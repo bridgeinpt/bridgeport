@@ -110,7 +110,7 @@ export async function generateDeploymentArtifacts(
 
   // Generate env file if template specified
   if (service.envTemplateName) {
-    const envContent = await generateEnvContent(environmentId, service.envTemplateName);
+    const envContent = (await generateEnvContent(environmentId, service.envTemplateName)).trimEnd();
     artifacts.envFile = {
       name: `${service.name}.env`,
       content: envContent,
@@ -118,12 +118,23 @@ export async function generateDeploymentArtifacts(
     };
   }
 
-  // Load config files (content is now stored directly in the database)
+  // Load config files and resolve secret placeholders
+  const secrets = await getSecretsMap(environmentId);
   for (const sf of service.files) {
-    const checksum = createHash('sha256').update(sf.configFile.content).digest('hex');
+    let content = sf.configFile.content;
+
+    // Resolve ${SECRET_KEY} placeholders
+    for (const [key, value] of Object.entries(secrets)) {
+      content = content.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), value);
+    }
+
+    // Trim trailing empty lines
+    content = content.trimEnd();
+
+    const checksum = createHash('sha256').update(content).digest('hex');
     artifacts.configFiles.push({
       name: sf.configFile.filename,
-      content: sf.configFile.content,
+      content,
       checksum,
       mountPath: sf.targetPath,
     });
