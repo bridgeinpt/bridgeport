@@ -54,10 +54,12 @@ COPY --from=prisma-build /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=prisma-build /app/node_modules/@prisma ./node_modules/@prisma
 COPY --from=prisma-build /app/node_modules/prisma ./node_modules/prisma
 COPY --from=prisma-build /app/node_modules/.bin/prisma ./node_modules/.bin/prisma
+COPY --from=prisma-build /app/node_modules/effect ./node_modules/effect
+COPY --from=prisma-build /app/node_modules/fast-check ./node_modules/fast-check
+COPY --from=prisma-build /app/node_modules/pure-rand ./node_modules/pure-rand
 
 # Remove packages only needed for prisma generate (not migrate deploy)
-RUN rm -rf node_modules/@prisma/config node_modules/effect node_modules/@effect \
-    node_modules/typescript node_modules/fast-check node_modules/@types
+RUN rm -rf node_modules/typescript node_modules/@types
 
 # Prune unnecessary files from node_modules to reduce image size
 RUN find node_modules -type f \( \
@@ -72,9 +74,9 @@ RUN find node_modules -type f \( \
     -name "*.gyp" \
   \) -delete 2>/dev/null || true
 
-# Remove non-musl Prisma engines (keep only linux-musl for Alpine)
-RUN find node_modules/.prisma -type f -name "libquery*" ! -name "*musl*" -delete 2>/dev/null || true
-RUN find node_modules/@prisma/engines -type f \( -name "*.node" -o -name "libquery*" -o -name "schema-engine*" \) ! -name "*linux-musl*" -delete 2>/dev/null || true
+# Remove non-musl and non-amd64 Prisma engines (keep only linux-musl-openssl-3.0.x for Alpine amd64)
+RUN find node_modules -type f \( -name "libquery*" -o -name "schema-engine*" \) \
+    \( ! -name "*linux-musl-openssl*" -o -name "*arm64*" \) -delete 2>/dev/null || true
 
 # Production stage (minimal Alpine)
 FROM node:22-alpine AS production
