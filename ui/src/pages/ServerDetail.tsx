@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   getServer,
   checkServerHealth,
@@ -13,10 +13,13 @@ import {
   regenerateAgentToken,
   deployAgent,
   removeAgent,
+  updateServer,
+  deleteServer,
   type ServerWithServices,
   type MetricsMode,
   type ServerMetrics,
   type CreateServiceInput,
+  type UpdateServerInput,
 } from '../lib/api';
 import { useToast } from '../components/Toast';
 import { formatDistanceToNow } from 'date-fns';
@@ -56,6 +59,19 @@ export default function ServerDetail() {
     composePath: '',
     healthCheckUrl: '',
   });
+
+  // Edit server modal state
+  const navigate = useNavigate();
+  const [showEditServer, setShowEditServer] = useState(false);
+  const [editingServer, setEditingServer] = useState(false);
+  const [editServerError, setEditServerError] = useState<string | null>(null);
+  const [editServerData, setEditServerData] = useState<UpdateServerInput>({
+    name: '',
+    hostname: '',
+    publicIp: '',
+    tags: [],
+  });
+  const [editTagInput, setEditTagInput] = useState('');
 
   useEffect(() => {
     if (id) {
@@ -233,6 +249,71 @@ export default function ServerDetail() {
     }
   };
 
+  const openEditServer = () => {
+    if (!server) return;
+    setEditServerData({
+      name: server.name,
+      hostname: server.hostname,
+      publicIp: server.publicIp || '',
+      tags: server.tags ? JSON.parse(server.tags) : [],
+    });
+    setEditTagInput('');
+    setEditServerError(null);
+    setShowEditServer(true);
+  };
+
+  const handleEditServer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!id) return;
+    setEditingServer(true);
+    setEditServerError(null);
+    try {
+      const { server: updatedServer } = await updateServer(id, {
+        name: editServerData.name,
+        hostname: editServerData.hostname,
+        publicIp: editServerData.publicIp || null,
+        tags: editServerData.tags,
+      });
+      setServer((prev) => prev ? { ...prev, ...updatedServer } : null);
+      setShowEditServer(false);
+      toast.success('Server updated');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to update server';
+      setEditServerError(message);
+    } finally {
+      setEditingServer(false);
+    }
+  };
+
+  const handleDeleteServer = async () => {
+    if (!id || !server) return;
+    if (!confirm(`Delete server "${server.name}"? This will also delete all services on this server. This cannot be undone.`)) return;
+    try {
+      await deleteServer(id);
+      toast.success('Server deleted');
+      navigate('/servers');
+    } catch (error) {
+      toast.error('Failed to delete server');
+    }
+  };
+
+  const addEditTag = () => {
+    if (editTagInput.trim() && !editServerData.tags?.includes(editTagInput.trim())) {
+      setEditServerData((prev) => ({
+        ...prev,
+        tags: [...(prev.tags || []), editTagInput.trim()],
+      }));
+      setEditTagInput('');
+    }
+  };
+
+  const removeEditTag = (tag: string) => {
+    setEditServerData((prev) => ({
+      ...prev,
+      tags: (prev.tags || []).filter((t) => t !== tag),
+    }));
+  };
+
   if (loading) {
     return (
       <div className="p-8">
@@ -279,6 +360,15 @@ export default function ServerDetail() {
           </p>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={openEditServer}
+            className="btn btn-ghost"
+            title="Edit Server"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+          </button>
           <button
             onClick={() => setShowCreateService(true)}
             className="btn btn-ghost"
@@ -811,6 +901,122 @@ export default function ServerDetail() {
                 <button type="submit" disabled={creating} className="btn btn-primary">
                   {creating ? 'Creating...' : 'Create Service'}
                 </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Server Modal */}
+      {showEditServer && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-lg p-6">
+            <h3 className="text-lg font-semibold text-white mb-4">Edit Server</h3>
+            <form onSubmit={handleEditServer} className="space-y-4">
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Server Name *</label>
+                <input
+                  type="text"
+                  value={editServerData.name}
+                  onChange={(e) => setEditServerData({ ...editServerData, name: e.target.value })}
+                  placeholder="e.g., app-api-staging"
+                  className="input"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Hostname / Private IP *</label>
+                <input
+                  type="text"
+                  value={editServerData.hostname}
+                  onChange={(e) => setEditServerData({ ...editServerData, hostname: e.target.value })}
+                  placeholder="e.g., 10.20.10.3"
+                  className="input font-mono text-sm"
+                  required
+                />
+                <p className="text-xs text-slate-500 mt-1">IP or hostname used to connect via SSH</p>
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Public IP</label>
+                <input
+                  type="text"
+                  value={editServerData.publicIp || ''}
+                  onChange={(e) => setEditServerData({ ...editServerData, publicIp: e.target.value })}
+                  placeholder="e.g., 123.45.67.89"
+                  className="input font-mono text-sm"
+                />
+                <p className="text-xs text-slate-500 mt-1">Public-facing IP address (optional)</p>
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Tags</label>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {(editServerData.tags || []).map((tag) => (
+                    <span
+                      key={tag}
+                      className="px-2 py-1 bg-slate-700 rounded text-sm text-slate-300 flex items-center gap-1"
+                    >
+                      {tag}
+                      <button
+                        type="button"
+                        onClick={() => removeEditTag(tag)}
+                        className="text-slate-400 hover:text-white"
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </span>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={editTagInput}
+                    onChange={(e) => setEditTagInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        addEditTag();
+                      }
+                    }}
+                    placeholder="Add tag..."
+                    className="input flex-1"
+                  />
+                  <button type="button" onClick={addEditTag} className="btn btn-secondary">
+                    Add
+                  </button>
+                </div>
+              </div>
+
+              {editServerError && (
+                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+                  {editServerError}
+                </div>
+              )}
+
+              <div className="flex gap-2 justify-between pt-2">
+                <button
+                  type="button"
+                  onClick={handleDeleteServer}
+                  className="btn btn-ghost text-red-400 hover:text-red-300"
+                >
+                  Delete Server
+                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowEditServer(false);
+                      setEditServerError(null);
+                    }}
+                    className="btn btn-ghost"
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" disabled={editingServer} className="btn btn-primary">
+                    {editingServer ? 'Saving...' : 'Save Changes'}
+                  </button>
+                </div>
               </div>
             </form>
           </div>

@@ -17,6 +17,7 @@ import Registries from './pages/Registries';
 import Users from './pages/Users';
 import Databases from './pages/Databases';
 import Monitoring from './pages/Monitoring';
+import Settings from './pages/Settings';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { token } = useAuthStore();
@@ -54,6 +55,7 @@ export default function App() {
                 <Route path="/databases" element={<Databases />} />
                 <Route path="/activity" element={<Activity />} />
                 <Route path="/users" element={<Users />} />
+                <Route path="/settings" element={<Settings />} />
                 <Route path="/about" element={<About />} />
               </Routes>
             </Layout>

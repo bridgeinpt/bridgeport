@@ -12,6 +12,8 @@ import {
   checkServiceHealth,
   listServiceFiles,
   listConfigFiles,
+  createConfigFile,
+  getConfigFile,
   attachServiceFile,
   detachServiceFile,
   syncServiceFiles,
@@ -54,6 +56,7 @@ export default function ServiceDetail() {
   const [editEnvTemplate, setEditEnvTemplate] = useState<string>('');
   const [editComposePath, setEditComposePath] = useState<string>('');
   const [editContainerName, setEditContainerName] = useState<string>('');
+  const [editImageName, setEditImageName] = useState<string>('');
   const [editHealthCheckUrl, setEditHealthCheckUrl] = useState<string>('');
   const [editRegistryConnectionId, setEditRegistryConnectionId] = useState<string>('');
 
@@ -66,6 +69,13 @@ export default function ServiceDetail() {
   const [attaching, setAttaching] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResults, setSyncResults] = useState<SyncResult[] | null>(null);
+  const [viewingFileContent, setViewingFileContent] = useState<{ name: string; filename: string; content: string } | null>(null);
+  const [showCreateFile, setShowCreateFile] = useState(false);
+  const [newFileName, setNewFileName] = useState('');
+  const [newFileFilename, setNewFileFilename] = useState('');
+  const [newFileContent, setNewFileContent] = useState('');
+  const [newFileDescription, setNewFileDescription] = useState('');
+  const [creatingFile, setCreatingFile] = useState(false);
 
   // Registry and auto-update state
   const [registries, setRegistries] = useState<RegistryConnection[]>([]);
@@ -246,6 +256,7 @@ export default function ServiceDetail() {
     setEditEnvTemplate(service.envTemplateName || '');
     setEditComposePath(service.composePath || '');
     setEditContainerName(service.containerName || '');
+    setEditImageName(service.imageName || '');
     setEditHealthCheckUrl(service.healthCheckUrl || '');
     setEditRegistryConnectionId(service.registryConnectionId || '');
     setShowConfig(true);
@@ -259,6 +270,7 @@ export default function ServiceDetail() {
         envTemplateName: editEnvTemplate || null,
         composePath: editComposePath || null,
         containerName: editContainerName || undefined,
+        imageName: editImageName || undefined,
         healthCheckUrl: editHealthCheckUrl || null,
         registryConnectionId: editRegistryConnectionId || null,
       });
@@ -311,6 +323,48 @@ export default function ServiceDetail() {
     setAttachConfigFileId('');
     setAttachTargetPath('');
     setShowAttachFile(true);
+  };
+
+  const handleViewFileContent = async (fileId: string, fileName: string, filename: string) => {
+    try {
+      const { configFile } = await getConfigFile(fileId);
+      setViewingFileContent({ name: fileName, filename, content: configFile.content });
+    } catch {
+      toast.error('Failed to load file content');
+    }
+  };
+
+  const handleCreateNewFile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedEnvironment?.id) return;
+    setCreatingFile(true);
+    try {
+      const { configFile } = await createConfigFile(selectedEnvironment.id, {
+        name: newFileName,
+        filename: newFileFilename,
+        content: newFileContent,
+        description: newFileDescription || undefined,
+      });
+      // Add to configFiles list and select it
+      setConfigFiles((prev) => [...prev, configFile]);
+      setAttachConfigFileId(configFile.id);
+      // Auto-suggest target path
+      const defaultPath = service?.composePath
+        ? service.composePath.replace(/[^/]+$/, configFile.filename)
+        : `/opt/app/${configFile.filename}`;
+      setAttachTargetPath(defaultPath);
+      // Close create modal, keep attach modal open
+      setShowCreateFile(false);
+      setNewFileName('');
+      setNewFileFilename('');
+      setNewFileContent('');
+      setNewFileDescription('');
+      toast.success('Config file created');
+    } catch (error) {
+      toast.error('Failed to create config file');
+    } finally {
+      setCreatingFile(false);
+    }
   };
 
   if (loading) {
@@ -964,15 +1018,27 @@ export default function ServiceDetail() {
                   </div>
                   <code className="text-sm text-green-400">{file.targetPath}</code>
                 </div>
-                <button
-                  onClick={() => handleDetachFile(file.configFileId)}
-                  className="p-1 text-slate-400 hover:text-red-400"
-                  title="Detach"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleViewFileContent(file.configFileId, file.configFile.name, file.configFile.filename)}
+                    className="p-1 text-slate-400 hover:text-primary-400"
+                    title="View Content"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => handleDetachFile(file.configFileId)}
+                    className="p-1 text-slate-400 hover:text-red-400"
+                    title="Detach"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -991,31 +1057,40 @@ export default function ServiceDetail() {
             <form onSubmit={handleAttachFile} className="space-y-4">
               <div>
                 <label className="block text-sm text-slate-400 mb-1">Config File</label>
-                <select
-                  value={attachConfigFileId}
-                  onChange={(e) => {
-                    setAttachConfigFileId(e.target.value);
-                    // Auto-suggest target path based on selected file
-                    const selected = configFiles.find((f) => f.id === e.target.value);
-                    if (selected && !attachTargetPath) {
-                      const defaultPath = service?.composePath
-                        ? service.composePath.replace(/[^/]+$/, selected.filename)
-                        : `/opt/app/${selected.filename}`;
-                      setAttachTargetPath(defaultPath);
-                    }
-                  }}
-                  className="input"
-                  required
-                >
-                  <option value="">Select a file...</option>
-                  {configFiles
-                    .filter((f) => !attachedFiles.some((af) => af.configFileId === f.id))
-                    .map((file) => (
-                      <option key={file.id} value={file.id}>
-                        {file.name} ({file.filename})
-                      </option>
-                    ))}
-                </select>
+                <div className="flex gap-2">
+                  <select
+                    value={attachConfigFileId}
+                    onChange={(e) => {
+                      setAttachConfigFileId(e.target.value);
+                      // Auto-suggest target path based on selected file
+                      const selected = configFiles.find((f) => f.id === e.target.value);
+                      if (selected && !attachTargetPath) {
+                        const defaultPath = service?.composePath
+                          ? service.composePath.replace(/[^/]+$/, selected.filename)
+                          : `/opt/app/${selected.filename}`;
+                        setAttachTargetPath(defaultPath);
+                      }
+                    }}
+                    className="input flex-1"
+                    required
+                  >
+                    <option value="">Select a file...</option>
+                    {configFiles
+                      .filter((f) => !attachedFiles.some((af) => af.configFileId === f.id))
+                      .map((file) => (
+                        <option key={file.id} value={file.id}>
+                          {file.name} ({file.filename})
+                        </option>
+                      ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateFile(true)}
+                    className="btn btn-secondary whitespace-nowrap"
+                  >
+                    Create New
+                  </button>
+                </div>
               </div>
               <div>
                 <label className="block text-sm text-slate-400 mb-1">Target Path on Server</label>
@@ -1041,6 +1116,101 @@ export default function ServiceDetail() {
                 </button>
                 <button type="submit" disabled={attaching} className="btn btn-primary">
                   {attaching ? 'Attaching...' : 'Attach'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* View File Content Modal */}
+      {viewingFileContent && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-4xl max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between p-4 border-b border-slate-700">
+              <div>
+                <h3 className="text-lg font-semibold text-white">{viewingFileContent.name}</h3>
+                <p className="text-sm text-slate-400">{viewingFileContent.filename}</p>
+              </div>
+              <button
+                onClick={() => setViewingFileContent(null)}
+                className="text-slate-400 hover:text-white"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-4">
+              <pre className="text-sm font-mono text-slate-300 whitespace-pre-wrap">
+                {viewingFileContent.content}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create New Config File Modal */}
+      {showCreateFile && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
+          <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-3xl p-6 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-lg font-semibold text-white mb-4">Create New Config File</h3>
+            <form onSubmit={handleCreateNewFile} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm text-slate-400 mb-1">Display Name</label>
+                  <input
+                    type="text"
+                    value={newFileName}
+                    onChange={(e) => setNewFileName(e.target.value)}
+                    placeholder="my-config"
+                    className="input"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-slate-400 mb-1">Filename</label>
+                  <input
+                    type="text"
+                    value={newFileFilename}
+                    onChange={(e) => setNewFileFilename(e.target.value)}
+                    placeholder="config.yml"
+                    className="input"
+                    required
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Description (optional)</label>
+                <input
+                  type="text"
+                  value={newFileDescription}
+                  onChange={(e) => setNewFileDescription(e.target.value)}
+                  placeholder="Description..."
+                  className="input"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Content</label>
+                <textarea
+                  value={newFileContent}
+                  onChange={(e) => setNewFileContent(e.target.value)}
+                  placeholder="Paste file content here..."
+                  rows={12}
+                  className="input font-mono text-sm"
+                  required
+                />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateFile(false)}
+                  className="btn btn-ghost"
+                >
+                  Cancel
+                </button>
+                <button type="submit" disabled={creatingFile} className="btn btn-primary">
+                  {creatingFile ? 'Creating...' : 'Create'}
                 </button>
               </div>
             </form>
@@ -1104,6 +1274,21 @@ export default function ServiceDetail() {
                 />
                 <p className="text-xs text-slate-500 mt-1">
                   Docker container name for logs and health checks
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">
+                  Image Name
+                </label>
+                <input
+                  type="text"
+                  value={editImageName}
+                  onChange={(e) => setEditImageName(e.target.value)}
+                  placeholder="registry.example.com/my-image"
+                  className="input font-mono text-sm"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Docker image name (without tag)
                 </p>
               </div>
               <div>

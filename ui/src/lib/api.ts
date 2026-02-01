@@ -155,6 +155,19 @@ export const listServers = (envId: string) =>
 export const getServer = (id: string) =>
   api.get<{ server: ServerWithServices }>(`/servers/${id}`);
 
+export interface UpdateServerInput {
+  name?: string;
+  hostname?: string;
+  publicIp?: string | null;
+  tags?: string[];
+}
+
+export const updateServer = (id: string, data: UpdateServerInput) =>
+  api.patch<{ server: Server }>(`/servers/${id}`, data);
+
+export const deleteServer = (id: string) =>
+  api.delete<{ success: boolean }>(`/servers/${id}`);
+
 export const checkServerHealth = (id: string) =>
   api.post<{ status: string; error?: string }>(`/servers/${id}/health`);
 
