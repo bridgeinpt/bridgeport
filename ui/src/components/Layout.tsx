@@ -34,10 +34,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       {/* Sidebar */}
       <aside className="w-64 bg-slate-900 border-r border-slate-700 flex flex-col">
         <div className="p-4 border-b border-slate-700">
-          <h1 className="text-xl font-bold text-white flex items-center gap-2">
-            <img src="/logo.svg" alt="BridgePort" className="h-7 w-7" />
-            BridgePort
-          </h1>
+          <img src="/logo.svg" alt="BridgePort" className="h-8" />
         </div>
 
         {/* Environment selector */}
