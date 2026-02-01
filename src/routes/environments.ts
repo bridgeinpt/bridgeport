@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/db.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
 import { logAudit } from '../services/audit.js';
+import { requireAdmin } from '../plugins/authorize.js';
 
 const createEnvSchema = z.object({
   name: z.string().min(1).max(50),
@@ -11,6 +12,10 @@ const createEnvSchema = z.object({
 const updateSshSchema = z.object({
   sshPrivateKey: z.string().min(1),
   sshUser: z.string().min(1).default('root'),
+});
+
+const updateSettingsSchema = z.object({
+  allowSecretReveal: z.boolean().optional(),
 });
 
 export async function environmentRoutes(fastify: FastifyInstance) {
@@ -61,10 +66,10 @@ export async function environmentRoutes(fastify: FastifyInstance) {
     }
   );
 
-  // Create environment
+  // Create environment (admin only)
   fastify.post(
     '/api/environments',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
       const body = createEnvSchema.safeParse(request.body);
       if (!body.success) {
@@ -96,10 +101,10 @@ export async function environmentRoutes(fastify: FastifyInstance) {
     }
   );
 
-  // Delete environment
+  // Delete environment (admin only)
   fastify.delete(
     '/api/environments/:id',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -126,10 +131,10 @@ export async function environmentRoutes(fastify: FastifyInstance) {
     }
   );
 
-  // Update SSH settings for environment
+  // Update SSH settings for environment (admin only)
   fastify.put(
     '/api/environments/:id/ssh',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = updateSshSchema.safeParse(request.body);
@@ -192,6 +197,71 @@ export async function environmentRoutes(fastify: FastifyInstance) {
         configured: !!environment.sshPrivateKey,
         sshUser: environment.sshUser,
       };
+    }
+  );
+
+  // Get environment settings
+  fastify.get(
+    '/api/environments/:id/settings',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      const environment = await prisma.environment.findUnique({
+        where: { id },
+        select: { id: true, name: true, allowSecretReveal: true },
+      });
+
+      if (!environment) {
+        return reply.code(404).send({ error: 'Environment not found' });
+      }
+
+      return { settings: { allowSecretReveal: environment.allowSecretReveal } };
+    }
+  );
+
+  // Update environment settings (admin only)
+  fastify.patch(
+    '/api/environments/:id/settings',
+    { preHandler: [fastify.authenticate, requireAdmin] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = updateSettingsSchema.safeParse(request.body);
+
+      if (!body.success) {
+        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
+      }
+
+      const environment = await prisma.environment.findUnique({
+        where: { id },
+      });
+
+      if (!environment) {
+        return reply.code(404).send({ error: 'Environment not found' });
+      }
+
+      const updateData: { allowSecretReveal?: boolean } = {};
+      if (body.data.allowSecretReveal !== undefined) {
+        updateData.allowSecretReveal = body.data.allowSecretReveal;
+      }
+
+      const updated = await prisma.environment.update({
+        where: { id },
+        data: updateData,
+        select: { id: true, name: true, allowSecretReveal: true },
+      });
+
+      await logAudit({
+        action: 'update',
+        resourceType: 'environment',
+        resourceId: id,
+        resourceName: environment.name,
+        details: { settingsUpdated: updateData },
+        userId: request.authUser!.id,
+        environmentId: id,
+      });
+
+      return { settings: { allowSecretReveal: updated.allowSecretReveal } };
     }
   );
 }

@@ -5,16 +5,20 @@ import type { User, ApiToken } from '@prisma/client';
 
 const SALT_ROUNDS = 12;
 
+export type UserRole = 'admin' | 'operator' | 'viewer';
+
 export interface AuthUser {
   id: string;
   email: string;
   name: string | null;
+  role: UserRole;
 }
 
 export async function createUser(
   email: string,
   password: string,
-  name?: string
+  name?: string,
+  role: UserRole = 'viewer'
 ): Promise<AuthUser> {
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
 
@@ -23,15 +27,17 @@ export async function createUser(
       email,
       passwordHash,
       name,
+      role,
     },
     select: {
       id: true,
       email: true,
       name: true,
+      role: true,
     },
   });
 
-  return user;
+  return user as AuthUser;
 }
 
 export async function validatePassword(
@@ -55,6 +61,7 @@ export async function validatePassword(
     id: user.id,
     email: user.email,
     name: user.name,
+    role: user.role as UserRole,
   };
 }
 
@@ -65,10 +72,15 @@ export async function getUserById(id: string): Promise<AuthUser | null> {
       id: true,
       email: true,
       name: true,
+      role: true,
     },
   });
 
-  return user;
+  if (!user) {
+    return null;
+  }
+
+  return user as AuthUser;
 }
 
 export async function createApiToken(
@@ -117,6 +129,7 @@ export async function validateApiToken(token: string): Promise<AuthUser | null> 
     id: tokenRecord.user.id,
     email: tokenRecord.user.email,
     name: tokenRecord.user.name,
+    role: tokenRecord.user.role as UserRole,
   };
 }
 
@@ -165,6 +178,6 @@ export async function bootstrapAdminUser(
   }
 
   console.log(`Creating initial admin user: ${email}`);
-  await createUser(email, password, 'Admin');
+  await createUser(email, password, 'Admin', 'admin');
   console.log('Admin user created successfully');
 }

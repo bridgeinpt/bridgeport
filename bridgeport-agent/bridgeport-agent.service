@@ -1,0 +1,15 @@
+[Unit]
+Description=BridgePort Monitoring Agent
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+Environment="BRIDGEPORT_SERVER=https://deploy.example.com"
+Environment="BRIDGEPORT_TOKEN=your-agent-token-here"
+ExecStart=/usr/local/bin/bridgeport-agent
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

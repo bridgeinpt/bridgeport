@@ -22,6 +22,8 @@ const createRegistrySchema = z.object({
   username: z.string().optional(),
   password: z.string().optional(),
   isDefault: z.boolean().optional(),
+  refreshIntervalMinutes: z.number().min(5).max(1440).optional(),
+  autoLinkPattern: z.string().optional(),
 });
 
 const updateRegistrySchema = z.object({
@@ -33,6 +35,8 @@ const updateRegistrySchema = z.object({
   username: z.string().nullable().optional(),
   password: z.string().nullable().optional(),
   isDefault: z.boolean().optional(),
+  refreshIntervalMinutes: z.number().min(5).max(1440).optional(),
+  autoLinkPattern: z.string().nullable().optional(),
 });
 
 export async function registryRoutes(fastify: FastifyInstance) {

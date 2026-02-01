@@ -36,6 +36,8 @@ export default function Registries() {
     username: '',
     password: '',
     isDefault: false,
+    refreshIntervalMinutes: 30,
+    autoLinkPattern: '',
   });
   const [saving, setSaving] = useState(false);
 
@@ -58,6 +60,8 @@ export default function Registries() {
       username: '',
       password: '',
       isDefault: false,
+      refreshIntervalMinutes: 30,
+      autoLinkPattern: '',
     });
   };
 
@@ -77,6 +81,8 @@ export default function Registries() {
       username: registry.username || '',
       password: '', // Don't show existing password
       isDefault: registry.isDefault,
+      refreshIntervalMinutes: registry.refreshIntervalMinutes,
+      autoLinkPattern: registry.autoLinkPattern || '',
     });
     setEditingId(registry.id);
     setShowCreate(true);
@@ -103,11 +109,13 @@ export default function Registries() {
         type: formData.type,
         registryUrl: formData.registryUrl,
         isDefault: formData.isDefault,
+        refreshIntervalMinutes: formData.refreshIntervalMinutes,
       };
       if (formData.repositoryPrefix) data.repositoryPrefix = formData.repositoryPrefix;
       if (formData.token) data.token = formData.token;
       if (formData.username) data.username = formData.username;
       if (formData.password) data.password = formData.password;
+      if (formData.autoLinkPattern) data.autoLinkPattern = formData.autoLinkPattern;
 
       if (editingId) {
         const { registry } = await updateRegistryConnection(editingId, data);
@@ -228,6 +236,10 @@ export default function Registries() {
                       <span>
                         {registry._count?.services || 0} service{registry._count?.services !== 1 ? 's' : ''}
                       </span>
+                      <span>Refresh: {registry.refreshIntervalMinutes}m</span>
+                      {registry.autoLinkPattern && (
+                        <span className="text-primary-400">Auto-link: {registry.autoLinkPattern}</span>
+                      )}
                       <span>
                         Updated {formatDistanceToNow(new Date(registry.updatedAt), { addSuffix: true })}
                       </span>
@@ -395,6 +407,37 @@ export default function Registries() {
                 <label htmlFor="isDefault" className="text-sm text-slate-300">
                   Set as default registry for this environment
                 </label>
+              </div>
+
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Refresh Interval (minutes)</label>
+                <input
+                  type="number"
+                  min={5}
+                  max={1440}
+                  value={formData.refreshIntervalMinutes}
+                  onChange={(e) =>
+                    setFormData({ ...formData, refreshIntervalMinutes: parseInt(e.target.value) || 30 })
+                  }
+                  className="input"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  How often to check for image updates (5-1440 minutes)
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Auto-link Pattern (optional)</label>
+                <input
+                  type="text"
+                  value={formData.autoLinkPattern}
+                  onChange={(e) => setFormData({ ...formData, autoLinkPattern: e.target.value })}
+                  placeholder="bios-*"
+                  className="input font-mono text-sm"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Automatically link services matching this pattern (e.g., "bios-*", "app-*")
+                </p>
               </div>
 
               <div className="flex gap-2 justify-end pt-4">

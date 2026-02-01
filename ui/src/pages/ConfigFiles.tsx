@@ -6,9 +6,12 @@ import {
   createConfigFile,
   updateConfigFile,
   deleteConfigFile,
+  getConfigFileHistory,
+  restoreConfigFile,
   type ConfigFile,
+  type FileHistoryEntry,
 } from '../lib/api';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow, format } from 'date-fns';
 
 export default function ConfigFiles() {
   const { selectedEnvironment } = useAppStore();
@@ -24,6 +27,11 @@ export default function ConfigFiles() {
   const [editContent, setEditContent] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [viewingFile, setViewingFile] = useState<(ConfigFile & { services: Array<{ targetPath: string; service: { id: string; name: string; server: { id: string; name: string } } }> }) | null>(null);
+  const [historyFile, setHistoryFile] = useState<ConfigFile | null>(null);
+  const [history, setHistory] = useState<FileHistoryEntry[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [selectedHistoryEntry, setSelectedHistoryEntry] = useState<FileHistoryEntry | null>(null);
+  const [serviceFilter, setServiceFilter] = useState<string>('');
 
   useEffect(() => {
     if (selectedEnvironment?.id) {
@@ -94,6 +102,36 @@ export default function ConfigFiles() {
     setEditContent(file.content);
     setEditDescription(file.description || '');
   };
+
+  const handleViewHistory = async (file: ConfigFile) => {
+    setHistoryFile(file);
+    setLoadingHistory(true);
+    try {
+      const { history } = await getConfigFileHistory(file.id);
+      setHistory(history);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const handleRestore = async (historyEntry: FileHistoryEntry) => {
+    if (!historyFile) return;
+    if (!confirm('Are you sure you want to restore this version? The current content will be saved to history.')) return;
+
+    const { configFile } = await restoreConfigFile(historyFile.id, historyEntry.id);
+    setConfigFiles((prev) =>
+      prev.map((f) => (f.id === configFile.id ? { ...configFile, _count: f._count } : f))
+    );
+    // Reload history to show the new entry
+    const { history: updatedHistory } = await getConfigFileHistory(historyFile.id);
+    setHistory(updatedHistory);
+    setSelectedHistoryEntry(null);
+  };
+
+  // Filter config files based on service filter
+  const filteredConfigFiles = serviceFilter
+    ? configFiles.filter((f) => f._count && f._count.services > 0)
+    : configFiles;
 
   if (!selectedEnvironment) {
     return (
@@ -330,9 +368,120 @@ export default function ConfigFiles() {
         </div>
       )}
 
+      {/* History Modal */}
+      {historyFile && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-5xl p-6 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-white">
+                  History: {historyFile.name}
+                </h3>
+                <p className="text-sm text-slate-400">
+                  {history.length} previous version{history.length !== 1 ? 's' : ''}
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setHistoryFile(null);
+                  setHistory([]);
+                  setSelectedHistoryEntry(null);
+                }}
+                className="text-slate-400 hover:text-white"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {loadingHistory ? (
+              <div className="flex-1 flex items-center justify-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
+              </div>
+            ) : history.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center text-slate-400">
+                No edit history available
+              </div>
+            ) : (
+              <div className="flex-1 flex gap-4 overflow-hidden">
+                {/* History List */}
+                <div className="w-64 flex-shrink-0 overflow-y-auto space-y-2">
+                  {history.map((entry) => (
+                    <button
+                      key={entry.id}
+                      onClick={() => setSelectedHistoryEntry(entry)}
+                      className={`w-full text-left p-3 rounded-lg border transition-colors ${
+                        selectedHistoryEntry?.id === entry.id
+                          ? 'bg-primary-900/30 border-primary-500'
+                          : 'bg-slate-800/50 border-slate-700 hover:border-slate-600'
+                      }`}
+                    >
+                      <p className="text-sm text-white">
+                        {format(new Date(entry.editedAt), 'MMM d, yyyy')}
+                      </p>
+                      <p className="text-xs text-slate-400">
+                        {format(new Date(entry.editedAt), 'h:mm a')}
+                      </p>
+                      {entry.editedBy && (
+                        <p className="text-xs text-slate-500 mt-1 truncate">
+                          by {entry.editedBy.name || entry.editedBy.email}
+                        </p>
+                      )}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Content Preview */}
+                <div className="flex-1 flex flex-col overflow-hidden">
+                  {selectedHistoryEntry ? (
+                    <>
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-sm text-slate-400">
+                          Content at {format(new Date(selectedHistoryEntry.editedAt), 'MMM d, yyyy h:mm a')}
+                        </p>
+                        <button
+                          onClick={() => handleRestore(selectedHistoryEntry)}
+                          className="btn btn-primary text-sm"
+                        >
+                          Restore This Version
+                        </button>
+                      </div>
+                      <pre className="flex-1 overflow-auto p-4 bg-slate-950 rounded-lg text-sm font-mono text-slate-300">
+                        {selectedHistoryEntry.content}
+                      </pre>
+                    </>
+                  ) : (
+                    <div className="flex-1 flex items-center justify-center text-slate-400">
+                      Select a version to preview
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Filter */}
+      <div className="mb-6 flex items-center gap-4">
+        <label className="flex items-center gap-2 text-sm text-slate-400">
+          <input
+            type="checkbox"
+            checked={!!serviceFilter}
+            onChange={(e) => setServiceFilter(e.target.checked ? 'attached' : '')}
+            className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-primary-600 focus:ring-primary-500"
+          />
+          Only show files attached to services
+        </label>
+        <span className="text-sm text-slate-500">
+          ({filteredConfigFiles.length} of {configFiles.length} files)
+        </span>
+      </div>
+
       {/* Config Files Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {configFiles.map((file) => (
+        {filteredConfigFiles.map((file) => (
           <div key={file.id} className="card hover:border-slate-600 transition-colors">
             <div className="flex items-start justify-between mb-2">
               <div className="flex-1 min-w-0">
@@ -357,6 +506,15 @@ export default function ConfigFiles() {
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => handleViewHistory(file)}
+                  className="p-1 text-slate-400 hover:text-white"
+                  title="History"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </button>
                 <button
@@ -385,6 +543,18 @@ export default function ConfigFiles() {
             </div>
           </div>
         ))}
+
+        {filteredConfigFiles.length === 0 && configFiles.length > 0 && (
+          <div className="col-span-full card text-center py-12">
+            <p className="text-slate-400">No config files match the filter</p>
+            <button
+              onClick={() => setServiceFilter('')}
+              className="btn btn-ghost mt-4"
+            >
+              Clear Filter
+            </button>
+          </div>
+        )}
 
         {configFiles.length === 0 && (
           <div className="col-span-full card text-center py-12">

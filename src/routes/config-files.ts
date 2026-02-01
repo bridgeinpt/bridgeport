@@ -131,6 +131,21 @@ export async function configFileRoutes(fastify: FastifyInstance) {
 
       try {
         const existing = await prisma.configFile.findUnique({ where: { id } });
+        if (!existing) {
+          return reply.code(404).send({ error: 'Config file not found' });
+        }
+
+        // Save history if content is being updated
+        if (body.data.content !== undefined && body.data.content !== existing.content) {
+          await prisma.fileHistory.create({
+            data: {
+              content: existing.content,
+              configFileId: id,
+              editedById: request.authUser!.id,
+            },
+          });
+        }
+
         const configFile = await prisma.configFile.update({
           where: { id },
           data: body.data,
@@ -142,13 +157,87 @@ export async function configFileRoutes(fastify: FastifyInstance) {
           resourceId: configFile.id,
           resourceName: configFile.name,
           userId: request.authUser!.id,
-          environmentId: existing?.environmentId,
+          environmentId: existing.environmentId,
         });
 
         return { configFile };
       } catch {
         return reply.code(404).send({ error: 'Config file not found' });
       }
+    }
+  );
+
+  // Get config file history
+  fastify.get(
+    '/api/config-files/:id/history',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      const configFile = await prisma.configFile.findUnique({ where: { id } });
+      if (!configFile) {
+        return reply.code(404).send({ error: 'Config file not found' });
+      }
+
+      const history = await prisma.fileHistory.findMany({
+        where: { configFileId: id },
+        select: {
+          id: true,
+          content: true,
+          editedAt: true,
+          editedBy: { select: { id: true, email: true, name: true } },
+        },
+        orderBy: { editedAt: 'desc' },
+        take: 50,
+      });
+
+      return { history };
+    }
+  );
+
+  // Restore config file from history
+  fastify.post(
+    '/api/config-files/:id/restore/:historyId',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id, historyId } = request.params as { id: string; historyId: string };
+
+      const configFile = await prisma.configFile.findUnique({ where: { id } });
+      if (!configFile) {
+        return reply.code(404).send({ error: 'Config file not found' });
+      }
+
+      const historyEntry = await prisma.fileHistory.findUnique({ where: { id: historyId } });
+      if (!historyEntry || historyEntry.configFileId !== id) {
+        return reply.code(404).send({ error: 'History entry not found' });
+      }
+
+      // Save current content as new history entry before restoring
+      await prisma.fileHistory.create({
+        data: {
+          content: configFile.content,
+          configFileId: id,
+          editedById: request.authUser!.id,
+        },
+      });
+
+      // Restore content from history
+      const updated = await prisma.configFile.update({
+        where: { id },
+        data: { content: historyEntry.content },
+      });
+
+      await logAudit({
+        action: 'restore',
+        resourceType: 'config_file',
+        resourceId: configFile.id,
+        resourceName: configFile.name,
+        details: { restoredFrom: historyId, restoredAt: historyEntry.editedAt },
+        userId: request.authUser!.id,
+        environmentId: configFile.environmentId,
+      });
+
+      return { configFile: updated };
     }
   );
 

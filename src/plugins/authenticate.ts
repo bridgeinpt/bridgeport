@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import fp from 'fastify-plugin';
-import { validateApiToken, type AuthUser } from '../services/auth.js';
+import { validateApiToken, getUserById, type AuthUser } from '../services/auth.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -30,8 +30,12 @@ async function authenticatePlugin(fastify: FastifyInstance) {
           // Try JWT
           try {
             const payload = await request.jwtVerify<{ id: string; email: string }>();
-            request.authUser = { id: payload.id, email: payload.email, name: null };
-            return;
+            // Fetch full user to get role
+            const fullUser = await getUserById(payload.id);
+            if (fullUser) {
+              request.authUser = fullUser;
+              return;
+            }
           } catch {
             // Invalid JWT
           }

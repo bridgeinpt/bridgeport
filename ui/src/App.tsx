@@ -14,6 +14,8 @@ import ConfigFiles from './pages/ConfigFiles';
 import Activity from './pages/Activity';
 import About from './pages/About';
 import Registries from './pages/Registries';
+import Users from './pages/Users';
+import Databases from './pages/Databases';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { token } = useAuthStore();
@@ -47,7 +49,9 @@ export default function App() {
                 <Route path="/env-templates" element={<EnvTemplates />} />
                 <Route path="/config-files" element={<ConfigFiles />} />
                 <Route path="/registries" element={<Registries />} />
+                <Route path="/databases" element={<Databases />} />
                 <Route path="/activity" element={<Activity />} />
+                <Route path="/users" element={<Users />} />
                 <Route path="/about" element={<About />} />
               </Routes>
             </Layout>

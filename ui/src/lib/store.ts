@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { User, Environment } from './api';
+import type { User, Environment, UserRole } from './api';
 
 interface AuthState {
   user: User | null;
@@ -23,16 +23,40 @@ export const useAuthStore = create<AuthState>()(
   )
 );
 
+// Role helpers
+export const isAdmin = (user: User | null): boolean => user?.role === 'admin';
+export const isOperator = (user: User | null): boolean => user?.role === 'operator';
+export const isViewer = (user: User | null): boolean => user?.role === 'viewer';
+export const hasMinimumRole = (user: User | null, minimumRole: UserRole): boolean => {
+  if (!user) return false;
+  const roleHierarchy: Record<UserRole, number> = {
+    admin: 3,
+    operator: 2,
+    viewer: 1,
+  };
+  return roleHierarchy[user.role] >= roleHierarchy[minimumRole];
+};
+
 interface AppState {
   selectedEnvironment: Environment | null;
   setSelectedEnvironment: (env: Environment | null) => void;
+  clearSelectedEnvironment: () => void;
   sidebarOpen: boolean;
   toggleSidebar: () => void;
 }
 
-export const useAppStore = create<AppState>((set) => ({
-  selectedEnvironment: null,
-  setSelectedEnvironment: (env) => set({ selectedEnvironment: env }),
-  sidebarOpen: true,
-  toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
-}));
+export const useAppStore = create<AppState>()(
+  persist(
+    (set) => ({
+      selectedEnvironment: null,
+      setSelectedEnvironment: (env) => set({ selectedEnvironment: env }),
+      clearSelectedEnvironment: () => set({ selectedEnvironment: null }),
+      sidebarOpen: true,
+      toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
+    }),
+    {
+      name: 'app-storage',
+      partialize: (state) => ({ selectedEnvironment: state.selectedEnvironment }),
+    }
+  )
+);

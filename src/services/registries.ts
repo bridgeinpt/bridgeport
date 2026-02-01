@@ -10,6 +10,8 @@ export interface RegistryConnectionInput {
   username?: string | null;
   password?: string | null;
   isDefault?: boolean;
+  refreshIntervalMinutes?: number;
+  autoLinkPattern?: string | null;
 }
 
 export interface RegistryConnectionOutput {
@@ -22,6 +24,9 @@ export interface RegistryConnectionOutput {
   hasPassword: boolean;
   username: string | null;
   isDefault: boolean;
+  refreshIntervalMinutes: number;
+  autoLinkPattern: string | null;
+  lastRefreshAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
   environmentId: string;
@@ -38,6 +43,9 @@ function toOutput(conn: {
   username: string | null;
   encryptedPassword: string | null;
   isDefault: boolean;
+  refreshIntervalMinutes: number;
+  autoLinkPattern: string | null;
+  lastRefreshAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
   environmentId: string;
@@ -53,6 +61,9 @@ function toOutput(conn: {
     hasPassword: !!conn.encryptedPassword,
     username: conn.username,
     isDefault: conn.isDefault,
+    refreshIntervalMinutes: conn.refreshIntervalMinutes,
+    autoLinkPattern: conn.autoLinkPattern,
+    lastRefreshAt: conn.lastRefreshAt,
     createdAt: conn.createdAt,
     updatedAt: conn.updatedAt,
     environmentId: conn.environmentId,
@@ -83,6 +94,8 @@ export async function createRegistryConnection(
     encryptedPassword?: string;
     passwordNonce?: string;
     isDefault: boolean;
+    refreshIntervalMinutes?: number;
+    autoLinkPattern?: string;
     environmentId: string;
   } = {
     name: input.name,
@@ -90,6 +103,8 @@ export async function createRegistryConnection(
     registryUrl: input.registryUrl,
     repositoryPrefix: input.repositoryPrefix || undefined,
     isDefault: input.isDefault ?? false,
+    refreshIntervalMinutes: input.refreshIntervalMinutes ?? 30,
+    autoLinkPattern: input.autoLinkPattern || undefined,
     environmentId,
   };
 
@@ -148,6 +163,8 @@ export async function updateRegistryConnection(
     encryptedPassword?: string | null;
     passwordNonce?: string | null;
     isDefault?: boolean;
+    refreshIntervalMinutes?: number;
+    autoLinkPattern?: string | null;
   } = {};
 
   if (input.name !== undefined) data.name = input.name;
@@ -155,6 +172,8 @@ export async function updateRegistryConnection(
   if (input.registryUrl !== undefined) data.registryUrl = input.registryUrl;
   if (input.repositoryPrefix !== undefined) data.repositoryPrefix = input.repositoryPrefix;
   if (input.isDefault !== undefined) data.isDefault = input.isDefault;
+  if (input.refreshIntervalMinutes !== undefined) data.refreshIntervalMinutes = input.refreshIntervalMinutes;
+  if (input.autoLinkPattern !== undefined) data.autoLinkPattern = input.autoLinkPattern;
 
   if (input.token !== undefined) {
     if (input.token) {

@@ -91,6 +91,42 @@ export const register = (email: string, password: string, name?: string) =>
 
 export const getMe = () => api.get<{ user: User }>('/auth/me');
 
+// Users
+export interface CreateUserInput {
+  email: string;
+  password: string;
+  name?: string;
+  role?: UserRole;
+}
+
+export interface UpdateUserInput {
+  name?: string;
+  role?: UserRole;
+}
+
+export interface ChangePasswordInput {
+  currentPassword?: string;
+  newPassword: string;
+}
+
+export const listUsers = () =>
+  api.get<{ users: User[] }>('/users');
+
+export const getUser = (id: string) =>
+  api.get<{ user: User }>(`/users/${id}`);
+
+export const createUser = (data: CreateUserInput) =>
+  api.post<{ user: User }>('/users', data);
+
+export const updateUser = (id: string, data: UpdateUserInput) =>
+  api.patch<{ user: User }>(`/users/${id}`, data);
+
+export const deleteUser = (id: string) =>
+  api.delete<{ success: boolean }>(`/users/${id}`);
+
+export const changeUserPassword = (id: string, data: ChangePasswordInput) =>
+  api.post<{ success: boolean; message: string }>(`/users/${id}/change-password`, data);
+
 // Environments
 export const listEnvironments = () =>
   api.get<{ environments: Environment[] }>('/environments');
@@ -100,6 +136,17 @@ export const getEnvironment = (id: string) =>
 
 export const createEnvironment = (name: string) =>
   api.post<{ environment: Environment }>('/environments', { name });
+
+// Environment settings
+export interface EnvironmentSettings {
+  allowSecretReveal: boolean;
+}
+
+export const getEnvironmentSettings = (id: string) =>
+  api.get<{ settings: EnvironmentSettings }>(`/environments/${id}/settings`);
+
+export const updateEnvironmentSettings = (id: string, settings: Partial<EnvironmentSettings>) =>
+  api.patch<{ settings: EnvironmentSettings }>(`/environments/${id}/settings`, settings);
 
 // Servers
 export const listServers = (envId: string) =>
@@ -158,10 +205,15 @@ export const deleteSecret = (id: string) =>
   api.delete<{ success: boolean }>(`/secrets/${id}`);
 
 // Types
+export type UserRole = 'admin' | 'operator' | 'viewer';
+
 export interface User {
   id: string;
   email: string;
   name: string | null;
+  role: UserRole;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Environment {
@@ -231,6 +283,7 @@ export interface Secret {
   id: string;
   key: string;
   description: string | null;
+  neverReveal: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -239,6 +292,7 @@ export interface SecretInput {
   key: string;
   value: string;
   description?: string;
+  neverReveal?: boolean;
 }
 
 export interface DeployOptions {
@@ -400,6 +454,26 @@ export const detachServiceFile = (serviceId: string, configFileId: string) =>
 export const syncServiceFiles = (serviceId: string) =>
   api.post<{ results: SyncResult[]; success: boolean }>(`/services/${serviceId}/sync-files`);
 
+// File History
+export interface FileHistoryEntry {
+  id: string;
+  content: string;
+  editedAt: string;
+  editedBy: { id: string; email: string; name: string | null } | null;
+}
+
+export const getConfigFileHistory = (id: string) =>
+  api.get<{ history: FileHistoryEntry[] }>(`/config-files/${id}/history`);
+
+export const restoreConfigFile = (id: string, historyId: string) =>
+  api.post<{ configFile: ConfigFile }>(`/config-files/${id}/restore/${historyId}`);
+
+export const getEnvTemplateHistory = (name: string) =>
+  api.get<{ history: FileHistoryEntry[] }>(`/env-templates/${name}/history`);
+
+export const restoreEnvTemplate = (name: string, historyId: string) =>
+  api.post<{ template: EnvTemplate }>(`/env-templates/${name}/restore/${historyId}`);
+
 // Registry Connections
 export interface RegistryConnection {
   id: string;
@@ -411,6 +485,9 @@ export interface RegistryConnection {
   hasPassword: boolean;
   username: string | null;
   isDefault: boolean;
+  refreshIntervalMinutes: number;
+  autoLinkPattern: string | null;
+  lastRefreshAt: string | null;
   createdAt: string;
   updatedAt: string;
   environmentId: string;
@@ -426,6 +503,8 @@ export interface RegistryConnectionInput {
   username?: string;
   password?: string;
   isDefault?: boolean;
+  refreshIntervalMinutes?: number;
+  autoLinkPattern?: string;
 }
 
 export interface RegistryRepository {
@@ -476,3 +555,184 @@ export interface UpdateCheckResult {
 
 export const checkServiceUpdates = (serviceId: string) =>
   api.post<UpdateCheckResult>(`/services/${serviceId}/check-updates`);
+
+// Metrics
+export type MetricsMode = 'ssh' | 'agent' | 'disabled';
+
+export interface ServerMetrics {
+  id: string;
+  cpuPercent: number | null;
+  memoryUsedMb: number | null;
+  memoryTotalMb: number | null;
+  diskUsedGb: number | null;
+  diskTotalGb: number | null;
+  loadAvg1: number | null;
+  loadAvg5: number | null;
+  loadAvg15: number | null;
+  uptime: number | null;
+  source: string;
+  collectedAt: string;
+}
+
+export interface ServiceMetrics {
+  id: string;
+  cpuPercent: number | null;
+  memoryUsedMb: number | null;
+  memoryLimitMb: number | null;
+  networkRxMb: number | null;
+  networkTxMb: number | null;
+  blockReadMb: number | null;
+  blockWriteMb: number | null;
+  restartCount: number | null;
+  collectedAt: string;
+}
+
+export interface MetricsSummaryServer {
+  id: string;
+  name: string;
+  hostname: string;
+  metricsMode: MetricsMode;
+  latestMetrics: ServerMetrics | null;
+  services: Array<{
+    id: string;
+    name: string;
+    containerName: string;
+    latestMetrics: ServiceMetrics | null;
+  }>;
+}
+
+export const getServerMetrics = (id: string, from?: string, to?: string, limit?: number) => {
+  const params = new URLSearchParams();
+  if (from) params.append('from', from);
+  if (to) params.append('to', to);
+  if (limit) params.append('limit', limit.toString());
+  const query = params.toString();
+  return api.get<{ metrics: ServerMetrics[] }>(`/servers/${id}/metrics${query ? `?${query}` : ''}`);
+};
+
+export const getServiceMetrics = (id: string, from?: string, to?: string, limit?: number) => {
+  const params = new URLSearchParams();
+  if (from) params.append('from', from);
+  if (to) params.append('to', to);
+  if (limit) params.append('limit', limit.toString());
+  const query = params.toString();
+  return api.get<{ metrics: ServiceMetrics[] }>(`/services/${id}/metrics${query ? `?${query}` : ''}`);
+};
+
+export const getEnvironmentMetricsSummary = (envId: string) =>
+  api.get<{ servers: MetricsSummaryServer[] }>(`/environments/${envId}/metrics/summary`);
+
+export const collectServerMetrics = (id: string) =>
+  api.post<{ serverMetrics: string; services: Array<{ service: string; success: boolean }> }>(
+    `/servers/${id}/collect-metrics`
+  );
+
+export const updateServerMetricsMode = (id: string, metricsMode: MetricsMode) =>
+  api.patch<{ server: { id: string; name: string; metricsMode: MetricsMode; agentToken?: string } }>(
+    `/servers/${id}/metrics-mode`,
+    { metricsMode }
+  );
+
+export const regenerateAgentToken = (id: string) =>
+  api.post<{ agentToken: string }>(`/servers/${id}/regenerate-agent-token`);
+
+// Databases
+export type DatabaseType = 'postgres' | 'mysql' | 'sqlite';
+export type BackupStorageType = 'local' | 'spaces';
+
+export interface Database {
+  id: string;
+  name: string;
+  type: DatabaseType;
+  host: string | null;
+  port: number | null;
+  databaseName: string | null;
+  hasCredentials: boolean;
+  filePath: string | null;
+  serverId: string | null;
+  backupStorageType: BackupStorageType;
+  backupLocalPath: string | null;
+  backupSpacesBucket: string | null;
+  backupSpacesPrefix: string | null;
+  createdAt: string;
+  updatedAt: string;
+  environmentId: string;
+  _count?: { backups: number; services: number };
+}
+
+export interface DatabaseInput {
+  name: string;
+  type: DatabaseType;
+  host?: string;
+  port?: number;
+  databaseName?: string;
+  username?: string;
+  password?: string;
+  filePath?: string;
+  serverId?: string;
+  backupStorageType?: BackupStorageType;
+  backupLocalPath?: string;
+  backupSpacesBucket?: string;
+  backupSpacesPrefix?: string;
+}
+
+export interface DatabaseBackup {
+  id: string;
+  filename: string;
+  size: number;
+  type: 'manual' | 'scheduled';
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  error: string | null;
+  storageType: BackupStorageType;
+  storagePath: string;
+  createdAt: string;
+  completedAt: string | null;
+  triggeredBy: { id: string; email: string; name: string | null } | null;
+}
+
+export interface BackupSchedule {
+  id: string;
+  cronExpression: string;
+  retentionDays: number;
+  enabled: boolean;
+  lastRunAt: string | null;
+  nextRunAt: string | null;
+}
+
+export const listDatabases = (envId: string) =>
+  api.get<{ databases: Database[] }>(`/environments/${envId}/databases`);
+
+export const createDatabase = (envId: string, data: DatabaseInput) =>
+  api.post<{ database: Database }>(`/environments/${envId}/databases`, data);
+
+export const getDatabase = (id: string) =>
+  api.get<{ database: Database }>(`/databases/${id}`);
+
+export const updateDatabase = (id: string, data: Partial<DatabaseInput>) =>
+  api.patch<{ database: Database }>(`/databases/${id}`, data);
+
+export const deleteDatabase = (id: string) =>
+  api.delete<{ success: boolean }>(`/databases/${id}`);
+
+export const createDatabaseBackup = (id: string) =>
+  api.post<{ backupId: string; message: string }>(`/databases/${id}/backups`);
+
+export const listDatabaseBackups = (id: string) =>
+  api.get<{ backups: DatabaseBackup[] }>(`/databases/${id}/backups`);
+
+export const getDatabaseBackup = (id: string) =>
+  api.get<{ backup: DatabaseBackup }>(`/backups/${id}`);
+
+export const deleteDatabaseBackup = (id: string) =>
+  api.delete<{ success: boolean }>(`/backups/${id}`);
+
+export const getBackupSchedule = (databaseId: string) =>
+  api.get<{ schedule: BackupSchedule | null }>(`/databases/${databaseId}/schedule`);
+
+export const setBackupSchedule = (
+  databaseId: string,
+  data: { cronExpression: string; retentionDays?: number; enabled?: boolean }
+) => api.put<{ schedule: BackupSchedule }>(`/databases/${databaseId}/schedule`, data);
+
+export const deleteBackupSchedule = (databaseId: string) =>
+  api.delete<{ success: boolean }>(`/databases/${databaseId}/schedule`);

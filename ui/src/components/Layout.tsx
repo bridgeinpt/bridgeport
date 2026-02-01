@@ -1,9 +1,16 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { useAuthStore, useAppStore } from '../lib/store';
+import { useAuthStore, useAppStore, isAdmin } from '../lib/store';
 import { listEnvironments, type Environment } from '../lib/api';
 
-const navigation = [
+interface NavItem {
+  name: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  adminOnly?: boolean;
+}
+
+const navigation: NavItem[] = [
   { name: 'Dashboard', href: '/', icon: HomeIcon },
   { name: 'Servers', href: '/servers', icon: ServerIcon },
   { name: 'Services', href: '/services', icon: CubeIcon },
@@ -11,23 +18,38 @@ const navigation = [
   { name: 'Env Templates', href: '/env-templates', icon: DocumentIcon },
   { name: 'Config Files', href: '/config-files', icon: FileIcon },
   { name: 'Registries', href: '/registries', icon: RegistryIcon },
+  { name: 'Databases', href: '/databases', icon: DatabaseIcon },
   { name: 'Activity', href: '/activity', icon: ActivityIcon },
+  { name: 'Users', href: '/users', icon: UsersIcon, adminOnly: true },
 ];
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const { user, logout } = useAuthStore();
-  const { selectedEnvironment, setSelectedEnvironment } = useAppStore();
+  const { selectedEnvironment, setSelectedEnvironment, clearSelectedEnvironment } = useAppStore();
   const [environments, setEnvironments] = useState<Environment[]>([]);
 
   useEffect(() => {
     listEnvironments().then(({ environments }) => {
       setEnvironments(environments);
-      if (!selectedEnvironment && environments.length > 0) {
+
+      if (selectedEnvironment) {
+        // Validate persisted environment still exists
+        const stillExists = environments.some((env) => env.id === selectedEnvironment.id);
+        if (!stillExists) {
+          // Environment was deleted, clear and select first available
+          if (environments.length > 0) {
+            setSelectedEnvironment(environments[0]);
+          } else {
+            clearSelectedEnvironment();
+          }
+        }
+      } else if (environments.length > 0) {
+        // No environment selected, select first one
         setSelectedEnvironment(environments[0]);
       }
     });
-  }, [selectedEnvironment, setSelectedEnvironment]);
+  }, []); // Only run on mount
 
   return (
     <div className="min-h-screen flex">
@@ -59,29 +81,38 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="flex-1 p-4 space-y-1">
-          {navigation.map((item) => {
-            const isActive = location.pathname === item.href;
-            return (
-              <Link
-                key={item.name}
-                to={item.href}
-                className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
-                  isActive
-                    ? 'bg-primary-600 text-white'
-                    : 'text-slate-300 hover:bg-slate-800'
-                }`}
-              >
-                <item.icon className="w-5 h-5" />
-                {item.name}
-              </Link>
-            );
-          })}
+          {navigation
+            .filter((item) => !item.adminOnly || isAdmin(user))
+            .map((item) => {
+              const isActive = location.pathname === item.href;
+              return (
+                <Link
+                  key={item.name}
+                  to={item.href}
+                  className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
+                    isActive
+                      ? 'bg-primary-600 text-white'
+                      : 'text-slate-300 hover:bg-slate-800'
+                  }`}
+                >
+                  <item.icon className="w-5 h-5" />
+                  {item.name}
+                </Link>
+              );
+            })}
         </nav>
 
         <div className="p-4 border-t border-slate-700">
           <div className="flex items-center justify-between">
             <div className="text-sm">
-              <p className="text-white font-medium">{user?.name || user?.email}</p>
+              <div className="flex items-center gap-2">
+                <p className="text-white font-medium">{user?.name || user?.email}</p>
+                {user?.role && (
+                  <span className="px-1.5 py-0.5 text-[10px] rounded bg-slate-700 text-slate-300 uppercase">
+                    {user.role}
+                  </span>
+                )}
+              </div>
               <p className="text-slate-400 text-xs">{user?.email}</p>
             </div>
             <div className="flex items-center gap-2">
@@ -188,6 +219,22 @@ function RegistryIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+    </svg>
+  );
+}
+
+function UsersIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+    </svg>
+  );
+}
+
+function DatabaseIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
     </svg>
   );
 }

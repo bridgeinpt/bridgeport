@@ -7,10 +7,13 @@ import {
   deleteEnvTemplate,
   generateEnvPreview,
   listSecrets,
+  getEnvTemplateHistory,
+  restoreEnvTemplate,
   type EnvTemplate,
   type Secret,
+  type FileHistoryEntry,
 } from '../lib/api';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow, format } from 'date-fns';
 
 export default function EnvTemplates() {
   const { selectedEnvironment } = useAppStore();
@@ -27,6 +30,10 @@ export default function EnvTemplates() {
   const [previewContent, setPreviewContent] = useState<string>('');
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [historyTemplate, setHistoryTemplate] = useState<EnvTemplate | null>(null);
+  const [history, setHistory] = useState<FileHistoryEntry[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [selectedHistoryEntry, setSelectedHistoryEntry] = useState<FileHistoryEntry | null>(null);
 
   useEffect(() => {
     loadData();
@@ -103,6 +110,31 @@ export default function EnvTemplates() {
   const startEdit = (template: EnvTemplate) => {
     setEditingTemplate(template.name);
     setEditContent(template.template);
+  };
+
+  const handleViewHistory = async (template: EnvTemplate) => {
+    setHistoryTemplate(template);
+    setLoadingHistory(true);
+    try {
+      const { history } = await getEnvTemplateHistory(template.name);
+      setHistory(history);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const handleRestore = async (historyEntry: FileHistoryEntry) => {
+    if (!historyTemplate) return;
+    if (!confirm('Are you sure you want to restore this version? The current content will be saved to history.')) return;
+
+    const { template } = await restoreEnvTemplate(historyTemplate.name, historyEntry.id);
+    setTemplates((prev) =>
+      prev.map((t) => (t.name === template.name ? template : t))
+    );
+    // Reload history to show the new entry
+    const { history: updatedHistory } = await getEnvTemplateHistory(historyTemplate.name);
+    setHistory(updatedHistory);
+    setSelectedHistoryEntry(null);
   };
 
   // Extract placeholders from template
@@ -279,6 +311,101 @@ export default function EnvTemplates() {
         </div>
       )}
 
+      {/* History Modal */}
+      {historyTemplate && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-5xl p-6 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-white">
+                  History: {historyTemplate.name}
+                </h3>
+                <p className="text-sm text-slate-400">
+                  {history.length} previous version{history.length !== 1 ? 's' : ''}
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setHistoryTemplate(null);
+                  setHistory([]);
+                  setSelectedHistoryEntry(null);
+                }}
+                className="text-slate-400 hover:text-white"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {loadingHistory ? (
+              <div className="flex-1 flex items-center justify-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
+              </div>
+            ) : history.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center text-slate-400">
+                No edit history available
+              </div>
+            ) : (
+              <div className="flex-1 flex gap-4 overflow-hidden">
+                {/* History List */}
+                <div className="w-64 flex-shrink-0 overflow-y-auto space-y-2">
+                  {history.map((entry) => (
+                    <button
+                      key={entry.id}
+                      onClick={() => setSelectedHistoryEntry(entry)}
+                      className={`w-full text-left p-3 rounded-lg border transition-colors ${
+                        selectedHistoryEntry?.id === entry.id
+                          ? 'bg-primary-900/30 border-primary-500'
+                          : 'bg-slate-800/50 border-slate-700 hover:border-slate-600'
+                      }`}
+                    >
+                      <p className="text-sm text-white">
+                        {format(new Date(entry.editedAt), 'MMM d, yyyy')}
+                      </p>
+                      <p className="text-xs text-slate-400">
+                        {format(new Date(entry.editedAt), 'h:mm a')}
+                      </p>
+                      {entry.editedBy && (
+                        <p className="text-xs text-slate-500 mt-1 truncate">
+                          by {entry.editedBy.name || entry.editedBy.email}
+                        </p>
+                      )}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Content Preview */}
+                <div className="flex-1 flex flex-col overflow-hidden">
+                  {selectedHistoryEntry ? (
+                    <>
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-sm text-slate-400">
+                          Content at {format(new Date(selectedHistoryEntry.editedAt), 'MMM d, yyyy h:mm a')}
+                        </p>
+                        <button
+                          onClick={() => handleRestore(selectedHistoryEntry)}
+                          className="btn btn-primary text-sm"
+                        >
+                          Restore This Version
+                        </button>
+                      </div>
+                      <pre className="flex-1 overflow-auto p-4 bg-slate-950 rounded-lg text-sm font-mono text-slate-300">
+                        {selectedHistoryEntry.content}
+                      </pre>
+                    </>
+                  ) : (
+                    <div className="flex-1 flex items-center justify-center text-slate-400">
+                      Select a version to preview
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Templates List */}
       <div className="space-y-4">
         {templates.map((template) => {
@@ -315,6 +442,12 @@ export default function EnvTemplates() {
                       Cancel
                     </button>
                   )}
+                  <button
+                    onClick={() => handleViewHistory(template)}
+                    className="btn btn-ghost text-sm"
+                  >
+                    History
+                  </button>
                   <button
                     onClick={() => handleDelete(template.name)}
                     className="btn btn-ghost text-sm text-red-400 hover:text-red-300"

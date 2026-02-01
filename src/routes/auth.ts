@@ -59,7 +59,8 @@ export async function authRoutes(fastify: FastifyInstance) {
       return reply.code(403).send({ error: 'Registration disabled' });
     }
 
-    const user = await createUser(body.data.email, body.data.password, body.data.name);
+    // First user is always admin
+    const user = await createUser(body.data.email, body.data.password, body.data.name, 'admin');
 
     const token = fastify.jwt.sign(
       { id: user.id, email: user.email },

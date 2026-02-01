@@ -12,12 +12,15 @@ model User {
   email        String   @unique
   passwordHash String
   name         String?
+  role         String   @default("viewer") // "admin" | "operator" | "viewer"
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  apiTokens   ApiToken[]
-  deployments Deployment[]
-  auditLogs   AuditLog[]
+  apiTokens        ApiToken[]
+  deployments      Deployment[]
+  auditLogs        AuditLog[]
+  fileHistory      FileHistory[]
+  databaseBackups  DatabaseBackup[]
 }
 
 model ApiToken {
@@ -32,18 +35,28 @@ model ApiToken {
 }
 
 model Environment {
-  id            String   @id @default(cuid())
-  name          String   @unique // staging, production
-  sshPrivateKey String?  // Encrypted SSH private key for this environment
-  sshUser       String   @default("root") // SSH username
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id               String   @id @default(cuid())
+  name             String   @unique // staging, production
+  sshPrivateKey    String?  // Encrypted SSH private key for this environment
+  sshUser          String   @default("root") // SSH username
+  allowSecretReveal Boolean @default(true)  // Whether secrets can be revealed in this environment
+
+  // DO Spaces credentials for backups (optional, encrypted)
+  spacesAccessKey       String?
+  encryptedSpacesSecret String?
+  spacesSecretNonce     String?
+  spacesRegion          String?  // e.g., "fra1"
+  spacesEndpoint        String?  // e.g., "fra1.digitaloceanspaces.com"
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   servers              Server[]
   secrets              Secret[]
   configFiles          ConfigFile[]
   auditLogs            AuditLog[]
   registryConnections  RegistryConnection[]
+  databases            Database[]
 }
 
 model Server {
@@ -57,12 +70,39 @@ model Server {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  // Metrics collection settings
+  metricsMode   String   @default("disabled") // "ssh" | "agent" | "disabled"
+  agentToken    String?  // Token for agent authentication
+
   environmentId String
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
 
-  services Service[]
+  services  Service[]
+  metrics   ServerMetrics[]
+  databases Database[]
 
   @@unique([environmentId, name])
+}
+
+// Server-level metrics (CPU, memory, disk, load)
+model ServerMetrics {
+  id            String   @id @default(cuid())
+  cpuPercent    Float?
+  memoryUsedMb  Float?
+  memoryTotalMb Float?
+  diskUsedGb    Float?
+  diskTotalGb   Float?
+  loadAvg1      Float?
+  loadAvg5      Float?
+  loadAvg15     Float?
+  uptime        Int?     // seconds
+  source        String   // "ssh" | "agent"
+  collectedAt   DateTime @default(now())
+
+  serverId String
+  server   Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([serverId, collectedAt(sort: Desc)])
 }
 
 model Service {
@@ -92,11 +132,32 @@ model Service {
   server      Server        @relation(fields: [serverId], references: [id], onDelete: Cascade)
   deployments Deployment[]
   files       ServiceFile[]
+  metrics     ServiceMetrics[]
+  databases   ServiceDatabase[]
 
   registryConnectionId String?
   registryConnection   RegistryConnection? @relation(fields: [registryConnectionId], references: [id], onDelete: SetNull)
 
   @@unique([serverId, name])
+}
+
+// Container-level metrics (per service)
+model ServiceMetrics {
+  id            String   @id @default(cuid())
+  cpuPercent    Float?
+  memoryUsedMb  Float?
+  memoryLimitMb Float?
+  networkRxMb   Float?
+  networkTxMb   Float?
+  blockReadMb   Float?
+  blockWriteMb  Float?
+  restartCount  Int?
+  collectedAt   DateTime @default(now())
+
+  serviceId String
+  service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([serviceId, collectedAt(sort: Desc)])
 }
 
 model Deployment {
@@ -124,6 +185,7 @@ model Secret {
   encryptedValue String   // XChaCha20-Poly1305 encrypted
   nonce          String   // Encryption nonce (base64)
   description    String?
+  neverReveal    Boolean  @default(false) // Write-only secret, cannot be revealed
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -139,6 +201,8 @@ model EnvTemplate {
   template  String   // Template content with ${SECRET_NAME} placeholders
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  history FileHistory[]
 }
 
 // Config files (compose files, Caddyfile, certificates, etc.)
@@ -154,6 +218,7 @@ model ConfigFile {
   environmentId String
   environment   Environment  @relation(fields: [environmentId], references: [id], onDelete: Cascade)
   services      ServiceFile[]
+  history       FileHistory[]
 
   @@unique([environmentId, name])
 }
@@ -207,6 +272,24 @@ model AuditLog {
   @@index([environmentId])
 }
 
+// Edit history for config files and env templates
+model FileHistory {
+  id        String   @id @default(cuid())
+  content   String   // Previous content
+  editedAt  DateTime @default(now())
+
+  editedById String?
+  editedBy   User?   @relation(fields: [editedById], references: [id], onDelete: SetNull)
+
+  configFileId  String?
+  configFile    ConfigFile?  @relation(fields: [configFileId], references: [id], onDelete: Cascade)
+  envTemplateId String?
+  envTemplate   EnvTemplate? @relation(fields: [envTemplateId], references: [id], onDelete: Cascade)
+
+  @@index([configFileId, editedAt(sort: Desc)])
+  @@index([envTemplateId, editedAt(sort: Desc)])
+}
+
 // Registry connection for image update checking
 model RegistryConnection {
   id                String   @id @default(cuid())
@@ -220,6 +303,9 @@ model RegistryConnection {
   encryptedPassword String?
   passwordNonce     String?
   isDefault         Boolean  @default(false)
+  refreshIntervalMinutes Int @default(30)  // How often to check for updates
+  autoLinkPattern   String?  // Pattern for auto-linking services (e.g., "bios-*")
+  lastRefreshAt     DateTime?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -228,4 +314,86 @@ model RegistryConnection {
   services      Service[]
 
   @@unique([environmentId, name])
+}
+
+// Database for backup management
+model Database {
+  id                   String   @id @default(cuid())
+  name                 String   // Display name (e.g., "bios-postgres-staging")
+  type                 String   // "postgres" | "mysql" | "sqlite"
+  host                 String?  // Database host (for remote DBs)
+  port                 Int?     // Database port
+  databaseName         String?  // Actual database name
+  encryptedCredentials String?  // Encrypted username:password
+  credentialsNonce     String?
+  filePath             String?  // For SQLite: path on server
+
+  // Backup storage configuration
+  backupStorageType    String   @default("local")  // "local" | "spaces"
+  backupLocalPath      String?  // Local path on server (e.g., /var/backups)
+  backupSpacesBucket   String?  // Spaces bucket name
+  backupSpacesPrefix   String?  // Key prefix (e.g., "backups/staging/")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  environmentId String
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+
+  serverId String?
+  server   Server?  @relation(fields: [serverId], references: [id], onDelete: SetNull)
+
+  backups  DatabaseBackup[]
+  schedule BackupSchedule?
+  services ServiceDatabase[]
+
+  @@unique([environmentId, name])
+}
+
+// Database backup record
+model DatabaseBackup {
+  id          String   @id @default(cuid())
+  filename    String
+  size        BigInt
+  type        String   // "manual" | "scheduled"
+  status      String   // "pending" | "in_progress" | "completed" | "failed"
+  error       String?
+  storageType String   // "local" | "spaces"
+  storagePath String   // Local path or Spaces key
+  createdAt   DateTime @default(now())
+  completedAt DateTime?
+
+  databaseId String
+  database   Database @relation(fields: [databaseId], references: [id], onDelete: Cascade)
+
+  triggeredById String?
+  triggeredBy   User?   @relation(fields: [triggeredById], references: [id], onDelete: SetNull)
+
+  @@index([databaseId, createdAt(sort: Desc)])
+}
+
+// Backup schedule configuration
+model BackupSchedule {
+  id             String   @id @default(cuid())
+  cronExpression String   // e.g., "0 2 * * *" (daily 2am)
+  retentionDays  Int      @default(7)
+  enabled        Boolean  @default(true)
+  lastRunAt      DateTime?
+  nextRunAt      DateTime?
+
+  databaseId String   @unique
+  database   Database @relation(fields: [databaseId], references: [id], onDelete: Cascade)
+}
+
+// Links services to databases
+model ServiceDatabase {
+  id               String @id @default(cuid())
+  connectionEnvVar String // e.g., "DATABASE_URL"
+
+  serviceId  String
+  service    Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  databaseId String
+  database   Database @relation(fields: [databaseId], references: [id], onDelete: Cascade)
+
+  @@unique([serviceId, databaseId])
 }

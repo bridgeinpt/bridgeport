@@ -5,12 +5,14 @@ export interface SecretInput {
   key: string;
   value: string;
   description?: string;
+  neverReveal?: boolean;
 }
 
 export interface SecretOutput {
   id: string;
   key: string;
   description: string | null;
+  neverReveal: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -27,12 +29,14 @@ export async function createSecret(
       encryptedValue: ciphertext,
       nonce,
       description: input.description,
+      neverReveal: input.neverReveal ?? false,
       environmentId,
     },
     select: {
       id: true,
       key: true,
       description: true,
+      neverReveal: true,
       createdAt: true,
       updatedAt: true,
     },
@@ -49,6 +53,7 @@ export async function updateSecret(
     encryptedValue?: string;
     nonce?: string;
     description?: string;
+    neverReveal?: boolean;
   } = {};
 
   if (input.value !== undefined) {
@@ -61,6 +66,10 @@ export async function updateSecret(
     updateData.description = input.description;
   }
 
+  if (input.neverReveal !== undefined) {
+    updateData.neverReveal = input.neverReveal;
+  }
+
   const secret = await prisma.secret.update({
     where: { id: secretId },
     data: updateData,
@@ -68,6 +77,7 @@ export async function updateSecret(
       id: true,
       key: true,
       description: true,
+      neverReveal: true,
       createdAt: true,
       updatedAt: true,
     },
@@ -91,6 +101,7 @@ export async function listSecrets(environmentId: string): Promise<SecretOutput[]
       id: true,
       key: true,
       description: true,
+      neverReveal: true,
       createdAt: true,
       updatedAt: true,
     },

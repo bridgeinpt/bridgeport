@@ -1,22 +1,38 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppStore } from '../lib/store';
-import { getEnvironment, type EnvironmentWithServers } from '../lib/api';
+import {
+  getEnvironment,
+  getEnvironmentMetricsSummary,
+  type EnvironmentWithServers,
+  type MetricsSummaryServer,
+} from '../lib/api';
 import { formatDistanceToNow } from 'date-fns';
 
 export default function Dashboard() {
   const { selectedEnvironment } = useAppStore();
   const [environment, setEnvironment] = useState<EnvironmentWithServers | null>(null);
+  const [metrics, setMetrics] = useState<MetricsSummaryServer[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (selectedEnvironment?.id) {
       setLoading(true);
-      getEnvironment(selectedEnvironment.id)
-        .then(({ environment }) => setEnvironment(environment))
+      Promise.all([
+        getEnvironment(selectedEnvironment.id),
+        getEnvironmentMetricsSummary(selectedEnvironment.id),
+      ])
+        .then(([envRes, metricsRes]) => {
+          setEnvironment(envRes.environment);
+          setMetrics(metricsRes.servers);
+        })
         .finally(() => setLoading(false));
     }
   }, [selectedEnvironment?.id]);
+
+  // Helper to get metrics for a server
+  const getServerMetrics = (serverId: string) =>
+    metrics.find((m) => m.id === serverId)?.latestMetrics;
 
   if (loading) {
     return (
@@ -121,6 +137,114 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Server Metrics Cards */}
+      {metrics.some((m) => m.latestMetrics) && (
+        <div className="mb-8">
+          <h2 className="text-lg font-semibold text-white mb-4">Server Resources</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {metrics
+              .filter((m) => m.latestMetrics)
+              .map((server) => (
+                <div key={server.id} className="card">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-medium text-white">{server.name}</h3>
+                    <span className="text-xs text-slate-500">
+                      {server.latestMetrics &&
+                        formatDistanceToNow(new Date(server.latestMetrics.collectedAt), {
+                          addSuffix: true,
+                        })}
+                    </span>
+                  </div>
+
+                  {server.latestMetrics && (
+                    <div className="space-y-3">
+                      {/* CPU */}
+                      <div>
+                        <div className="flex justify-between text-xs mb-1">
+                          <span className="text-slate-400">CPU</span>
+                          <span className="text-white">
+                            {server.latestMetrics.cpuPercent?.toFixed(1)}%
+                          </span>
+                        </div>
+                        <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-primary-500 rounded-full transition-all"
+                            style={{ width: `${Math.min(server.latestMetrics.cpuPercent || 0, 100)}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Memory */}
+                      {server.latestMetrics.memoryTotalMb && (
+                        <div>
+                          <div className="flex justify-between text-xs mb-1">
+                            <span className="text-slate-400">Memory</span>
+                            <span className="text-white">
+                              {((server.latestMetrics.memoryUsedMb || 0) / 1024).toFixed(1)} /{' '}
+                              {(server.latestMetrics.memoryTotalMb / 1024).toFixed(1)} GB
+                            </span>
+                          </div>
+                          <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-green-500 rounded-full transition-all"
+                              style={{
+                                width: `${Math.min(
+                                  ((server.latestMetrics.memoryUsedMb || 0) /
+                                    server.latestMetrics.memoryTotalMb) *
+                                    100,
+                                  100
+                                )}%`,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Disk */}
+                      {server.latestMetrics.diskTotalGb && (
+                        <div>
+                          <div className="flex justify-between text-xs mb-1">
+                            <span className="text-slate-400">Disk</span>
+                            <span className="text-white">
+                              {server.latestMetrics.diskUsedGb?.toFixed(0)} /{' '}
+                              {server.latestMetrics.diskTotalGb.toFixed(0)} GB
+                            </span>
+                          </div>
+                          <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-yellow-500 rounded-full transition-all"
+                              style={{
+                                width: `${Math.min(
+                                  ((server.latestMetrics.diskUsedGb || 0) /
+                                    server.latestMetrics.diskTotalGb) *
+                                    100,
+                                  100
+                                )}%`,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Load Average */}
+                      {server.latestMetrics.loadAvg1 !== null && (
+                        <div className="flex justify-between text-xs">
+                          <span className="text-slate-400">Load Avg</span>
+                          <span className="text-white font-mono">
+                            {server.latestMetrics.loadAvg1?.toFixed(2)}{' '}
+                            {server.latestMetrics.loadAvg5?.toFixed(2)}{' '}
+                            {server.latestMetrics.loadAvg15?.toFixed(2)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
       {/* Servers List */}
       <div className="card">
         <h2 className="text-lg font-semibold text-white mb-4">Servers</h2>
@@ -131,35 +255,68 @@ export default function Dashboard() {
                 <th className="pb-3 font-medium">Name</th>
                 <th className="pb-3 font-medium">IP Address</th>
                 <th className="pb-3 font-medium">Services</th>
+                <th className="pb-3 font-medium">CPU</th>
+                <th className="pb-3 font-medium">Memory</th>
                 <th className="pb-3 font-medium">Status</th>
                 <th className="pb-3 font-medium">Last Checked</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-700">
-              {environment.servers.map((server) => (
-                <tr key={server.id} className="text-slate-300">
-                  <td className="py-3">
-                    <Link
-                      to={`/servers/${server.id}`}
-                      className="text-white hover:text-primary-400"
-                    >
-                      {server.name}
-                    </Link>
-                  </td>
-                  <td className="py-3 font-mono text-sm">{server.hostname}</td>
-                  <td className="py-3">{server.services.length}</td>
-                  <td className="py-3">
-                    <StatusBadge status={server.status} />
-                  </td>
-                  <td className="py-3 text-sm text-slate-400">
-                    {server.lastCheckedAt
-                      ? formatDistanceToNow(new Date(server.lastCheckedAt), {
-                          addSuffix: true,
-                        })
-                      : 'Never'}
-                  </td>
-                </tr>
-              ))}
+              {environment.servers.map((server) => {
+                const serverMetrics = getServerMetrics(server.id);
+                return (
+                  <tr key={server.id} className="text-slate-300">
+                    <td className="py-3">
+                      <Link
+                        to={`/servers/${server.id}`}
+                        className="text-white hover:text-primary-400"
+                      >
+                        {server.name}
+                      </Link>
+                    </td>
+                    <td className="py-3 font-mono text-sm">{server.hostname}</td>
+                    <td className="py-3">{server.services.length}</td>
+                    <td className="py-3 text-sm">
+                      {serverMetrics?.cpuPercent !== null ? (
+                        <span className={serverMetrics!.cpuPercent! > 80 ? 'text-red-400' : ''}>
+                          {serverMetrics!.cpuPercent?.toFixed(1)}%
+                        </span>
+                      ) : (
+                        <span className="text-slate-500">-</span>
+                      )}
+                    </td>
+                    <td className="py-3 text-sm">
+                      {serverMetrics?.memoryTotalMb ? (
+                        <span
+                          className={
+                            ((serverMetrics.memoryUsedMb || 0) / serverMetrics.memoryTotalMb) * 100 > 80
+                              ? 'text-red-400'
+                              : ''
+                          }
+                        >
+                          {(
+                            ((serverMetrics.memoryUsedMb || 0) / serverMetrics.memoryTotalMb) *
+                            100
+                          ).toFixed(0)}
+                          %
+                        </span>
+                      ) : (
+                        <span className="text-slate-500">-</span>
+                      )}
+                    </td>
+                    <td className="py-3">
+                      <StatusBadge status={server.status} />
+                    </td>
+                    <td className="py-3 text-sm text-slate-400">
+                      {server.lastCheckedAt
+                        ? formatDistanceToNow(new Date(server.lastCheckedAt), {
+                            addSuffix: true,
+                          })
+                        : 'Never'}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
