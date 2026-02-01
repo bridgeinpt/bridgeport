@@ -46,10 +46,6 @@ const serverMetricsIngestSchema = z.object({
     .optional(),
 });
 
-const updateMetricsModeSchema = z.object({
-  metricsMode: z.enum(['ssh', 'agent', 'disabled']),
-});
-
 export async function metricsRoutes(fastify: FastifyInstance) {
   // Get metrics for a server
   fastify.get(
@@ -169,64 +165,6 @@ export async function metricsRoutes(fastify: FastifyInstance) {
       return {
         serverMetrics: serverMetrics ? 'collected' : 'failed',
         services: serviceResults,
-      };
-    }
-  );
-
-  // Update server metrics mode
-  fastify.patch(
-    '/api/servers/:id/metrics-mode',
-    { preHandler: [fastify.authenticate] },
-    async (request, reply) => {
-      const { id } = request.params as { id: string };
-      const body = updateMetricsModeSchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
-
-      const server = await prisma.server.findUnique({ where: { id } });
-      if (!server) {
-        return reply.code(404).send({ error: 'Server not found' });
-      }
-
-      const updateData: { metricsMode: string; agentToken?: string } = {
-        metricsMode: body.data.metricsMode,
-      };
-
-      // Generate agent token if switching to agent mode
-      if (body.data.metricsMode === 'agent' && !server.agentToken) {
-        updateData.agentToken = crypto.randomBytes(32).toString('hex');
-      }
-
-      const updated = await prisma.server.update({
-        where: { id },
-        data: updateData,
-        select: {
-          id: true,
-          name: true,
-          metricsMode: true,
-          agentToken: true,
-        },
-      });
-
-      await logAudit({
-        action: 'update',
-        resourceType: 'server',
-        resourceId: id,
-        resourceName: server.name,
-        details: { metricsMode: body.data.metricsMode },
-        userId: request.authUser!.id,
-        environmentId: server.environmentId,
-      });
-
-      return {
-        server: {
-          id: updated.id,
-          name: updated.name,
-          metricsMode: updated.metricsMode,
-          agentToken: updated.metricsMode === 'agent' ? updated.agentToken : undefined,
-        },
       };
     }
   );
