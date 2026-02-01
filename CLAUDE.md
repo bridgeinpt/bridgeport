@@ -44,7 +44,15 @@ bridgeport/
 ├── ui/                       # Frontend (React + Vite)
 │   ├── src/
 │   │   ├── components/       # Reusable components
+│   │   │   └── Layout.tsx    # Navigation sidebar with env selector
 │   │   ├── pages/            # Page components
+│   │   │   ├── Dashboard.tsx # Overview with server metrics
+│   │   │   ├── Monitoring.tsx # Dedicated monitoring dashboard
+│   │   │   ├── Servers.tsx   # Server list
+│   │   │   ├── ServerDetail.tsx # Server config + monitoring
+│   │   │   ├── Services.tsx  # Service list
+│   │   │   ├── ServiceDetail.tsx # Service deploy + health checks
+│   │   │   └── ...           # Other pages
 │   │   └── lib/              # API client, store
 │   └── public/               # Static assets
 ├── bridgeport-agent/         # Go monitoring agent
@@ -177,6 +185,25 @@ ServerMetrics  - Time-series server metrics
 ServiceMetrics - Time-series container metrics
 RegistryConnection - Container registry with refreshIntervalMinutes, autoLinkPattern
 ```
+
+## UI Features
+
+### Server Management
+- **Monitoring Card**: Configure metrics mode (disabled/SSH/agent), view real-time metrics
+- **Create Service**: Manually create services before containers exist
+- **Discover Containers**: Auto-discover running Docker containers
+
+### Service Management
+- **Deploy**: Deploy new image tags with pull
+- **Health Checks**: Manual health checks with detailed results (container + URL)
+- **Health Check History**: View past health check results from audit log
+- **Deployment History**: View past deployments with expandable logs
+- **Config Files**: Attach and sync config files to servers
+
+### Monitoring Dashboard (`/monitoring`)
+- Environment-wide server metrics overview
+- Service resource usage table sorted by CPU
+- Auto-refresh every 30 seconds
 
 ## Important Notes
 

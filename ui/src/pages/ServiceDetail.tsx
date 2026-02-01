@@ -17,6 +17,7 @@ import {
   syncServiceFiles,
   checkServiceUpdates,
   listRegistryConnections,
+  getAuditLogs,
   type ServiceWithServer,
   type Deployment,
   type EnvTemplate,
@@ -24,6 +25,7 @@ import {
   type ConfigFile,
   type SyncResult,
   type RegistryConnection,
+  type AuditLog,
 } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -71,6 +73,17 @@ export default function ServiceDetail() {
   } | null>(null);
   const [togglingAutoUpdate, setTogglingAutoUpdate] = useState(false);
 
+  // Error and health check state
+  const [deployError, setDeployError] = useState<string | null>(null);
+  const [healthCheckError, setHealthCheckError] = useState<string | null>(null);
+  const [healthCheckResult, setHealthCheckResult] = useState<{
+    status: string;
+    container: { state: string; status: string; health?: string; running: boolean };
+    url: { success: boolean; statusCode?: number; error?: string } | null;
+  } | null>(null);
+  const [healthCheckHistory, setHealthCheckHistory] = useState<AuditLog[]>([]);
+  const [expandedDeployment, setExpandedDeployment] = useState<string | null>(null);
+
   useEffect(() => {
     if (id) {
       setLoading(true);
@@ -82,6 +95,8 @@ export default function ServiceDetail() {
         getDeploymentHistory(id).then(({ deployments }) => setDeployments(deployments)),
         listEnvTemplates().then(({ templates }) => setTemplates(templates)),
         listServiceFiles(id).then(({ files }) => setAttachedFiles(files)),
+        getAuditLogs({ resourceType: 'service', resourceId: id, action: 'health_check', limit: 10 })
+          .then(({ logs }) => setHealthCheckHistory(logs)),
       ]).finally(() => setLoading(false));
     }
   }, [id]);
@@ -138,12 +153,18 @@ export default function ServiceDetail() {
   const handleDeploy = async () => {
     if (!id) return;
     setDeploying(true);
+    setDeployError(null);
     try {
       const result = await deployService(id, { imageTag, pullImage: true });
       setDeployments((prev) => [result.deployment, ...prev]);
       if (service) {
         setService({ ...service, imageTag, status: 'running' });
       }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Deployment failed';
+      setDeployError(message);
+      // Refresh deployment history to get the failed deployment
+      getDeploymentHistory(id).then(({ deployments }) => setDeployments(deployments));
     } finally {
       setDeploying(false);
     }
@@ -174,11 +195,27 @@ export default function ServiceDetail() {
   const handleHealthCheck = async () => {
     if (!id) return;
     setChecking(true);
+    setHealthCheckError(null);
+    setHealthCheckResult(null);
     try {
       const result = await checkServiceHealth(id);
       setService((prev) =>
         prev ? { ...prev, status: result.status, lastCheckedAt: result.lastCheckedAt } : null
       );
+      setHealthCheckResult({
+        status: result.status,
+        container: result.container,
+        url: result.url,
+      });
+      // Refresh health check history
+      getAuditLogs({ resourceType: 'service', resourceId: id, action: 'health_check', limit: 10 })
+        .then(({ logs }) => setHealthCheckHistory(logs));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Health check failed';
+      setHealthCheckError(message);
+      // Still refresh history to show the failed attempt
+      getAuditLogs({ resourceType: 'service', resourceId: id, action: 'health_check', limit: 10 })
+        .then(({ logs }) => setHealthCheckHistory(logs));
     } finally {
       setChecking(false);
     }
@@ -481,6 +518,29 @@ export default function ServiceDetail() {
                   : 'No updates available'}
               </div>
             )}
+
+            {/* Deploy error */}
+            {deployError && (
+              <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <svg className="w-5 h-5 text-red-400 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <div className="flex-1">
+                    <p className="text-red-400 font-medium">Deployment Failed</p>
+                    <p className="text-red-300/80 text-sm mt-1">{deployError}</p>
+                  </div>
+                  <button
+                    onClick={() => setDeployError(null)}
+                    className="text-red-400 hover:text-red-300"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -533,6 +593,122 @@ export default function ServiceDetail() {
         </div>
       </div>
 
+      {/* Health Check Result/Error */}
+      {(healthCheckError || healthCheckResult) && (
+        <div className="card mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-white">Health Check Result</h3>
+            <button
+              onClick={() => {
+                setHealthCheckError(null);
+                setHealthCheckResult(null);
+              }}
+              className="text-slate-400 hover:text-white text-sm"
+            >
+              Dismiss
+            </button>
+          </div>
+
+          {healthCheckError && (
+            <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
+              <div className="flex items-start gap-3">
+                <svg className="w-5 h-5 text-red-400 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div>
+                  <p className="text-red-400 font-medium">Health Check Failed</p>
+                  <p className="text-red-300/80 text-sm mt-1">{healthCheckError}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {healthCheckResult && (
+            <div className="space-y-4">
+              {/* Overall Status */}
+              <div className="flex items-center gap-3">
+                <span
+                  className={`w-3 h-3 rounded-full ${
+                    healthCheckResult.status === 'healthy'
+                      ? 'bg-green-500'
+                      : healthCheckResult.status === 'running'
+                      ? 'bg-blue-500'
+                      : healthCheckResult.status === 'unhealthy'
+                      ? 'bg-red-500'
+                      : 'bg-yellow-500'
+                  }`}
+                />
+                <span className="text-white font-medium capitalize">{healthCheckResult.status}</span>
+              </div>
+
+              {/* Container Details */}
+              <div className="p-3 bg-slate-800 rounded-lg">
+                <p className="text-slate-400 text-sm mb-2">Container</p>
+                <dl className="grid grid-cols-2 gap-2 text-sm">
+                  <div>
+                    <dt className="text-slate-500">State</dt>
+                    <dd className="text-white">{healthCheckResult.container.state}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-500">Status</dt>
+                    <dd className="text-white">{healthCheckResult.container.status}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-slate-500">Running</dt>
+                    <dd className={healthCheckResult.container.running ? 'text-green-400' : 'text-red-400'}>
+                      {healthCheckResult.container.running ? 'Yes' : 'No'}
+                    </dd>
+                  </div>
+                  {healthCheckResult.container.health && (
+                    <div>
+                      <dt className="text-slate-500">Health</dt>
+                      <dd
+                        className={
+                          healthCheckResult.container.health === 'healthy'
+                            ? 'text-green-400'
+                            : healthCheckResult.container.health === 'unhealthy'
+                            ? 'text-red-400'
+                            : 'text-yellow-400'
+                        }
+                      >
+                        {healthCheckResult.container.health}
+                      </dd>
+                    </div>
+                  )}
+                </dl>
+              </div>
+
+              {/* URL Check Details */}
+              {healthCheckResult.url && (
+                <div className="p-3 bg-slate-800 rounded-lg">
+                  <p className="text-slate-400 text-sm mb-2">URL Health Check</p>
+                  <dl className="grid grid-cols-2 gap-2 text-sm">
+                    <div>
+                      <dt className="text-slate-500">Status</dt>
+                      <dd className={healthCheckResult.url.success ? 'text-green-400' : 'text-red-400'}>
+                        {healthCheckResult.url.success ? 'Success' : 'Failed'}
+                      </dd>
+                    </div>
+                    {healthCheckResult.url.statusCode && (
+                      <div>
+                        <dt className="text-slate-500">HTTP Code</dt>
+                        <dd className="text-white">{healthCheckResult.url.statusCode}</dd>
+                      </div>
+                    )}
+                    {healthCheckResult.url.error && (
+                      <div className="col-span-2">
+                        <dt className="text-slate-500">Error</dt>
+                        <dd className="text-red-400 text-xs">{healthCheckResult.url.error}</dd>
+                      </div>
+                    )}
+                  </dl>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Deployment History */}
       <div className="card">
         <h3 className="text-lg font-semibold text-white mb-4">
@@ -548,49 +724,163 @@ export default function ServiceDetail() {
                   <th className="pb-3 font-medium">Triggered By</th>
                   <th className="pb-3 font-medium">Started</th>
                   <th className="pb-3 font-medium">Duration</th>
+                  <th className="pb-3 font-medium"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-700">
                 {deployments.map((deployment) => (
-                  <tr key={deployment.id} className="text-slate-300">
-                    <td className="py-3 font-mono text-primary-400">
-                      {deployment.imageTag}
-                    </td>
-                    <td className="py-3">
-                      <span
-                        className={`badge ${
-                          deployment.status === 'success'
-                            ? 'badge-success'
-                            : deployment.status === 'failed'
-                            ? 'badge-error'
-                            : deployment.status === 'deploying'
-                            ? 'badge-info'
-                            : 'badge-warning'
-                        }`}
-                      >
-                        {deployment.status}
-                      </span>
-                    </td>
-                    <td className="py-3">{deployment.triggeredBy}</td>
-                    <td className="py-3 text-sm">
-                      {format(new Date(deployment.startedAt), 'MMM d, HH:mm')}
-                    </td>
-                    <td className="py-3 text-sm text-slate-400">
-                      {deployment.completedAt
-                        ? `${Math.round(
-                            (new Date(deployment.completedAt).getTime() -
-                              new Date(deployment.startedAt).getTime()) /
-                              1000
-                          )}s`
-                        : '-'}
-                    </td>
-                  </tr>
+                  <>
+                    <tr key={deployment.id} className="text-slate-300">
+                      <td className="py-3 font-mono text-primary-400">
+                        {deployment.imageTag}
+                      </td>
+                      <td className="py-3">
+                        <span
+                          className={`badge ${
+                            deployment.status === 'success'
+                              ? 'badge-success'
+                              : deployment.status === 'failed'
+                              ? 'badge-error'
+                              : deployment.status === 'deploying'
+                              ? 'badge-info'
+                              : 'badge-warning'
+                          }`}
+                        >
+                          {deployment.status}
+                        </span>
+                      </td>
+                      <td className="py-3">{deployment.triggeredBy}</td>
+                      <td className="py-3 text-sm">
+                        {format(new Date(deployment.startedAt), 'MMM d, HH:mm')}
+                      </td>
+                      <td className="py-3 text-sm text-slate-400">
+                        {deployment.completedAt
+                          ? `${Math.round(
+                              (new Date(deployment.completedAt).getTime() -
+                                new Date(deployment.startedAt).getTime()) /
+                                1000
+                            )}s`
+                          : '-'}
+                      </td>
+                      <td className="py-3 text-right">
+                        {deployment.logs && (
+                          <button
+                            onClick={() =>
+                              setExpandedDeployment(
+                                expandedDeployment === deployment.id ? null : deployment.id
+                              )
+                            }
+                            className={`text-sm ${
+                              deployment.status === 'failed'
+                                ? 'text-red-400 hover:text-red-300'
+                                : 'text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            {expandedDeployment === deployment.id ? 'Hide Logs' : 'View Logs'}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                    {expandedDeployment === deployment.id && deployment.logs && (
+                      <tr key={`${deployment.id}-logs`}>
+                        <td colSpan={6} className="p-0">
+                          <pre className="p-4 bg-slate-950 text-xs text-slate-300 font-mono overflow-x-auto max-h-64 overflow-y-auto">
+                            {deployment.logs}
+                          </pre>
+                        </td>
+                      </tr>
+                    )}
+                  </>
                 ))}
               </tbody>
             </table>
           </div>
         ) : (
           <p className="text-slate-400">No deployments yet</p>
+        )}
+      </div>
+
+      {/* Health Check History */}
+      <div className="card mt-6">
+        <h3 className="text-lg font-semibold text-white mb-4">
+          Health Check History
+        </h3>
+        {healthCheckHistory.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
+                  <th className="pb-3 font-medium">Time</th>
+                  <th className="pb-3 font-medium">Status</th>
+                  <th className="pb-3 font-medium">Container</th>
+                  <th className="pb-3 font-medium">URL Check</th>
+                  <th className="pb-3 font-medium">User</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-700">
+                {healthCheckHistory.map((log) => {
+                  const details = log.details ? JSON.parse(log.details) : null;
+                  return (
+                    <tr key={log.id} className="text-slate-300">
+                      <td className="py-3 text-sm">
+                        {format(new Date(log.createdAt), 'MMM d, HH:mm:ss')}
+                      </td>
+                      <td className="py-3">
+                        {log.success ? (
+                          <span
+                            className={`badge ${
+                              details?.status === 'healthy'
+                                ? 'badge-success'
+                                : details?.status === 'running'
+                                ? 'badge-info'
+                                : details?.status === 'unhealthy'
+                                ? 'badge-error'
+                                : 'badge-warning'
+                            }`}
+                          >
+                            {details?.status || 'unknown'}
+                          </span>
+                        ) : (
+                          <span className="badge badge-error">failed</span>
+                        )}
+                      </td>
+                      <td className="py-3 text-sm">
+                        {details?.containerHealth ? (
+                          <span
+                            className={
+                              details.containerHealth.running ? 'text-green-400' : 'text-red-400'
+                            }
+                          >
+                            {details.containerHealth.state}
+                            {details.containerHealth.health && ` (${details.containerHealth.health})`}
+                          </span>
+                        ) : (
+                          <span className="text-slate-500">-</span>
+                        )}
+                      </td>
+                      <td className="py-3 text-sm">
+                        {details?.urlHealth ? (
+                          <span
+                            className={details.urlHealth.success ? 'text-green-400' : 'text-red-400'}
+                          >
+                            {details.urlHealth.success ? 'OK' : 'Failed'}
+                            {details.urlHealth.statusCode && ` (${details.urlHealth.statusCode})`}
+                          </span>
+                        ) : (
+                          <span className="text-slate-500">-</span>
+                        )}
+                      </td>
+                      <td className="py-3 text-sm text-slate-400">
+                        {log.user?.email || 'System'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-slate-400">No health checks recorded yet</p>
         )}
       </div>
 

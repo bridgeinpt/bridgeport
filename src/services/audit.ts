@@ -15,6 +15,7 @@ export interface AuditLogParams {
 export interface AuditLogFilters {
   environmentId?: string;
   resourceType?: string;
+  resourceId?: string;
   action?: string;
   userId?: string;
   limit?: number;
@@ -50,6 +51,9 @@ export async function getAuditLogs(filters: AuditLogFilters) {
   }
   if (filters.resourceType) {
     where.resourceType = filters.resourceType;
+  }
+  if (filters.resourceId) {
+    where.resourceId = filters.resourceId;
   }
   if (filters.action) {
     where.action = filters.action;

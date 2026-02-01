@@ -10,12 +10,14 @@ export async function auditRoutes(fastify: FastifyInstance) {
       const {
         environmentId,
         resourceType,
+        resourceId,
         action,
         limit,
         offset,
       } = request.query as {
         environmentId?: string;
         resourceType?: string;
+        resourceId?: string;
         action?: string;
         limit?: string;
         offset?: string;
@@ -24,6 +26,7 @@ export async function auditRoutes(fastify: FastifyInstance) {
       const result = await getAuditLogs({
         environmentId,
         resourceType,
+        resourceId,
         action,
         limit: limit ? parseInt(limit) : 50,
         offset: offset ? parseInt(offset) : 0,

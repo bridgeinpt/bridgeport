@@ -124,9 +124,9 @@ export default function Services() {
                     <td className="py-4 text-right">
                       <Link
                         to={`/services/${service.id}`}
-                        className="btn btn-secondary text-sm"
+                        className="text-primary-400 hover:text-primary-300 text-sm"
                       >
-                        Deploy
+                        View
                       </Link>
                     </td>
                   </tr>

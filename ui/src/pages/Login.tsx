@@ -38,7 +38,7 @@ export default function Login() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-white flex items-center justify-center gap-3">
-            <img src="/logo.svg" alt="BridgePort" className="h-28 w-10" />
+            <img src="/logo.svg" alt="BridgePort" className="h-28" />
           </h1>
           <p className="text-slate-400 mt-2">Dock. Run. Ship. Repeat.</p>
         </div>

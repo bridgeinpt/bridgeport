@@ -161,6 +161,19 @@ export const checkServerHealth = (id: string) =>
 export const discoverContainers = (id: string) =>
   api.post<{ services: Service[] }>(`/servers/${id}/discover`);
 
+export interface CreateServiceInput {
+  name: string;
+  containerName: string;
+  imageName: string;
+  imageTag?: string;
+  composePath?: string;
+  envTemplateName?: string;
+  healthCheckUrl?: string;
+}
+
+export const createService = (serverId: string, data: CreateServiceInput) =>
+  api.post<{ service: Service }>(`/servers/${serverId}/services`, data);
+
 // Agent deployment
 export const deployAgent = (id: string, bridgeportUrl?: string) =>
   api.post<{ success: boolean; message?: string }>(`/servers/${id}/agent/deploy`, bridgeportUrl ? { bridgeportUrl } : {});
@@ -380,6 +393,7 @@ export interface AuditLog {
 export interface AuditLogFilters {
   environmentId?: string;
   resourceType?: string;
+  resourceId?: string;
   action?: string;
   limit?: number;
   offset?: number;
@@ -389,6 +403,7 @@ export const getAuditLogs = (filters: AuditLogFilters = {}) => {
   const params = new URLSearchParams();
   if (filters.environmentId) params.append('environmentId', filters.environmentId);
   if (filters.resourceType) params.append('resourceType', filters.resourceType);
+  if (filters.resourceId) params.append('resourceId', filters.resourceId);
   if (filters.action) params.append('action', filters.action);
   if (filters.limit) params.append('limit', filters.limit.toString());
   if (filters.offset) params.append('offset', filters.offset.toString());
