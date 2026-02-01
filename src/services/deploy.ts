@@ -113,8 +113,13 @@ export async function deployService(
         await client.exec(`chmod 600 ${envPath}`);
       }
 
-      // Upload config files
+      // Upload config files (skip any that would overwrite the compose file)
+      const composeFilename = path.basename(composePath);
       for (const cf of artifacts.configFiles) {
+        if (cf.name === composeFilename) {
+          log(`Skipping config file ${cf.name} (would overwrite compose file)`);
+          continue;
+        }
         log(`Writing config file: ${cf.name}`);
         const cfPath = `${deployDir}/${cf.name}`;
         await client.exec(`cat > ${cfPath} << 'CFEOF'\n${cf.content}\nCFEOF`);
