@@ -111,5 +111,5 @@ ENV DATABASE_URL="file:/app/data/bridgeport.db"
 
 EXPOSE 3000
 
-# Run migrations and start
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/server.js"]
+# Sync database schema and start
+CMD ["sh", "-c", "npx prisma db push --skip-generate && node dist/server.js"]
