@@ -7,7 +7,7 @@ export default function About() {
           <img
             src="/logo.svg"
             alt="BridgePort"
-            className="h-20 mx-auto mb-4"
+            className="h-28 mx-auto mb-4"
           />
           <p className="text-primary-400 mt-1 font-medium">
             Dock. Run. Ship. Repeat.
