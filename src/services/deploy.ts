@@ -100,9 +100,9 @@ export async function deployService(
 
       const artifacts = await generateDeploymentArtifacts(serviceId);
 
-      // Upload compose file
-      log(`Writing ${artifacts.compose.name}`);
-      const composePath = `${deployDir}/${artifacts.compose.name}`;
+      // Upload compose file (preserve existing path if set, otherwise use generated name)
+      const composePath = service.composePath || `${deployDir}/${artifacts.compose.name}`;
+      log(`Writing compose file to ${composePath}`);
       await client.exec(`cat > ${composePath} << 'COMPOSEEOF'\n${artifacts.compose.content}\nCOMPOSEEOF`);
 
       // Upload env file if generated
@@ -124,13 +124,14 @@ export async function deployService(
       await saveDeploymentArtifacts(deployment.id, artifacts);
       log('Artifacts saved');
 
-      // Update service compose path
-      await prisma.service.update({
-        where: { id: serviceId },
-        data: { composePath },
-      });
-
-      service.composePath = composePath;
+      // Update service compose path only if it wasn't already set
+      if (!service.composePath) {
+        await prisma.service.update({
+          where: { id: serviceId },
+          data: { composePath },
+        });
+        service.composePath = composePath;
+      }
     }
 
     // Pull new image
