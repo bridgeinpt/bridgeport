@@ -1,5 +1,5 @@
 import { prisma } from '../lib/db.js';
-import { SSHClient } from '../lib/ssh.js';
+import { SSHClient, LocalClient, isLocalhost, type CommandClient } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 
 export interface ServerMetricsData {
@@ -33,22 +33,27 @@ export async function collectServerMetricsSSH(serverId: string): Promise<ServerM
 
   if (!server) return null;
 
-  const sshCreds = await getEnvironmentSshKey(server.environmentId);
-  if (!sshCreds) return null;
-
-  const ssh = new SSHClient({
-    hostname: server.hostname,
-    username: sshCreds.username,
-    privateKey: sshCreds.privateKey,
-  });
+  // Create appropriate client based on hostname
+  let client: CommandClient;
+  if (isLocalhost(server.hostname)) {
+    client = new LocalClient();
+  } else {
+    const sshCreds = await getEnvironmentSshKey(server.environmentId);
+    if (!sshCreds) return null;
+    client = new SSHClient({
+      hostname: server.hostname,
+      username: sshCreds.username,
+      privateKey: sshCreds.privateKey,
+    });
+  }
 
   try {
-    await ssh.connect();
+    await client.connect();
 
     const metrics: ServerMetricsData = {};
 
     // CPU usage - using top in batch mode
-    const cpuResult = await ssh.exec("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'");
+    const cpuResult = await client.exec("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'");
     if (cpuResult.code === 0 && cpuResult.stdout) {
       const cpuValue = parseFloat(cpuResult.stdout.trim());
       if (!isNaN(cpuValue)) {
@@ -57,7 +62,7 @@ export async function collectServerMetricsSSH(serverId: string): Promise<ServerM
     }
 
     // Memory - using free
-    const memResult = await ssh.exec("free -m | awk '/^Mem:/ {print $2, $3}'");
+    const memResult = await client.exec("free -m | awk '/^Mem:/ {print $2, $3}'");
     if (memResult.code === 0 && memResult.stdout) {
       const [total, used] = memResult.stdout.trim().split(/\s+/).map(Number);
       if (!isNaN(total) && !isNaN(used)) {
@@ -67,7 +72,7 @@ export async function collectServerMetricsSSH(serverId: string): Promise<ServerM
     }
 
     // Disk - using df
-    const diskResult = await ssh.exec("df -BG / | awk 'NR==2 {gsub(/G/,\"\"); print $2, $3}'");
+    const diskResult = await client.exec("df -BG / | awk 'NR==2 {gsub(/G/,\"\"); print $2, $3}'");
     if (diskResult.code === 0 && diskResult.stdout) {
       const [total, used] = diskResult.stdout.trim().split(/\s+/).map(Number);
       if (!isNaN(total) && !isNaN(used)) {
@@ -77,7 +82,7 @@ export async function collectServerMetricsSSH(serverId: string): Promise<ServerM
     }
 
     // Load average
-    const loadResult = await ssh.exec("cat /proc/loadavg | awk '{print $1, $2, $3}'");
+    const loadResult = await client.exec("cat /proc/loadavg | awk '{print $1, $2, $3}'");
     if (loadResult.code === 0 && loadResult.stdout) {
       const [load1, load5, load15] = loadResult.stdout.trim().split(/\s+/).map(Number);
       if (!isNaN(load1)) metrics.loadAvg1 = load1;
@@ -86,7 +91,7 @@ export async function collectServerMetricsSSH(serverId: string): Promise<ServerM
     }
 
     // Uptime in seconds
-    const uptimeResult = await ssh.exec("cat /proc/uptime | awk '{print int($1)}'");
+    const uptimeResult = await client.exec("cat /proc/uptime | awk '{print int($1)}'");
     if (uptimeResult.code === 0 && uptimeResult.stdout) {
       const uptime = parseInt(uptimeResult.stdout.trim());
       if (!isNaN(uptime)) {
@@ -99,7 +104,7 @@ export async function collectServerMetricsSSH(serverId: string): Promise<ServerM
     console.error(`Failed to collect metrics for server ${serverId}:`, error);
     return null;
   } finally {
-    ssh.disconnect();
+    client.disconnect();
   }
 }
 
@@ -114,22 +119,27 @@ export async function collectServiceMetrics(
 
   if (!server) return null;
 
-  const sshCreds = await getEnvironmentSshKey(server.environmentId);
-  if (!sshCreds) return null;
-
-  const ssh = new SSHClient({
-    hostname: server.hostname,
-    username: sshCreds.username,
-    privateKey: sshCreds.privateKey,
-  });
+  // Create appropriate client based on hostname
+  let client: CommandClient;
+  if (isLocalhost(server.hostname)) {
+    client = new LocalClient();
+  } else {
+    const sshCreds = await getEnvironmentSshKey(server.environmentId);
+    if (!sshCreds) return null;
+    client = new SSHClient({
+      hostname: server.hostname,
+      username: sshCreds.username,
+      privateKey: sshCreds.privateKey,
+    });
+  }
 
   try {
-    await ssh.connect();
+    await client.connect();
 
     const metrics: ServiceMetricsData = {};
 
     // Docker stats for container
-    const statsResult = await ssh.exec(
+    const statsResult = await client.exec(
       `docker stats --no-stream --format '{{json .}}' ${containerName} 2>/dev/null`
     );
 
@@ -178,7 +188,7 @@ export async function collectServiceMetrics(
     }
 
     // Get restart count
-    const inspectResult = await ssh.exec(
+    const inspectResult = await client.exec(
       `docker inspect --format '{{.RestartCount}}' ${containerName} 2>/dev/null`
     );
     if (inspectResult.code === 0 && inspectResult.stdout) {
@@ -193,7 +203,7 @@ export async function collectServiceMetrics(
     console.error(`Failed to collect metrics for container ${containerName}:`, error);
     return null;
   } finally {
-    ssh.disconnect();
+    client.disconnect();
   }
 }
 

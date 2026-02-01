@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/db.js';
-import { SSHClient } from '../lib/ssh.js';
+import { SSHClient, LocalClient, isLocalhost, type CommandClient } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from './environments.js';
 import { logAudit } from '../services/audit.js';
 
@@ -410,22 +410,26 @@ export async function configFileRoutes(fastify: FastifyInstance) {
         return reply.code(400).send({ error: 'No files attached to this service' });
       }
 
-      // Get SSH credentials
-      const sshCreds = await getEnvironmentSshKey(service.server.environmentId);
-      if (!sshCreds) {
-        return reply.code(400).send({ error: 'SSH key not configured for this environment' });
+      // Create appropriate client based on hostname
+      let client: CommandClient;
+      if (isLocalhost(service.server.hostname)) {
+        client = new LocalClient();
+      } else {
+        const sshCreds = await getEnvironmentSshKey(service.server.environmentId);
+        if (!sshCreds) {
+          return reply.code(400).send({ error: 'SSH key not configured for this environment' });
+        }
+        client = new SSHClient({
+          hostname: service.server.hostname,
+          username: sshCreds.username,
+          privateKey: sshCreds.privateKey,
+        });
       }
-
-      const ssh = new SSHClient({
-        hostname: service.server.hostname,
-        username: sshCreds.username,
-        privateKey: sshCreds.privateKey,
-      });
 
       const results: Array<{ file: string; targetPath: string; success: boolean; error?: string }> = [];
 
       try {
-        await ssh.connect();
+        await client.connect();
 
         for (const serviceFile of service.files) {
           const { configFile, targetPath } = serviceFile;
@@ -433,10 +437,10 @@ export async function configFileRoutes(fastify: FastifyInstance) {
           try {
             // Ensure target directory exists
             const targetDir = targetPath.substring(0, targetPath.lastIndexOf('/'));
-            await ssh.exec(`mkdir -p "${targetDir}"`);
+            await client.exec(`mkdir -p "${targetDir}"`);
 
             // Write file content using heredoc with quoted delimiter to prevent shell expansion
-            const { code, stderr } = await ssh.exec(
+            const { code, stderr } = await client.exec(
               `cat > "${targetPath}" << 'CONFIGFILE_EOF'\n${configFile.content}\nCONFIGFILE_EOF`
             );
 
@@ -460,10 +464,10 @@ export async function configFileRoutes(fastify: FastifyInstance) {
           }
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'SSH connection failed';
+        const message = error instanceof Error ? error.message : 'Connection failed';
         return reply.code(500).send({ error: message });
       } finally {
-        ssh.disconnect();
+        client.disconnect();
       }
 
       const allSuccess = results.every((r) => r.success);

@@ -1,6 +1,6 @@
 import { prisma } from '../lib/db.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
-import { SSHClient } from '../lib/ssh.js';
+import { SSHClient, LocalClient, isLocalhost, type CommandClient } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 import crypto from 'crypto';
 
@@ -246,10 +246,25 @@ async function executeBackup(backupId: string): Promise<void> {
     let dumpCommand = '';
     let targetPath = backup.storagePath;
 
-    // Get SSH credentials if we have a server
-    const sshCreds = db.server
-      ? await getEnvironmentSshKey(db.environmentId)
-      : null;
+    if (!db.server) {
+      throw new Error('No server configured for this database');
+    }
+
+    // Create appropriate client based on hostname
+    let client: CommandClient;
+    if (isLocalhost(db.server.hostname)) {
+      client = new LocalClient();
+    } else {
+      const sshCreds = await getEnvironmentSshKey(db.environmentId);
+      if (!sshCreds) {
+        throw new Error('SSH key not configured for this environment');
+      }
+      client = new SSHClient({
+        hostname: db.server.hostname,
+        username: sshCreds.username,
+        privateKey: sshCreds.privateKey,
+      });
+    }
 
     if (db.type === 'postgres' && db.host) {
       // Get credentials
@@ -267,42 +282,31 @@ async function executeBackup(backupId: string): Promise<void> {
       throw new Error(`Unsupported database type or missing configuration: ${db.type}`);
     }
 
-    // Execute backup via SSH if we have a server
-    if (sshCreds && db.server) {
-      const ssh = new SSHClient({
-        hostname: db.server.hostname,
-        username: sshCreds.username,
-        privateKey: sshCreds.privateKey,
-      });
+    await client.connect();
 
-      await ssh.connect();
+    // Ensure backup directory exists
+    const targetDir = targetPath.substring(0, targetPath.lastIndexOf('/'));
+    await client.exec(`mkdir -p "${targetDir}"`);
 
-      // Ensure backup directory exists
-      const targetDir = targetPath.substring(0, targetPath.lastIndexOf('/'));
-      await ssh.exec(`mkdir -p "${targetDir}"`);
-
-      const result = await ssh.exec(dumpCommand);
-      if (result.code !== 0) {
-        throw new Error(result.stderr || 'Backup command failed');
-      }
-
-      // Get file size
-      const sizeResult = await ssh.exec(`stat -c %s "${targetPath}" 2>/dev/null || stat -f %z "${targetPath}"`);
-      const size = parseInt(sizeResult.stdout.trim()) || 0;
-
-      ssh.disconnect();
-
-      await prisma.databaseBackup.update({
-        where: { id: backupId },
-        data: {
-          status: 'completed',
-          size: BigInt(size),
-          completedAt: new Date(),
-        },
-      });
-    } else {
-      throw new Error('No server configured for this database');
+    const result = await client.exec(dumpCommand);
+    if (result.code !== 0) {
+      throw new Error(result.stderr || 'Backup command failed');
     }
+
+    // Get file size
+    const sizeResult = await client.exec(`stat -c %s "${targetPath}" 2>/dev/null || stat -f %z "${targetPath}"`);
+    const size = parseInt(sizeResult.stdout.trim()) || 0;
+
+    client.disconnect();
+
+    await prisma.databaseBackup.update({
+      where: { id: backupId },
+      data: {
+        status: 'completed',
+        size: BigInt(size),
+        completedAt: new Date(),
+      },
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     await prisma.databaseBackup.update({
@@ -348,21 +352,29 @@ export async function deleteBackup(id: string): Promise<void> {
 
   // Delete file from storage
   if (backup.storageType === 'local' && backup.database.server) {
-    const sshCreds = await getEnvironmentSshKey(backup.database.environmentId);
-    if (sshCreds) {
-      const ssh = new SSHClient({
+    let client: CommandClient;
+    if (isLocalhost(backup.database.server.hostname)) {
+      client = new LocalClient();
+    } else {
+      const sshCreds = await getEnvironmentSshKey(backup.database.environmentId);
+      if (!sshCreds) {
+        // Can't delete file without credentials, but still delete DB record
+        await prisma.databaseBackup.delete({ where: { id } });
+        return;
+      }
+      client = new SSHClient({
         hostname: backup.database.server.hostname,
         username: sshCreds.username,
         privateKey: sshCreds.privateKey,
       });
+    }
 
-      try {
-        await ssh.connect();
-        await ssh.exec(`rm -f "${backup.storagePath}"`);
-        ssh.disconnect();
-      } catch {
-        // Ignore errors when deleting file
-      }
+    try {
+      await client.connect();
+      await client.exec(`rm -f "${backup.storagePath}"`);
+      client.disconnect();
+    } catch {
+      // Ignore errors when deleting file
     }
   }
   // TODO: Handle Spaces deletion
