@@ -205,3 +205,26 @@ export async function deleteEnvTemplate(name: string): Promise<void> {
     where: { name },
   });
 }
+
+/**
+ * Resolve ${SECRET_KEY} placeholders in content with actual secret values.
+ * Returns the resolved content and any missing secrets.
+ */
+export async function resolveSecretPlaceholders(
+  environmentId: string,
+  content: string
+): Promise<{ content: string; missing: string[] }> {
+  const secrets = await getSecretsForEnv(environmentId);
+
+  let resolvedContent = content;
+
+  for (const [key, value] of Object.entries(secrets)) {
+    resolvedContent = resolvedContent.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), value);
+  }
+
+  // Find any remaining unresolved placeholders
+  const unresolved = resolvedContent.match(/\$\{[A-Z_][A-Z0-9_]*\}/g) || [];
+  const missing = [...new Set(unresolved)].map((p) => p.slice(2, -1)); // Remove ${ and }
+
+  return { content: resolvedContent, missing };
+}

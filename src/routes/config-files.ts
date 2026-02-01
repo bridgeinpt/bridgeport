@@ -4,6 +4,7 @@ import { prisma } from '../lib/db.js';
 import { SSHClient, LocalClient, isLocalhost, type CommandClient } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from './environments.js';
 import { logAudit } from '../services/audit.js';
+import { resolveSecretPlaceholders } from '../services/secrets.js';
 
 const createConfigFileSchema = z.object({
   name: z.string().min(1),
@@ -435,13 +436,29 @@ export async function configFileRoutes(fastify: FastifyInstance) {
           const { configFile, targetPath } = serviceFile;
 
           try {
+            // Resolve ${SECRET_KEY} placeholders in content
+            const { content: resolvedContent, missing } = await resolveSecretPlaceholders(
+              service.server.environmentId,
+              configFile.content
+            );
+
+            if (missing.length > 0) {
+              results.push({
+                file: configFile.name,
+                targetPath,
+                success: false,
+                error: `Missing secrets: ${missing.join(', ')}`,
+              });
+              continue;
+            }
+
             // Ensure target directory exists
             const targetDir = targetPath.substring(0, targetPath.lastIndexOf('/'));
             await client.exec(`mkdir -p "${targetDir}"`);
 
             // Write file content using heredoc with quoted delimiter to prevent shell expansion
             const { code, stderr } = await client.exec(
-              `cat > "${targetPath}" << 'CONFIGFILE_EOF'\n${configFile.content}\nCONFIGFILE_EOF`
+              `cat > "${targetPath}" << 'CONFIGFILE_EOF'\n${resolvedContent}\nCONFIGFILE_EOF`
             );
 
             if (code !== 0) {
