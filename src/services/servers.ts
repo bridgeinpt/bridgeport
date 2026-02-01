@@ -1,7 +1,72 @@
 import { prisma } from '../lib/db.js';
 import { SSHClient, LocalClient, DockerSSH, isLocalhost, createClient } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
-import type { Server, Service } from '@prisma/client';
+import type { Server, Service, RegistryConnection } from '@prisma/client';
+
+/**
+ * Parse registry URL from an image name
+ * Examples:
+ *   registry.digitalocean.com/bios-registry/app-api -> registry.digitalocean.com
+ *   ghcr.io/owner/repo -> ghcr.io
+ *   nginx -> docker.io (Docker Hub)
+ *   caddy:2-alpine -> docker.io
+ */
+function parseRegistryFromImage(imageName: string): { registryUrl: string; isDockerHub: boolean } {
+  // Remove tag if present
+  const nameWithoutTag = imageName.split(':')[0];
+  const parts = nameWithoutTag.split('/');
+
+  // Docker Hub images (official or user)
+  if (parts.length === 1 || (parts.length === 2 && !parts[0].includes('.'))) {
+    return { registryUrl: 'docker.io', isDockerHub: true };
+  }
+
+  // Private registry: first part contains a dot (domain)
+  return { registryUrl: parts[0], isDockerHub: false };
+}
+
+/**
+ * Find a matching registry for an image or create a new one
+ */
+async function findOrCreateRegistry(
+  environmentId: string,
+  imageName: string,
+  registries: RegistryConnection[]
+): Promise<string | null> {
+  const { registryUrl, isDockerHub } = parseRegistryFromImage(imageName);
+
+  // Try to find a matching registry
+  for (const registry of registries) {
+    // Check if registry URL matches
+    if (registry.registryUrl.includes(registryUrl) || registryUrl.includes(registry.registryUrl)) {
+      return registry.id;
+    }
+    // Check autoLinkPattern if set
+    if (registry.autoLinkPattern && new RegExp(registry.autoLinkPattern).test(imageName)) {
+      return registry.id;
+    }
+  }
+
+  // Don't auto-create registries for Docker Hub (too common, usually doesn't need auth)
+  if (isDockerHub) {
+    return null;
+  }
+
+  // Create a new registry for this image
+  const registryName = registryUrl.replace(/\./g, '-');
+  const type = registryUrl.includes('digitalocean') ? 'digitalocean' : 'generic';
+
+  const newRegistry = await prisma.registryConnection.create({
+    data: {
+      name: registryName,
+      type,
+      registryUrl: `https://${registryUrl}`,
+      environmentId,
+    },
+  });
+
+  return newRegistry.id;
+}
 
 export interface ServerInput {
   name: string;
@@ -158,6 +223,11 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
     include: { environment: true, services: true },
   });
 
+  // Get existing registries for this environment
+  const registries = await prisma.registryConnection.findMany({
+    where: { environmentId: server.environmentId },
+  });
+
   // Create appropriate client based on hostname
   let client;
   if (isLocalhost(server.hostname)) {
@@ -197,8 +267,21 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
         },
       });
 
+      // Parse image name and tag
+      const [imageName, imageTag = 'latest'] = container.image.split(':');
+
+      // Find or create matching registry (re-fetch registries to include any newly created)
+      const currentRegistries = await prisma.registryConnection.findMany({
+        where: { environmentId: server.environmentId },
+      });
+      const registryConnectionId = await findOrCreateRegistry(
+        server.environmentId,
+        imageName,
+        currentRegistries
+      );
+
       if (existing) {
-        // Update status and mark as found
+        // Update status, mark as found, and link to registry if not already linked
         const updated = await prisma.service.update({
           where: { id: existing.id },
           data: {
@@ -206,13 +289,12 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
             discoveryStatus: 'found',
             lastCheckedAt: new Date(),
             lastDiscoveredAt: new Date(),
+            // Only update registry if not already set
+            ...(existing.registryConnectionId ? {} : { registryConnectionId }),
           },
         });
         services.push(updated);
       } else {
-        // Parse image name and tag
-        const [imageName, imageTag = 'latest'] = container.image.split(':');
-
         const created = await prisma.service.create({
           data: {
             name: container.name,
@@ -224,6 +306,7 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
             lastCheckedAt: new Date(),
             lastDiscoveredAt: new Date(),
             serverId,
+            registryConnectionId,
           },
         });
         services.push(created);

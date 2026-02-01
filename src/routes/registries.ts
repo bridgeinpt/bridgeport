@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { prisma } from '../lib/db.js';
 import {
   createRegistryConnection,
   updateRegistryConnection,
@@ -238,6 +239,36 @@ export async function registryRoutes(fastify: FastifyInstance) {
         const message = error instanceof Error ? error.message : 'Failed to list tags';
         return reply.code(500).send({ error: message });
       }
+    }
+  );
+
+  // List services using this registry
+  fastify.get(
+    '/api/registries/:id/services',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      const registry = await getRegistryConnection(id);
+      if (!registry) {
+        return reply.code(404).send({ error: 'Registry connection not found' });
+      }
+
+      const services = await prisma.service.findMany({
+        where: { registryConnectionId: id },
+        select: {
+          id: true,
+          name: true,
+          imageName: true,
+          imageTag: true,
+          server: {
+            select: { id: true, name: true },
+          },
+        },
+        orderBy: { name: 'asc' },
+      });
+
+      return { services };
     }
   );
 }

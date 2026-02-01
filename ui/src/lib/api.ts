@@ -565,6 +565,17 @@ export const deleteRegistryConnection = (id: string) =>
 export const testRegistryConnection = (id: string) =>
   api.post<{ success: boolean; message?: string; error?: string }>(`/registries/${id}/test`);
 
+export interface RegistryService {
+  id: string;
+  name: string;
+  imageName: string;
+  imageTag: string;
+  server: { id: string; name: string };
+}
+
+export const getRegistryServices = (id: string) =>
+  api.get<{ services: RegistryService[] }>(`/registries/${id}/services`);
+
 export const listRegistryRepositories = (id: string) =>
   api.get<{ repositories: RegistryRepository[] }>(`/registries/${id}/repositories`);
 

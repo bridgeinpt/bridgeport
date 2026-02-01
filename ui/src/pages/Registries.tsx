@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAppStore } from '../lib/store';
 import { useToast } from '../components/Toast';
 import {
@@ -7,8 +8,10 @@ import {
   updateRegistryConnection,
   deleteRegistryConnection,
   testRegistryConnection,
+  getRegistryServices,
   type RegistryConnection,
   type RegistryConnectionInput,
+  type RegistryService,
 } from '../lib/api';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -27,6 +30,9 @@ export default function Registries() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<{ id: string; success: boolean; message: string } | null>(null);
+  const [viewingServices, setViewingServices] = useState<string | null>(null);
+  const [linkedServices, setLinkedServices] = useState<RegistryService[]>([]);
+  const [loadingServices, setLoadingServices] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState<RegistryConnectionInput>({
@@ -170,6 +176,24 @@ export default function Registries() {
     }
   };
 
+  const handleViewServices = async (id: string) => {
+    if (viewingServices === id) {
+      setViewingServices(null);
+      setLinkedServices([]);
+      return;
+    }
+    setViewingServices(id);
+    setLoadingServices(true);
+    try {
+      const { services } = await getRegistryServices(id);
+      setLinkedServices(services);
+    } catch (error) {
+      toast.error('Failed to load linked services');
+    } finally {
+      setLoadingServices(false);
+    }
+  };
+
   if (!selectedEnvironment) {
     return (
       <div className="p-8">
@@ -259,6 +283,14 @@ export default function Registries() {
                   </div>
                 </div>
                 <div className="flex gap-2">
+                  {(registry._count?.services || 0) > 0 && (
+                    <button
+                      onClick={() => handleViewServices(registry.id)}
+                      className="btn btn-ghost text-sm"
+                    >
+                      {viewingServices === registry.id ? 'Hide Services' : 'View Services'}
+                    </button>
+                  )}
                   <button
                     onClick={() => handleTest(registry.id)}
                     disabled={testing === registry.id}
@@ -286,6 +318,43 @@ export default function Registries() {
                   </button>
                 </div>
               </div>
+
+              {/* Linked Services */}
+              {viewingServices === registry.id && (
+                <div className="mt-4 pt-4 border-t border-slate-700">
+                  <h4 className="text-sm font-medium text-slate-400 mb-3">Linked Services</h4>
+                  {loadingServices ? (
+                    <div className="animate-pulse space-y-2">
+                      <div className="h-8 bg-slate-700 rounded"></div>
+                      <div className="h-8 bg-slate-700 rounded"></div>
+                    </div>
+                  ) : linkedServices.length === 0 ? (
+                    <p className="text-sm text-slate-500">No services linked to this registry</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {linkedServices.map((service) => (
+                        <div
+                          key={service.id}
+                          className="flex items-center justify-between p-2 bg-slate-800/50 rounded"
+                        >
+                          <div>
+                            <Link
+                              to={`/services/${service.id}`}
+                              className="text-white hover:text-primary-400"
+                            >
+                              {service.name}
+                            </Link>
+                            <span className="text-slate-500 text-sm ml-2">on {service.server.name}</span>
+                          </div>
+                          <span className="text-slate-400 font-mono text-sm">
+                            {service.imageName}:{service.imageTag}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>
