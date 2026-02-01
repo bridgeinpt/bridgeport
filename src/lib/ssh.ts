@@ -291,7 +291,7 @@ export class DockerSSH {
     state: string;
   }>> {
     const { stdout, code } = await this.client.exec(
-      this.pathPrefix + 'docker ps -a --format "{{.ID}}\\t{{.Names}}\\t{{.Image}}\\t{{.Status}}\\t{{.State}}"'
+      this.pathPrefix + 'docker ps -a --format "{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.State}}"'
     );
 
     if (code !== 0) {
@@ -303,7 +303,7 @@ export class DockerSSH {
       .split('\n')
       .filter(Boolean)
       .map((line) => {
-        const [id, name, image, status, state] = line.split('\t');
+        const [id, name, image, status, state] = line.split('|');
         return { id, name, image, status, state };
       });
   }
@@ -321,21 +321,21 @@ export class DockerSSH {
     health?: string;
     running: boolean;
   }> {
-    // Get container state and health status
+    // Get container state and health status (use | as delimiter since tabs don't work reliably)
     const { stdout, code } = await this.client.exec(
-      this.pathPrefix + `docker inspect --format '{{.State.Status}}\\t{{.State.Running}}\\t{{.State.Health.Status}}' ${containerName} 2>/dev/null || echo "not_found\\tfalse\\t"`
+      this.pathPrefix + `docker inspect --format '{{.State.Status}}|{{.State.Running}}|{{.State.Health.Status}}' ${containerName} 2>/dev/null || echo "not_found|false|"`
     );
 
     if (code !== 0 || stdout.includes('not_found')) {
       return { state: 'not_found', status: 'Container not found', running: false };
     }
 
-    const [state, running, health] = stdout.trim().split('\t');
+    const [state, running, health] = stdout.trim().split('|');
 
     return {
       state: state || 'unknown',
       status: state === 'running' ? 'Running' : `Container is ${state}`,
-      health: health && health !== '' ? health : undefined,
+      health: health && health !== '' && health !== '<no value>' ? health : undefined,
       running: running === 'true',
     };
   }
