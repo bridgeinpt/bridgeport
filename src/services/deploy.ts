@@ -80,9 +80,9 @@ export async function deployService(
     await client.connect();
     log(`Connected to ${service.server.name} (${service.server.hostname})`);
 
-    // Determine deploy directory
+    // Determine deploy directory (strip filename and trailing slash)
     const deployDir = service.composePath
-      ? service.composePath.replace(/[^/]+$/, '')
+      ? service.composePath.replace(/\/[^/]+$/, '')
       : `/opt/${service.name}`;
 
     await client.exec(`mkdir -p ${deployDir}`);

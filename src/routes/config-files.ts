@@ -436,11 +436,12 @@ export async function configFileRoutes(fastify: FastifyInstance) {
           const { configFile, targetPath } = serviceFile;
 
           try {
-            // Resolve ${SECRET_KEY} placeholders in content
-            const { content: resolvedContent, missing } = await resolveSecretPlaceholders(
+            // Resolve ${SECRET_KEY} placeholders in content and trim trailing empty lines
+            const { content: rawContent, missing } = await resolveSecretPlaceholders(
               service.server.environmentId,
               configFile.content
             );
+            const resolvedContent = rawContent.trimEnd();
 
             if (missing.length > 0) {
               results.push({

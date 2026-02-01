@@ -298,30 +298,32 @@ export default function Secrets() {
                 </div>
 
                 {editingSecret === secret.id ? (
-                  <div className="mt-3 flex gap-2">
-                    <input
-                      type="password"
+                  <div className="mt-3 space-y-2">
+                    <textarea
                       value={editValue}
                       onChange={(e) => setEditValue(e.target.value)}
                       placeholder="New value..."
-                      className="input flex-1"
+                      rows={3}
+                      className="input w-full font-mono text-sm"
                       autoFocus
                     />
-                    <button
-                      onClick={() => handleEdit(secret.id)}
-                      className="btn btn-primary text-sm"
-                    >
-                      Save
-                    </button>
-                    <button
-                      onClick={() => {
-                        setEditingSecret(null);
-                        setEditValue('');
-                      }}
-                      className="btn btn-ghost text-sm"
-                    >
-                      Cancel
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => handleEdit(secret.id)}
+                        className="btn btn-primary text-sm"
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditingSecret(null);
+                          setEditValue('');
+                        }}
+                        className="btn btn-ghost text-sm"
+                      >
+                        Cancel
+                      </button>
+                    </div>
                   </div>
                 ) : revealErrors[secret.id] ? (
                   <p className="mt-2 text-sm text-red-400">{revealErrors[secret.id]}</p>
