@@ -4,12 +4,23 @@ import { checkServiceHealth } from '../services/services.js';
 import { RegistryFactory, type RegistryCredentials } from './registry.js';
 import { getRegistryCredentials } from '../services/registries.js';
 import { deployService } from '../services/deploy.js';
+import {
+  collectServerMetricsSSH,
+  collectServiceMetrics,
+  saveServerMetrics,
+  saveServiceMetrics,
+  cleanupOldMetrics,
+} from '../services/metrics.js';
+import { checkDueBackups } from '../services/database-backup.js';
 
 interface SchedulerConfig {
   serverHealthIntervalMs: number;
   serviceHealthIntervalMs: number;
   discoveryIntervalMs: number;
   updateCheckIntervalMs: number;
+  metricsIntervalMs: number;
+  backupCheckIntervalMs: number;
+  metricsRetentionDays: number;
 }
 
 const DEFAULT_CONFIG: SchedulerConfig = {
@@ -17,12 +28,18 @@ const DEFAULT_CONFIG: SchedulerConfig = {
   serviceHealthIntervalMs: 60 * 1000, // 1 minute
   discoveryIntervalMs: 5 * 60 * 1000, // 5 minutes
   updateCheckIntervalMs: 30 * 60 * 1000, // 30 minutes
+  metricsIntervalMs: 5 * 60 * 1000, // 5 minutes
+  backupCheckIntervalMs: 60 * 1000, // 1 minute
+  metricsRetentionDays: 7,
 };
 
 let serverHealthTimer: NodeJS.Timeout | null = null;
 let serviceHealthTimer: NodeJS.Timeout | null = null;
 let discoveryTimer: NodeJS.Timeout | null = null;
 let updateCheckTimer: NodeJS.Timeout | null = null;
+let metricsTimer: NodeJS.Timeout | null = null;
+let backupCheckTimer: NodeJS.Timeout | null = null;
+let cleanupTimer: NodeJS.Timeout | null = null;
 let isRunning = false;
 
 /**
@@ -309,6 +326,83 @@ export async function checkServiceUpdate(serviceId: string): Promise<{
 }
 
 /**
+ * Collect metrics from servers with SSH mode enabled
+ */
+async function runMetricsCollection(): Promise<void> {
+  try {
+    const servers = await prisma.server.findMany({
+      where: {
+        metricsMode: 'ssh',
+        status: 'healthy',
+      },
+      include: {
+        services: {
+          where: { discoveryStatus: 'found' },
+          select: { id: true, containerName: true },
+        },
+      },
+    });
+
+    if (servers.length === 0) {
+      return; // No servers with SSH metrics enabled
+    }
+
+    console.log(`[Scheduler] Collecting metrics from ${servers.length} servers (SSH mode)`);
+
+    for (const server of servers) {
+      try {
+        // Collect server metrics
+        const serverMetrics = await collectServerMetricsSSH(server.id);
+        if (serverMetrics) {
+          await saveServerMetrics(server.id, serverMetrics, 'ssh');
+        }
+
+        // Collect service metrics
+        for (const service of server.services) {
+          try {
+            const serviceMetrics = await collectServiceMetrics(server.id, service.containerName);
+            if (serviceMetrics) {
+              await saveServiceMetrics(service.id, serviceMetrics);
+            }
+          } catch (error) {
+            console.error(`[Scheduler] Failed to collect metrics for service ${service.containerName}:`, error);
+          }
+        }
+      } catch (error) {
+        console.error(`[Scheduler] Metrics collection failed for server ${server.name}:`, error);
+      }
+    }
+  } catch (error) {
+    console.error('[Scheduler] Metrics collection run failed:', error);
+  }
+}
+
+/**
+ * Check for due backup schedules and execute them
+ */
+async function runBackupChecks(): Promise<void> {
+  try {
+    await checkDueBackups();
+  } catch (error) {
+    console.error('[Scheduler] Backup check failed:', error);
+  }
+}
+
+/**
+ * Clean up old metrics data
+ */
+async function runMetricsCleanup(retentionDays: number): Promise<void> {
+  try {
+    const deleted = await cleanupOldMetrics(retentionDays);
+    if (deleted > 0) {
+      console.log(`[Scheduler] Cleaned up ${deleted} old metrics records`);
+    }
+  } catch (error) {
+    console.error('[Scheduler] Metrics cleanup failed:', error);
+  }
+}
+
+/**
  * Start the scheduler with periodic health checks and discovery
  */
 export function startScheduler(config: Partial<SchedulerConfig> = {}): void {
@@ -325,6 +419,9 @@ export function startScheduler(config: Partial<SchedulerConfig> = {}): void {
   console.log(`  - Service health: ${cfg.serviceHealthIntervalMs / 1000}s`);
   console.log(`  - Discovery: ${cfg.discoveryIntervalMs / 1000}s`);
   console.log(`  - Update checks: ${cfg.updateCheckIntervalMs / 1000}s`);
+  console.log(`  - Metrics collection: ${cfg.metricsIntervalMs / 1000}s`);
+  console.log(`  - Backup checks: ${cfg.backupCheckIntervalMs / 1000}s`);
+  console.log(`  - Metrics retention: ${cfg.metricsRetentionDays} days`);
 
   // Run initial checks after a short delay
   setTimeout(() => {
@@ -336,6 +433,11 @@ export function startScheduler(config: Partial<SchedulerConfig> = {}): void {
   serviceHealthTimer = setInterval(runServiceHealthChecks, cfg.serviceHealthIntervalMs);
   discoveryTimer = setInterval(runDiscovery, cfg.discoveryIntervalMs);
   updateCheckTimer = setInterval(runUpdateChecks, cfg.updateCheckIntervalMs);
+  metricsTimer = setInterval(runMetricsCollection, cfg.metricsIntervalMs);
+  backupCheckTimer = setInterval(runBackupChecks, cfg.backupCheckIntervalMs);
+
+  // Run cleanup once per hour
+  cleanupTimer = setInterval(() => runMetricsCleanup(cfg.metricsRetentionDays), 60 * 60 * 1000);
 }
 
 /**
@@ -366,6 +468,21 @@ export function stopScheduler(): void {
   if (updateCheckTimer) {
     clearInterval(updateCheckTimer);
     updateCheckTimer = null;
+  }
+
+  if (metricsTimer) {
+    clearInterval(metricsTimer);
+    metricsTimer = null;
+  }
+
+  if (backupCheckTimer) {
+    clearInterval(backupCheckTimer);
+    backupCheckTimer = null;
+  }
+
+  if (cleanupTimer) {
+    clearInterval(cleanupTimer);
+    cleanupTimer = null;
   }
 
   isRunning = false;

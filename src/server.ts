@@ -131,6 +131,9 @@ async function buildServer() {
       serviceHealthIntervalMs: config.SCHEDULER_SERVICE_HEALTH_INTERVAL * 1000,
       discoveryIntervalMs: config.SCHEDULER_DISCOVERY_INTERVAL * 1000,
       updateCheckIntervalMs: config.SCHEDULER_UPDATE_CHECK_INTERVAL * 1000,
+      metricsIntervalMs: config.SCHEDULER_METRICS_INTERVAL * 1000,
+      backupCheckIntervalMs: config.SCHEDULER_BACKUP_CHECK_INTERVAL * 1000,
+      metricsRetentionDays: config.METRICS_RETENTION_DAYS,
     });
   }
 

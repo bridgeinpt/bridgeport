@@ -82,6 +82,23 @@ journalctl -u bridgeport-agent -f
 | `-token` | `BRIDGEPORT_TOKEN` | Agent authentication token | Required |
 | `-interval` | - | Collection/push interval | 30s |
 
+### Internal Networking (Recommended)
+
+Use internal/VPC IPs instead of public URLs for better security and performance:
+
+```bash
+# Public (works but not recommended):
+Environment="BRIDGEPORT_SERVER=https://deploy.example.com"
+
+# Internal (recommended - stays within VPC):
+Environment="BRIDGEPORT_SERVER=http://10.30.10.5:3000"
+```
+
+Requirements for internal networking:
+- BridgePort must be in the same VPC or a peered VPC
+- BridgePort's `HOST` config should be `0.0.0.0`
+- Firewall allows port 3000 from agent servers
+
 ## How It Works
 
 ```

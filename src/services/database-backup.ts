@@ -390,3 +390,118 @@ export async function getBackupSchedule(databaseId: string) {
 export async function deleteBackupSchedule(databaseId: string) {
   await prisma.backupSchedule.delete({ where: { databaseId } }).catch(() => {});
 }
+
+/**
+ * Check for due backups and execute them.
+ * Called periodically by the scheduler.
+ */
+export async function checkDueBackups(): Promise<void> {
+  const now = new Date();
+
+  // Find schedules that are due
+  const schedules = await prisma.backupSchedule.findMany({
+    where: { enabled: true },
+    include: { database: true },
+  });
+
+  for (const schedule of schedules) {
+    try {
+      // Simple cron check - check if enough time has passed since last run
+      const shouldRun = isScheduleDue(schedule.cronExpression, schedule.lastRunAt, now);
+
+      if (shouldRun) {
+        console.log(`[Scheduler] Running scheduled backup for database ${schedule.database.name}`);
+
+        // Update lastRunAt before running to prevent duplicate runs
+        await prisma.backupSchedule.update({
+          where: { id: schedule.id },
+          data: { lastRunAt: now, nextRunAt: getNextRunTime(schedule.cronExpression, now) },
+        });
+
+        // Create backup (uses 'scheduler' as the trigger user ID)
+        await createBackup(schedule.databaseId, 'scheduler', 'scheduled');
+
+        // Clean up old backups based on retention policy
+        await enforceRetention(schedule.databaseId, schedule.retentionDays);
+      }
+    } catch (error) {
+      console.error(`[Scheduler] Failed to run backup for database ${schedule.database.name}:`, error);
+    }
+  }
+}
+
+/**
+ * Check if a cron schedule is due to run.
+ * Simplified implementation - checks common patterns.
+ */
+function isScheduleDue(cronExpression: string, lastRunAt: Date | null, now: Date): boolean {
+  if (!lastRunAt) return true; // Never run before
+
+  const msSinceLastRun = now.getTime() - lastRunAt.getTime();
+  const hoursSinceLastRun = msSinceLastRun / (1000 * 60 * 60);
+
+  // Parse common cron patterns
+  const parts = cronExpression.trim().split(/\s+/);
+  if (parts.length < 5) return false;
+
+  // Daily at specific hour (e.g., "0 2 * * *" = daily at 2am)
+  if (parts[2] === '*' && parts[3] === '*' && parts[4] === '*') {
+    return hoursSinceLastRun >= 24;
+  }
+
+  // Hourly (e.g., "0 * * * *")
+  if (parts[1] === '*') {
+    return hoursSinceLastRun >= 1;
+  }
+
+  // Weekly (e.g., "0 2 * * 0")
+  if (parts[4] !== '*') {
+    return hoursSinceLastRun >= 24 * 7;
+  }
+
+  // Default: daily
+  return hoursSinceLastRun >= 24;
+}
+
+/**
+ * Calculate next run time for a cron expression.
+ */
+function getNextRunTime(cronExpression: string, from: Date): Date {
+  const parts = cronExpression.trim().split(/\s+/);
+  const next = new Date(from);
+
+  // Simple calculation - add appropriate interval
+  if (parts[1] === '*') {
+    next.setHours(next.getHours() + 1);
+  } else if (parts[4] !== '*') {
+    next.setDate(next.getDate() + 7);
+  } else {
+    next.setDate(next.getDate() + 1);
+  }
+
+  return next;
+}
+
+/**
+ * Delete old backups based on retention policy.
+ */
+async function enforceRetention(databaseId: string, retentionDays: number): Promise<void> {
+  const cutoffDate = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+
+  const oldBackups = await prisma.databaseBackup.findMany({
+    where: {
+      databaseId,
+      createdAt: { lt: cutoffDate },
+      type: 'scheduled', // Only auto-delete scheduled backups, not manual ones
+    },
+  });
+
+  for (const backup of oldBackups) {
+    try {
+      await deleteBackup(backup.id);
+      console.log(`[Scheduler] Deleted old backup ${backup.filename} (retention policy)`);
+    } catch (error) {
+      console.error(`[Scheduler] Failed to delete old backup ${backup.id}:`, error);
+    }
+  }
+}

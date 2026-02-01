@@ -20,6 +20,10 @@ const envSchema = z.object({
   SCHEDULER_SERVICE_HEALTH_INTERVAL: z.coerce.number().default(60), // 1 minute
   SCHEDULER_DISCOVERY_INTERVAL: z.coerce.number().default(300), // 5 minutes
   SCHEDULER_UPDATE_CHECK_INTERVAL: z.coerce.number().default(1800), // 30 minutes
+  SCHEDULER_METRICS_INTERVAL: z.coerce.number().default(300), // 5 minutes - SSH metrics collection
+  SCHEDULER_BACKUP_CHECK_INTERVAL: z.coerce.number().default(60), // 1 minute - check for due backups
+  // Metrics retention (in days)
+  METRICS_RETENTION_DAYS: z.coerce.number().default(7), // Keep metrics for 7 days
 });
 
 export type Config = z.infer<typeof envSchema>;

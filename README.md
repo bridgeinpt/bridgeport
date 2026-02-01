@@ -281,12 +281,48 @@ systemctl start bridgeport-agent
 | `-token` / `BRIDGEPORT_TOKEN` | Agent authentication token | Required |
 | `-interval` | Collection interval | 30s |
 
+### Internal Networking
+
+The agent can use internal/private IPs to communicate with BridgePort. This is **recommended** for security and performance:
+
+```bash
+# Instead of public URL:
+Environment="BRIDGEPORT_SERVER=https://deploy.example.com"
+
+# Use internal VPC IP (if BridgePort is in the same VPC or peered VPC):
+Environment="BRIDGEPORT_SERVER=http://10.30.10.5:3000"
+```
+
+Benefits of internal networking:
+- **Security**: Traffic stays within private network
+- **Performance**: Lower latency, no egress costs
+- **Reliability**: No dependency on public DNS/internet
+
+If using internal IPs, ensure:
+- BridgePort's `HOST` is bound to `0.0.0.0` (not `127.0.0.1`)
+- VPC peering is configured if servers are in different VPCs
+- Firewall rules allow traffic on port 3000 from agent servers
+
 ### Building the Agent
 
 ```bash
 cd bridgeport-agent
 make build           # Build for current platform
 make build-linux     # Cross-compile for Linux amd64
+```
+
+### Data Retention
+
+Metrics are automatically cleaned up based on the `METRICS_RETENTION_DAYS` setting (default: 7 days). The cleanup job runs hourly.
+
+For typical deployments:
+- 10 servers × 5 services each × 2 metrics/min × 7 days ≈ 1M records
+- With SQLite, this is ~100MB of storage
+
+Adjust retention based on your needs:
+```bash
+METRICS_RETENTION_DAYS=3   # Smaller deployments, less history
+METRICS_RETENTION_DAYS=30  # Larger storage, more history
 ```
 
 ## API Reference
