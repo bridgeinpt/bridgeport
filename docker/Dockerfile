@@ -82,8 +82,8 @@ RUN find node_modules -type f \( -name "libquery*" -o -name "schema-engine*" \) 
 FROM node:22-alpine AS production
 WORKDIR /app
 
-# Install only runtime dependencies
-RUN apk add --no-cache openssl openssh-client
+# Install runtime dependencies (openssh-client for SSH, docker-cli for localhost discovery)
+RUN apk add --no-cache openssl openssh-client docker-cli
 
 # Create directories
 RUN mkdir -p /app/data /app/uploads /app/.ssh

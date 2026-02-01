@@ -17,6 +17,7 @@ services:
       - bridgeport-data:/app/data
       - bridgeport-uploads:/app/uploads
       - /root/.ssh/bios-infra:/app/.ssh/bios-infra:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # For localhost container discovery
     networks:
       - caddy
   caddy:
