@@ -251,9 +251,36 @@ export class DockerSSH {
   private client: CommandClient;
   // Ensure docker is in PATH for non-interactive SSH sessions
   private readonly pathPrefix = 'export PATH="/usr/local/bin:/usr/bin:$PATH" && ';
+  // Cache detected compose command (docker compose vs docker-compose)
+  private composeCmd: string | null = null;
 
   constructor(client: CommandClient) {
     this.client = client;
+  }
+
+  // Detect which compose command is available
+  private async getComposeCommand(): Promise<string> {
+    if (this.composeCmd) {
+      return this.composeCmd;
+    }
+
+    // Try docker compose (new plugin style) first
+    const { code: pluginCode } = await this.client.exec(this.pathPrefix + 'docker compose version 2>/dev/null');
+    if (pluginCode === 0) {
+      this.composeCmd = 'docker compose';
+      return this.composeCmd;
+    }
+
+    // Fall back to docker-compose (standalone)
+    const { code: standaloneCode } = await this.client.exec(this.pathPrefix + 'docker-compose version 2>/dev/null');
+    if (standaloneCode === 0) {
+      this.composeCmd = 'docker-compose';
+      return this.composeCmd;
+    }
+
+    // Default to docker compose and let it fail with a clear error
+    this.composeCmd = 'docker compose';
+    return this.composeCmd;
   }
 
   async listContainers(): Promise<Array<{
@@ -359,9 +386,10 @@ export class DockerSSH {
   }
 
   async composeUp(composePath: string, serviceName?: string): Promise<void> {
+    const compose = await this.getComposeCommand();
     const cmd = serviceName
-      ? `docker compose -f ${composePath} up -d ${serviceName}`
-      : `docker compose -f ${composePath} up -d`;
+      ? `${compose} -f ${composePath} up -d ${serviceName}`
+      : `${compose} -f ${composePath} up -d`;
 
     const { code, stderr } = await this.client.exec(this.pathPrefix + cmd);
     if (code !== 0) {
@@ -370,11 +398,12 @@ export class DockerSSH {
   }
 
   async composePull(composePath: string, serviceName?: string): Promise<void> {
+    const compose = await this.getComposeCommand();
     const cmd = serviceName
-      ? `docker compose -f ${composePath} pull ${serviceName}`
-      : `docker compose -f ${composePath} pull`;
+      ? `${compose} -f ${composePath} pull ${serviceName}`
+      : `${compose} -f ${composePath} pull`;
 
-    const { code, stderr } = await this.client.exec(cmd);
+    const { code, stderr } = await this.client.exec(this.pathPrefix + cmd);
     if (code !== 0) {
       throw new Error(`Failed to pull compose images: ${stderr}`);
     }
