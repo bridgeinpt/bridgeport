@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../lib/store';
+import { useToast } from '../components/Toast';
 import {
   listDatabases,
   createDatabase,
@@ -31,6 +32,7 @@ const STORAGE_TYPES = [
 
 export default function Databases() {
   const { selectedEnvironment } = useAppStore();
+  const toast = useToast();
   const [databases, setDatabases] = useState<Database[]>([]);
   const [servers, setServers] = useState<Server[]>([]);
   const [loading, setLoading] = useState(true);
@@ -135,8 +137,9 @@ export default function Databases() {
     try {
       await deleteDatabase(db.id);
       setDatabases((prev) => prev.filter((d) => d.id !== db.id));
+      toast.success('Database deleted');
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Delete failed');
+      toast.error(error instanceof Error ? error.message : 'Delete failed');
     }
   };
 
@@ -170,8 +173,9 @@ export default function Databases() {
       // Refresh backups list
       const { backups } = await listDatabaseBackups(viewingDb.id);
       setBackups(backups);
+      toast.success('Backup created');
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Backup failed');
+      toast.error(error instanceof Error ? error.message : 'Backup failed');
     } finally {
       setBackingUp(false);
     }
@@ -182,8 +186,9 @@ export default function Databases() {
     try {
       await deleteDatabaseBackup(backup.id);
       setBackups((prev) => prev.filter((b) => b.id !== backup.id));
+      toast.success('Backup deleted');
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Delete failed');
+      toast.error(error instanceof Error ? error.message : 'Delete failed');
     }
   };
 
@@ -193,8 +198,9 @@ export default function Databases() {
       const { schedule } = await setBackupSchedule(viewingDb.id, scheduleForm);
       setSchedule(schedule);
       setEditingSchedule(false);
+      toast.success('Schedule saved');
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Failed to save schedule');
+      toast.error(error instanceof Error ? error.message : 'Failed to save schedule');
     }
   };
 

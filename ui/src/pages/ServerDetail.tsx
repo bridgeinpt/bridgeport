@@ -18,6 +18,7 @@ import {
   type ServerMetrics,
   type CreateServiceInput,
 } from '../lib/api';
+import { useToast } from '../components/Toast';
 import { formatDistanceToNow } from 'date-fns';
 
 interface AgentStatus {
@@ -30,6 +31,7 @@ interface AgentStatus {
 
 export default function ServerDetail() {
   const { id } = useParams<{ id: string }>();
+  const toast = useToast();
   const [server, setServer] = useState<ServerWithServices | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -107,8 +109,9 @@ export default function ServerDetail() {
       setServer((prev) =>
         prev ? { ...prev, services: prev.services.filter(s => s.id !== serviceId) } : null
       );
+      toast.success('Service deleted');
     } catch (error) {
-      alert('Failed to delete service');
+      toast.error('Failed to delete service');
     }
   };
 
@@ -124,8 +127,9 @@ export default function ServerDetail() {
       // Refresh agent status after mode change
       const statusRes = await getAgentStatus(id);
       setAgentStatus(statusRes);
+      toast.success(`Metrics mode changed to ${mode}`);
     } catch (error) {
-      alert('Failed to change metrics mode');
+      toast.error('Failed to change metrics mode');
     } finally {
       setModeChanging(false);
     }
@@ -141,8 +145,9 @@ export default function ServerDetail() {
       if (metricsRes.metrics.length > 0) {
         setLatestMetrics(metricsRes.metrics[0]);
       }
+      toast.success('Metrics collected');
     } catch (error) {
-      alert('Failed to collect metrics');
+      toast.error('Failed to collect metrics');
     } finally {
       setMetricsLoading(false);
     }
@@ -154,8 +159,9 @@ export default function ServerDetail() {
     try {
       const result = await regenerateAgentToken(id);
       setAgentToken(result.agentToken);
+      toast.success('Token regenerated');
     } catch (error) {
-      alert('Failed to regenerate token');
+      toast.error('Failed to regenerate token');
     }
   };
 
@@ -166,8 +172,9 @@ export default function ServerDetail() {
       await deployAgent(id);
       const statusRes = await getAgentStatus(id);
       setAgentStatus(statusRes);
+      toast.success('Agent deployed');
     } catch (error) {
-      alert('Failed to deploy agent');
+      toast.error('Failed to deploy agent');
     } finally {
       setModeChanging(false);
     }
@@ -181,8 +188,9 @@ export default function ServerDetail() {
       await removeAgent(id);
       const statusRes = await getAgentStatus(id);
       setAgentStatus(statusRes);
+      toast.success('Agent removed');
     } catch (error) {
-      alert('Failed to remove agent');
+      toast.error('Failed to remove agent');
     } finally {
       setModeChanging(false);
     }

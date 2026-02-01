@@ -28,12 +28,14 @@ import {
   type AuditLog,
 } from '../lib/api';
 import { useAppStore } from '../lib/store';
+import { useToast } from '../components/Toast';
 import { formatDistanceToNow, format } from 'date-fns';
 
 export default function ServiceDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { selectedEnvironment } = useAppStore();
+  const toast = useToast();
   const [service, setService] = useState<ServiceWithServer | null>(null);
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [templates, setTemplates] = useState<EnvTemplate[]>([]);
@@ -51,6 +53,7 @@ export default function ServiceDetail() {
   // Config edit state
   const [editEnvTemplate, setEditEnvTemplate] = useState<string>('');
   const [editComposePath, setEditComposePath] = useState<string>('');
+  const [editContainerName, setEditContainerName] = useState<string>('');
   const [editHealthCheckUrl, setEditHealthCheckUrl] = useState<string>('');
   const [editRegistryConnectionId, setEditRegistryConnectionId] = useState<string>('');
 
@@ -223,15 +226,26 @@ export default function ServiceDetail() {
 
   const loadLogs = async () => {
     if (!id) return;
-    const { logs } = await getServiceLogs(id, 200);
-    setLogs(logs);
-    setShowLogs(true);
+    try {
+      const { logs } = await getServiceLogs(id, 200);
+      setLogs(logs);
+      setShowLogs(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to load logs';
+      if (message.includes('No such container')) {
+        setLogs('Container not found. The service may not be running or has not been deployed yet.');
+        setShowLogs(true);
+      } else {
+        toast.error(message);
+      }
+    }
   };
 
   const openConfig = () => {
     if (!service) return;
     setEditEnvTemplate(service.envTemplateName || '');
     setEditComposePath(service.composePath || '');
+    setEditContainerName(service.containerName || '');
     setEditHealthCheckUrl(service.healthCheckUrl || '');
     setEditRegistryConnectionId(service.registryConnectionId || '');
     setShowConfig(true);
@@ -244,11 +258,13 @@ export default function ServiceDetail() {
       const { service: updated } = await updateService(id, {
         envTemplateName: editEnvTemplate || null,
         composePath: editComposePath || null,
+        containerName: editContainerName || undefined,
         healthCheckUrl: editHealthCheckUrl || null,
         registryConnectionId: editRegistryConnectionId || null,
       });
       setService((prev) => (prev ? { ...prev, ...updated } : null));
       setShowConfig(false);
+      toast.success('Configuration saved');
     } finally {
       setSaving(false);
     }
@@ -1073,6 +1089,21 @@ export default function ServiceDetail() {
                 />
                 <p className="text-xs text-slate-500 mt-1">
                   Path to docker-compose.yml on the server
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">
+                  Container Name
+                </label>
+                <input
+                  type="text"
+                  value={editContainerName}
+                  onChange={(e) => setEditContainerName(e.target.value)}
+                  placeholder="my-container"
+                  className="input font-mono text-sm"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Docker container name for logs and health checks
                 </p>
               </div>
               <div>

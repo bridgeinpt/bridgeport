@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../lib/store';
+import { useToast } from '../components/Toast';
 import {
   listRegistryConnections,
   createRegistryConnection,
@@ -19,6 +20,7 @@ const REGISTRY_TYPES = [
 
 export default function Registries() {
   const { selectedEnvironment } = useAppStore();
+  const toast = useToast();
   const [registries, setRegistries] = useState<RegistryConnection[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -141,8 +143,9 @@ export default function Registries() {
     try {
       await deleteRegistryConnection(id);
       setRegistries((prev) => prev.filter((r) => r.id !== id));
+      toast.success('Registry deleted');
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Delete failed');
+      toast.error(error instanceof Error ? error.message : 'Delete failed');
     }
   };
 
