@@ -113,16 +113,17 @@ export async function deployService(
         await client.exec(`chmod 600 ${envPath}`);
       }
 
-      // Upload config files (skip any that would overwrite the compose file)
-      const composeFilename = path.basename(composePath);
+      // Upload config files to their configured target paths
       for (const cf of artifacts.configFiles) {
-        if (cf.name === composeFilename) {
-          log(`Skipping config file ${cf.name} (would overwrite compose file)`);
-          continue;
-        }
-        log(`Writing config file: ${cf.name}`);
-        const cfPath = `${deployDir}/${cf.name}`;
-        await client.exec(`cat > ${cfPath} << 'CFEOF'\n${cf.content}\nCFEOF`);
+        // Use the configured mountPath (targetPath) for the file
+        const cfPath = cf.mountPath;
+
+        // Ensure target directory exists
+        const cfDir = path.dirname(cfPath);
+        await client.exec(`mkdir -p "${cfDir}"`);
+
+        log(`Writing config file: ${cf.name} -> ${cfPath}`);
+        await client.exec(`cat > "${cfPath}" << 'CFEOF'\n${cf.content}\nCFEOF`);
       }
 
       // Save artifacts to database

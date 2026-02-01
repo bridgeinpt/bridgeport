@@ -189,10 +189,10 @@ export async function generateDeploymentArtifacts(
       svc.env_file = [`./${artifacts.envFile.name}`];
     }
 
-    // Add volume mounts for config files
+    // Add volume mounts for config files (use absolute paths since files are written to their target paths)
     if (artifacts.configFiles.length > 0) {
       svc.volumes = artifacts.configFiles.map(
-        (cf) => `./${cf.name}:${cf.mountPath}:ro`
+        (cf) => `${cf.mountPath}:${cf.mountPath}:ro`
       );
     }
 
