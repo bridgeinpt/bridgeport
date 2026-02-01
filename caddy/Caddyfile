@@ -1,0 +1,30 @@
+# BridgePort Caddy Configuration
+{
+	# Global options
+	email infra@bridgein.com
+
+	# Enable automatic HTTPS
+	auto_https on
+}
+
+# BridgePort application
+deploy.bridgein.com {
+	reverse_proxy bridgeport:3000
+
+	# Security headers
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		X-XSS-Protection "1; mode=block"
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+
+	# Compress responses
+	encode gzip zstd
+
+	# Logging
+	log {
+		output file /var/log/caddy/access.log
+		format json
+	}
+}

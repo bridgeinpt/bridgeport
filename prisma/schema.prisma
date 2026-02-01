@@ -1,0 +1,231 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  apiTokens   ApiToken[]
+  deployments Deployment[]
+  auditLogs   AuditLog[]
+}
+
+model ApiToken {
+  id          String    @id @default(cuid())
+  name        String
+  tokenHash   String    @unique
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Environment {
+  id            String   @id @default(cuid())
+  name          String   @unique // staging, production
+  sshPrivateKey String?  // Encrypted SSH private key for this environment
+  sshUser       String   @default("root") // SSH username
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  servers              Server[]
+  secrets              Secret[]
+  configFiles          ConfigFile[]
+  auditLogs            AuditLog[]
+  registryConnections  RegistryConnection[]
+}
+
+model Server {
+  id            String   @id @default(cuid())
+  name          String   // e.g., app-api-staging
+  hostname      String   // e.g., 10.20.10.3
+  publicIp      String?  // Reserved IP if applicable
+  tags          String   // JSON array of tags
+  status        String   @default("unknown") // healthy, unhealthy, unknown
+  lastCheckedAt DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  environmentId String
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+
+  services Service[]
+
+  @@unique([environmentId, name])
+}
+
+model Service {
+  id              String   @id @default(cuid())
+  name            String   // e.g., traefik, app-api
+  containerName   String   // Docker container name
+  imageName       String   // e.g., registry.digitalocean.com/bios-registry/app-api
+  imageTag        String   @default("latest")
+  composePath     String?  // Path to docker-compose.yml on server
+  envTemplateName String?  // Reference to env template
+  composeTemplate String?  // Docker compose template with placeholders
+  healthCheckUrl  String?  // Optional URL to check for health (e.g., http://localhost:8000/health)
+  status          String   @default("unknown") // running, stopped, unhealthy, healthy, unknown
+  discoveryStatus String   @default("found") // found, missing (container not found during last discovery)
+  lastCheckedAt   DateTime?
+  lastDiscoveredAt DateTime? // When service was last seen during discovery
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Auto-update fields
+  autoUpdate            Boolean   @default(false)
+  latestAvailableTag    String?   // Latest tag found in registry
+  latestAvailableDigest String?   // Digest of latest tag (for comparing even if tag is "latest")
+  lastUpdateCheckAt     DateTime?
+
+  serverId    String
+  server      Server        @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  deployments Deployment[]
+  files       ServiceFile[]
+
+  registryConnectionId String?
+  registryConnection   RegistryConnection? @relation(fields: [registryConnectionId], references: [id], onDelete: SetNull)
+
+  @@unique([serverId, name])
+}
+
+model Deployment {
+  id           String   @id @default(cuid())
+  imageTag     String
+  status       String   // pending, deploying, success, failed
+  logs         String?  // Deployment logs
+  triggeredBy  String   // user email or "webhook"
+  startedAt    DateTime @default(now())
+  completedAt  DateTime?
+
+  serviceId String
+  service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  userId    String?
+  user      User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
+  artifacts DeploymentArtifact[]
+
+  @@index([serviceId, startedAt(sort: Desc)])
+}
+
+model Secret {
+  id             String   @id @default(cuid())
+  key            String   // e.g., DATABASE_URL, DJANGO_SECRET_KEY
+  encryptedValue String   // XChaCha20-Poly1305 encrypted
+  nonce          String   // Encryption nonce (base64)
+  description    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  environmentId String
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+
+  @@unique([environmentId, key])
+}
+
+model EnvTemplate {
+  id        String   @id @default(cuid())
+  name      String   @unique // e.g., app-api, keycloak
+  template  String   // Template content with ${SECRET_NAME} placeholders
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Config files (compose files, Caddyfile, certificates, etc.)
+model ConfigFile {
+  id          String   @id @default(cuid())
+  name        String   // Display name (e.g., "gateway-compose", "cloudflare-cert")
+  filename    String   // Target filename on server (e.g., "docker-compose.yml", "cloudflare-origin.pem")
+  content     String   // File content (stored in DB for simplicity)
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  environmentId String
+  environment   Environment  @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  services      ServiceFile[]
+
+  @@unique([environmentId, name])
+}
+
+// Links config files to services with target path on server
+model ServiceFile {
+  id         String @id @default(cuid())
+  targetPath String // Full path on server (e.g., /opt/caddy/docker-compose.yml)
+
+  serviceId    String
+  service      Service    @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  configFileId String
+  configFile   ConfigFile @relation(fields: [configFileId], references: [id], onDelete: Cascade)
+
+  @@unique([serviceId, configFileId])
+}
+
+// Generated deployment artifacts (compose files, env files)
+model DeploymentArtifact {
+  id        String   @id @default(cuid())
+  type      String   // compose, env, config
+  name      String   // Filename
+  content   String   // File content
+  checksum  String   // SHA-256 hash
+  createdAt DateTime @default(now())
+
+  deploymentId String
+  deployment   Deployment @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
+}
+
+// Audit log for tracking all actions
+model AuditLog {
+  id           String   @id @default(cuid())
+  action       String   // deploy, restart, health_check, create, update, delete, access
+  resourceType String   // service, server, secret, environment, config_file, env_template
+  resourceId   String?  // ID of affected resource (nullable for deleted resources)
+  resourceName String?  // Human-readable name for display
+  details      String?  // JSON string with additional details
+  success      Boolean  @default(true)
+  error        String?  // Error message if failed
+  createdAt    DateTime @default(now())
+
+  userId        String?
+  user          User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  environmentId String?
+  environment   Environment? @relation(fields: [environmentId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt(sort: Desc)])
+  @@index([resourceType, resourceId])
+  @@index([userId])
+  @@index([environmentId])
+}
+
+// Registry connection for image update checking
+model RegistryConnection {
+  id                String   @id @default(cuid())
+  name              String   // "DigitalOcean", "Docker Hub", etc.
+  type              String   // "digitalocean", "dockerhub", "gcr", "ecr", "generic"
+  registryUrl       String   // API URL or registry domain
+  repositoryPrefix  String?  // e.g., "bios-registry" for DO
+  encryptedToken    String?  // Encrypted API token
+  tokenNonce        String?
+  username          String?  // For basic auth registries
+  encryptedPassword String?
+  passwordNonce     String?
+  isDefault         Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  environmentId String
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  services      Service[]
+
+  @@unique([environmentId, name])
+}

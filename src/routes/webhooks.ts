@@ -1,0 +1,204 @@
+import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
+import crypto from 'crypto';
+import { prisma } from '../lib/db.js';
+import { deployService } from '../services/deploy.js';
+import { logAudit } from '../services/audit.js';
+
+const deployWebhookSchema = z.object({
+  service: z.string().min(1), // Service name or ID
+  environment: z.string().min(1), // Environment name
+  imageTag: z.string().optional(),
+  generateArtifacts: z.boolean().default(false),
+});
+
+// Simple webhook secret verification
+function verifyWebhookSignature(
+  payload: string,
+  signature: string,
+  secret: string
+): boolean {
+  const expectedSignature = crypto
+    .createHmac('sha256', secret)
+    .update(payload)
+    .digest('hex');
+
+  return crypto.timingSafeEqual(
+    Buffer.from(signature),
+    Buffer.from(expectedSignature)
+  );
+}
+
+export async function webhookRoutes(fastify: FastifyInstance) {
+  // CI/CD deployment webhook
+  fastify.post('/api/webhooks/deploy', async (request, reply) => {
+    const signature = request.headers['x-webhook-signature'] as string;
+    const webhookSecret = process.env.WEBHOOK_SECRET;
+
+    // Verify signature if secret is configured
+    if (webhookSecret) {
+      if (!signature) {
+        return reply.code(401).send({ error: 'Missing signature' });
+      }
+
+      const rawBody = JSON.stringify(request.body);
+      if (!verifyWebhookSignature(rawBody, signature, webhookSecret)) {
+        return reply.code(401).send({ error: 'Invalid signature' });
+      }
+    }
+
+    const body = deployWebhookSchema.safeParse(request.body);
+    if (!body.success) {
+      return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
+    }
+
+    // Find environment
+    const environment = await prisma.environment.findUnique({
+      where: { name: body.data.environment },
+    });
+
+    if (!environment) {
+      return reply.code(404).send({ error: 'Environment not found' });
+    }
+
+    // Find service by name in the environment
+    const service = await prisma.service.findFirst({
+      where: {
+        OR: [
+          { id: body.data.service },
+          { name: body.data.service },
+        ],
+        server: {
+          environmentId: environment.id,
+        },
+      },
+    });
+
+    if (!service) {
+      return reply.code(404).send({ error: 'Service not found' });
+    }
+
+    try {
+      const result = await deployService(
+        service.id,
+        'webhook',
+        null,
+        {
+          imageTag: body.data.imageTag,
+          generateArtifacts: body.data.generateArtifacts,
+        }
+      );
+
+      await logAudit({
+        action: 'webhook_deploy',
+        resourceType: 'service',
+        resourceId: service.id,
+        resourceName: service.name,
+        details: { source: 'custom-webhook', imageTag: body.data.imageTag, deploymentId: result.deployment.id },
+        environmentId: environment.id,
+      });
+
+      return {
+        success: result.deployment.status === 'success',
+        deploymentId: result.deployment.id,
+        status: result.deployment.status,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Deployment failed';
+
+      await logAudit({
+        action: 'webhook_deploy',
+        resourceType: 'service',
+        resourceId: service.id,
+        resourceName: service.name,
+        details: { source: 'custom-webhook', imageTag: body.data.imageTag },
+        success: false,
+        error: message,
+        environmentId: environment.id,
+      });
+
+      return reply.code(500).send({ error: message });
+    }
+  });
+
+  // GitHub Actions compatible webhook
+  fastify.post('/api/webhooks/github', async (request, reply) => {
+    const signature = request.headers['x-hub-signature-256'] as string;
+    const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET;
+
+    // Verify GitHub signature
+    if (webhookSecret && signature) {
+      const rawBody = JSON.stringify(request.body);
+      const expectedSig = 'sha256=' + crypto
+        .createHmac('sha256', webhookSecret)
+        .update(rawBody)
+        .digest('hex');
+
+      if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSig))) {
+        return reply.code(401).send({ error: 'Invalid signature' });
+      }
+    }
+
+    const event = request.headers['x-github-event'];
+    const payload = request.body as Record<string, unknown>;
+
+    // Handle package published event (container registry)
+    if (event === 'package' && payload.action === 'published') {
+      const packageData = payload.package as {
+        name: string;
+        package_version: { version: string };
+      };
+
+      // Find matching services and deploy
+      const services = await prisma.service.findMany({
+        where: {
+          imageName: {
+            contains: packageData.name,
+          },
+        },
+      });
+
+      const results = [];
+      for (const service of services) {
+        try {
+          const result = await deployService(
+            service.id,
+            'github-webhook',
+            null,
+            {
+              imageTag: packageData.package_version.version,
+            }
+          );
+
+          const serviceWithServer = await prisma.service.findUnique({
+            where: { id: service.id },
+            include: { server: true },
+          });
+
+          await logAudit({
+            action: 'webhook_deploy',
+            resourceType: 'service',
+            resourceId: service.id,
+            resourceName: service.name,
+            details: { source: 'github-webhook', packageName: packageData.name, imageTag: packageData.package_version.version },
+            environmentId: serviceWithServer?.server.environmentId,
+          });
+
+          results.push({
+            service: service.name,
+            status: result.deployment.status,
+          });
+        } catch {
+          results.push({
+            service: service.name,
+            status: 'failed',
+          });
+        }
+      }
+
+      return { processed: results.length, results };
+    }
+
+    return { message: 'Event ignored' };
+  });
+}

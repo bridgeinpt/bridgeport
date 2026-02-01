@@ -1,0 +1,46 @@
+services:
+  bridgeport:
+    image: registry.digitalocean.com/bios-registry/bridgeport:latest
+    container_name: bridgeport
+    restart: unless-stopped
+    expose:
+      - "3000"
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=file:/app/data/bridgeport.db
+      - SSH_KEY_PATH=/app/.ssh/bios-infra
+      - SSH_USER=root
+      - UPLOAD_DIR=/app/uploads
+    volumes:
+      - bridgeport-data:/app/data
+      - bridgeport-uploads:/app/uploads
+      - /root/.ssh/bios-infra:/app/.ssh/bios-infra:ro
+    networks:
+      - caddy
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - caddy
+
+volumes:
+  bridgeport-data:
+  bridgeport-uploads:
+  caddy-data:
+  caddy-config:
+
+networks:
+  caddy:
+    driver: bridge

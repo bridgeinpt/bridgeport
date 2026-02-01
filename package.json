@@ -1,0 +1,42 @@
+{
+  "name": "bridgeport",
+  "version": "1.0.0",
+  "description": "BridgePort - Dock. Run. Ship. Repeat. A lightweight deployment management tool by BridgeIn.",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio"
+  },
+  "keywords": ["deployment", "infrastructure", "bridgein"],
+  "author": "BridgeIn",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@fastify/cors": "^10.0.0",
+    "@fastify/jwt": "^9.0.0",
+    "@fastify/multipart": "^9.0.0",
+    "@fastify/static": "^8.0.0",
+    "@prisma/client": "^6.0.0",
+    "bcrypt": "^5.1.1",
+    "fastify": "^5.0.0",
+    "fastify-plugin": "^5.0.0",
+    "sodium-native": "^4.1.1",
+    "ssh2": "^1.15.0",
+    "yaml": "^2.6.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^5.0.2",
+    "@types/node": "^22.0.0",
+    "@types/ssh2": "^1.15.0",
+    "pino-pretty": "^11.0.0",
+    "prisma": "^6.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
