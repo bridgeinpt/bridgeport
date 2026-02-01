@@ -277,9 +277,9 @@ export default function Dashboard() {
                     <td className="py-3 font-mono text-sm">{server.hostname}</td>
                     <td className="py-3">{server.services.length}</td>
                     <td className="py-3 text-sm">
-                      {serverMetrics?.cpuPercent !== null ? (
-                        <span className={serverMetrics!.cpuPercent! > 80 ? 'text-red-400' : ''}>
-                          {serverMetrics!.cpuPercent?.toFixed(1)}%
+                      {serverMetrics?.cpuPercent != null ? (
+                        <span className={serverMetrics.cpuPercent > 80 ? 'text-red-400' : ''}>
+                          {serverMetrics.cpuPercent.toFixed(1)}%
                         </span>
                       ) : (
                         <span className="text-slate-500">-</span>
