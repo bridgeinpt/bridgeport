@@ -11,6 +11,8 @@ import {
   importFromTerraform,
 } from '../services/servers.js';
 import { logAudit } from '../services/audit.js';
+import { deployAgent, removeAgent, checkAgentStatus } from '../services/agent-deploy.js';
+import { prisma } from '../lib/db.js';
 
 const createServerSchema = z.object({
   name: z.string().min(1),
@@ -249,6 +251,156 @@ export async function serverRoutes(fastify: FastifyInstance) {
         const message = error instanceof Error ? error.message : 'Import failed';
         return reply.code(500).send({ error: message });
       }
+    }
+  );
+
+  // Deploy monitoring agent to server
+  fastify.post(
+    '/api/servers/:id/agent/deploy',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = request.body as { bridgeportUrl?: string } | undefined;
+
+      const server = await prisma.server.findUnique({
+        where: { id },
+        include: { environment: true },
+      });
+
+      if (!server) {
+        return reply.code(404).send({ error: 'Server not found' });
+      }
+
+      const result = await deployAgent(id, body?.bridgeportUrl);
+
+      await logAudit({
+        action: 'deploy_agent',
+        resourceType: 'server',
+        resourceId: server.id,
+        resourceName: server.name,
+        details: { success: result.success, error: result.error },
+        success: result.success,
+        userId: request.authUser!.id,
+        environmentId: server.environmentId,
+      });
+
+      if (!result.success) {
+        return reply.code(500).send({ error: result.error });
+      }
+
+      return { success: true, message: 'Agent deployed successfully' };
+    }
+  );
+
+  // Remove monitoring agent from server
+  fastify.post(
+    '/api/servers/:id/agent/remove',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      const server = await prisma.server.findUnique({
+        where: { id },
+        include: { environment: true },
+      });
+
+      if (!server) {
+        return reply.code(404).send({ error: 'Server not found' });
+      }
+
+      const result = await removeAgent(id);
+
+      await logAudit({
+        action: 'remove_agent',
+        resourceType: 'server',
+        resourceId: server.id,
+        resourceName: server.name,
+        details: { success: result.success, error: result.error },
+        success: result.success,
+        userId: request.authUser!.id,
+        environmentId: server.environmentId,
+      });
+
+      if (!result.success) {
+        return reply.code(500).send({ error: result.error });
+      }
+
+      return { success: true, message: 'Agent removed successfully' };
+    }
+  );
+
+  // Check agent status on server
+  fastify.get(
+    '/api/servers/:id/agent/status',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      const server = await prisma.server.findUnique({ where: { id } });
+      if (!server) {
+        return reply.code(404).send({ error: 'Server not found' });
+      }
+
+      const status = await checkAgentStatus(id);
+      return {
+        metricsMode: server.metricsMode,
+        hasToken: !!server.agentToken,
+        ...status,
+      };
+    }
+  );
+
+  // Update server metrics mode
+  fastify.patch(
+    '/api/servers/:id/metrics-mode',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = request.body as { mode: 'ssh' | 'agent' | 'disabled' };
+
+      if (!['ssh', 'agent', 'disabled'].includes(body.mode)) {
+        return reply.code(400).send({ error: 'Invalid mode. Must be ssh, agent, or disabled' });
+      }
+
+      const server = await prisma.server.findUnique({
+        where: { id },
+        include: { environment: true },
+      });
+
+      if (!server) {
+        return reply.code(404).send({ error: 'Server not found' });
+      }
+
+      // If switching to agent mode, deploy the agent
+      if (body.mode === 'agent' && server.metricsMode !== 'agent') {
+        const deployResult = await deployAgent(id);
+        if (!deployResult.success) {
+          return reply.code(500).send({ error: `Failed to deploy agent: ${deployResult.error}` });
+        }
+      }
+
+      // If switching away from agent mode, remove the agent
+      if (body.mode !== 'agent' && server.metricsMode === 'agent') {
+        await removeAgent(id);
+      }
+
+      // Update the mode
+      const updated = await prisma.server.update({
+        where: { id },
+        data: { metricsMode: body.mode },
+      });
+
+      await logAudit({
+        action: 'update_metrics_mode',
+        resourceType: 'server',
+        resourceId: server.id,
+        resourceName: server.name,
+        details: { oldMode: server.metricsMode, newMode: body.mode },
+        userId: request.authUser!.id,
+        environmentId: server.environmentId,
+      });
+
+      return { metricsMode: updated.metricsMode };
     }
   );
 }

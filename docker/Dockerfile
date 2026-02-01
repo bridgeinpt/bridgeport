@@ -1,3 +1,9 @@
+# Build stage for Go agent
+FROM golang:1.22-alpine AS agent-build
+WORKDIR /build
+COPY bridgeport-agent/ ./
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bridgeport-agent .
+
 # Build stage for UI
 FROM node:22-slim AS ui-build
 WORKDIR /app/ui
@@ -66,6 +72,9 @@ COPY --from=api-build /app/prisma ./prisma
 
 # Copy built UI
 COPY --from=ui-build /app/ui/dist ./ui/dist
+
+# Copy agent binary for deployment to servers
+COPY --from=agent-build /build/bridgeport-agent ./agent/bridgeport-agent
 
 COPY package.json ./
 

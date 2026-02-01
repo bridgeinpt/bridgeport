@@ -161,6 +161,19 @@ export const checkServerHealth = (id: string) =>
 export const discoverContainers = (id: string) =>
   api.post<{ services: Service[] }>(`/servers/${id}/discover`);
 
+// Agent deployment
+export const deployAgent = (id: string, bridgeportUrl?: string) =>
+  api.post<{ success: boolean; message?: string }>(`/servers/${id}/agent/deploy`, bridgeportUrl ? { bridgeportUrl } : {});
+
+export const removeAgent = (id: string) =>
+  api.post<{ success: boolean; message?: string }>(`/servers/${id}/agent/remove`);
+
+export const getAgentStatus = (id: string) =>
+  api.get<{ metricsMode: string; hasToken: boolean; installed: boolean; running: boolean; error?: string }>(`/servers/${id}/agent/status`);
+
+export const setMetricsMode = (id: string, mode: 'ssh' | 'agent' | 'disabled') =>
+  api.patch<{ metricsMode: string }>(`/servers/${id}/metrics-mode`, { mode });
+
 // Services
 export const getService = (id: string) =>
   api.get<{ service: ServiceWithServer }>(`/services/${id}`);
