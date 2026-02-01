@@ -217,6 +217,44 @@ export interface DiscoverResult {
   missing: string[];
 }
 
+/**
+ * Extract just the image name (last path segment) from a full image path
+ * Examples:
+ *   registry.digitalocean.com/bios-registry/app-api -> app-api
+ *   ghcr.io/owner/repo -> repo
+ *   nginx -> nginx
+ *   caddy:2-alpine -> caddy
+ */
+function extractImageName(fullImagePath: string): string {
+  // Remove tag if present
+  const nameWithoutTag = fullImagePath.split(':')[0];
+  const parts = nameWithoutTag.split('/');
+  return parts[parts.length - 1];
+}
+
+/**
+ * Determine health status from container health and URL check result
+ */
+function determineHealthStatus(
+  containerHealth: string | undefined,
+  running: boolean
+): string {
+  if (!running) {
+    return 'unknown';
+  }
+  if (containerHealth === 'healthy') {
+    return 'healthy';
+  }
+  if (containerHealth === 'unhealthy') {
+    return 'unhealthy';
+  }
+  // Container has no HEALTHCHECK configured
+  if (!containerHealth) {
+    return 'none';
+  }
+  return 'unknown';
+}
+
 export async function discoverContainers(serverId: string): Promise<DiscoverResult> {
   const server = await prisma.server.findUniqueOrThrow({
     where: { id: serverId },
@@ -257,6 +295,9 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
     for (const container of containers) {
       foundContainerNames.add(container.name);
 
+      // Get comprehensive container info including ports
+      const containerInfo = await docker.getContainerInfo(container.name);
+
       // Check if service already exists
       const existing = await prisma.service.findUnique({
         where: {
@@ -267,8 +308,18 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
         },
       });
 
-      // Parse image name and tag
-      const [imageName, imageTag = 'latest'] = container.image.split(':');
+      // Parse full image path and extract just the name
+      const fullImagePath = containerInfo.image || container.image;
+      const [fullImageName, imageTag = 'latest'] = fullImagePath.split(':');
+
+      // Determine container and health status
+      const containerStatus = containerInfo.state || container.state;
+      const healthStatus = determineHealthStatus(containerInfo.health, containerInfo.running);
+
+      // Serialize ports to JSON
+      const exposedPorts = containerInfo.ports.length > 0
+        ? JSON.stringify(containerInfo.ports)
+        : null;
 
       // Find or create matching registry (re-fetch registries to include any newly created)
       const currentRegistries = await prisma.registryConnection.findMany({
@@ -276,16 +327,20 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
       });
       const registryConnectionId = await findOrCreateRegistry(
         server.environmentId,
-        imageName,
+        fullImageName,
         currentRegistries
       );
 
       if (existing) {
-        // Update status, mark as found, and link to registry if not already linked
+        // Update status, ports, mark as found, and link to registry if not already linked
         const updated = await prisma.service.update({
           where: { id: existing.id },
           data: {
-            status: container.state,
+            status: containerStatus, // Keep for backwards compatibility
+            containerStatus,
+            healthStatus,
+            exposedPorts,
+            imageTag, // Update to current running tag
             discoveryStatus: 'found',
             lastCheckedAt: new Date(),
             lastDiscoveredAt: new Date(),
@@ -299,9 +354,12 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
           data: {
             name: container.name,
             containerName: container.name,
-            imageName,
+            imageName: fullImageName,
             imageTag,
-            status: container.state,
+            status: containerStatus, // Keep for backwards compatibility
+            containerStatus,
+            healthStatus,
+            exposedPorts,
             discoveryStatus: 'found',
             lastCheckedAt: new Date(),
             lastDiscoveredAt: new Date(),
@@ -322,6 +380,8 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
           data: {
             discoveryStatus: 'missing',
             status: 'stopped',
+            containerStatus: 'not_found',
+            healthStatus: 'unknown',
             lastCheckedAt: new Date(),
           },
         });

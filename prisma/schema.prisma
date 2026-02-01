@@ -116,7 +116,10 @@ model Service {
   envTemplateName String?  // Reference to env template
   composeTemplate String?  // Docker compose template with placeholders
   healthCheckUrl  String?  // Optional URL to check for health (e.g., http://localhost:8000/health)
-  status          String   @default("unknown") // running, stopped, unhealthy, healthy, unknown
+  status          String   @default("unknown") // running, stopped, unhealthy, healthy, unknown (kept for backwards compatibility)
+  containerStatus String   @default("unknown") // running, stopped, exited, created, restarting, paused, dead, not_found
+  healthStatus    String   @default("unknown") // healthy, unhealthy, unknown, none
+  exposedPorts    String?  // JSON array: [{"host": 8080, "container": 80, "protocol": "tcp"}]
   discoveryStatus String   @default("found") // found, missing (container not found during last discovery)
   lastCheckedAt   DateTime?
   lastDiscoveredAt DateTime? // When service was last seen during discovery

@@ -20,9 +20,60 @@ import {
   type ServerMetrics,
   type CreateServiceInput,
   type UpdateServerInput,
+  type ExposedPort,
 } from '../lib/api';
 import { useToast } from '../components/Toast';
 import { formatDistanceToNow } from 'date-fns';
+
+function parseExposedPorts(portsJson: string | null): ExposedPort[] {
+  if (!portsJson) return [];
+  try {
+    return JSON.parse(portsJson);
+  } catch {
+    return [];
+  }
+}
+
+function formatPorts(ports: ExposedPort[], maxDisplay = 3): string {
+  if (ports.length === 0) return '-';
+  const displayed = ports.slice(0, maxDisplay).map(p =>
+    p.host ? `${p.host}:${p.container}` : `${p.container}`
+  );
+  if (ports.length > maxDisplay) {
+    displayed.push(`+${ports.length - maxDisplay}`);
+  }
+  return displayed.join(', ');
+}
+
+function getContainerStatusColor(status: string): string {
+  switch (status) {
+    case 'running':
+      return 'badge-success';
+    case 'stopped':
+    case 'exited':
+    case 'dead':
+      return 'badge-error';
+    case 'restarting':
+    case 'paused':
+    case 'created':
+      return 'badge-warning';
+    default:
+      return 'badge-warning';
+  }
+}
+
+function getHealthStatusColor(status: string): string {
+  switch (status) {
+    case 'healthy':
+      return 'badge-success';
+    case 'unhealthy':
+      return 'badge-error';
+    case 'none':
+      return 'bg-slate-600 text-slate-300';
+    default:
+      return 'badge-warning';
+  }
+}
 
 interface AgentStatus {
   metricsMode: string;
@@ -685,50 +736,55 @@ export default function ServerDetail() {
                         <th className="pb-3 font-medium">Name</th>
                         <th className="pb-3 font-medium">Container</th>
                         <th className="pb-3 font-medium">Image</th>
-                        <th className="pb-3 font-medium">Status</th>
+                        <th className="pb-3 font-medium">Ports</th>
+                        <th className="pb-3 font-medium">Container</th>
+                        <th className="pb-3 font-medium">Health</th>
                         <th className="pb-3 font-medium"></th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-700">
-                      {activeServices.map((service) => (
-                        <tr key={service.id} className="text-slate-300">
-                          <td className="py-3">
-                            <Link
-                              to={`/services/${service.id}`}
-                              className="text-white hover:text-primary-400"
-                            >
-                              {service.name}
-                            </Link>
-                          </td>
-                          <td className="py-3 font-mono text-sm">
-                            {service.containerName}
-                          </td>
-                          <td className="py-3 font-mono text-sm">
-                            {service.imageName.split('/').pop()}:{service.imageTag}
-                          </td>
-                          <td className="py-3">
-                            <span
-                              className={`badge ${
-                                service.status === 'running' || service.status === 'healthy'
-                                  ? 'badge-success'
-                                  : service.status === 'stopped'
-                                  ? 'badge-error'
-                                  : 'badge-warning'
-                              }`}
-                            >
-                              {service.status}
-                            </span>
-                          </td>
-                          <td className="py-3 text-right">
-                            <Link
-                              to={`/services/${service.id}`}
-                              className="text-primary-400 hover:text-primary-300 text-sm"
-                            >
-                              View
-                            </Link>
-                          </td>
-                        </tr>
-                      ))}
+                      {activeServices.map((service) => {
+                        const ports = parseExposedPorts(service.exposedPorts);
+                        return (
+                          <tr key={service.id} className="text-slate-300">
+                            <td className="py-3">
+                              <Link
+                                to={`/services/${service.id}`}
+                                className="text-white hover:text-primary-400"
+                              >
+                                {service.name}
+                              </Link>
+                            </td>
+                            <td className="py-3 font-mono text-sm">
+                              {service.containerName}
+                            </td>
+                            <td className="py-3 font-mono text-sm">
+                              {service.imageName.split('/').pop()}:{service.imageTag}
+                            </td>
+                            <td className="py-3 font-mono text-sm text-slate-400">
+                              {formatPorts(ports)}
+                            </td>
+                            <td className="py-3">
+                              <span className={`badge ${getContainerStatusColor(service.containerStatus || service.status)}`}>
+                                {service.containerStatus || service.status}
+                              </span>
+                            </td>
+                            <td className="py-3">
+                              <span className={`badge ${getHealthStatusColor(service.healthStatus || 'unknown')}`}>
+                                {service.healthStatus || 'unknown'}
+                              </span>
+                            </td>
+                            <td className="py-3 text-right">
+                              <Link
+                                to={`/services/${service.id}`}
+                                className="text-primary-400 hover:text-primary-300 text-sm"
+                              >
+                                View
+                              </Link>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -755,6 +811,7 @@ export default function ServerDetail() {
                         <th className="pb-3 font-medium">Name</th>
                         <th className="pb-3 font-medium">Container</th>
                         <th className="pb-3 font-medium">Image</th>
+                        <th className="pb-3 font-medium">Status</th>
                         <th className="pb-3 font-medium">Last Seen</th>
                         <th className="pb-3 font-medium"></th>
                       </tr>
@@ -775,6 +832,11 @@ export default function ServerDetail() {
                           </td>
                           <td className="py-3 font-mono text-sm">
                             {service.imageName.split('/').pop()}:{service.imageTag}
+                          </td>
+                          <td className="py-3">
+                            <span className={`badge ${getContainerStatusColor(service.containerStatus || 'not_found')}`}>
+                              {service.containerStatus || 'not_found'}
+                            </span>
                           </td>
                           <td className="py-3">
                             {service.lastDiscoveredAt

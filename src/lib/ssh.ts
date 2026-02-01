@@ -340,6 +340,66 @@ export class DockerSSH {
     };
   }
 
+  async getContainerInfo(containerName: string): Promise<{
+    state: string;
+    running: boolean;
+    health?: string;
+    ports: Array<{ host: number | null; container: number; protocol: string }>;
+    image: string;
+  }> {
+    // Get comprehensive container info: state, health, ports, and image
+    // Format: state|running|health|image|ports_json
+    // Ports come from NetworkSettings.Ports which is a map like {"80/tcp":[{"HostIp":"0.0.0.0","HostPort":"8080"}]}
+    const { stdout, code } = await this.client.exec(
+      this.pathPrefix + `docker inspect --format '{{.State.Status}}|{{.State.Running}}|{{.State.Health.Status}}|{{.Config.Image}}|{{json .NetworkSettings.Ports}}' ${containerName} 2>/dev/null || echo "not_found|false|||{}"`
+    );
+
+    if (code !== 0 || stdout.includes('not_found')) {
+      return { state: 'not_found', running: false, ports: [], image: '' };
+    }
+
+    const parts = stdout.trim().split('|');
+    const state = parts[0] || 'unknown';
+    const running = parts[1] === 'true';
+    const healthRaw = parts[2];
+    const health = healthRaw && healthRaw !== '' && healthRaw !== '<no value>' ? healthRaw : undefined;
+    const image = parts[3] || '';
+    const portsJson = parts.slice(4).join('|'); // Rejoin in case image contains |
+
+    // Parse ports from Docker's NetworkSettings.Ports format
+    const ports: Array<{ host: number | null; container: number; protocol: string }> = [];
+    try {
+      const portsData = JSON.parse(portsJson || '{}');
+      // portsData looks like: {"80/tcp":[{"HostIp":"0.0.0.0","HostPort":"8080"}], "443/tcp": null}
+      for (const [containerPort, bindings] of Object.entries(portsData)) {
+        const [portStr, protocol] = containerPort.split('/');
+        const containerPortNum = parseInt(portStr, 10);
+
+        if (Array.isArray(bindings) && bindings.length > 0) {
+          // Port is bound to host
+          for (const binding of bindings as Array<{ HostIp: string; HostPort: string }>) {
+            ports.push({
+              host: binding.HostPort ? parseInt(binding.HostPort, 10) : null,
+              container: containerPortNum,
+              protocol: protocol || 'tcp',
+            });
+          }
+        } else {
+          // Port exposed but not bound to host
+          ports.push({
+            host: null,
+            container: containerPortNum,
+            protocol: protocol || 'tcp',
+          });
+        }
+      }
+    } catch {
+      // If parsing fails, return empty ports
+    }
+
+    return { state, running, health, ports, image };
+  }
+
   async checkUrl(url: string, timeoutSeconds: number = 5): Promise<{
     success: boolean;
     statusCode?: number;

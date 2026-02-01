@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   getService,
@@ -20,6 +20,7 @@ import {
   checkServiceUpdates,
   listRegistryConnections,
   getAuditLogs,
+  getServiceHistory,
   type ServiceWithServer,
   type Deployment,
   type EnvTemplate,
@@ -28,10 +29,51 @@ import {
   type SyncResult,
   type RegistryConnection,
   type AuditLog,
+  type ExposedPort,
+  type ServiceHistoryEntry,
 } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { useToast } from '../components/Toast';
 import { formatDistanceToNow, format } from 'date-fns';
+
+function parseExposedPorts(portsJson: string | null): ExposedPort[] {
+  if (!portsJson) return [];
+  try {
+    return JSON.parse(portsJson);
+  } catch {
+    return [];
+  }
+}
+
+function getContainerStatusColor(status: string): string {
+  switch (status) {
+    case 'running':
+      return 'badge-success';
+    case 'stopped':
+    case 'exited':
+    case 'dead':
+      return 'badge-error';
+    case 'restarting':
+    case 'paused':
+    case 'created':
+      return 'badge-warning';
+    default:
+      return 'badge-warning';
+  }
+}
+
+function getHealthStatusColor(status: string): string {
+  switch (status) {
+    case 'healthy':
+      return 'badge-success';
+    case 'unhealthy':
+      return 'badge-error';
+    case 'none':
+      return 'bg-slate-600 text-slate-300';
+    default:
+      return 'badge-warning';
+  }
+}
 
 export default function ServiceDetail() {
   const { id } = useParams<{ id: string }>();
@@ -91,11 +133,24 @@ export default function ServiceDetail() {
   const [healthCheckError, setHealthCheckError] = useState<string | null>(null);
   const [healthCheckResult, setHealthCheckResult] = useState<{
     status: string;
+    containerStatus: string;
+    healthStatus: string;
     container: { state: string; status: string; health?: string; running: boolean };
     url: { success: boolean; statusCode?: number; error?: string } | null;
+    exposedPorts: ExposedPort[];
   } | null>(null);
   const [healthCheckHistory, setHealthCheckHistory] = useState<AuditLog[]>([]);
   const [expandedDeployment, setExpandedDeployment] = useState<string | null>(null);
+
+  // Inline name editing state
+  const [editingName, setEditingName] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [savingName, setSavingName] = useState(false);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+
+  // Action history state
+  const [actionHistory, setActionHistory] = useState<ServiceHistoryEntry[]>([]);
+  const [showAllHistory, setShowAllHistory] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -110,6 +165,7 @@ export default function ServiceDetail() {
         listServiceFiles(id).then(({ files }) => setAttachedFiles(files)),
         getAuditLogs({ resourceType: 'service', resourceId: id, action: 'health_check', limit: 10 })
           .then(({ logs }) => setHealthCheckHistory(logs)),
+        getServiceHistory(id, 20).then(({ logs }) => setActionHistory(logs)),
       ]).finally(() => setLoading(false));
     }
   }, [id]);
@@ -163,6 +219,46 @@ export default function ServiceDetail() {
     }
   };
 
+  const startEditingName = () => {
+    if (service) {
+      setEditName(service.name);
+      setEditingName(true);
+      setTimeout(() => nameInputRef.current?.focus(), 0);
+    }
+  };
+
+  const cancelEditingName = () => {
+    setEditingName(false);
+    setEditName('');
+  };
+
+  const saveEditName = async () => {
+    if (!id || !service || !editName.trim() || editName === service.name) {
+      cancelEditingName();
+      return;
+    }
+    setSavingName(true);
+    try {
+      const { service: updated } = await updateService(id, { name: editName.trim() });
+      setService((prev) => (prev ? { ...prev, name: updated.name } : null));
+      setEditingName(false);
+      toast.success('Service name updated');
+    } catch (error) {
+      toast.error('Failed to update service name');
+    } finally {
+      setSavingName(false);
+    }
+  };
+
+  const handleNameKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      saveEditName();
+    } else if (e.key === 'Escape') {
+      cancelEditingName();
+    }
+  };
+
   const handleDeploy = async () => {
     if (!id) return;
     setDeploying(true);
@@ -213,22 +309,40 @@ export default function ServiceDetail() {
     try {
       const result = await checkServiceHealth(id);
       setService((prev) =>
-        prev ? { ...prev, status: result.status, lastCheckedAt: result.lastCheckedAt } : null
+        prev ? {
+          ...prev,
+          status: result.status,
+          containerStatus: result.containerStatus,
+          healthStatus: result.healthStatus,
+          exposedPorts: JSON.stringify(result.exposedPorts),
+          imageTag: result.imageTag,
+          lastCheckedAt: result.lastCheckedAt,
+        } : null
       );
+      setImageTag(result.imageTag);
       setHealthCheckResult({
         status: result.status,
+        containerStatus: result.containerStatus,
+        healthStatus: result.healthStatus,
         container: result.container,
         url: result.url,
+        exposedPorts: result.exposedPorts,
       });
-      // Refresh health check history
-      getAuditLogs({ resourceType: 'service', resourceId: id, action: 'health_check', limit: 10 })
-        .then(({ logs }) => setHealthCheckHistory(logs));
+      // Refresh health check history and action history
+      Promise.all([
+        getAuditLogs({ resourceType: 'service', resourceId: id, action: 'health_check', limit: 10 })
+          .then(({ logs }) => setHealthCheckHistory(logs)),
+        getServiceHistory(id, 20).then(({ logs }) => setActionHistory(logs)),
+      ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Health check failed';
       setHealthCheckError(message);
       // Still refresh history to show the failed attempt
-      getAuditLogs({ resourceType: 'service', resourceId: id, action: 'health_check', limit: 10 })
-        .then(({ logs }) => setHealthCheckHistory(logs));
+      Promise.all([
+        getAuditLogs({ resourceType: 'service', resourceId: id, action: 'health_check', limit: 10 })
+          .then(({ logs }) => setHealthCheckHistory(logs)),
+        getServiceHistory(id, 20).then(({ logs }) => setActionHistory(logs)),
+      ]);
     } finally {
       setChecking(false);
     }
@@ -416,20 +530,44 @@ export default function ServiceDetail() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <div className="flex items-center gap-3">
-            <span
-              className={`badge ${
-                service.discoveryStatus === 'missing'
-                  ? 'badge-warning'
-                  : service.status === 'running' || service.status === 'healthy'
-                  ? 'badge-success'
-                  : service.status === 'stopped'
-                  ? 'badge-error'
-                  : 'badge-warning'
-              }`}
-            >
-              {service.discoveryStatus === 'missing' ? 'missing' : service.status}
+            {/* Container Status Badge */}
+            <span className={`badge ${getContainerStatusColor(service.containerStatus || service.status)}`}>
+              {service.containerStatus || service.status}
             </span>
-            <h1 className="text-2xl font-bold text-white">{service.name}</h1>
+            {/* Health Status Badge */}
+            <span className={`badge ${getHealthStatusColor(service.healthStatus || 'unknown')}`}>
+              {service.healthStatus || 'unknown'}
+            </span>
+            {/* Inline Editable Name */}
+            {editingName ? (
+              <div className="flex items-center gap-2">
+                <input
+                  ref={nameInputRef}
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  onKeyDown={handleNameKeyDown}
+                  onBlur={saveEditName}
+                  disabled={savingName}
+                  className="text-2xl font-bold bg-slate-800 text-white border border-primary-500 rounded px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  style={{ minWidth: '200px' }}
+                />
+                {savingName && (
+                  <span className="text-sm text-slate-400">Saving...</span>
+                )}
+              </div>
+            ) : (
+              <h1
+                className="text-2xl font-bold text-white cursor-pointer hover:text-primary-400 group flex items-center gap-2"
+                onClick={startEditingName}
+                title="Click to edit service name"
+              >
+                {service.name}
+                <svg className="w-4 h-4 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                </svg>
+              </h1>
+            )}
           </div>
           <p className="text-slate-400 mt-1">
             on{' '}
@@ -626,6 +764,31 @@ export default function ServiceDetail() {
             <div>
               <dt className="text-slate-400">Container</dt>
               <dd className="text-white font-mono">{service.containerName}</dd>
+            </div>
+            {/* Exposed Ports */}
+            <div>
+              <dt className="text-slate-400">Ports</dt>
+              <dd className="text-white">
+                {(() => {
+                  const ports = parseExposedPorts(service.exposedPorts);
+                  if (ports.length === 0) {
+                    return <span className="text-slate-500">No ports exposed</span>;
+                  }
+                  return (
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                      {ports.map((port, i) => (
+                        <span
+                          key={i}
+                          className="px-2 py-0.5 bg-slate-700 rounded text-xs font-mono"
+                          title={`${port.protocol.toUpperCase()}`}
+                        >
+                          {port.host ? `${port.host}:${port.container}` : port.container}
+                        </span>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </dd>
             </div>
             <div>
               <dt className="text-slate-400">Env Template</dt>
@@ -951,6 +1114,99 @@ export default function ServiceDetail() {
           </div>
         ) : (
           <p className="text-slate-400">No health checks recorded yet</p>
+        )}
+      </div>
+
+      {/* Action History */}
+      <div className="card mt-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-white">Action History</h3>
+          {actionHistory.length > 5 && (
+            <button
+              onClick={() => setShowAllHistory(!showAllHistory)}
+              className="text-sm text-primary-400 hover:text-primary-300"
+            >
+              {showAllHistory ? 'Show Less' : `Show All (${actionHistory.length})`}
+            </button>
+          )}
+        </div>
+        {actionHistory.length > 0 ? (
+          <div className="space-y-2">
+            {(showAllHistory ? actionHistory : actionHistory.slice(0, 5)).map((log) => {
+              const details = log.details ? JSON.parse(log.details) : null;
+              return (
+                <div
+                  key={log.id}
+                  className={`flex items-center justify-between p-3 rounded-lg ${
+                    log.success ? 'bg-slate-800/50' : 'bg-red-500/10'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    {/* Action icon */}
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                      log.action === 'deploy' ? 'bg-blue-500/20 text-blue-400' :
+                      log.action === 'restart' ? 'bg-yellow-500/20 text-yellow-400' :
+                      log.action === 'health_check' ? 'bg-green-500/20 text-green-400' :
+                      log.action === 'update' ? 'bg-purple-500/20 text-purple-400' :
+                      'bg-slate-600 text-slate-400'
+                    }`}>
+                      {log.action === 'deploy' && (
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                        </svg>
+                      )}
+                      {log.action === 'restart' && (
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                      )}
+                      {log.action === 'health_check' && (
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      )}
+                      {log.action === 'update' && (
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                      )}
+                      {log.action === 'create' && (
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                        </svg>
+                      )}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-white font-medium capitalize">{log.action.replace('_', ' ')}</span>
+                        {!log.success && (
+                          <span className="badge badge-error text-xs">failed</span>
+                        )}
+                        {log.action === 'deploy' && details?.imageTag && (
+                          <span className="text-xs text-primary-400 font-mono">{details.imageTag}</span>
+                        )}
+                        {log.action === 'health_check' && details?.status && (
+                          <span className={`badge text-xs ${getHealthStatusColor(details.healthStatus || details.status)}`}>
+                            {details.healthStatus || details.status}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-slate-400">
+                        {log.user?.email || 'System'} • {format(new Date(log.createdAt), 'MMM d, HH:mm')}
+                      </div>
+                    </div>
+                  </div>
+                  {log.error && (
+                    <div className="text-xs text-red-400 max-w-xs truncate" title={log.error}>
+                      {log.error}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-slate-400">No actions recorded yet</p>
         )}
       </div>
 

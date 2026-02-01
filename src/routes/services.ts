@@ -455,7 +455,7 @@ export async function serviceRoutes(fastify: FastifyInstance) {
     }
   );
 
-  // Health check service
+  // Health check service - comprehensive refresh of all service info
   fastify.post(
     '/api/services/:id/health',
     { preHandler: [fastify.authenticate] },
@@ -492,8 +492,8 @@ export async function serviceRoutes(fastify: FastifyInstance) {
       try {
         await client.connect();
 
-        // Check container health
-        const containerHealth = await docker.getContainerHealth(service.containerName);
+        // Get comprehensive container info (state, health, ports, image)
+        const containerInfo = await docker.getContainerInfo(service.containerName);
 
         // Check URL health if configured
         let urlHealth: { success: boolean; statusCode?: number; error?: string } | null = null;
@@ -501,43 +501,88 @@ export async function serviceRoutes(fastify: FastifyInstance) {
           urlHealth = await docker.checkUrl(service.healthCheckUrl);
         }
 
-        // Determine overall status
+        // Determine container status
+        const containerStatus = containerInfo.state;
+
+        // Determine health status
+        let healthStatus: string;
+        if (!containerInfo.running) {
+          healthStatus = 'unknown';
+        } else if (containerInfo.health === 'healthy') {
+          healthStatus = 'healthy';
+        } else if (containerInfo.health === 'unhealthy') {
+          healthStatus = 'unhealthy';
+        } else if (urlHealth) {
+          // No Docker HEALTHCHECK, but we have URL check
+          healthStatus = urlHealth.success ? 'healthy' : 'unhealthy';
+        } else if (!containerInfo.health) {
+          // No HEALTHCHECK and no URL configured
+          healthStatus = 'none';
+        } else {
+          healthStatus = 'unknown';
+        }
+
+        // Determine overall status (for backwards compatibility)
         let status: string;
-        if (!containerHealth.running) {
-          status = containerHealth.state === 'not_found' ? 'not_found' : 'stopped';
-        } else if (containerHealth.health === 'unhealthy') {
+        if (!containerInfo.running) {
+          status = containerInfo.state === 'not_found' ? 'not_found' : 'stopped';
+        } else if (healthStatus === 'unhealthy') {
           status = 'unhealthy';
-        } else if (urlHealth && !urlHealth.success) {
-          status = 'unhealthy';
-        } else if (containerHealth.health === 'healthy' || (urlHealth && urlHealth.success)) {
+        } else if (healthStatus === 'healthy') {
           status = 'healthy';
         } else {
           status = 'running';
         }
 
-        // Update service status in database
+        // Serialize ports to JSON
+        const exposedPorts = containerInfo.ports.length > 0
+          ? JSON.stringify(containerInfo.ports)
+          : null;
+
+        // Extract current image tag from running container
+        const currentImageTag = containerInfo.image ? containerInfo.image.split(':')[1] || service.imageTag : service.imageTag;
+
+        // Update service with all refreshed data
         await prisma.service.update({
           where: { id },
           data: {
             status,
+            containerStatus,
+            healthStatus,
+            exposedPorts,
+            imageTag: currentImageTag,
+            discoveryStatus: containerInfo.state === 'not_found' ? 'missing' : 'found',
             lastCheckedAt: new Date(),
+            lastDiscoveredAt: containerInfo.state !== 'not_found' ? new Date() : service.lastDiscoveredAt,
           },
         });
+
+        // Build container health response for compatibility
+        const containerHealth = {
+          state: containerInfo.state,
+          status: containerInfo.running ? 'Running' : `Container is ${containerInfo.state}`,
+          health: containerInfo.health,
+          running: containerInfo.running,
+        };
 
         await logAudit({
           action: 'health_check',
           resourceType: 'service',
           resourceId: id,
           resourceName: service.name,
-          details: { status, containerHealth, urlHealth },
+          details: { status, containerStatus, healthStatus, containerHealth, urlHealth, exposedPorts },
           userId: request.authUser!.id,
           environmentId: service.server.environmentId,
         });
 
         return {
           status,
+          containerStatus,
+          healthStatus,
           container: containerHealth,
           url: urlHealth,
+          exposedPorts: containerInfo.ports,
+          imageTag: currentImageTag,
           lastCheckedAt: new Date().toISOString(),
         };
       } catch (error) {
@@ -548,6 +593,8 @@ export async function serviceRoutes(fastify: FastifyInstance) {
           where: { id },
           data: {
             status: 'unknown',
+            containerStatus: 'unknown',
+            healthStatus: 'unknown',
             lastCheckedAt: new Date(),
           },
         });
@@ -567,6 +614,58 @@ export async function serviceRoutes(fastify: FastifyInstance) {
       } finally {
         client.disconnect();
       }
+    }
+  );
+
+  // Get service action history
+  fastify.get(
+    '/api/services/:id/history',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const { limit } = request.query as { limit?: string };
+
+      const service = await prisma.service.findUnique({
+        where: { id },
+        include: { server: true },
+      });
+
+      if (!service) {
+        return reply.code(404).send({ error: 'Service not found' });
+      }
+
+      // Get audit logs for this service (deploy, restart, health_check actions)
+      const logs = await prisma.auditLog.findMany({
+        where: {
+          resourceType: 'service',
+          resourceId: id,
+          action: { in: ['deploy', 'restart', 'health_check', 'update', 'create'] },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: limit ? parseInt(limit, 10) : 50,
+        include: {
+          user: {
+            select: { id: true, email: true, name: true },
+          },
+        },
+      });
+
+      // Also get deployments for this service
+      const deployments = await prisma.deployment.findMany({
+        where: { serviceId: id },
+        orderBy: { startedAt: 'desc' },
+        take: limit ? parseInt(limit, 10) : 20,
+        select: {
+          id: true,
+          imageTag: true,
+          status: true,
+          triggeredBy: true,
+          startedAt: true,
+          completedAt: true,
+        },
+      });
+
+      return { logs, deployments };
     }
   );
 

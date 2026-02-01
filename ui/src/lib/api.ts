@@ -216,10 +216,38 @@ export const deleteService = (id: string) =>
 export const checkServiceHealth = (id: string) =>
   api.post<{
     status: string;
+    containerStatus: string;
+    healthStatus: string;
     container: { state: string; status: string; health?: string; running: boolean };
     url: { success: boolean; statusCode?: number; error?: string } | null;
+    exposedPorts: ExposedPort[];
+    imageTag: string;
     lastCheckedAt: string;
   }>(`/services/${id}/health`);
+
+export interface ServiceHistoryEntry {
+  id: string;
+  action: string;
+  details: string | null;
+  success: boolean;
+  error: string | null;
+  createdAt: string;
+  user: { id: string; email: string; name: string | null } | null;
+}
+
+export interface ServiceDeploymentSummary {
+  id: string;
+  imageTag: string;
+  status: string;
+  triggeredBy: string;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+export const getServiceHistory = (id: string, limit?: number) =>
+  api.get<{ logs: ServiceHistoryEntry[]; deployments: ServiceDeploymentSummary[] }>(
+    `/services/${id}/history${limit ? `?limit=${limit}` : ''}`
+  );
 
 export const getServiceLogs = (id: string, tail?: number) =>
   api.get<{ logs: string }>(`/services/${id}/logs${tail ? `?tail=${tail}` : ''}`);
@@ -281,6 +309,12 @@ export interface ServerWithServices extends Server {
   services: Service[];
 }
 
+export interface ExposedPort {
+  host: number | null;
+  container: number;
+  protocol: 'tcp' | 'udp';
+}
+
 export interface Service {
   id: string;
   name: string;
@@ -291,6 +325,9 @@ export interface Service {
   envTemplateName: string | null;
   healthCheckUrl: string | null;
   status: string;
+  containerStatus: string; // running, stopped, exited, created, restarting, paused, dead, not_found
+  healthStatus: string; // healthy, unhealthy, unknown, none
+  exposedPorts: string | null; // JSON array of ExposedPort
   discoveryStatus: string; // 'found' | 'missing'
   lastCheckedAt: string | null;
   lastDiscoveredAt: string | null;
