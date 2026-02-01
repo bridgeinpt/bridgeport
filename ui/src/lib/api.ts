@@ -462,6 +462,15 @@ export const getAuditLogs = (filters: AuditLogFilters = {}) => {
 };
 
 // Config Files
+export interface ConfigFileServiceAttachment {
+  targetPath: string;
+  service: {
+    id: string;
+    name: string;
+    server: { id: string; name: string };
+  };
+}
+
 export interface ConfigFile {
   id: string;
   name: string;
@@ -472,6 +481,7 @@ export interface ConfigFile {
   updatedAt: string;
   environmentId: string;
   _count?: { services: number };
+  services?: ConfigFileServiceAttachment[];
 }
 
 export interface ConfigFileInput {

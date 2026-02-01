@@ -43,6 +43,18 @@ export async function configFileRoutes(fastify: FastifyInstance) {
           createdAt: true,
           updatedAt: true,
           _count: { select: { services: true } },
+          services: {
+            select: {
+              targetPath: true,
+              service: {
+                select: {
+                  id: true,
+                  name: true,
+                  server: { select: { id: true, name: true } },
+                },
+              },
+            },
+          },
         },
         orderBy: { name: 'asc' },
       });

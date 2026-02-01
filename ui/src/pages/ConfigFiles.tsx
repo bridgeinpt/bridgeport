@@ -8,21 +8,21 @@ import {
   deleteConfigFile,
   getConfigFileHistory,
   restoreConfigFile,
-  listServers,
   type ConfigFile,
   type FileHistoryEntry,
-  type Server,
 } from '../lib/api';
 import { formatDistanceToNow, format } from 'date-fns';
 
-interface ConfigFileWithServers extends ConfigFile {
-  servers?: string[]; // Derived from services
+interface ServiceOption {
+  id: string;
+  name: string;
+  serverName: string;
 }
 
 export default function ConfigFiles() {
   const { selectedEnvironment } = useAppStore();
-  const [configFiles, setConfigFiles] = useState<ConfigFileWithServers[]>([]);
-  const [servers, setServers] = useState<Server[]>([]);
+  const [configFiles, setConfigFiles] = useState<ConfigFile[]>([]);
+  const [allServices, setAllServices] = useState<ServiceOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState('');
@@ -38,8 +38,8 @@ export default function ConfigFiles() {
   const [history, setHistory] = useState<FileHistoryEntry[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [selectedHistoryEntry, setSelectedHistoryEntry] = useState<FileHistoryEntry | null>(null);
+  const [attachedFilter, setAttachedFilter] = useState<boolean>(false);
   const [serviceFilter, setServiceFilter] = useState<string>('');
-  const [serverFilter, setServerFilter] = useState<string>('');
 
   useEffect(() => {
     if (selectedEnvironment?.id) {
@@ -51,12 +51,27 @@ export default function ConfigFiles() {
     if (!selectedEnvironment?.id) return;
     setLoading(true);
     try {
-      const [configFilesRes, serversRes] = await Promise.all([
-        listConfigFiles(selectedEnvironment.id),
-        listServers(selectedEnvironment.id),
-      ]);
+      const configFilesRes = await listConfigFiles(selectedEnvironment.id);
       setConfigFiles(configFilesRes.configFiles);
-      setServers(serversRes.servers);
+
+      // Build unique service options from config file attachments
+      const serviceMap = new Map<string, ServiceOption>();
+      for (const cf of configFilesRes.configFiles) {
+        for (const sf of cf.services || []) {
+          if (!serviceMap.has(sf.service.id)) {
+            serviceMap.set(sf.service.id, {
+              id: sf.service.id,
+              name: sf.service.name,
+              serverName: sf.service.server.name,
+            });
+          }
+        }
+      }
+      // Sort by server name then service name
+      const serviceOptions = Array.from(serviceMap.values()).sort((a, b) =>
+        `${a.serverName}/${a.name}`.localeCompare(`${b.serverName}/${b.name}`)
+      );
+      setAllServices(serviceOptions);
     } finally {
       setLoading(false);
     }
@@ -141,12 +156,17 @@ export default function ConfigFiles() {
   };
 
   // Filter config files based on filters
-  // Note: For server filtering, we need to fetch the file details to know which servers it's attached to
-  // For now, we filter based on service count and allow viewing individual files to see server assignments
   const filteredConfigFiles = configFiles.filter((f) => {
-    // Service attachment filter
-    if (serviceFilter && (!f._count || f._count.services === 0)) {
+    // "Only attached" filter
+    if (attachedFilter && (!f._count || f._count.services === 0)) {
       return false;
+    }
+    // Service filter - check if this config file is attached to the selected service
+    if (serviceFilter) {
+      const isAttached = f.services?.some((sf) => sf.service.id === serviceFilter);
+      if (!isAttached) {
+        return false;
+      }
     }
     return true;
   });
@@ -345,20 +365,15 @@ export default function ConfigFiles() {
               <div className="mb-4 p-3 bg-slate-800/50 rounded-lg">
                 <p className="text-sm text-slate-400 mb-2">Attached to services:</p>
                 <div className="space-y-1">
-                  {viewingFile.services
-                    .filter((sf) => !serverFilter || sf.service.server.id === serverFilter)
-                    .map((sf) => (
-                      <div key={sf.service.id} className="text-sm">
-                        <span className="text-white">{sf.service.server.name}</span>
-                        <span className="text-slate-500"> / </span>
-                        <span className="text-primary-400">{sf.service.name}</span>
-                        <span className="text-slate-500"> → </span>
-                        <code className="text-green-400 text-xs">{sf.targetPath}</code>
-                      </div>
-                    ))}
-                  {serverFilter && viewingFile.services.filter((sf) => sf.service.server.id === serverFilter).length === 0 && (
-                    <p className="text-sm text-slate-500">Not attached to any services on this server</p>
-                  )}
+                  {viewingFile.services.map((sf) => (
+                    <div key={sf.service.id} className="text-sm">
+                      <span className="text-white">{sf.service.server.name}</span>
+                      <span className="text-slate-500"> / </span>
+                      <span className="text-primary-400">{sf.service.name}</span>
+                      <span className="text-slate-500"> → </span>
+                      <code className="text-green-400 text-xs">{sf.targetPath}</code>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -491,24 +506,24 @@ export default function ConfigFiles() {
         <label className="flex items-center gap-2 text-sm text-slate-400">
           <input
             type="checkbox"
-            checked={!!serviceFilter}
-            onChange={(e) => setServiceFilter(e.target.checked ? 'attached' : '')}
+            checked={attachedFilter}
+            onChange={(e) => setAttachedFilter(e.target.checked)}
             className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-primary-600 focus:ring-primary-500"
           />
           Only show files attached to services
         </label>
-        {servers.length > 0 && (
+        {allServices.length > 0 && (
           <div className="flex items-center gap-2">
-            <span className="text-sm text-slate-400">Server:</span>
+            <span className="text-sm text-slate-400">Service:</span>
             <select
-              value={serverFilter}
-              onChange={(e) => setServerFilter(e.target.value)}
+              value={serviceFilter}
+              onChange={(e) => setServiceFilter(e.target.value)}
               className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white"
             >
-              <option value="">All Servers</option>
-              {servers.map((server) => (
-                <option key={server.id} value={server.id}>
-                  {server.name}
+              <option value="">All Services</option>
+              {allServices.map((service) => (
+                <option key={service.id} value={service.id}>
+                  {service.serverName} / {service.name}
                 </option>
               ))}
             </select>
@@ -588,10 +603,13 @@ export default function ConfigFiles() {
           <div className="col-span-full card text-center py-12">
             <p className="text-slate-400">No config files match the filter</p>
             <button
-              onClick={() => setServiceFilter('')}
+              onClick={() => {
+                setAttachedFilter(false);
+                setServiceFilter('');
+              }}
               className="btn btn-ghost mt-4"
             >
-              Clear Filter
+              Clear Filters
             </button>
           </div>
         )}
