@@ -1,3 +1,4 @@
+import path from 'path';
 import { prisma } from '../lib/db.js';
 import { SSHClient, LocalClient, DockerSSH, isLocalhost, type CommandClient } from '../lib/ssh.js';
 import { registryClient } from '../lib/registry.js';
@@ -80,9 +81,9 @@ export async function deployService(
     await client.connect();
     log(`Connected to ${service.server.name} (${service.server.hostname})`);
 
-    // Determine deploy directory (strip filename and trailing slash)
+    // Determine deploy directory (use path.dirname to properly handle any path)
     const deployDir = service.composePath
-      ? service.composePath.replace(/\/[^/]+$/, '')
+      ? path.dirname(service.composePath)
       : `/opt/${service.name}`;
 
     await client.exec(`mkdir -p ${deployDir}`);
