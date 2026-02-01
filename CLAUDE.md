@@ -8,6 +8,7 @@ A lightweight, self-hosted deployment management tool for Docker-based infrastru
 - **Frontend**: React, Vite, Tailwind CSS
 - **Database**: SQLite with Prisma ORM
 - **Encryption**: XChaCha20-Poly1305 for secrets
+- **Monitoring Agent**: Go
 
 ## Project Structure
 
@@ -19,15 +20,40 @@ bridgeport/
 │   │   ├── config.ts         # Environment configuration
 │   │   ├── crypto.ts         # Encryption utilities
 │   │   ├── db.ts             # Prisma client
-│   │   └── ssh.ts            # SSH client wrapper
+│   │   ├── ssh.ts            # SSH client wrapper
+│   │   └── scheduler.ts      # Background job scheduler
 │   ├── routes/               # API routes
-│   └── services/             # Business logic
+│   │   ├── auth.ts           # Authentication
+│   │   ├── users.ts          # User management (RBAC)
+│   │   ├── environments.ts   # Environment settings
+│   │   ├── servers.ts        # Server management
+│   │   ├── services.ts       # Container management
+│   │   ├── secrets.ts        # Secret management + env templates
+│   │   ├── config-files.ts   # Config files with history
+│   │   ├── registries.ts     # Registry connections
+│   │   ├── databases.ts      # Database backup management
+│   │   ├── metrics.ts        # Server/service metrics
+│   │   ├── audit.ts          # Audit logs
+│   │   └── webhooks.ts       # CI/CD webhooks
+│   ├── services/             # Business logic
+│   │   ├── metrics.ts        # SSH metrics collection
+│   │   └── database-backup.ts # Backup execution
+│   └── plugins/              # Fastify plugins
+│       ├── authenticate.ts   # JWT authentication
+│       └── authorize.ts      # RBAC middleware
 ├── ui/                       # Frontend (React + Vite)
 │   ├── src/
 │   │   ├── components/       # Reusable components
 │   │   ├── pages/            # Page components
 │   │   └── lib/              # API client, store
 │   └── public/               # Static assets
+├── bridgeport-agent/         # Go monitoring agent
+│   ├── main.go               # Agent entry point
+│   ├── collector/
+│   │   ├── system.go         # CPU, memory, disk, load
+│   │   └── docker.go         # Container metrics
+│   ├── go.mod
+│   └── Makefile
 ├── prisma/schema.prisma      # Database schema
 └── docker/                   # Docker configuration
 ```
@@ -54,6 +80,9 @@ cd ui && npm run dev
 # Build
 npm run build
 cd ui && npm run build
+
+# Build Go agent
+cd bridgeport-agent && make build-linux
 ```
 
 ## Key Patterns
@@ -68,6 +97,21 @@ export default async function (fastify: FastifyInstance) {
   });
 }
 ```
+
+### Authorization (RBAC)
+Use middleware from `src/plugins/authorize.ts`:
+
+```typescript
+import { requireAdmin, requireOperator } from '../plugins/authorize.js';
+
+// Admin only route
+fastify.post('/api/users', { preHandler: [fastify.authenticate, requireAdmin] }, handler);
+
+// Admin or Operator
+fastify.post('/api/deploy', { preHandler: [fastify.authenticate, requireOperator] }, handler);
+```
+
+Three roles: `admin` > `operator` > `viewer`
 
 ### Database Access
 Use Prisma client from `src/lib/db.ts`:
@@ -89,6 +133,14 @@ const decrypted = decrypt(encrypted);
 ### Frontend State
 Zustand stores in `ui/src/lib/store.ts`. API client in `ui/src/lib/api.ts`.
 
+Environment selection is persisted to localStorage via Zustand persist middleware.
+
+### Metrics Collection
+Two modes for server metrics:
+
+1. **SSH Polling** (`src/services/metrics.ts`): BridgePort collects via SSH
+2. **Agent Push** (`src/routes/metrics.ts`): Agent sends to `/api/metrics/ingest`
+
 ## Environment Variables
 
 Required for development:
@@ -99,9 +151,38 @@ MASTER_KEY=<openssl rand -base64 32>
 JWT_SECRET=<openssl rand -base64 32>
 ```
 
+Optional scheduler settings:
+
+```bash
+SCHEDULER_ENABLED=true
+SCHEDULER_METRICS_INTERVAL=300      # SSH metrics collection (seconds)
+SCHEDULER_BACKUP_CHECK_INTERVAL=60  # Backup schedule check (seconds)
+```
+
+## Key Models
+
+```
+User          - Authentication with role (admin/operator/viewer)
+Environment   - Logical grouping with SSH key, allowSecretReveal setting
+Server        - Physical/virtual machine with metricsMode (ssh/agent/disabled)
+Service       - Docker container
+Secret        - Encrypted key-value with neverReveal flag
+EnvTemplate   - Template for .env generation
+ConfigFile    - Synced configuration files
+FileHistory   - Edit history for config files and env templates
+Database      - Registered database for backups
+DatabaseBackup - Backup record with status
+BackupSchedule - Cron-based backup scheduling
+ServerMetrics  - Time-series server metrics
+ServiceMetrics - Time-series container metrics
+RegistryConnection - Container registry with refreshIntervalMinutes, autoLinkPattern
+```
+
 ## Important Notes
 
 - BridgePort is designed to be a **generic tool** - avoid BridgeIn-specific code
 - All secrets must be encrypted at rest
 - SSH keys are stored encrypted per-environment
 - Audit logging is required for sensitive operations
+- File edits automatically save to history for rollback
+- Agent tokens are per-server, generated when enabling agent mode

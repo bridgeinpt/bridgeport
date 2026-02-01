@@ -10,12 +10,15 @@ Created by the Engineering Team at [BridgeIn](https://bridgein.pt).
 
 - **Server Management** - Register servers, health checks, container discovery via SSH
 - **Service Management** - Deploy, restart, and monitor Docker containers
-- **Registry Connections** - Connect to container registries (DigitalOcean, Docker Hub, generic)
+- **Registry Connections** - Connect to container registries with configurable refresh intervals and auto-linking
 - **Auto-Update** - Automatic update checking and optional auto-deployment for services
-- **Config File Management** - Store and sync configuration files to servers
-- **Secret Management** - Encrypted secret storage with env template substitution
+- **Config File Management** - Store and sync configuration files to servers with edit history
+- **Secret Management** - Encrypted secret storage with env template substitution and reveal controls
+- **Database Backups** - PostgreSQL and SQLite backup management with scheduling
+- **Server Monitoring** - Real-time metrics via SSH polling or lightweight Go agent
+- **User Management** - Role-based access control (Admin, Operator, Viewer)
 - **Audit Logging** - Track all deployments and configuration changes
-- **Web UI** - Dashboard for managing deployments, viewing logs, and monitoring
+- **Web UI** - Dashboard with metrics, deployment management, and monitoring
 
 ## Quick Start
 
@@ -105,30 +108,51 @@ bridgeport/
 │   │   ├── config.ts          # Environment configuration
 │   │   ├── crypto.ts          # XChaCha20-Poly1305 encryption
 │   │   ├── db.ts              # Prisma client
-│   │   └── ssh.ts             # SSH client wrapper
-│   ├── routes/                # API routes
+│   │   ├── ssh.ts             # SSH client wrapper
+│   │   └── scheduler.ts       # Background job scheduler
+│   ├── routes/
 │   │   ├── auth.ts            # Authentication
+│   │   ├── users.ts           # User management (RBAC)
 │   │   ├── environments.ts    # Environment management
 │   │   ├── servers.ts         # Server management
 │   │   ├── services.ts        # Service/container management
 │   │   ├── secrets.ts         # Secret management
-│   │   ├── config-files.ts    # Config file management
+│   │   ├── config-files.ts    # Config file management with history
 │   │   ├── registries.ts      # Registry connection management
+│   │   ├── databases.ts       # Database backup management
+│   │   ├── metrics.ts         # Server/service metrics
 │   │   ├── audit.ts           # Audit logs
 │   │   └── webhooks.ts        # CI/CD webhooks
-│   └── services/              # Business logic
+│   ├── services/
+│   │   ├── metrics.ts         # Metrics collection logic
+│   │   └── database-backup.ts # Backup execution logic
+│   └── plugins/
+│       ├── authenticate.ts    # JWT authentication
+│       └── authorize.ts       # RBAC middleware
 ├── ui/                        # React frontend (Vite + Tailwind)
+├── bridgeport-agent/          # Go monitoring agent
 ├── prisma/schema.prisma       # Database schema
 └── docker/                    # Docker configuration
 ```
 
 ## Core Concepts
 
+### User Roles
+
+BridgePort uses a three-tier role system:
+
+| Role | Permissions |
+|------|-------------|
+| **Admin** | Full access: user management, environment creation, all operations |
+| **Operator** | Deploy, restart, manage secrets/files/databases. No user management |
+| **Viewer** | Read-only access to all resources |
+
 ### Environments
 Logical groupings of servers (e.g., staging, production). Each environment has:
 - Its own SSH key for server access
-- Isolated secrets
-- Isolated config files
+- Isolated secrets with optional reveal restrictions
+- Isolated config files and databases
+- Optional DO Spaces credentials for backups
 
 ### Servers
 Physical or virtual machines registered in an environment. BridgePort connects via SSH to:
@@ -136,6 +160,7 @@ Physical or virtual machines registered in an environment. BridgePort connects v
 - Execute deployments
 - Sync configuration files
 - Check health status
+- Collect metrics (if SSH polling enabled)
 
 ### Services
 Docker containers running on servers. For each service you can:
@@ -145,6 +170,7 @@ Docker containers running on servers. For each service you can:
 - Configure health checks
 - Attach configuration files
 - Enable auto-update from connected registries
+- View resource metrics
 
 ### Registry Connections
 Container registry connections for automatic update checking:
@@ -154,7 +180,8 @@ Container registry connections for automatic update checking:
 
 Features:
 - Encrypted credential storage
-- Periodic update checking (configurable interval)
+- Per-registry refresh intervals (default: 30 minutes)
+- Auto-link patterns for automatic service discovery
 - "Update available" notifications in UI
 - Optional auto-deployment when updates are found
 - Digest-based comparison for "latest" tag updates
@@ -162,6 +189,7 @@ Features:
 ### Config Files
 Configuration files (docker-compose.yml, nginx.conf, certificates, etc.) stored in the database and synced to servers:
 - Create and edit files in the web UI
+- **Edit history** with version tracking and restore capability
 - Attach files to services with target paths
 - One-click sync to push files to servers via SSH
 
@@ -169,6 +197,8 @@ Configuration files (docker-compose.yml, nginx.conf, certificates, etc.) stored 
 Encrypted key-value pairs for sensitive configuration:
 - Encrypted at rest with XChaCha20-Poly1305
 - Per-environment isolation
+- **Per-environment reveal control** - disable secret viewing for production
+- **Write-only secrets** - secrets that can never be revealed after creation
 - Audit logging for access
 
 ### Env Templates
@@ -179,6 +209,86 @@ API_KEY=${API_KEY}
 DEBUG=false
 ```
 
+Templates also support **edit history** with version tracking and restore.
+
+### Database Backups
+Manage PostgreSQL and SQLite database backups:
+- Register databases with encrypted credentials
+- **Manual backups** - trigger on-demand via UI
+- **Scheduled backups** - cron-based automatic backups
+- **Retention policies** - automatic cleanup of old backups
+- Backup storage on server filesystem
+- Download and restore capabilities
+
+### Server Monitoring
+Two methods for collecting server and container metrics:
+
+| Method | Description | Use Case |
+|--------|-------------|----------|
+| **SSH Polling** | BridgePort collects metrics via SSH commands | Simple setup, no agent needed |
+| **Go Agent** | Lightweight agent pushes metrics to BridgePort | Real-time, lower latency, efficient |
+
+Metrics collected:
+- CPU usage, memory usage, disk usage
+- Load averages, uptime
+- Per-container CPU and memory
+- Container restart counts
+
+## Monitoring Agent
+
+The BridgePort Agent is a lightweight Go binary that runs on monitored servers and pushes metrics to BridgePort.
+
+### Installation
+
+1. Enable agent mode for the server in BridgePort UI (Server Settings > Metrics Mode > Agent)
+2. Copy the generated agent token
+3. Install the agent on the server:
+
+```bash
+# Download the agent binary
+curl -L https://your-bridgeport/downloads/bridgeport-agent -o /usr/local/bin/bridgeport-agent
+chmod +x /usr/local/bin/bridgeport-agent
+
+# Create systemd service
+cat > /etc/systemd/system/bridgeport-agent.service << 'EOF'
+[Unit]
+Description=BridgePort Monitoring Agent
+After=network.target docker.service
+
+[Service]
+Type=simple
+Environment="BRIDGEPORT_SERVER=https://deploy.example.com"
+Environment="BRIDGEPORT_TOKEN=your-agent-token-here"
+ExecStart=/usr/local/bin/bridgeport-agent
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Enable and start
+systemctl daemon-reload
+systemctl enable bridgeport-agent
+systemctl start bridgeport-agent
+```
+
+### Agent Configuration
+
+| Flag/Env Var | Description | Default |
+|--------------|-------------|---------|
+| `-server` / `BRIDGEPORT_SERVER` | BridgePort server URL | Required |
+| `-token` / `BRIDGEPORT_TOKEN` | Agent authentication token | Required |
+| `-interval` | Collection interval | 30s |
+
+### Building the Agent
+
+```bash
+cd bridgeport-agent
+make build           # Build for current platform
+make build-linux     # Cross-compile for Linux amd64
+```
+
 ## API Reference
 
 ### Authentication
@@ -187,13 +297,21 @@ POST /api/auth/login       # Login, returns JWT
 GET  /api/auth/me          # Get current user
 ```
 
-Note: Initial admin user is created from `ADMIN_EMAIL`/`ADMIN_PASSWORD` env vars on first boot.
+### Users (Admin only)
+```bash
+GET    /api/users              # List users
+POST   /api/users              # Create user
+PATCH  /api/users/:id          # Update user
+DELETE /api/users/:id          # Delete user
+POST   /api/users/:id/password # Change password
+```
 
 ### Environments
 ```bash
 GET  /api/environments              # List environments
 POST /api/environments              # Create environment
 PUT  /api/environments/:id/ssh      # Upload SSH key
+PUT  /api/environments/:id/settings # Update settings (reveal control, Spaces creds)
 ```
 
 ### Servers
@@ -202,6 +320,7 @@ GET  /api/environments/:envId/servers           # List servers
 POST /api/environments/:envId/servers           # Create server
 POST /api/servers/:id/health                    # Health check
 POST /api/servers/:id/discover                  # Discover containers
+GET  /api/servers/:id/metrics                   # Get server metrics
 POST /api/environments/:envId/servers/import-terraform  # Import from Terraform
 ```
 
@@ -213,6 +332,7 @@ POST  /api/services/:id/deploy        # Deploy new version
 POST  /api/services/:id/restart       # Restart container
 POST  /api/services/:id/health        # Health check
 GET   /api/services/:id/logs          # Get logs
+GET   /api/services/:id/metrics       # Get container metrics
 POST  /api/services/:id/check-updates # Check for image updates
 ```
 
@@ -221,7 +341,7 @@ POST  /api/services/:id/check-updates # Check for image updates
 GET    /api/environments/:envId/registries      # List registries
 POST   /api/environments/:envId/registries      # Create registry connection
 GET    /api/registries/:id                      # Get registry details
-PATCH  /api/registries/:id                      # Update registry
+PATCH  /api/registries/:id                      # Update (incl. refresh interval, auto-link)
 DELETE /api/registries/:id                      # Delete registry
 POST   /api/registries/:id/test                 # Test connection
 GET    /api/registries/:id/repositories         # List repositories
@@ -233,8 +353,10 @@ GET    /api/registries/:id/repositories/:repo/tags  # List tags
 GET    /api/environments/:envId/config-files   # List config files
 POST   /api/environments/:envId/config-files   # Create config file
 GET    /api/config-files/:id                   # Get with content
-PATCH  /api/config-files/:id                   # Update
+PATCH  /api/config-files/:id                   # Update (saves history)
 DELETE /api/config-files/:id                   # Delete
+GET    /api/config-files/:id/history           # Get edit history
+POST   /api/config-files/:id/restore/:historyId # Restore version
 GET    /api/services/:id/files                 # List attached files
 POST   /api/services/:id/files                 # Attach file
 DELETE /api/services/:serviceId/files/:fileId  # Detach file
@@ -244,10 +366,46 @@ POST   /api/services/:id/sync-files            # Sync to server
 ### Secrets
 ```bash
 GET    /api/environments/:envId/secrets   # List secrets
-POST   /api/environments/:envId/secrets   # Create secret
-GET    /api/secrets/:id/value             # Get decrypted value
+POST   /api/environments/:envId/secrets   # Create secret (incl. neverReveal flag)
+GET    /api/secrets/:id/value             # Get decrypted value (if allowed)
 PATCH  /api/secrets/:id                   # Update
 DELETE /api/secrets/:id                   # Delete
+```
+
+### Env Templates
+```bash
+GET    /api/environments/:envId/env-templates        # List templates
+POST   /api/environments/:envId/env-templates        # Create template
+GET    /api/env-templates/:id                        # Get with content
+PATCH  /api/env-templates/:id                        # Update (saves history)
+DELETE /api/env-templates/:id                        # Delete
+GET    /api/env-templates/:id/history                # Get edit history
+POST   /api/env-templates/:id/restore/:historyId    # Restore version
+POST   /api/env-templates/:id/generate               # Generate with secrets
+```
+
+### Databases
+```bash
+GET    /api/environments/:envId/databases    # List databases
+POST   /api/environments/:envId/databases    # Register database
+GET    /api/databases/:id                    # Get database details
+PATCH  /api/databases/:id                    # Update database
+DELETE /api/databases/:id                    # Delete database
+POST   /api/databases/:id/test               # Test connection
+POST   /api/databases/:id/backup             # Trigger manual backup
+GET    /api/databases/:id/backups            # List backups
+PUT    /api/databases/:id/schedule           # Set backup schedule
+GET    /api/backups/:id/download             # Download backup file
+POST   /api/backups/:id/restore              # Restore from backup
+DELETE /api/backups/:id                      # Delete backup
+```
+
+### Metrics
+```bash
+GET  /api/servers/:id/metrics                    # Server metrics history
+GET  /api/services/:id/metrics                   # Service metrics history
+GET  /api/environments/:envId/metrics/summary    # Environment metrics summary
+POST /api/metrics/ingest                         # Agent metrics push endpoint
 ```
 
 ### Webhooks
@@ -257,27 +415,31 @@ POST /api/webhooks/deploy   # Deployment webhook for CI/CD
 
 ## Configuration
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `DATABASE_URL` | SQLite database path | Yes |
-| `MASTER_KEY` | 32-byte base64 encryption key | Yes |
-| `JWT_SECRET` | JWT signing secret | Yes |
-| `HOST` | Server host (default: 0.0.0.0) | No |
-| `PORT` | Server port (default: 3000) | No |
-| `ADMIN_EMAIL` | Initial admin email (created on first boot) | No |
-| `ADMIN_PASSWORD` | Initial admin password (min 8 chars) | No |
-| `SCHEDULER_ENABLED` | Enable periodic health checks (default: true) | No |
-| `SCHEDULER_SERVER_HEALTH_INTERVAL` | Server health check interval in seconds (default: 60) | No |
-| `SCHEDULER_SERVICE_HEALTH_INTERVAL` | Service health check interval in seconds (default: 60) | No |
-| `SCHEDULER_DISCOVERY_INTERVAL` | Container discovery interval in seconds (default: 300) | No |
-| `SCHEDULER_UPDATE_CHECK_INTERVAL` | Registry update check interval in seconds (default: 1800) | No |
+| Variable | Description | Required | Default |
+|----------|-------------|----------|---------|
+| `DATABASE_URL` | SQLite database path | Yes | - |
+| `MASTER_KEY` | 32-byte base64 encryption key | Yes | - |
+| `JWT_SECRET` | JWT signing secret | Yes | - |
+| `HOST` | Server host | No | 0.0.0.0 |
+| `PORT` | Server port | No | 3000 |
+| `ADMIN_EMAIL` | Initial admin email | No | - |
+| `ADMIN_PASSWORD` | Initial admin password (min 8 chars) | No | - |
+| `SCHEDULER_ENABLED` | Enable background jobs | No | true |
+| `SCHEDULER_SERVER_HEALTH_INTERVAL` | Server health check (seconds) | No | 60 |
+| `SCHEDULER_SERVICE_HEALTH_INTERVAL` | Service health check (seconds) | No | 60 |
+| `SCHEDULER_DISCOVERY_INTERVAL` | Container discovery (seconds) | No | 300 |
+| `SCHEDULER_UPDATE_CHECK_INTERVAL` | Registry update check (seconds) | No | 1800 |
+| `SCHEDULER_METRICS_INTERVAL` | Metrics collection (seconds) | No | 300 |
+| `SCHEDULER_BACKUP_CHECK_INTERVAL` | Backup schedule check (seconds) | No | 60 |
 
 ## Security
 
 - **Encryption**: Secrets encrypted with XChaCha20-Poly1305
 - **Authentication**: JWT tokens with bcrypt password hashing
+- **Authorization**: Role-based access control (Admin/Operator/Viewer)
 - **SSH**: Per-environment encrypted SSH keys
 - **Audit**: All sensitive actions logged
+- **Secret Reveal Control**: Per-environment and per-secret visibility restrictions
 
 ## Building
 
@@ -290,6 +452,9 @@ cd ui && npm run build
 
 # Build Docker image
 docker build -f docker/Dockerfile -t bridgeport .
+
+# Build monitoring agent
+cd bridgeport-agent && make build-linux
 ```
 
 ## License
