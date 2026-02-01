@@ -19,13 +19,23 @@ export function generateAgentToken(): string {
 
 /**
  * Get the BridgePort server URL for the agent to connect to.
- * Prefers internal URL if available.
+ * Uses AGENT_CALLBACK_URL if configured, otherwise falls back to HOST:PORT.
  */
 function getBridgePortUrl(): string {
-  // In production, use the configured host/port
-  // The agent should connect to BridgePort's internal address
-  const host = config.HOST === '0.0.0.0' ? '127.0.0.1' : config.HOST;
-  return `http://${host}:${config.PORT}`;
+  // Use explicit callback URL if configured (recommended for production)
+  if (config.AGENT_CALLBACK_URL) {
+    return config.AGENT_CALLBACK_URL;
+  }
+
+  // Fallback: construct from HOST/PORT
+  // This only works if HOST is the actual internal IP, not 0.0.0.0
+  if (config.HOST && config.HOST !== '0.0.0.0') {
+    return `http://${config.HOST}:${config.PORT}`;
+  }
+
+  // Last resort - won't work for remote servers
+  console.warn('[Agent Deploy] AGENT_CALLBACK_URL not set. Agent deployment may fail for remote servers.');
+  return `http://127.0.0.1:${config.PORT}`;
 }
 
 /**

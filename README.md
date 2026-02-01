@@ -467,6 +467,9 @@ POST /api/webhooks/deploy   # Deployment webhook for CI/CD
 | `SCHEDULER_UPDATE_CHECK_INTERVAL` | Registry update check (seconds) | No | 1800 |
 | `SCHEDULER_METRICS_INTERVAL` | Metrics collection (seconds) | No | 300 |
 | `SCHEDULER_BACKUP_CHECK_INTERVAL` | Backup schedule check (seconds) | No | 60 |
+| `AGENT_CALLBACK_URL` | Internal URL for agent to reach BridgePort | No* | - |
+
+\* Required for automatic agent deployment. Set to BridgePort's internal/VPC IP (e.g., `http://10.30.10.5:3000`).
 
 ## Security
 

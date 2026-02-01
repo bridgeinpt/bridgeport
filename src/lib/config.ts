@@ -24,6 +24,9 @@ const envSchema = z.object({
   SCHEDULER_BACKUP_CHECK_INTERVAL: z.coerce.number().default(60), // 1 minute - check for due backups
   // Metrics retention (in days)
   METRICS_RETENTION_DAYS: z.coerce.number().default(7), // Keep metrics for 7 days
+  // Internal URL for agent to connect back to BridgePort
+  // Should be the internal/VPC IP that monitored servers can reach
+  AGENT_CALLBACK_URL: z.string().optional(), // e.g., "http://10.30.10.5:3000"
 });
 
 export type Config = z.infer<typeof envSchema>;
