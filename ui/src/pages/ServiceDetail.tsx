@@ -658,9 +658,48 @@ export default function ServiceDetail() {
             )}
           </div>
           <div className="space-y-4">
+            {/* Image info */}
+            <div className="grid grid-cols-2 gap-4 p-3 bg-slate-800/50 rounded-lg">
+              <div>
+                <dt className="text-xs text-slate-500 uppercase tracking-wide">Image Name</dt>
+                <dd className="text-white font-mono text-sm mt-0.5">
+                  {service.imageName || <span className="text-slate-500 italic">Not set</span>}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-slate-500 uppercase tracking-wide">Image Tag</dt>
+                <dd className="text-white font-mono text-sm mt-0.5">
+                  {service.imageTag || <span className="text-slate-500 italic">Not set</span>}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-slate-500 uppercase tracking-wide">Registry</dt>
+                <dd className="text-white text-sm mt-0.5">
+                  {(() => {
+                    const registry = registries.find(r => r.id === service.registryConnectionId);
+                    return registry ? (
+                      <span className="text-primary-400">{registry.name}</span>
+                    ) : (
+                      <span className="text-slate-500 italic">Not linked</span>
+                    );
+                  })()}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs text-slate-500 uppercase tracking-wide">Current Image</dt>
+                <dd className="text-primary-400 font-mono text-sm mt-0.5 break-all">
+                  {service.imageName && service.imageTag ? (
+                    `${service.imageName}:${service.imageTag}`
+                  ) : (
+                    <span className="text-slate-500 italic">Not configured</span>
+                  )}
+                </dd>
+              </div>
+            </div>
+
             <div>
               <label className="block text-sm text-slate-400 mb-1">
-                Image Tag
+                Deploy Tag
               </label>
               <div className="flex gap-2">
                 <input
@@ -678,12 +717,6 @@ export default function ServiceDetail() {
                   {deploying ? 'Deploying...' : 'Deploy'}
                 </button>
               </div>
-            </div>
-            <div className="text-sm text-slate-400">
-              <p>Current image:</p>
-              <code className="text-primary-400">
-                {service.imageName}:{service.imageTag}
-              </code>
             </div>
 
             {/* Auto-update toggle */}
