@@ -658,7 +658,7 @@ export const collectServerMetrics = (id: string) =>
 export const updateServerMetricsMode = (id: string, metricsMode: MetricsMode) =>
   api.patch<{ server: { id: string; name: string; metricsMode: MetricsMode; agentToken?: string } }>(
     `/servers/${id}/metrics-mode`,
-    { metricsMode }
+    { mode: metricsMode }
   );
 
 export const regenerateAgentToken = (id: string) =>
