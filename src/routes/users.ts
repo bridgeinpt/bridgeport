@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/db.js';
 import { requireAdmin, requireAdminOrSelf } from '../plugins/authorize.js';
 import { logAudit } from '../services/audit.js';

@@ -1,8 +1,10 @@
-import sodium from 'sodium-native';
+import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'node:crypto';
 
-const NONCE_BYTES = sodium.crypto_secretbox_NONCEBYTES; // 24 bytes for XChaCha20
-const KEY_BYTES = sodium.crypto_secretbox_KEYBYTES; // 32 bytes
-const MAC_BYTES = sodium.crypto_secretbox_MACBYTES; // 16 bytes
+// AES-256-GCM: 32-byte key, 12-byte IV, 16-byte auth tag
+const KEY_BYTES = 32;
+const IV_BYTES = 12;
+const AUTH_TAG_BYTES = 16;
+const ALGORITHM = 'aes-256-gcm';
 
 let masterKey: Buffer | null = null;
 
@@ -25,54 +27,59 @@ function getMasterKey(): Buffer {
 
 export function encrypt(plaintext: string): { ciphertext: string; nonce: string } {
   const key = getMasterKey();
-  const message = Buffer.from(plaintext, 'utf8');
+  const iv = randomBytes(IV_BYTES);
 
-  const nonce = Buffer.alloc(NONCE_BYTES);
-  sodium.randombytes_buf(nonce);
+  const cipher = createCipheriv(ALGORITHM, key, iv);
+  const encrypted = Buffer.concat([
+    cipher.update(plaintext, 'utf8'),
+    cipher.final(),
+  ]);
+  const authTag = cipher.getAuthTag();
 
-  const ciphertext = Buffer.alloc(message.length + MAC_BYTES);
-  sodium.crypto_secretbox_easy(ciphertext, message, nonce, key);
+  // Store ciphertext + authTag together
+  const combined = Buffer.concat([encrypted, authTag]);
 
   return {
-    ciphertext: ciphertext.toString('base64'),
-    nonce: nonce.toString('base64'),
+    ciphertext: combined.toString('base64'),
+    nonce: iv.toString('base64'),
   };
 }
 
 export function decrypt(ciphertext: string, nonce: string): string {
   const key = getMasterKey();
-  const ciphertextBuf = Buffer.from(ciphertext, 'base64');
-  const nonceBuf = Buffer.from(nonce, 'base64');
+  const combined = Buffer.from(ciphertext, 'base64');
+  const iv = Buffer.from(nonce, 'base64');
 
-  if (nonceBuf.length !== NONCE_BYTES) {
-    throw new Error(`Invalid nonce length: expected ${NONCE_BYTES}, got ${nonceBuf.length}`);
+  if (iv.length !== IV_BYTES) {
+    throw new Error(`Invalid nonce length: expected ${IV_BYTES}, got ${iv.length}`);
   }
 
-  const plaintext = Buffer.alloc(ciphertextBuf.length - MAC_BYTES);
+  // Split ciphertext and auth tag
+  const encrypted = combined.subarray(0, combined.length - AUTH_TAG_BYTES);
+  const authTag = combined.subarray(combined.length - AUTH_TAG_BYTES);
 
-  const success = sodium.crypto_secretbox_open_easy(plaintext, ciphertextBuf, nonceBuf, key);
+  const decipher = createDecipheriv(ALGORITHM, key, iv);
+  decipher.setAuthTag(authTag);
 
-  if (!success) {
+  try {
+    const decrypted = Buffer.concat([
+      decipher.update(encrypted),
+      decipher.final(),
+    ]);
+    return decrypted.toString('utf8');
+  } catch {
     throw new Error('Decryption failed - invalid ciphertext or key');
   }
-
-  return plaintext.toString('utf8');
 }
 
 export function hashToken(token: string): string {
-  const hash = Buffer.alloc(sodium.crypto_generichash_BYTES);
-  sodium.crypto_generichash(hash, Buffer.from(token, 'utf8'));
-  return hash.toString('base64');
+  return createHash('sha256').update(token).digest('base64');
 }
 
 export function generateToken(): string {
-  const token = Buffer.alloc(32);
-  sodium.randombytes_buf(token);
-  return token.toString('base64url');
+  return randomBytes(32).toString('base64url');
 }
 
 export function generateMasterKey(): string {
-  const key = Buffer.alloc(KEY_BYTES);
-  sodium.randombytes_buf(key);
-  return key.toString('base64');
+  return randomBytes(KEY_BYTES).toString('base64');
 }

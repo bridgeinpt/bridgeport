@@ -1,4 +1,4 @@
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/db.js';
 import { generateToken, hashToken } from '../lib/crypto.js';
 import type { User, ApiToken } from '@prisma/client';
