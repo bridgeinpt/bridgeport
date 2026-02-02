@@ -13,11 +13,11 @@ services:
       - SSH_KEY_PATH=/app/.ssh/bios-infra
       - SSH_USER=root
       - UPLOAD_DIR=/app/uploads
+    user: "1000:1000"  # Run as node user (non-root)
     volumes:
       - bridgeport-data:/app/data
       - bridgeport-uploads:/app/uploads
       - /root/.ssh/bios-infra:/app/.ssh/bios-infra:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro  # For localhost container discovery
     networks:
       - caddy
   caddy:

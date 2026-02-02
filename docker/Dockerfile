@@ -85,8 +85,9 @@ WORKDIR /app
 # Install runtime dependencies (openssh-client for SSH, docker-cli + compose for localhost, db clients for backups)
 RUN apk add --no-cache openssl openssh-client docker-cli docker-cli-compose sqlite postgresql16-client
 
-# Create directories
-RUN mkdir -p /app/data /app/uploads /app/.ssh
+# Create directories and set ownership for non-root user
+RUN mkdir -p /app/data /app/uploads /app/.ssh && \
+    chown -R node:node /app
 
 # Copy production node_modules (pruned)
 COPY --from=deps-prod /app/node_modules ./node_modules
@@ -110,6 +111,9 @@ ENV NODE_ENV=production
 ENV DATABASE_URL="file:/app/data/bridgeport.db"
 
 EXPOSE 3000
+
+# Run as non-root user
+USER node
 
 # Sync database schema and start
 CMD ["sh", "-c", "npx prisma db push --skip-generate && node dist/server.js"]
