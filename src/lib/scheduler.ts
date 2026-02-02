@@ -11,6 +11,7 @@ import {
   saveServerMetrics,
   saveServiceMetrics,
   cleanupOldMetrics,
+  collectServerDataSSH,
 } from '../services/metrics.js';
 import { checkDueBackups } from '../services/database-backup.js';
 
@@ -38,15 +39,16 @@ const timers = new Map<string, NodeJS.Timeout>();
 let isRunning = false;
 
 /**
- * Run health checks on all servers
+ * Run health checks on all servers (skips agent-mode servers since agents report health directly)
  */
 async function runServerHealthChecks(): Promise<void> {
   try {
     const servers = await prisma.server.findMany({
+      where: { metricsMode: { not: 'agent' } }, // Skip agent servers - they report health directly
       select: { id: true, name: true },
     });
 
-    console.log(`[Scheduler] Running health checks on ${servers.length} servers`);
+    console.log(`[Scheduler] Running health checks on ${servers.length} servers (excluding agent-mode)`);
 
     for (const server of servers) {
       try {
@@ -62,6 +64,9 @@ async function runServerHealthChecks(): Promise<void> {
 
 /**
  * Run health checks on all services that have a healthCheckUrl configured
+ * (skips services on agent-mode servers since agents report container health directly)
+ * Note: Services with healthCheckUrl on agent servers still need URL checks via SSH,
+ * as the agent cannot perform HTTP health checks.
  */
 async function runServiceHealthChecks(): Promise<void> {
   try {
@@ -69,6 +74,8 @@ async function runServiceHealthChecks(): Promise<void> {
       where: {
         healthCheckUrl: { not: null },
         discoveryStatus: 'found',
+        // For agent-mode servers, we still need to do URL checks since the agent
+        // cannot perform HTTP health checks. Include all services with healthCheckUrl.
       },
       select: { id: true, name: true },
     });
@@ -301,14 +308,15 @@ export async function checkServiceUpdate(serviceId: string): Promise<{
 }
 
 /**
- * Collect metrics from servers with SSH mode enabled
+ * Collect metrics and health from servers with SSH mode enabled.
+ * Uses a single SSH connection per server to collect both server metrics,
+ * service metrics, and health status (reducing duplicate SSH connections).
  */
 async function runMetricsCollection(): Promise<void> {
   try {
     const servers = await prisma.server.findMany({
       where: {
         metricsMode: 'ssh',
-        status: 'healthy',
       },
       include: {
         services: {
@@ -322,33 +330,63 @@ async function runMetricsCollection(): Promise<void> {
       return; // No servers with SSH metrics enabled
     }
 
-    console.log(`[Scheduler] Collecting metrics from ${servers.length} servers (SSH mode)`);
+    console.log(`[Scheduler] Collecting metrics and health from ${servers.length} servers (SSH mode, combined)`);
 
     for (const server of servers) {
       try {
-        // Collect server metrics
-        const serverMetrics = await collectServerMetricsSSH(server.id);
-        if (serverMetrics) {
-          await saveServerMetrics(server.id, serverMetrics, 'ssh');
+        // Collect all data in a single SSH session
+        const data = await collectServerDataSSH(server.id);
+
+        if (!data) {
+          // Could not connect to server
+          await prisma.server.update({
+            where: { id: server.id },
+            data: { status: 'unhealthy', lastCheckedAt: new Date() },
+          });
+          continue;
         }
 
-        // Collect service metrics
-        for (const service of server.services) {
-          try {
-            const serviceMetrics = await collectServiceMetrics(server.id, service.containerName);
-            if (serviceMetrics) {
-              await saveServiceMetrics(service.id, serviceMetrics);
-            }
-          } catch (error) {
-            console.error(`[Scheduler] Failed to collect metrics for service ${service.containerName}:`, error);
+        // Update server health status
+        await prisma.server.update({
+          where: { id: server.id },
+          data: {
+            status: data.serverHealth.status,
+            lastCheckedAt: new Date(),
+          },
+        });
+
+        // Save server metrics
+        if (data.serverMetrics) {
+          await saveServerMetrics(server.id, data.serverMetrics, 'ssh');
+        }
+
+        // Save service metrics and update health
+        for (const serviceData of data.serviceData) {
+          const service = server.services.find((s) => s.containerName === serviceData.containerName);
+          if (!service) continue;
+
+          // Save metrics
+          if (serviceData.metrics) {
+            await saveServiceMetrics(service.id, serviceData.metrics);
           }
+
+          // Update service health status
+          await prisma.service.update({
+            where: { id: service.id },
+            data: {
+              status: serviceData.overallStatus,
+              containerStatus: serviceData.containerStatus,
+              healthStatus: serviceData.healthStatus,
+              lastCheckedAt: new Date(),
+            },
+          });
         }
       } catch (error) {
-        console.error(`[Scheduler] Metrics collection failed for server ${server.name}:`, error);
+        console.error(`[Scheduler] Combined metrics/health collection failed for server ${server.name}:`, error);
       }
     }
   } catch (error) {
-    console.error('[Scheduler] Metrics collection run failed:', error);
+    console.error('[Scheduler] Combined metrics/health collection run failed:', error);
   }
 }
 

@@ -31,6 +31,7 @@ type MetricsPayload struct {
 	LoadAvg5      *float64         `json:"loadAvg5,omitempty"`
 	LoadAvg15     *float64         `json:"loadAvg15,omitempty"`
 	Uptime        *int             `json:"uptime,omitempty"`
+	ServerHealthy *bool            `json:"serverHealthy,omitempty"` // Agent confirms server is reachable
 	Services      []ServiceMetrics `json:"services,omitempty"`
 }
 
@@ -44,6 +45,8 @@ type ServiceMetrics struct {
 	BlockReadMb   *float64 `json:"blockReadMb,omitempty"`
 	BlockWriteMb  *float64 `json:"blockWriteMb,omitempty"`
 	RestartCount  *int     `json:"restartCount,omitempty"`
+	State         *string  `json:"state,omitempty"`  // "running", "stopped", "exited", etc.
+	Health        *string  `json:"health,omitempty"` // "healthy", "unhealthy", "none", ""
 }
 
 func main() {
@@ -98,6 +101,10 @@ func main() {
 func collectAndSend(config Config) {
 	payload := MetricsPayload{}
 
+	// Agent is running = server is healthy (reachable)
+	serverHealthy := true
+	payload.ServerHealthy = &serverHealthy
+
 	// Collect system metrics
 	if sysMetrics, err := collector.CollectSystemMetrics(); err == nil {
 		payload.CPUPercent = &sysMetrics.CPUPercent
@@ -116,6 +123,8 @@ func collectAndSend(config Config) {
 	// Collect Docker container metrics
 	if containers, err := collector.CollectDockerMetrics(); err == nil {
 		for _, c := range containers {
+			state := c.State
+			health := c.Health
 			sm := ServiceMetrics{
 				ContainerName: c.Name,
 				CPUPercent:    &c.CPUPercent,
@@ -126,6 +135,8 @@ func collectAndSend(config Config) {
 				BlockReadMb:   &c.BlockReadMb,
 				BlockWriteMb:  &c.BlockWriteMb,
 				RestartCount:  &c.RestartCount,
+				State:         &state,
+				Health:        &health,
 			}
 			payload.Services = append(payload.Services, sm)
 		}

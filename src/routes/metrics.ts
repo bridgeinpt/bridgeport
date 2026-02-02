@@ -29,6 +29,7 @@ const serverMetricsIngestSchema = z.object({
   loadAvg5: z.number().optional(),
   loadAvg15: z.number().optional(),
   uptime: z.number().optional(),
+  serverHealthy: z.boolean().optional(), // Agent confirms server is reachable
   services: z
     .array(
       z.object({
@@ -41,6 +42,8 @@ const serverMetricsIngestSchema = z.object({
         blockReadMb: z.number().optional(),
         blockWriteMb: z.number().optional(),
         restartCount: z.number().optional(),
+        state: z.string().optional(),  // Container state: "running", "stopped", etc.
+        health: z.string().optional(), // Health status: "healthy", "unhealthy", "none", ""
       })
     )
     .optional(),
@@ -193,17 +196,67 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'Invalid metrics data', details: body.error.issues });
     }
 
-    // Save server metrics
-    const { services: serviceMetrics, ...serverMetricsData } = body.data;
+    // Save server metrics (exclude health fields from metrics data)
+    const { services: serviceMetrics, serverHealthy, ...serverMetricsData } = body.data;
     await saveServerMetrics(server.id, serverMetricsData, 'agent');
 
-    // Save service metrics if provided
+    // Update server health status if provided
+    if (serverHealthy !== undefined) {
+      await prisma.server.update({
+        where: { id: server.id },
+        data: {
+          status: serverHealthy ? 'healthy' : 'unhealthy',
+          lastCheckedAt: new Date(),
+        },
+      });
+    }
+
+    // Save service metrics and health if provided
     if (serviceMetrics && serviceMetrics.length > 0) {
       for (const sm of serviceMetrics) {
         const service = server.services.find((s) => s.containerName === sm.containerName);
         if (service) {
-          const { containerName, ...metricsData } = sm;
+          const { containerName, state, health, ...metricsData } = sm;
+
+          // Save metrics
           await saveServiceMetrics(service.id, metricsData);
+
+          // Update service health status if provided
+          if (state !== undefined || health !== undefined) {
+            const isRunning = state === 'running';
+
+            // Determine health status from container health
+            let healthStatus = 'unknown';
+            if (!isRunning) {
+              healthStatus = state === 'not_found' ? 'unknown' : 'unknown';
+            } else if (health === 'healthy') {
+              healthStatus = 'healthy';
+            } else if (health === 'unhealthy') {
+              healthStatus = 'unhealthy';
+            } else if (health === 'none' || health === '') {
+              healthStatus = 'none';
+            }
+
+            // Determine overall status
+            let status = 'running';
+            if (!isRunning) {
+              status = 'stopped';
+            } else if (healthStatus === 'unhealthy') {
+              status = 'unhealthy';
+            } else if (healthStatus === 'healthy') {
+              status = 'healthy';
+            }
+
+            await prisma.service.update({
+              where: { id: service.id },
+              data: {
+                status,
+                containerStatus: state || 'unknown',
+                healthStatus,
+                lastCheckedAt: new Date(),
+              },
+            });
+          }
         }
       }
     }

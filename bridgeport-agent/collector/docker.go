@@ -20,6 +20,8 @@ type ContainerMetrics struct {
 	BlockReadMb   float64
 	BlockWriteMb  float64
 	RestartCount  int
+	State         string // "running", "stopped", "exited", etc.
+	Health        string // "healthy", "unhealthy", "none" (no healthcheck), "" (starting)
 }
 
 type dockerContainer struct {
@@ -65,7 +67,12 @@ type blkioStats struct {
 
 type dockerInspect struct {
 	State struct {
-		RestartCount int `json:"RestartCount"`
+		Status       string `json:"Status"`
+		Running      bool   `json:"Running"`
+		RestartCount int    `json:"RestartCount"`
+		Health       *struct {
+			Status string `json:"Status"`
+		} `json:"Health,omitempty"`
 	} `json:"State"`
 }
 
@@ -172,6 +179,12 @@ func getContainerMetrics(id string, names []string) (*ContainerMetrics, error) {
 		}
 	}
 
+	// Determine health status
+	health := "none" // No healthcheck configured
+	if inspect.State.Health != nil {
+		health = inspect.State.Health.Status
+	}
+
 	return &ContainerMetrics{
 		Name:          name,
 		CPUPercent:    cpuPercent,
@@ -182,5 +195,7 @@ func getContainerMetrics(id string, names []string) (*ContainerMetrics, error) {
 		BlockReadMb:   float64(readBytes) / (1024 * 1024),
 		BlockWriteMb:  float64(writeBytes) / (1024 * 1024),
 		RestartCount:  inspect.State.RestartCount,
+		State:         inspect.State.Status,
+		Health:        health,
 	}, nil
 }
