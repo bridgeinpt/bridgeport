@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import fp from 'fastify-plugin';
 import { validateApiToken, getUserById, type AuthUser } from '../services/auth.js';
+import { prisma } from '../lib/db.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -34,6 +35,11 @@ async function authenticatePlugin(fastify: FastifyInstance) {
             const fullUser = await getUserById(payload.id);
             if (fullUser) {
               request.authUser = fullUser;
+              // Update lastActiveAt in background (don't await)
+              prisma.user.update({
+                where: { id: fullUser.id },
+                data: { lastActiveAt: new Date() },
+              }).catch(() => {}); // Ignore errors
               return;
             }
           } catch {

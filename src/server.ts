@@ -5,7 +5,7 @@ import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { mkdir } from 'fs/promises';
+import { mkdir, readFile } from 'fs/promises';
 import { config } from './lib/config.js';
 import { initializeCrypto } from './lib/crypto.js';
 import { initializeDatabase, disconnectDatabase } from './lib/db.js';
@@ -28,6 +28,17 @@ import { databaseRoutes } from './routes/databases.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// Read version from package.json at startup
+let appVersion = 'unknown';
+try {
+  const packageJson = JSON.parse(
+    await readFile(join(__dirname, '../package.json'), 'utf-8')
+  );
+  appVersion = packageJson.version;
+} catch {
+  // Fallback if package.json can't be read
+}
 
 async function buildServer() {
   const fastify = Fastify({
@@ -105,7 +116,7 @@ async function buildServer() {
 
   // Health check
   fastify.get('/health', async () => {
-    return { status: 'ok', timestamp: new Date().toISOString() };
+    return { status: 'ok', timestamp: new Date().toISOString(), version: appVersion };
   });
 
   // Serve static files in production

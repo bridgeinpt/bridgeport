@@ -112,6 +112,10 @@ class ApiClient {
 
 export const api = new ApiClient();
 
+// Health check (public endpoint, no auth needed)
+export const getHealth = () =>
+  fetch('/health').then(res => res.json() as Promise<{ status: string; timestamp: string; version: string }>);
+
 // Auth
 export const login = (email: string, password: string) =>
   api.post<{ token: string; user: User }>('/auth/login', { email, password });
@@ -141,6 +145,9 @@ export interface ChangePasswordInput {
 
 export const listUsers = () =>
   api.get<{ users: User[] }>('/users');
+
+export const getActiveUsers = () =>
+  api.get<{ activeUsers: User[] }>('/users/active');
 
 export const getUser = (id: string) =>
   api.get<{ user: User }>(`/users/${id}`);
@@ -332,6 +339,7 @@ export interface User {
   email: string;
   name: string | null;
   role: UserRole;
+  lastActiveAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }

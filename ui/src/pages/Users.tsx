@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuthStore, isAdmin } from '../lib/store';
 import {
   listUsers,
+  getActiveUsers,
   createUser,
   updateUser,
   deleteUser,
@@ -26,6 +27,7 @@ const roleBadgeColors: Record<UserRole, string> = {
 export default function Users() {
   const { user: currentUser } = useAuthStore();
   const [users, setUsers] = useState<User[]>([]);
+  const [activeUserIds, setActiveUserIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,8 +58,12 @@ export default function Users() {
     setLoading(true);
     setError(null);
     try {
-      const { users } = await listUsers();
-      setUsers(users);
+      const [usersRes, activeRes] = await Promise.all([
+        listUsers(),
+        getActiveUsers(),
+      ]);
+      setUsers(usersRes.users);
+      setActiveUserIds(new Set(activeRes.activeUsers.map((u) => u.id)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load users');
     } finally {
@@ -356,6 +362,30 @@ export default function Users() {
         </div>
       )}
 
+      {/* Active Users Summary */}
+      {activeUserIds.size > 0 && (
+        <div className="mb-6 p-4 bg-slate-800/50 border border-slate-700 rounded-xl">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <h3 className="text-sm font-medium text-white">
+              {activeUserIds.size} Active User{activeUserIds.size !== 1 ? 's' : ''}
+            </h3>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {users
+              .filter((u) => activeUserIds.has(u.id))
+              .map((u) => (
+                <span
+                  key={u.id}
+                  className="px-2 py-1 text-xs rounded-full bg-slate-700 text-slate-300"
+                >
+                  {u.name || u.email}
+                </span>
+              ))}
+          </div>
+        </div>
+      )}
+
       {/* Users List */}
       <div className="space-y-3">
         {users.map((user) => (
@@ -373,8 +403,14 @@ export default function Users() {
                     >
                       {roleLabels[user.role]}
                     </span>
+                    {activeUserIds.has(user.id) && (
+                      <span className="px-2 py-0.5 text-xs rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                        Online
+                      </span>
+                    )}
                     {user.id === currentUser?.id && (
-                      <span className="px-2 py-0.5 text-xs rounded-full bg-green-500/20 text-green-400 border border-green-500/30">
+                      <span className="px-2 py-0.5 text-xs rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">
                         You
                       </span>
                     )}

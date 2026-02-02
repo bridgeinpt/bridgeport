@@ -1,4 +1,13 @@
+import { useEffect, useState } from 'react';
+import { getHealth } from '../lib/api';
+
 export default function About() {
+  const [version, setVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    getHealth().then((data) => setVersion(data.version)).catch(() => setVersion('unknown'));
+  }, []);
+
   return (
     <div className="p-8 max-w-2xl mx-auto">
       <div className="card text-center">
@@ -12,7 +21,7 @@ export default function About() {
           <p className="text-primary-400 mt-1 font-medium">
             Dock. Run. Ship. Repeat.
           </p>
-          <p className="text-slate-500 text-sm mt-2">v1.0.0</p>
+          <p className="text-slate-500 text-sm mt-2">{version ? `v${version}` : '...'}</p>
         </div>
 
         <div className="border-t border-slate-700 my-6" />

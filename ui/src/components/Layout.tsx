@@ -93,7 +93,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       {/* Sidebar */}
       <aside className="w-64 bg-slate-900 border-r border-slate-700 flex flex-col">
         <div className="p-4 border-b border-slate-700">
-          <img src="/logo.svg" alt="BridgePort" className="h-20" />
+          <Link to="/">
+            <img src="/logo.svg" alt="BridgePort" className="h-20" />
+          </Link>
         </div>
 
         {/* Environment selector */}

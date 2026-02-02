@@ -37,6 +37,7 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
           email: true,
           name: true,
           role: true,
+          lastActiveAt: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -44,6 +45,30 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
       });
 
       return { users };
+    }
+  );
+
+  // Get active users (admin only) - users active in the last 15 minutes
+  fastify.get(
+    '/api/users/active',
+    { preHandler: [fastify.authenticate, requireAdmin] },
+    async () => {
+      const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+      const activeUsers = await prisma.user.findMany({
+        where: {
+          lastActiveAt: { gte: fifteenMinutesAgo },
+        },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          lastActiveAt: true,
+        },
+        orderBy: { lastActiveAt: 'desc' },
+      });
+
+      return { activeUsers };
     }
   );
 
