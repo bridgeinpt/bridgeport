@@ -152,8 +152,8 @@ export default function Monitoring() {
                       : undefined
                   }
                   displayValue={
-                    server.latestMetrics?.memoryUsedMb != null
-                      ? `${(server.latestMetrics.memoryUsedMb / 1024).toFixed(1)}GB`
+                    server.latestMetrics?.memoryUsedMb != null && server.latestMetrics?.memoryTotalMb
+                      ? `${(server.latestMetrics.memoryUsedMb / 1024).toFixed(1)}/${(server.latestMetrics.memoryTotalMb / 1024).toFixed(0)}GB`
                       : undefined
                   }
                   max={100}
@@ -172,8 +172,8 @@ export default function Monitoring() {
                       : undefined
                   }
                   displayValue={
-                    server.latestMetrics?.diskUsedGb != null
-                      ? `${server.latestMetrics.diskUsedGb.toFixed(0)}GB`
+                    server.latestMetrics?.diskUsedGb != null && server.latestMetrics?.diskTotalGb
+                      ? `${server.latestMetrics.diskUsedGb.toFixed(0)}/${server.latestMetrics.diskTotalGb.toFixed(0)}GB`
                       : undefined
                   }
                   max={100}

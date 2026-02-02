@@ -400,7 +400,14 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
         environmentId: server.environmentId,
       });
 
-      return { metricsMode: updated.metricsMode };
+      return {
+        server: {
+          id: updated.id,
+          name: updated.name,
+          metricsMode: updated.metricsMode,
+          agentToken: updated.agentToken,
+        },
+      };
     }
   );
 }
