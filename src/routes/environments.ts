@@ -18,6 +18,13 @@ const updateSettingsSchema = z.object({
   allowSecretReveal: z.boolean().optional(),
 });
 
+const updateSpacesSchema = z.object({
+  spacesAccessKey: z.string().min(1),
+  spacesSecretKey: z.string().min(1),
+  spacesRegion: z.string().min(1),  // e.g., "fra1"
+  spacesEndpoint: z.string().min(1).optional(),  // e.g., "fra1.digitaloceanspaces.com"
+});
+
 export async function environmentRoutes(fastify: FastifyInstance): Promise<void> {
   // List environments
   fastify.get(
@@ -264,6 +271,128 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
       return { settings: { allowSecretReveal: updated.allowSecretReveal } };
     }
   );
+
+  // Get Spaces configuration status
+  fastify.get(
+    '/api/environments/:id/spaces',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      const environment = await prisma.environment.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          spacesAccessKey: true,
+          encryptedSpacesSecret: true,
+          spacesRegion: true,
+          spacesEndpoint: true,
+        },
+      });
+
+      if (!environment) {
+        return reply.code(404).send({ error: 'Environment not found' });
+      }
+
+      return {
+        configured: !!(environment.spacesAccessKey && environment.encryptedSpacesSecret),
+        spacesAccessKey: environment.spacesAccessKey || null,
+        spacesRegion: environment.spacesRegion || null,
+        spacesEndpoint: environment.spacesEndpoint || null,
+      };
+    }
+  );
+
+  // Update Spaces configuration (admin only)
+  fastify.put(
+    '/api/environments/:id/spaces',
+    { preHandler: [fastify.authenticate, requireAdmin] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = updateSpacesSchema.safeParse(request.body);
+
+      if (!body.success) {
+        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
+      }
+
+      const environment = await prisma.environment.findUnique({
+        where: { id },
+      });
+
+      if (!environment) {
+        return reply.code(404).send({ error: 'Environment not found' });
+      }
+
+      // Encrypt the secret key
+      const { ciphertext, nonce } = encrypt(body.data.spacesSecretKey);
+
+      // Default endpoint from region if not provided
+      const endpoint = body.data.spacesEndpoint || `${body.data.spacesRegion}.digitaloceanspaces.com`;
+
+      await prisma.environment.update({
+        where: { id },
+        data: {
+          spacesAccessKey: body.data.spacesAccessKey,
+          encryptedSpacesSecret: ciphertext,
+          spacesSecretNonce: nonce,
+          spacesRegion: body.data.spacesRegion,
+          spacesEndpoint: endpoint,
+        },
+      });
+
+      await logAudit({
+        action: 'update',
+        resourceType: 'environment',
+        resourceId: id,
+        resourceName: environment.name,
+        details: { spacesConfigured: true, region: body.data.spacesRegion },
+        userId: request.authUser!.id,
+        environmentId: id,
+      });
+
+      return { success: true, message: 'Spaces configuration updated' };
+    }
+  );
+
+  // Delete Spaces configuration (admin only)
+  fastify.delete(
+    '/api/environments/:id/spaces',
+    { preHandler: [fastify.authenticate, requireAdmin] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      const environment = await prisma.environment.findUnique({
+        where: { id },
+      });
+
+      if (!environment) {
+        return reply.code(404).send({ error: 'Environment not found' });
+      }
+
+      await prisma.environment.update({
+        where: { id },
+        data: {
+          spacesAccessKey: null,
+          encryptedSpacesSecret: null,
+          spacesSecretNonce: null,
+          spacesRegion: null,
+          spacesEndpoint: null,
+        },
+      });
+
+      await logAudit({
+        action: 'update',
+        resourceType: 'environment',
+        resourceId: id,
+        resourceName: environment.name,
+        details: { spacesConfigured: false },
+        userId: request.authUser!.id,
+        environmentId: id,
+      });
+
+      return { success: true, message: 'Spaces configuration removed' };
+    }
+  );
 }
 
 // Helper to get decrypted SSH key for an environment
@@ -286,5 +415,37 @@ export async function getEnvironmentSshKey(environmentId: string): Promise<{
   return {
     privateKey,
     username: environment.sshUser,
+  };
+}
+
+// Helper to get Spaces credentials for an environment
+export async function getEnvironmentSpacesConfig(environmentId: string): Promise<{
+  accessKey: string;
+  secretKey: string;
+  region: string;
+  endpoint: string;
+} | null> {
+  const environment = await prisma.environment.findUnique({
+    where: { id: environmentId },
+    select: {
+      spacesAccessKey: true,
+      encryptedSpacesSecret: true,
+      spacesSecretNonce: true,
+      spacesRegion: true,
+      spacesEndpoint: true,
+    },
+  });
+
+  if (!environment?.spacesAccessKey || !environment.encryptedSpacesSecret || !environment.spacesSecretNonce) {
+    return null;
+  }
+
+  const secretKey = decrypt(environment.encryptedSpacesSecret, environment.spacesSecretNonce);
+
+  return {
+    accessKey: environment.spacesAccessKey,
+    secretKey,
+    region: environment.spacesRegion || 'fra1',
+    endpoint: environment.spacesEndpoint || `${environment.spacesRegion || 'fra1'}.digitaloceanspaces.com`,
   };
 }

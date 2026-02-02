@@ -1,8 +1,11 @@
 import { prisma } from '../lib/db.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
 import { SSHClient, LocalClient, isLocalhost, type CommandClient } from '../lib/ssh.js';
-import { getEnvironmentSshKey } from '../routes/environments.js';
-import crypto from 'crypto';
+import { getEnvironmentSshKey, getEnvironmentSpacesConfig } from '../routes/environments.js';
+import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { readFile, unlink } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 export interface DatabaseInput {
   name: string;
@@ -241,18 +244,20 @@ async function executeBackup(backupId: string): Promise<void> {
   });
 
   const db = backup.database;
+  const useSpaces = db.backupStorageType === 'spaces';
+
+  // For Spaces, dump to temp file first; for local, dump to final path
+  const tempPath = useSpaces ? join(tmpdir(), `backup-${backupId}.sql`) : null;
+  const targetPath = tempPath || backup.storagePath;
 
   try {
     let dumpCommand = '';
-    let targetPath = backup.storagePath;
     let client: CommandClient;
 
     if (db.type === 'postgres' && db.host) {
       // Postgres: run pg_dump locally (connects remotely to database)
-      // No server needed - BridgePort has pg_dump installed
       client = new LocalClient();
 
-      // Get credentials
       let username = '';
       let password = '';
       if (db.encryptedCredentials && db.credentialsNonce) {
@@ -262,9 +267,14 @@ async function executeBackup(backupId: string): Promise<void> {
 
       dumpCommand = `PGPASSWORD='${password}' pg_dump -h ${db.host} -p ${db.port || 5432} -U ${username} -d ${db.databaseName} > "${targetPath}"`;
     } else if (db.type === 'sqlite' && db.filePath) {
-      // SQLite: need to run on the server where the file lives
       if (!db.server) {
         throw new Error('SQLite databases require a server to be configured');
+      }
+
+      // For SQLite with Spaces, we need to dump on the server then transfer
+      // For simplicity, SQLite + Spaces is not supported yet (would need SFTP download)
+      if (useSpaces) {
+        throw new Error('SQLite backups to Spaces are not yet supported. Use local storage or switch to Postgres.');
       }
 
       if (isLocalhost(db.server.hostname)) {
@@ -288,9 +298,11 @@ async function executeBackup(backupId: string): Promise<void> {
 
     await client.connect();
 
-    // Ensure backup directory exists
-    const targetDir = targetPath.substring(0, targetPath.lastIndexOf('/'));
-    await client.exec(`mkdir -p "${targetDir}"`);
+    // Ensure backup directory exists (for local storage)
+    if (!useSpaces) {
+      const targetDir = targetPath.substring(0, targetPath.lastIndexOf('/'));
+      await client.exec(`mkdir -p "${targetDir}"`);
+    }
 
     const result = await client.exec(dumpCommand);
     if (result.code !== 0) {
@@ -303,6 +315,40 @@ async function executeBackup(backupId: string): Promise<void> {
 
     client.disconnect();
 
+    // Upload to Spaces if configured
+    if (useSpaces && tempPath) {
+      const spacesConfig = await getEnvironmentSpacesConfig(db.environmentId);
+      if (!spacesConfig) {
+        throw new Error('Spaces not configured for this environment. Go to Settings > Spaces to configure.');
+      }
+
+      if (!db.backupSpacesBucket) {
+        throw new Error('No Spaces bucket configured for this database');
+      }
+
+      const s3Client = new S3Client({
+        endpoint: `https://${spacesConfig.endpoint}`,
+        region: spacesConfig.region,
+        credentials: {
+          accessKeyId: spacesConfig.accessKey,
+          secretAccessKey: spacesConfig.secretKey,
+        },
+      });
+
+      const fileContent = await readFile(tempPath);
+      const spacesKey = backup.storagePath; // Already includes prefix + filename
+
+      await s3Client.send(new PutObjectCommand({
+        Bucket: db.backupSpacesBucket,
+        Key: spacesKey,
+        Body: fileContent,
+        ContentType: 'application/sql',
+      }));
+
+      // Clean up temp file
+      await unlink(tempPath).catch(() => {});
+    }
+
     await prisma.databaseBackup.update({
       where: { id: backupId },
       data: {
@@ -312,6 +358,11 @@ async function executeBackup(backupId: string): Promise<void> {
       },
     });
   } catch (error) {
+    // Clean up temp file on error
+    if (tempPath) {
+      await unlink(tempPath).catch(() => {});
+    }
+
     const message = error instanceof Error ? error.message : 'Unknown error';
     await prisma.databaseBackup.update({
       where: { id: backupId },
@@ -380,8 +431,29 @@ export async function deleteBackup(id: string): Promise<void> {
     } catch {
       // Ignore errors when deleting file
     }
+  } else if (backup.storageType === 'spaces' && backup.database.backupSpacesBucket) {
+    // Delete from Spaces
+    try {
+      const spacesConfig = await getEnvironmentSpacesConfig(backup.database.environmentId);
+      if (spacesConfig) {
+        const s3Client = new S3Client({
+          endpoint: `https://${spacesConfig.endpoint}`,
+          region: spacesConfig.region,
+          credentials: {
+            accessKeyId: spacesConfig.accessKey,
+            secretAccessKey: spacesConfig.secretKey,
+          },
+        });
+
+        await s3Client.send(new DeleteObjectCommand({
+          Bucket: backup.database.backupSpacesBucket,
+          Key: backup.storagePath,
+        }));
+      }
+    } catch {
+      // Ignore errors when deleting from Spaces
+    }
   }
-  // TODO: Handle Spaces deletion
 
   await prisma.databaseBackup.delete({ where: { id } });
 }

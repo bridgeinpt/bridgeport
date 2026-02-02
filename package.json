@@ -13,10 +13,15 @@
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio"
   },
-  "keywords": ["deployment", "infrastructure", "bridgein"],
+  "keywords": [
+    "deployment",
+    "infrastructure",
+    "bridgein"
+  ],
   "author": "BridgeIn",
   "license": "UNLICENSED",
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.980.0",
     "@fastify/cors": "^10.0.0",
     "@fastify/jwt": "^9.0.0",
     "@fastify/multipart": "^9.0.0",

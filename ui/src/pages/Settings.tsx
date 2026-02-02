@@ -4,10 +4,14 @@ import { useAuthStore } from '../lib/store';
 import {
   getEnvironmentSettings,
   updateEnvironmentSettings,
+  getSpacesConfig,
+  updateSpacesConfig,
+  deleteSpacesConfig,
   listServers,
   listDatabases,
   type Server,
   type Database,
+  type SpacesConfig,
 } from '../lib/api';
 import { useToast } from '../components/Toast';
 
@@ -35,8 +39,15 @@ export default function Settings() {
   const toast = useToast();
   const [settings, setSettings] = useState<EnvironmentSettings | null>(null);
   const [moduleStatus, setModuleStatus] = useState<ModuleStatus | null>(null);
+  const [spacesConfig, setSpacesConfig] = useState<SpacesConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [editingSpaces, setEditingSpaces] = useState(false);
+  const [spacesForm, setSpacesForm] = useState({
+    spacesAccessKey: '',
+    spacesSecretKey: '',
+    spacesRegion: 'fra1',
+  });
 
   useEffect(() => {
     if (selectedEnvironment?.id) {
@@ -48,13 +59,15 @@ export default function Settings() {
     if (!selectedEnvironment?.id) return;
     setLoading(true);
     try {
-      const [settingsRes, serversRes, databasesRes] = await Promise.all([
+      const [settingsRes, serversRes, databasesRes, spacesRes] = await Promise.all([
         getEnvironmentSettings(selectedEnvironment.id),
         listServers(selectedEnvironment.id),
         listDatabases(selectedEnvironment.id),
+        getSpacesConfig(selectedEnvironment.id),
       ]);
 
       setSettings(settingsRes.settings);
+      setSpacesConfig(spacesRes);
 
       // Calculate module status
       const servers = serversRes.servers as Array<Server & { metricsMode?: string }>;
@@ -89,6 +102,42 @@ export default function Settings() {
       window.location.reload();
     } catch (error) {
       toast.error('Failed to update settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveSpaces = async () => {
+    if (!selectedEnvironment?.id || !isAdmin(user)) return;
+    if (!spacesForm.spacesAccessKey || !spacesForm.spacesSecretKey || !spacesForm.spacesRegion) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
+    setSaving(true);
+    try {
+      await updateSpacesConfig(selectedEnvironment.id, spacesForm);
+      const spacesRes = await getSpacesConfig(selectedEnvironment.id);
+      setSpacesConfig(spacesRes);
+      setEditingSpaces(false);
+      setSpacesForm({ spacesAccessKey: '', spacesSecretKey: '', spacesRegion: 'fra1' });
+      toast.success('Spaces configuration saved');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to save Spaces configuration');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteSpaces = async () => {
+    if (!selectedEnvironment?.id || !isAdmin(user)) return;
+    if (!confirm('Remove Spaces configuration? Existing backups stored in Spaces will not be deleted.')) return;
+    setSaving(true);
+    try {
+      await deleteSpacesConfig(selectedEnvironment.id);
+      setSpacesConfig({ configured: false, spacesAccessKey: null, spacesRegion: null, spacesEndpoint: null });
+      toast.success('Spaces configuration removed');
+    } catch (error) {
+      toast.error('Failed to remove Spaces configuration');
     } finally {
       setSaving(false);
     }
@@ -231,6 +280,129 @@ export default function Settings() {
             </p>
           )}
         </div>
+      </div>
+
+      {/* Spaces Configuration */}
+      <div className="card mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-lg font-semibold text-white">DO Spaces Configuration</h3>
+            <p className="text-sm text-slate-400">Configure DigitalOcean Spaces for database backups</p>
+          </div>
+          {spacesConfig?.configured && !editingSpaces && isAdmin(user) && (
+            <button
+              onClick={handleDeleteSpaces}
+              disabled={saving}
+              className="btn btn-ghost text-red-400 hover:text-red-300 text-sm"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+
+        {editingSpaces ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Access Key</label>
+                <input
+                  type="text"
+                  value={spacesForm.spacesAccessKey}
+                  onChange={(e) => setSpacesForm({ ...spacesForm, spacesAccessKey: e.target.value })}
+                  placeholder="DO00..."
+                  className="input"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Secret Key</label>
+                <input
+                  type="password"
+                  value={spacesForm.spacesSecretKey}
+                  onChange={(e) => setSpacesForm({ ...spacesForm, spacesSecretKey: e.target.value })}
+                  placeholder="••••••••"
+                  className="input"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">Region</label>
+              <select
+                value={spacesForm.spacesRegion}
+                onChange={(e) => setSpacesForm({ ...spacesForm, spacesRegion: e.target.value })}
+                className="input"
+              >
+                <option value="nyc3">NYC3 (New York)</option>
+                <option value="sfo3">SFO3 (San Francisco)</option>
+                <option value="ams3">AMS3 (Amsterdam)</option>
+                <option value="sgp1">SGP1 (Singapore)</option>
+                <option value="fra1">FRA1 (Frankfurt)</option>
+                <option value="syd1">SYD1 (Sydney)</option>
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={handleSaveSpaces} disabled={saving} className="btn btn-primary">
+                {saving ? 'Saving...' : 'Save Configuration'}
+              </button>
+              <button
+                onClick={() => {
+                  setEditingSpaces(false);
+                  setSpacesForm({ spacesAccessKey: '', spacesSecretKey: '', spacesRegion: 'fra1' });
+                }}
+                className="btn btn-ghost"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : spacesConfig?.configured ? (
+          <div className="p-4 bg-slate-800 rounded-lg">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="px-2 py-1 rounded text-xs font-medium bg-green-500/20 text-green-400">
+                Configured
+              </span>
+            </div>
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between text-slate-400">
+                <span>Access Key:</span>
+                <span className="text-white font-mono">{spacesConfig.spacesAccessKey}</span>
+              </div>
+              <div className="flex justify-between text-slate-400">
+                <span>Region:</span>
+                <span className="text-white">{spacesConfig.spacesRegion}</span>
+              </div>
+              <div className="flex justify-between text-slate-400">
+                <span>Endpoint:</span>
+                <span className="text-white font-mono text-xs">{spacesConfig.spacesEndpoint}</span>
+              </div>
+            </div>
+            {isAdmin(user) && (
+              <button
+                onClick={() => {
+                  setSpacesForm({
+                    spacesAccessKey: spacesConfig.spacesAccessKey || '',
+                    spacesSecretKey: '',
+                    spacesRegion: spacesConfig.spacesRegion || 'fra1',
+                  });
+                  setEditingSpaces(true);
+                }}
+                className="btn btn-secondary text-sm mt-4"
+              >
+                Update Configuration
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="p-4 bg-slate-800 rounded-lg text-center">
+            <p className="text-slate-400 mb-4">
+              Spaces is not configured. Configure it to enable cloud backups for databases.
+            </p>
+            {isAdmin(user) && (
+              <button onClick={() => setEditingSpaces(true)} className="btn btn-primary">
+                Configure Spaces
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Environment Info */}
