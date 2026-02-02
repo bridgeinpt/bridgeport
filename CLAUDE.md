@@ -170,14 +170,14 @@ SCHEDULER_BACKUP_CHECK_INTERVAL=60  # Backup schedule check (seconds)
 ## Key Models
 
 ```
-User          - Authentication with role (admin/operator/viewer)
+User          - Authentication with role (admin/operator/viewer), lastActiveAt for session tracking
 Environment   - Logical grouping with SSH key, allowSecretReveal setting
 Server        - Physical/virtual machine with metricsMode (ssh/agent/disabled)
 Service       - Docker container
 Secret        - Encrypted key-value with neverReveal flag
 ConfigFile    - Synced configuration files (including .env files with secret placeholders)
 FileHistory   - Edit history for config files
-Database      - Registered database for backups
+Database      - Registered database for backups (editable after creation)
 DatabaseBackup - Backup record with status
 BackupSchedule - Cron-based backup scheduling
 ServerMetrics  - Time-series server metrics
@@ -186,6 +186,10 @@ RegistryConnection - Container registry with refreshIntervalMinutes, autoLinkPat
 ```
 
 ## UI Features
+
+### Navigation
+- **Clickable Logo**: Click sidebar logo to navigate to dashboard
+- **My Account Modal**: Click user icon in sidebar to access profile and password change (all users)
 
 ### Server Management
 - **Monitoring Card**: Configure metrics mode (disabled/SSH/agent), view real-time metrics
@@ -199,10 +203,21 @@ RegistryConnection - Container registry with refreshIntervalMinutes, autoLinkPat
 - **Deployment History**: View past deployments with expandable logs
 - **Config Files**: Attach and sync config files to servers
 
+### Database Management
+- **Edit Databases**: Edit existing database configurations (name, connection, backup settings)
+- **Backup Management**: View, create, and delete backups with schedule configuration
+
+### User Management (Admin)
+- **Active Users**: Shows which users are currently online (active in last 15 minutes)
+- **Session Tracking**: lastActiveAt updated on each authenticated request
+
 ### Monitoring Dashboard (`/monitoring`)
 - Environment-wide server metrics overview
 - Service resource usage table sorted by CPU
 - Auto-refresh every 30 seconds
+
+### About Page
+- Dynamic version display fetched from `/health` endpoint
 
 ## Important Notes
 

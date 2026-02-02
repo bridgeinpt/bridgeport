@@ -16,7 +16,8 @@ Created by the Engineering Team at [BridgeIn](https://bridgein.pt).
 - **Secret Management** - Encrypted secret storage with env template substitution and reveal controls
 - **Database Backups** - PostgreSQL and SQLite backup management with scheduling
 - **Server Monitoring** - Real-time metrics via SSH polling or lightweight Go agent
-- **User Management** - Role-based access control (Admin, Operator, Viewer)
+- **User Management** - Role-based access control (Admin, Operator, Viewer), session tracking
+- **Self-Service Account** - All users can update profile and change password via sidebar
 - **Audit Logging** - Track all deployments and configuration changes
 - **Web UI** - Dashboard with metrics, deployment management, and monitoring
 
@@ -214,10 +215,11 @@ Templates also support **edit history** with version tracking and restore.
 ### Database Backups
 Manage PostgreSQL and SQLite database backups:
 - Register databases with encrypted credentials
+- **Edit databases** - update connection details, credentials, and backup settings
 - **Manual backups** - trigger on-demand via UI
 - **Scheduled backups** - cron-based automatic backups
 - **Retention policies** - automatic cleanup of old backups
-- Backup storage on server filesystem
+- Backup storage on server filesystem or DO Spaces
 - Download and restore capabilities
 
 ### Server Monitoring
@@ -327,19 +329,21 @@ METRICS_RETENTION_DAYS=30  # Larger storage, more history
 
 ## API Reference
 
-### Authentication
+### Health & Authentication
 ```bash
+GET  /health               # Health check (returns status, timestamp, version)
 POST /api/auth/login       # Login, returns JWT
 GET  /api/auth/me          # Get current user
 ```
 
-### Users (Admin only)
+### Users
 ```bash
-GET    /api/users              # List users
-POST   /api/users              # Create user
-PATCH  /api/users/:id          # Update user
-DELETE /api/users/:id          # Delete user
-POST   /api/users/:id/password # Change password
+GET    /api/users                    # List users (admin only)
+GET    /api/users/active             # List active users - online in last 15 min (admin only)
+POST   /api/users                    # Create user (admin only)
+PATCH  /api/users/:id                # Update user (admin or self)
+DELETE /api/users/:id                # Delete user (admin only)
+POST   /api/users/:id/change-password # Change password (admin or self, self requires current password)
 ```
 
 ### Environments
