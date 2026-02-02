@@ -7,6 +7,8 @@ import { getContainerStatusColor, getHealthStatusColor } from '../lib/status';
 import { Modal } from '../components/Modal';
 import { CheckIcon, WarningIcon, RefreshIcon } from '../components/Icons';
 import { useToast } from '../components/Toast';
+import Pagination from '../components/Pagination';
+import { usePagination } from '../hooks/usePagination';
 
 interface ServiceWithServer extends Service {
   serverName: string;
@@ -152,14 +154,25 @@ export default function Services() {
     }
   };
 
+  // Pagination
+  const {
+    paginatedData,
+    currentPage,
+    totalPages,
+    totalItems,
+    pageSize,
+    setPage,
+    setPageSize,
+  } = usePagination({ data: filteredServices, defaultPageSize: 25 });
+
   if (loading) {
     return (
-      <div className="p-8">
+      <div className="p-6">
         <div className="animate-pulse">
-          <div className="h-8 w-32 bg-slate-700 rounded mb-8"></div>
+          <div className="h-7 w-32 bg-slate-700 rounded mb-5"></div>
           <div className="space-y-4">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="h-20 bg-slate-800 rounded-xl"></div>
+              <div key={i} className="h-20 bg-slate-800 rounded-lg"></div>
             ))}
           </div>
         </div>
@@ -168,10 +181,10 @@ export default function Services() {
   }
 
   return (
-    <div className="p-8">
-      <div className="flex items-center justify-between mb-8">
+    <div className="p-6">
+      <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-2xl font-bold text-white">Services</h1>
+          <h1 className="text-xl font-bold text-white">Services</h1>
           <p className="text-slate-400">
             All services in {selectedEnvironment?.name}
           </p>
@@ -286,7 +299,7 @@ export default function Services() {
         )}
       </Modal>
 
-      <div className="card">
+      <div className="panel">
         {filteredServices.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -303,7 +316,7 @@ export default function Services() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-700">
-                {filteredServices.map((service) => {
+                {paginatedData.map((service) => {
                   const ports = parseExposedPorts(service.exposedPorts);
                   const hasUpdate = service.latestAvailableTag && service.latestAvailableTag !== service.imageTag;
                   const depNode = dependencyNodes.get(service.id);
@@ -396,6 +409,14 @@ export default function Services() {
                 })}
               </tbody>
             </table>
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={totalItems}
+              pageSize={pageSize}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+            />
           </div>
         ) : (
           <div className="text-center py-12">

@@ -119,10 +119,10 @@ export function Modal({
     >
       <div
         ref={contentRef}
-        className={`bg-slate-900 rounded-xl border border-slate-700 w-full ${sizeClasses[size]} p-6 max-h-[90vh] flex flex-col`}
+        className={`bg-slate-900 rounded-lg border border-slate-700 w-full ${sizeClasses[size]} p-5 max-h-[90vh] flex flex-col`}
       >
         {(title || showCloseButton) && (
-          <div className="flex items-start justify-between mb-4">
+          <div className="flex items-start justify-between mb-3">
             {title && (
               <div>
                 <h3 id="modal-title" className="text-lg font-semibold text-white">
@@ -152,7 +152,7 @@ export function Modal({
 
         <div className="flex-1 overflow-auto">{children}</div>
 
-        {footer && <div className="mt-6 flex gap-2 justify-end">{footer}</div>}
+        {footer && <div className="mt-4 flex gap-2 justify-end">{footer}</div>}
       </div>
     </div>
   );

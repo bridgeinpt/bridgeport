@@ -223,8 +223,8 @@ export default function ManagedImages() {
 
   if (!selectedEnvironment) {
     return (
-      <div className="p-8">
-        <div className="card text-center py-12">
+      <div className="p-6">
+        <div className="panel text-center py-12">
           <p className="text-slate-400">Select an environment to view managed images</p>
         </div>
       </div>
@@ -232,10 +232,10 @@ export default function ManagedImages() {
   }
 
   return (
-    <div className="p-8">
-      <div className="flex items-center justify-between mb-8">
+    <div className="p-6">
+      <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-2xl font-bold text-white">Managed Images</h1>
+          <h1 className="text-xl font-bold text-white">Managed Images</h1>
           <p className="text-slate-400 mt-1">
             Central image management for orchestrated deployments
           </p>
@@ -246,14 +246,14 @@ export default function ManagedImages() {
       </div>
 
       {loading ? (
-        <div className="card">
+        <div className="panel">
           <div className="animate-pulse space-y-4">
             <div className="h-12 bg-slate-700 rounded"></div>
             <div className="h-12 bg-slate-700 rounded"></div>
           </div>
         </div>
       ) : images.length === 0 ? (
-        <div className="card text-center py-12">
+        <div className="panel text-center py-12">
           <ImageIcon className="w-12 h-12 text-slate-500 mx-auto mb-4" />
           <p className="text-slate-400 mb-4">No managed images configured</p>
           <p className="text-slate-500 text-sm mb-4">
@@ -266,7 +266,7 @@ export default function ManagedImages() {
       ) : (
         <div className="space-y-4">
           {images.map((image) => (
-            <div key={image.id} className="card">
+            <div key={image.id} className="panel">
               <div className="flex items-start justify-between">
                 <div className="flex items-start gap-4">
                   <div className="p-3 bg-slate-800 rounded-lg">

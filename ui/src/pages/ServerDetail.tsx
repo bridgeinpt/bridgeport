@@ -398,10 +398,10 @@ export default function ServerDetail() {
 
   if (loading) {
     return (
-      <div className="p-8">
+      <div className="p-6">
         <div className="animate-pulse">
-          <div className="h-8 w-48 bg-slate-700 rounded mb-8"></div>
-          <div className="h-64 bg-slate-800 rounded-xl"></div>
+          <div className="h-8 w-48 bg-slate-700 rounded mb-5"></div>
+          <div className="h-64 bg-slate-800 rounded-lg"></div>
         </div>
       </div>
     );
@@ -409,8 +409,8 @@ export default function ServerDetail() {
 
   if (!server) {
     return (
-      <div className="p-8">
-        <div className="card text-center py-12">
+      <div className="p-6">
+        <div className="panel text-center py-12">
           <p className="text-slate-400">Server not found</p>
           <Link to="/servers" className="btn btn-primary mt-4">
             Back to Servers
@@ -421,8 +421,8 @@ export default function ServerDetail() {
   }
 
   return (
-    <div className="p-8">
-      <div className="flex items-center justify-between mb-8">
+    <div className="p-6">
+      <div className="flex items-center justify-between mb-5">
         <div>
           <div className="flex items-center gap-3">
             <div
@@ -434,7 +434,7 @@ export default function ServerDetail() {
                   : 'bg-yellow-500'
               }`}
             />
-            <h1 className="text-2xl font-bold text-white">{server.name}</h1>
+            <h1 className="text-xl font-bold text-white">{server.name}</h1>
           </div>
           <p className="text-slate-400 mt-1">
             {server.hostname}
@@ -475,8 +475,8 @@ export default function ServerDetail() {
       </div>
 
       {/* Server Info */}
-      <div className="grid grid-cols-2 gap-6 mb-8">
-        <div className="card">
+      <div className="grid grid-cols-2 gap-4 mb-6">
+        <div className="panel">
           <h3 className="text-lg font-semibold text-white mb-4">Details</h3>
           <dl className="space-y-3">
             <div className="flex justify-between">
@@ -518,7 +518,7 @@ export default function ServerDetail() {
           </dl>
         </div>
 
-        <div className="card">
+        <div className="panel">
           <h3 className="text-lg font-semibold text-white mb-4">Tags</h3>
           <div className="flex flex-wrap gap-2">
             {server.tags &&
@@ -538,7 +538,7 @@ export default function ServerDetail() {
       </div>
 
       {/* Monitoring Card */}
-      <div className="card mb-8">
+      <div className="panel mb-6">
         <h3 className="text-lg font-semibold text-white mb-4">Monitoring</h3>
 
         {/* Mode Selection */}
@@ -750,7 +750,7 @@ export default function ServerDetail() {
 
       {/* Config Files Sync Status */}
       {(configFilesStatus.length > 0 || loadingConfigFiles) && (
-        <div className="card mb-6">
+        <div className="panel mb-6">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <h3 className="text-lg font-semibold text-white">Config Files</h3>
@@ -950,7 +950,7 @@ export default function ServerDetail() {
 
         return (
           <>
-            <div className="card mb-6">
+            <div className="panel mb-6">
               <h3 className="text-lg font-semibold text-white mb-4">
                 Services ({activeServices.length})
               </h3>
@@ -1023,7 +1023,7 @@ export default function ServerDetail() {
 
             {/* Missing Services */}
             {missingServices.length > 0 && (
-              <div className="card border-orange-500/30">
+              <div className="panel border-orange-500/30">
                 <h3 className="text-lg font-semibold text-orange-400 mb-4">
                   Missing Services ({missingServices.length})
                 </h3>

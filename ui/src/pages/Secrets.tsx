@@ -15,6 +15,8 @@ import { formatDistanceToNow } from 'date-fns';
 import { Modal } from '../components/Modal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { LockIcon, LinkIcon, WarningIcon } from '../components/Icons';
+import Pagination from '../components/Pagination';
+import { usePagination } from '../hooks/usePagination';
 
 export default function Secrets() {
   const { selectedEnvironment } = useAppStore();
@@ -149,14 +151,25 @@ export default function Secrets() {
     setExpandedUsage((prev) => ({ ...prev, [secretId]: !prev[secretId] }));
   };
 
+  // Pagination
+  const {
+    paginatedData,
+    currentPage,
+    totalPages,
+    totalItems,
+    pageSize,
+    setPage,
+    setPageSize,
+  } = usePagination({ data: secrets, defaultPageSize: 25 });
+
   if (loading) {
     return (
-      <div className="p-8">
+      <div className="p-6">
         <div className="animate-pulse">
-          <div className="h-8 w-32 bg-slate-700 rounded mb-8"></div>
+          <div className="h-7 w-32 bg-slate-700 rounded mb-5"></div>
           <div className="space-y-4">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="h-16 bg-slate-800 rounded-xl"></div>
+              <div key={i} className="h-16 bg-slate-800 rounded-lg"></div>
             ))}
           </div>
         </div>
@@ -168,10 +181,10 @@ export default function Secrets() {
   const unusedSecrets = secrets.filter((s) => (s.usageCount ?? 0) === 0);
 
   return (
-    <div className="p-8">
-      <div className="flex items-center justify-between mb-8">
+    <div className="p-6">
+      <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-2xl font-bold text-white">Secrets</h1>
+          <h1 className="text-xl font-bold text-white">Secrets</h1>
           <p className="text-slate-400">
             Encrypted secrets for {selectedEnvironment?.name}
           </p>
@@ -183,7 +196,7 @@ export default function Secrets() {
 
       {/* Environment Settings (Admin only) */}
       {isAdmin(user) && (
-        <div className="card mb-6">
+        <div className="panel mb-5">
           <div className="flex items-center justify-between">
             <div>
               <h3 className="font-medium text-white">Secret Reveal Setting</h3>
@@ -213,7 +226,7 @@ export default function Secrets() {
 
       {/* Unused Secrets Warning */}
       {unusedSecrets.length > 0 && (
-        <div className="mb-6 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
+        <div className="mb-5 p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
           <div className="flex items-start gap-3">
             <WarningIcon className="w-5 h-5 text-yellow-400 mt-0.5" />
             <div>
@@ -324,10 +337,10 @@ export default function Secrets() {
 
       {/* Secrets List */}
       <div className="space-y-3">
-        {secrets.map((secret) => (
+        {paginatedData.map((secret) => (
           <div
             key={secret.id}
-            className={`card ${(secret.usageCount ?? 0) === 0 ? 'border-yellow-500/30' : ''}`}
+            className={`panel ${(secret.usageCount ?? 0) === 0 ? 'border-yellow-500/30' : ''}`}
           >
             <div className="flex items-start justify-between">
               <div className="flex-1">
@@ -478,7 +491,7 @@ export default function Secrets() {
         ))}
 
         {secrets.length === 0 && (
-          <div className="card text-center py-12">
+          <div className="panel text-center py-12">
             <p className="text-slate-400">No secrets configured</p>
             <button
               onClick={() => setShowCreate(true)}
@@ -487,6 +500,16 @@ export default function Secrets() {
               Add First Secret
             </button>
           </div>
+        )}
+        {secrets.length > 0 && (
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
         )}
       </div>
     </div>

@@ -19,6 +19,8 @@ import { Modal } from '../components/Modal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { getSyncStatusColor } from '../lib/status';
 import { RefreshIcon, CheckIcon, WarningIcon } from '../components/Icons';
+import Pagination from '../components/Pagination';
+import { usePagination } from '../hooks/usePagination';
 
 interface ServiceOption {
   id: string;
@@ -240,10 +242,21 @@ export default function ConfigFiles() {
     return true;
   });
 
+  // Pagination
+  const {
+    paginatedData,
+    currentPage,
+    totalPages,
+    totalItems,
+    pageSize,
+    setPage,
+    setPageSize,
+  } = usePagination({ data: filteredConfigFiles, defaultPageSize: 25 });
+
   if (!selectedEnvironment) {
     return (
-      <div className="p-8">
-        <div className="card text-center py-12">
+      <div className="p-6">
+        <div className="panel text-center py-12">
           <p className="text-slate-400">Please select an environment</p>
         </div>
       </div>
@@ -252,12 +265,12 @@ export default function ConfigFiles() {
 
   if (loading) {
     return (
-      <div className="p-8">
+      <div className="p-6">
         <div className="animate-pulse">
-          <div className="h-8 w-48 bg-slate-700 rounded mb-8"></div>
+          <div className="h-7 w-48 bg-slate-700 rounded mb-5"></div>
           <div className="space-y-4">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="h-24 bg-slate-800 rounded-xl"></div>
+              <div key={i} className="h-24 bg-slate-800 rounded-lg"></div>
             ))}
           </div>
         </div>
@@ -266,10 +279,10 @@ export default function ConfigFiles() {
   }
 
   return (
-    <div className="p-8">
-      <div className="flex items-center justify-between mb-8">
+    <div className="p-6">
+      <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-2xl font-bold text-white">Config Files</h1>
+          <h1 className="text-xl font-bold text-white">Config Files</h1>
           <p className="text-slate-400">
             Manage config files (compose files, Caddyfiles, certificates) for {selectedEnvironment.name}
           </p>
@@ -805,7 +818,7 @@ export default function ConfigFiles() {
       </Modal>
 
       {/* Filters */}
-      <div className="mb-6 flex items-center gap-6 flex-wrap">
+      <div className="mb-5 flex items-center gap-6 flex-wrap">
         <label className="flex items-center gap-2 text-sm text-slate-400">
           <input
             type="checkbox"
@@ -839,8 +852,8 @@ export default function ConfigFiles() {
 
       {/* Config Files Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredConfigFiles.map((file) => (
-          <div key={file.id} className="card hover:border-slate-600 transition-colors">
+        {paginatedData.map((file) => (
+          <div key={file.id} className="panel hover:border-slate-600 transition-colors">
             <div className="flex items-start justify-between mb-2">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
@@ -923,7 +936,7 @@ export default function ConfigFiles() {
         ))}
 
         {filteredConfigFiles.length === 0 && configFiles.length > 0 && (
-          <div className="col-span-full card text-center py-12">
+          <div className="col-span-full panel text-center py-12">
             <p className="text-slate-400">No config files match the filter</p>
             <button
               onClick={() => {
@@ -938,7 +951,7 @@ export default function ConfigFiles() {
         )}
 
         {configFiles.length === 0 && (
-          <div className="col-span-full card text-center py-12">
+          <div className="col-span-full panel text-center py-12">
             <p className="text-slate-400">No config files yet</p>
             <p className="text-slate-500 text-sm mt-2">
               Store docker-compose files, Caddyfiles, certificates, and more
@@ -949,6 +962,16 @@ export default function ConfigFiles() {
           </div>
         )}
       </div>
+      {filteredConfigFiles.length > 0 && (
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={totalItems}
+          pageSize={pageSize}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+        />
+      )}
     </div>
   );
 }

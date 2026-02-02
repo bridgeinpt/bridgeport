@@ -621,10 +621,10 @@ export default function ServiceDetail() {
 
   if (loading) {
     return (
-      <div className="p-8">
+      <div className="p-6">
         <div className="animate-pulse">
-          <div className="h-8 w-48 bg-slate-700 rounded mb-8"></div>
-          <div className="h-64 bg-slate-800 rounded-xl"></div>
+          <div className="h-7 w-48 bg-slate-700 rounded mb-5"></div>
+          <div className="h-64 bg-slate-800 rounded-lg"></div>
         </div>
       </div>
     );
@@ -632,8 +632,8 @@ export default function ServiceDetail() {
 
   if (!service) {
     return (
-      <div className="p-8">
-        <div className="card text-center py-12">
+      <div className="p-6">
+        <div className="panel text-center py-12">
           <p className="text-slate-400">Service not found</p>
           <Link to="/services" className="btn btn-primary mt-4">
             Back to Services
@@ -644,10 +644,10 @@ export default function ServiceDetail() {
   }
 
   return (
-    <div className="p-8">
+    <div className="p-6">
       {/* Missing Service Warning */}
       {service.discoveryStatus === 'missing' && (
-        <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-4 mb-6">
+        <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-4 mb-5">
           <div className="flex items-start gap-3">
             <svg className="w-5 h-5 text-orange-400 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -665,7 +665,7 @@ export default function ServiceDetail() {
         </div>
       )}
 
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-5">
         <div>
           <div className="flex items-center gap-3">
             {/* Container Status Badge */}
@@ -687,7 +687,7 @@ export default function ServiceDetail() {
                   onKeyDown={handleNameKeyDown}
                   onBlur={saveEditName}
                   disabled={savingName}
-                  className="text-2xl font-bold bg-slate-800 text-white border border-primary-500 rounded px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="text-xl font-bold bg-slate-800 text-white border border-primary-500 rounded px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-primary-500"
                   style={{ minWidth: '200px' }}
                 />
                 {savingName && (
@@ -696,7 +696,7 @@ export default function ServiceDetail() {
               </div>
             ) : (
               <h1
-                className="text-2xl font-bold text-white cursor-pointer hover:text-primary-400 group flex items-center gap-2"
+                className="text-xl font-bold text-white cursor-pointer hover:text-primary-400 group flex items-center gap-2"
                 onClick={startEditingName}
                 title="Click to edit service name"
               >
@@ -752,7 +752,7 @@ export default function ServiceDetail() {
 
       {/* Update Available Banner */}
       {service.latestAvailableTag && service.latestAvailableTag !== service.imageTag && (
-        <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4 mb-6">
+        <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4 mb-5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <svg className="w-5 h-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -780,9 +780,9 @@ export default function ServiceDetail() {
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-6 mb-8">
+      <div className="grid grid-cols-3 gap-4 mb-5">
         {/* Deploy Card */}
-        <div className="col-span-2 card">
+        <div className="col-span-2 panel">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-white">Deploy</h3>
             {service.registryConnectionId && (
@@ -995,7 +995,7 @@ export default function ServiceDetail() {
         </div>
 
         {/* Service Info */}
-        <div className="card">
+        <div className="panel">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-white">Details</h3>
             <button onClick={openConfig} className="btn btn-ghost text-sm">
@@ -1063,9 +1063,9 @@ export default function ServiceDetail() {
       </div>
 
       {/* Orchestration Row: Dependencies & Health Config */}
-      <div className="grid grid-cols-2 gap-6 mb-8">
+      <div className="grid grid-cols-2 gap-4 mb-5">
         {/* Dependencies Card */}
-        <div className="card">
+        <div className="panel">
           <h3 className="text-lg font-semibold text-white mb-4">Dependencies</h3>
           <DependencyEditor serviceId={id!} onUpdate={refreshDependencies} />
           {dependencies.length > 0 && (
@@ -1120,7 +1120,7 @@ export default function ServiceDetail() {
         </div>
 
         {/* Health Check Config Card */}
-        <div className="card">
+        <div className="panel">
           <h3 className="text-lg font-semibold text-white mb-4">Health Check Config</h3>
           <p className="text-sm text-slate-400 mb-4">
             Configure how health checks work during orchestrated deployments.
@@ -1146,7 +1146,7 @@ export default function ServiceDetail() {
 
       {/* Health Check Result/Error */}
       {(healthCheckError || healthCheckResult) && (
-        <div className="card mb-8">
+        <div className="panel mb-5">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-white">Health Check Result</h3>
             <button
@@ -1242,276 +1242,8 @@ export default function ServiceDetail() {
         </div>
       )}
 
-      {/* Deployment History */}
-      <div className="card">
-        <h3 className="text-lg font-semibold text-white mb-4">
-          Deployment History
-        </h3>
-        {deployments.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
-                  <th className="pb-3 font-medium">Tag</th>
-                  <th className="pb-3 font-medium">Status</th>
-                  <th className="pb-3 font-medium">Triggered By</th>
-                  <th className="pb-3 font-medium">Started</th>
-                  <th className="pb-3 font-medium">Duration</th>
-                  <th className="pb-3 font-medium"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-700">
-                {deployments.map((deployment) => (
-                  <>
-                    <tr key={deployment.id} className="text-slate-300">
-                      <td className="py-3 font-mono text-primary-400">
-                        {deployment.imageTag}
-                      </td>
-                      <td className="py-3">
-                        <span
-                          className={`badge ${
-                            deployment.status === 'success'
-                              ? 'badge-success'
-                              : deployment.status === 'failed'
-                              ? 'badge-error'
-                              : deployment.status === 'deploying'
-                              ? 'badge-info'
-                              : 'badge-warning'
-                          }`}
-                        >
-                          {deployment.status}
-                        </span>
-                      </td>
-                      <td className="py-3">{deployment.triggeredBy}</td>
-                      <td className="py-3 text-sm">
-                        {format(new Date(deployment.startedAt), 'MMM d, HH:mm')}
-                      </td>
-                      <td className="py-3 text-sm text-slate-400">
-                        {deployment.completedAt
-                          ? `${Math.round(
-                              (new Date(deployment.completedAt).getTime() -
-                                new Date(deployment.startedAt).getTime()) /
-                                1000
-                            )}s`
-                          : '-'}
-                      </td>
-                      <td className="py-3 text-right">
-                        {deployment.logs && (
-                          <button
-                            onClick={() =>
-                              setExpandedDeployment(
-                                expandedDeployment === deployment.id ? null : deployment.id
-                              )
-                            }
-                            className={`text-sm ${
-                              deployment.status === 'failed'
-                                ? 'text-red-400 hover:text-red-300'
-                                : 'text-slate-400 hover:text-white'
-                            }`}
-                          >
-                            {expandedDeployment === deployment.id ? 'Hide Logs' : 'View Logs'}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                    {expandedDeployment === deployment.id && deployment.logs && (
-                      <tr key={`${deployment.id}-logs`}>
-                        <td colSpan={6} className="p-0">
-                          <pre className="p-4 bg-slate-950 text-xs text-slate-300 font-mono overflow-x-auto max-h-64 overflow-y-auto">
-                            {deployment.logs}
-                          </pre>
-                        </td>
-                      </tr>
-                    )}
-                  </>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="text-slate-400">No deployments yet</p>
-        )}
-      </div>
-
-      {/* Health Check History */}
-      <div className="card mt-6">
-        <h3 className="text-lg font-semibold text-white mb-4">
-          Health Check History
-        </h3>
-        {healthCheckHistory.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
-                  <th className="pb-3 font-medium">Time</th>
-                  <th className="pb-3 font-medium">Status</th>
-                  <th className="pb-3 font-medium">Container</th>
-                  <th className="pb-3 font-medium">URL Check</th>
-                  <th className="pb-3 font-medium">User</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-700">
-                {healthCheckHistory.map((log) => {
-                  const details = log.details ? JSON.parse(log.details) : null;
-                  return (
-                    <tr key={log.id} className="text-slate-300">
-                      <td className="py-3 text-sm">
-                        {format(new Date(log.createdAt), 'MMM d, HH:mm:ss')}
-                      </td>
-                      <td className="py-3">
-                        {log.success ? (
-                          <span
-                            className={`badge ${
-                              details?.status === 'healthy'
-                                ? 'badge-success'
-                                : details?.status === 'running'
-                                ? 'badge-info'
-                                : details?.status === 'unhealthy'
-                                ? 'badge-error'
-                                : 'badge-warning'
-                            }`}
-                          >
-                            {details?.status || 'unknown'}
-                          </span>
-                        ) : (
-                          <span className="badge badge-error">failed</span>
-                        )}
-                      </td>
-                      <td className="py-3 text-sm">
-                        {details?.containerHealth ? (
-                          <span
-                            className={
-                              details.containerHealth.running ? 'text-green-400' : 'text-red-400'
-                            }
-                          >
-                            {details.containerHealth.state}
-                            {details.containerHealth.health && ` (${details.containerHealth.health})`}
-                          </span>
-                        ) : (
-                          <span className="text-slate-500">-</span>
-                        )}
-                      </td>
-                      <td className="py-3 text-sm">
-                        {details?.urlHealth ? (
-                          <span
-                            className={details.urlHealth.success ? 'text-green-400' : 'text-red-400'}
-                          >
-                            {details.urlHealth.success ? 'OK' : 'Failed'}
-                            {details.urlHealth.statusCode && ` (${details.urlHealth.statusCode})`}
-                          </span>
-                        ) : (
-                          <span className="text-slate-500">-</span>
-                        )}
-                      </td>
-                      <td className="py-3 text-sm text-slate-400">
-                        {log.user?.email || 'System'}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="text-slate-400">No health checks recorded yet</p>
-        )}
-      </div>
-
-      {/* Action History */}
-      <div className="card mt-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white">Action History</h3>
-          {actionHistory.length > 5 && (
-            <button
-              onClick={() => setShowAllHistory(!showAllHistory)}
-              className="text-sm text-primary-400 hover:text-primary-300"
-            >
-              {showAllHistory ? 'Show Less' : `Show All (${actionHistory.length})`}
-            </button>
-          )}
-        </div>
-        {actionHistory.length > 0 ? (
-          <div className="space-y-2">
-            {(showAllHistory ? actionHistory : actionHistory.slice(0, 5)).map((log) => {
-              const details = log.details ? JSON.parse(log.details) : null;
-              return (
-                <div
-                  key={log.id}
-                  className={`flex items-center justify-between p-3 rounded-lg ${
-                    log.success ? 'bg-slate-800/50' : 'bg-red-500/10'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    {/* Action icon */}
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                      log.action === 'deploy' ? 'bg-blue-500/20 text-blue-400' :
-                      log.action === 'restart' ? 'bg-yellow-500/20 text-yellow-400' :
-                      log.action === 'health_check' ? 'bg-green-500/20 text-green-400' :
-                      log.action === 'update' ? 'bg-purple-500/20 text-purple-400' :
-                      'bg-slate-600 text-slate-400'
-                    }`}>
-                      {log.action === 'deploy' && (
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                        </svg>
-                      )}
-                      {log.action === 'restart' && (
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                        </svg>
-                      )}
-                      {log.action === 'health_check' && (
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                      )}
-                      {log.action === 'update' && (
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                        </svg>
-                      )}
-                      {log.action === 'create' && (
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                        </svg>
-                      )}
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-white font-medium capitalize">{log.action.replace('_', ' ')}</span>
-                        {!log.success && (
-                          <span className="badge badge-error text-xs">failed</span>
-                        )}
-                        {log.action === 'deploy' && details?.imageTag && (
-                          <span className="text-xs text-primary-400 font-mono">{details.imageTag}</span>
-                        )}
-                        {log.action === 'health_check' && details?.status && (
-                          <span className={`badge text-xs ${getHealthStatusColor(details.healthStatus || details.status)}`}>
-                            {details.healthStatus || details.status}
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-xs text-slate-400">
-                        {log.user?.email || 'System'} • {format(new Date(log.createdAt), 'MMM d, HH:mm')}
-                      </div>
-                    </div>
-                  </div>
-                  {log.error && (
-                    <div className="text-xs text-red-400 max-w-xs truncate" title={log.error}>
-                      {log.error}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <p className="text-slate-400">No actions recorded yet</p>
-        )}
-      </div>
-
-      {/* Attached Files */}
-      <div className="card mt-6">
+      {/* Config Files - Moved up per plan */}
+      <div className="panel mb-5">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-white">Config Files</h3>
           <div className="flex gap-2">
@@ -1633,6 +1365,274 @@ export default function ServiceDetail() {
           <p className="text-slate-400 text-sm">
             No config files attached. Attach files to sync docker-compose, Caddyfile, certificates, etc.
           </p>
+        )}
+      </div>
+
+      {/* Deployment History */}
+      <div className="panel">
+        <h3 className="text-lg font-semibold text-white mb-4">
+          Deployment History
+        </h3>
+        {deployments.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
+                  <th className="pb-3 font-medium">Tag</th>
+                  <th className="pb-3 font-medium">Status</th>
+                  <th className="pb-3 font-medium">Triggered By</th>
+                  <th className="pb-3 font-medium">Started</th>
+                  <th className="pb-3 font-medium">Duration</th>
+                  <th className="pb-3 font-medium"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-700">
+                {deployments.map((deployment) => (
+                  <>
+                    <tr key={deployment.id} className="text-slate-300">
+                      <td className="py-3 font-mono text-primary-400">
+                        {deployment.imageTag}
+                      </td>
+                      <td className="py-3">
+                        <span
+                          className={`badge ${
+                            deployment.status === 'success'
+                              ? 'badge-success'
+                              : deployment.status === 'failed'
+                              ? 'badge-error'
+                              : deployment.status === 'deploying'
+                              ? 'badge-info'
+                              : 'badge-warning'
+                          }`}
+                        >
+                          {deployment.status}
+                        </span>
+                      </td>
+                      <td className="py-3">{deployment.triggeredBy}</td>
+                      <td className="py-3 text-sm">
+                        {format(new Date(deployment.startedAt), 'MMM d, HH:mm')}
+                      </td>
+                      <td className="py-3 text-sm text-slate-400">
+                        {deployment.completedAt
+                          ? `${Math.round(
+                              (new Date(deployment.completedAt).getTime() -
+                                new Date(deployment.startedAt).getTime()) /
+                                1000
+                            )}s`
+                          : '-'}
+                      </td>
+                      <td className="py-3 text-right">
+                        {deployment.logs && (
+                          <button
+                            onClick={() =>
+                              setExpandedDeployment(
+                                expandedDeployment === deployment.id ? null : deployment.id
+                              )
+                            }
+                            className={`text-sm ${
+                              deployment.status === 'failed'
+                                ? 'text-red-400 hover:text-red-300'
+                                : 'text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            {expandedDeployment === deployment.id ? 'Hide Logs' : 'View Logs'}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                    {expandedDeployment === deployment.id && deployment.logs && (
+                      <tr key={`${deployment.id}-logs`}>
+                        <td colSpan={6} className="p-0">
+                          <pre className="p-4 bg-slate-950 text-xs text-slate-300 font-mono overflow-x-auto max-h-64 overflow-y-auto">
+                            {deployment.logs}
+                          </pre>
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-slate-400">No deployments yet</p>
+        )}
+      </div>
+
+      {/* Health Check History */}
+      <div className="panel mt-5">
+        <h3 className="text-lg font-semibold text-white mb-4">
+          Health Check History
+        </h3>
+        {healthCheckHistory.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
+                  <th className="pb-3 font-medium">Time</th>
+                  <th className="pb-3 font-medium">Status</th>
+                  <th className="pb-3 font-medium">Container</th>
+                  <th className="pb-3 font-medium">URL Check</th>
+                  <th className="pb-3 font-medium">User</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-700">
+                {healthCheckHistory.map((log) => {
+                  const details = log.details ? JSON.parse(log.details) : null;
+                  return (
+                    <tr key={log.id} className="text-slate-300">
+                      <td className="py-3 text-sm">
+                        {format(new Date(log.createdAt), 'MMM d, HH:mm:ss')}
+                      </td>
+                      <td className="py-3">
+                        {log.success ? (
+                          <span
+                            className={`badge ${
+                              details?.status === 'healthy'
+                                ? 'badge-success'
+                                : details?.status === 'running'
+                                ? 'badge-info'
+                                : details?.status === 'unhealthy'
+                                ? 'badge-error'
+                                : 'badge-warning'
+                            }`}
+                          >
+                            {details?.status || 'unknown'}
+                          </span>
+                        ) : (
+                          <span className="badge badge-error">failed</span>
+                        )}
+                      </td>
+                      <td className="py-3 text-sm">
+                        {details?.containerHealth ? (
+                          <span
+                            className={
+                              details.containerHealth.running ? 'text-green-400' : 'text-red-400'
+                            }
+                          >
+                            {details.containerHealth.state}
+                            {details.containerHealth.health && ` (${details.containerHealth.health})`}
+                          </span>
+                        ) : (
+                          <span className="text-slate-500">-</span>
+                        )}
+                      </td>
+                      <td className="py-3 text-sm">
+                        {details?.urlHealth ? (
+                          <span
+                            className={details.urlHealth.success ? 'text-green-400' : 'text-red-400'}
+                          >
+                            {details.urlHealth.success ? 'OK' : 'Failed'}
+                            {details.urlHealth.statusCode && ` (${details.urlHealth.statusCode})`}
+                          </span>
+                        ) : (
+                          <span className="text-slate-500">-</span>
+                        )}
+                      </td>
+                      <td className="py-3 text-sm text-slate-400">
+                        {log.user?.email || 'System'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-slate-400">No health checks recorded yet</p>
+        )}
+      </div>
+
+      {/* Action History */}
+      <div className="panel mt-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-white">Action History</h3>
+          {actionHistory.length > 5 && (
+            <button
+              onClick={() => setShowAllHistory(!showAllHistory)}
+              className="text-sm text-primary-400 hover:text-primary-300"
+            >
+              {showAllHistory ? 'Show Less' : `Show All (${actionHistory.length})`}
+            </button>
+          )}
+        </div>
+        {actionHistory.length > 0 ? (
+          <div className="space-y-2">
+            {(showAllHistory ? actionHistory : actionHistory.slice(0, 5)).map((log) => {
+              const details = log.details ? JSON.parse(log.details) : null;
+              return (
+                <div
+                  key={log.id}
+                  className={`flex items-center justify-between p-3 rounded-lg ${
+                    log.success ? 'bg-slate-800/50' : 'bg-red-500/10'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    {/* Action icon */}
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                      log.action === 'deploy' ? 'bg-blue-500/20 text-blue-400' :
+                      log.action === 'restart' ? 'bg-yellow-500/20 text-yellow-400' :
+                      log.action === 'health_check' ? 'bg-green-500/20 text-green-400' :
+                      log.action === 'update' ? 'bg-purple-500/20 text-purple-400' :
+                      'bg-slate-600 text-slate-400'
+                    }`}>
+                      {log.action === 'deploy' && (
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                        </svg>
+                      )}
+                      {log.action === 'restart' && (
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                      )}
+                      {log.action === 'health_check' && (
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      )}
+                      {log.action === 'update' && (
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                      )}
+                      {log.action === 'create' && (
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                        </svg>
+                      )}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-white font-medium capitalize">{log.action.replace('_', ' ')}</span>
+                        {!log.success && (
+                          <span className="badge badge-error text-xs">failed</span>
+                        )}
+                        {log.action === 'deploy' && details?.imageTag && (
+                          <span className="text-xs text-primary-400 font-mono">{details.imageTag}</span>
+                        )}
+                        {log.action === 'health_check' && details?.status && (
+                          <span className={`badge text-xs ${getHealthStatusColor(details.healthStatus || details.status)}`}>
+                            {details.healthStatus || details.status}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-slate-400">
+                        {log.user?.email || 'System'} • {format(new Date(log.createdAt), 'MMM d, HH:mm')}
+                      </div>
+                    </div>
+                  </div>
+                  {log.error && (
+                    <div className="text-xs text-red-400 max-w-xs truncate" title={log.error}>
+                      {log.error}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-slate-400">No actions recorded yet</p>
         )}
       </div>
 

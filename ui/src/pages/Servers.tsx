@@ -4,6 +4,8 @@ import { useAppStore } from '../lib/store';
 import { listServers, checkServerHealth, discoverContainers, createServer, type Server } from '../lib/api';
 import { formatDistanceToNow } from 'date-fns';
 import { Modal } from '../components/Modal';
+import Pagination from '../components/Pagination';
+import { usePagination } from '../hooks/usePagination';
 
 export default function Servers() {
   const { selectedEnvironment } = useAppStore();
@@ -82,14 +84,25 @@ export default function Servers() {
     }
   };
 
+  // Pagination
+  const {
+    paginatedData,
+    currentPage,
+    totalPages,
+    totalItems,
+    pageSize,
+    setPage,
+    setPageSize,
+  } = usePagination({ data: servers, defaultPageSize: 25 });
+
   if (loading) {
     return (
-      <div className="p-8">
+      <div className="p-6">
         <div className="animate-pulse">
-          <div className="h-8 w-32 bg-slate-700 rounded mb-8"></div>
+          <div className="h-7 w-32 bg-slate-700 rounded mb-5"></div>
           <div className="space-y-4">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="h-20 bg-slate-800 rounded-xl"></div>
+              <div key={i} className="h-20 bg-slate-800 rounded-lg"></div>
             ))}
           </div>
         </div>
@@ -98,10 +111,10 @@ export default function Servers() {
   }
 
   return (
-    <div className="p-8">
-      <div className="flex items-center justify-between mb-8">
+    <div className="p-6">
+      <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-2xl font-bold text-white">Servers</h1>
+          <h1 className="text-xl font-bold text-white">Servers</h1>
           <p className="text-slate-400">
             Manage servers in {selectedEnvironment?.name}
           </p>
@@ -196,8 +209,8 @@ export default function Servers() {
       </Modal>
 
       <div className="space-y-4">
-        {servers.map((server) => (
-          <div key={server.id} className="card">
+        {paginatedData.map((server) => (
+          <div key={server.id} className="panel">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <div
@@ -266,10 +279,20 @@ export default function Servers() {
         ))}
 
         {servers.length === 0 && (
-          <div className="card text-center py-12">
+          <div className="panel text-center py-12">
             <p className="text-slate-400">No servers configured</p>
             <button onClick={() => setShowCreate(true)} className="btn btn-primary mt-4">Add First Server</button>
           </div>
+        )}
+        {servers.length > 0 && (
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
         )}
       </div>
     </div>

@@ -154,8 +154,8 @@ export default function Users() {
 
   if (!isAdmin(currentUser)) {
     return (
-      <div className="p-8">
-        <div className="card text-center py-12">
+      <div className="p-6">
+        <div className="panel text-center py-12">
           <p className="text-red-400">Access denied. Admin privileges required.</p>
         </div>
       </div>
@@ -164,12 +164,12 @@ export default function Users() {
 
   if (loading) {
     return (
-      <div className="p-8">
+      <div className="p-6">
         <div className="animate-pulse">
-          <div className="h-8 w-32 bg-slate-700 rounded mb-8"></div>
+          <div className="h-8 w-32 bg-slate-700 rounded mb-5"></div>
           <div className="space-y-4">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="h-16 bg-slate-800 rounded-xl"></div>
+              <div key={i} className="h-16 bg-slate-800 rounded-lg"></div>
             ))}
           </div>
         </div>
@@ -178,10 +178,10 @@ export default function Users() {
   }
 
   return (
-    <div className="p-8">
-      <div className="flex items-center justify-between mb-8">
+    <div className="p-6">
+      <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-2xl font-bold text-white">Users</h1>
+          <h1 className="text-xl font-bold text-white">Users</h1>
           <p className="text-slate-400">Manage user accounts and permissions</p>
         </div>
         <button onClick={() => setShowCreate(true)} className="btn btn-primary">
@@ -389,7 +389,7 @@ export default function Users() {
       {/* Users List */}
       <div className="space-y-3">
         {users.map((user) => (
-          <div key={user.id} className="card">
+          <div key={user.id} className="panel">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center text-white font-medium">
@@ -451,7 +451,7 @@ export default function Users() {
         ))}
 
         {users.length === 0 && (
-          <div className="card text-center py-12">
+          <div className="panel text-center py-12">
             <p className="text-slate-400">No users found</p>
           </div>
         )}

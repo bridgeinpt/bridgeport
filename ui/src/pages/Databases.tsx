@@ -19,6 +19,8 @@ import {
   type Server,
 } from '../lib/api';
 import { formatDistanceToNow, format } from 'date-fns';
+import Pagination from '../components/Pagination';
+import { usePagination } from '../hooks/usePagination';
 
 const DATABASE_TYPES = [
   { value: 'postgres', label: 'PostgreSQL' },
@@ -288,10 +290,21 @@ export default function Databases() {
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
   };
 
+  // Pagination
+  const {
+    paginatedData,
+    currentPage,
+    totalPages,
+    totalItems,
+    pageSize,
+    setPage,
+    setPageSize,
+  } = usePagination({ data: databases, defaultPageSize: 25 });
+
   if (!selectedEnvironment) {
     return (
-      <div className="p-8">
-        <div className="card text-center py-12">
+      <div className="p-6">
+        <div className="panel text-center py-12">
           <p className="text-slate-400">Select an environment</p>
         </div>
       </div>
@@ -300,12 +313,12 @@ export default function Databases() {
 
   if (loading) {
     return (
-      <div className="p-8">
+      <div className="p-6">
         <div className="animate-pulse">
-          <div className="h-8 w-48 bg-slate-700 rounded mb-8"></div>
+          <div className="h-7 w-48 bg-slate-700 rounded mb-5"></div>
           <div className="space-y-4">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="h-24 bg-slate-800 rounded-xl"></div>
+              <div key={i} className="h-24 bg-slate-800 rounded-lg"></div>
             ))}
           </div>
         </div>
@@ -314,10 +327,10 @@ export default function Databases() {
   }
 
   return (
-    <div className="p-8">
-      <div className="flex items-center justify-between mb-8">
+    <div className="p-6">
+      <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-2xl font-bold text-white">Databases</h1>
+          <h1 className="text-xl font-bold text-white">Databases</h1>
           <p className="text-slate-400">
             Manage database backups for {selectedEnvironment.name}
           </p>
@@ -884,7 +897,7 @@ export default function Databases() {
 
       {/* Databases List */}
       {databases.length === 0 ? (
-        <div className="card text-center py-12">
+        <div className="panel text-center py-12">
           <DatabaseIcon className="w-12 h-12 text-slate-500 mx-auto mb-4" />
           <p className="text-slate-400 mb-4">No databases configured</p>
           <p className="text-slate-500 text-sm mb-4">
@@ -896,8 +909,8 @@ export default function Databases() {
         </div>
       ) : (
         <div className="space-y-4">
-          {databases.map((db) => (
-            <div key={db.id} className="card">
+          {paginatedData.map((db) => (
+            <div key={db.id} className="panel">
               <div className="flex items-start justify-between">
                 <div className="flex items-start gap-4">
                   <div className="p-3 bg-slate-800 rounded-lg">
@@ -983,6 +996,14 @@ export default function Databases() {
               </div>
             </div>
           ))}
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
         </div>
       )}
     </div>

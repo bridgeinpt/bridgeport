@@ -17,6 +17,8 @@ import {
   type RegistryService,
 } from '../lib/api';
 import { formatDistanceToNow } from 'date-fns';
+import Pagination from '../components/Pagination';
+import { usePagination } from '../hooks/usePagination';
 
 const REGISTRY_TYPES = [
   { value: 'digitalocean', label: 'DigitalOcean', url: 'https://api.digitalocean.com/v2/registry' },
@@ -255,10 +257,21 @@ export default function Registries() {
     }
   };
 
+  // Pagination
+  const {
+    paginatedData,
+    currentPage,
+    totalPages,
+    totalItems,
+    pageSize,
+    setPage,
+    setPageSize,
+  } = usePagination({ data: registries, defaultPageSize: 25 });
+
   if (!selectedEnvironment) {
     return (
-      <div className="p-8">
-        <div className="card text-center py-12">
+      <div className="p-6">
+        <div className="panel text-center py-12">
           <p className="text-slate-400">Select an environment to view registries</p>
         </div>
       </div>
@@ -266,10 +279,10 @@ export default function Registries() {
   }
 
   return (
-    <div className="p-8">
-      <div className="flex items-center justify-between mb-8">
+    <div className="p-6">
+      <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-2xl font-bold text-white">Registry Connections</h1>
+          <h1 className="text-xl font-bold text-white">Registry Connections</h1>
           <p className="text-slate-400 mt-1">
             Manage container registry connections for {selectedEnvironment.name}
           </p>
@@ -280,14 +293,14 @@ export default function Registries() {
       </div>
 
       {loading ? (
-        <div className="card">
+        <div className="panel">
           <div className="animate-pulse space-y-4">
             <div className="h-12 bg-slate-700 rounded"></div>
             <div className="h-12 bg-slate-700 rounded"></div>
           </div>
         </div>
       ) : registries.length === 0 ? (
-        <div className="card text-center py-12">
+        <div className="panel text-center py-12">
           <RegistryIcon className="w-12 h-12 text-slate-500 mx-auto mb-4" />
           <p className="text-slate-400 mb-4">No registry connections configured</p>
           <p className="text-slate-500 text-sm mb-4">
@@ -299,8 +312,8 @@ export default function Registries() {
         </div>
       ) : (
         <div className="space-y-4">
-          {registries.map((registry) => (
-            <div key={registry.id} className="card">
+          {paginatedData.map((registry) => (
+            <div key={registry.id} className="panel">
               <div className="flex items-start justify-between">
                 <div className="flex items-start gap-4">
                   <div className="p-3 bg-slate-800 rounded-lg">
@@ -474,6 +487,14 @@ export default function Registries() {
               )}
             </div>
           ))}
+          <Pagination
+            currentPage={currentPage}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            pageSize={pageSize}
+            onPageChange={setPage}
+            onPageSizeChange={setPageSize}
+          />
         </div>
       )}
 

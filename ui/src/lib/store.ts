@@ -43,7 +43,7 @@ interface AppState {
   selectedEnvironment: Environment | null;
   setSelectedEnvironment: (env: Environment | null) => void;
   clearSelectedEnvironment: () => void;
-  sidebarOpen: boolean;
+  sidebarCollapsed: boolean;
   toggleSidebar: () => void;
 }
 
@@ -53,12 +53,15 @@ export const useAppStore = create<AppState>()(
       selectedEnvironment: null,
       setSelectedEnvironment: (env) => set({ selectedEnvironment: env }),
       clearSelectedEnvironment: () => set({ selectedEnvironment: null }),
-      sidebarOpen: true,
-      toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
+      sidebarCollapsed: false,
+      toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
     }),
     {
       name: 'app-storage',
-      partialize: (state) => ({ selectedEnvironment: state.selectedEnvironment }),
+      partialize: (state) => ({
+        selectedEnvironment: state.selectedEnvironment,
+        sidebarCollapsed: state.sidebarCollapsed,
+      }),
     }
   )
 );

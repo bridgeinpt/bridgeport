@@ -53,8 +53,8 @@ export default function DeploymentPlans() {
 
   if (!selectedEnvironment) {
     return (
-      <div className="p-8">
-        <div className="card text-center py-12">
+      <div className="p-6">
+        <div className="panel text-center py-12">
           <p className="text-slate-400">Select an environment to view deployment plans</p>
         </div>
       </div>
@@ -62,10 +62,10 @@ export default function DeploymentPlans() {
   }
 
   return (
-    <div className="p-8">
-      <div className="flex items-center justify-between mb-8">
+    <div className="p-6">
+      <div className="flex items-center justify-between mb-5">
         <div>
-          <h1 className="text-2xl font-bold text-white">Deployment Plans</h1>
+          <h1 className="text-xl font-bold text-white">Deployment Plans</h1>
           <p className="text-slate-400 mt-1">
             Orchestrated multi-service deployments for {selectedEnvironment.name}
           </p>
@@ -76,14 +76,14 @@ export default function DeploymentPlans() {
       </div>
 
       {loading ? (
-        <div className="card">
+        <div className="panel">
           <div className="animate-pulse space-y-4">
             <div className="h-16 bg-slate-700 rounded"></div>
             <div className="h-16 bg-slate-700 rounded"></div>
           </div>
         </div>
       ) : plans.length === 0 ? (
-        <div className="card text-center py-12">
+        <div className="panel text-center py-12">
           <PlanIcon className="w-12 h-12 text-slate-500 mx-auto mb-4" />
           <p className="text-slate-400 mb-4">No deployment plans yet</p>
           <p className="text-slate-500 text-sm mb-4">
@@ -105,7 +105,7 @@ export default function DeploymentPlans() {
               <Link
                 key={plan.id}
                 to={`/deployment-plans/${plan.id}`}
-                className="card block hover:border-slate-600 transition-colors"
+                className="panel block hover:border-slate-600 transition-colors"
               >
                 <div className="flex items-start justify-between">
                   <div className="flex items-start gap-4">
