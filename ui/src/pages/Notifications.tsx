@@ -150,15 +150,12 @@ export default function Notifications() {
   const unreadCount = notifications.filter((n) => !n.inAppReadAt).length;
 
   return (
-    <div className="p-8">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Notifications</h1>
-          <p className="text-slate-400">
-            {total} notification{total !== 1 ? 's' : ''}
-            {unreadCount > 0 && ` (${unreadCount} unread)`}
-          </p>
-        </div>
+    <div className="p-6">
+      <div className="flex items-center justify-between mb-5">
+        <p className="text-slate-400">
+          {total} notification{total !== 1 ? 's' : ''}
+          {unreadCount > 0 && ` (${unreadCount} unread)`}
+        </p>
         <div className="flex items-center gap-2">
           <button onClick={loadNotifications} className="btn btn-ghost" title="Refresh">
             <RefreshIcon className="w-4 h-4" />

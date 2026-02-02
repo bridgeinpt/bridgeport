@@ -223,9 +223,8 @@ export default function NotificationSettings() {
   }
 
   return (
-    <div className="p-8">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-white">Notification Settings</h1>
+    <div className="p-6">
+      <div className="mb-5">
         <p className="text-slate-400">Configure email, webhooks, and notification types</p>
       </div>
 

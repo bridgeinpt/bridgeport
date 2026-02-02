@@ -183,12 +183,9 @@ export default function Services() {
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-5">
-        <div>
-          <h1 className="text-xl font-bold text-white">Services</h1>
-          <p className="text-slate-400">
-            All services in {selectedEnvironment?.name}
-          </p>
-        </div>
+        <p className="text-slate-400">
+          All services in {selectedEnvironment?.name}
+        </p>
         <div className="flex items-center gap-4">
           {servicesWithUpdates.length > 0 && (
             <>

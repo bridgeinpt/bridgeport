@@ -68,14 +68,11 @@ export default function Activity() {
   }
 
   return (
-    <div className="p-8">
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Activity Log</h1>
-          <p className="text-slate-400">
-            Track all actions performed in {selectedEnvironment?.name || 'all environments'}
-          </p>
-        </div>
+    <div className="p-6">
+      <div className="flex items-center justify-between mb-5">
+        <p className="text-slate-400">
+          Track all actions performed in {selectedEnvironment?.name || 'all environments'}
+        </p>
         <div className="flex items-center gap-4">
           <select
             value={resourceTypeFilter}

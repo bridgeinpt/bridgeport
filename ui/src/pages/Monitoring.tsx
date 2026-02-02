@@ -82,14 +82,11 @@ export default function Monitoring() {
   const serversWithMetrics = servers.filter((s) => s.latestMetrics);
 
   return (
-    <div className="p-8">
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Monitoring</h1>
-          <p className="text-slate-400">
-            Resource usage across {selectedEnvironment?.name || 'environment'}
-          </p>
-        </div>
+    <div className="p-6">
+      <div className="flex items-center justify-between mb-5">
+        <p className="text-slate-400">
+          Resource usage across {selectedEnvironment?.name || 'environment'}
+        </p>
         <button
           onClick={() => fetchData(true)}
           disabled={refreshing}

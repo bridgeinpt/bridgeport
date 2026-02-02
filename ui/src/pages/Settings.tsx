@@ -195,9 +195,8 @@ export default function Settings() {
   }
 
   return (
-    <div className="p-8">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-white">Environment Settings</h1>
+    <div className="p-6">
+      <div className="mb-5">
         <p className="text-slate-400">
           Configure settings for {selectedEnvironment.name}
         </p>
