@@ -12,7 +12,7 @@ export default function TopBar({ onOpenAccount }: TopBarProps) {
   const { user, logout } = useAuthStore();
 
   return (
-    <header className="h-12 bg-slate-900 border-b border-slate-700 flex items-center justify-between px-4">
+    <header className="h-12 flex-shrink-0 bg-slate-900 border-b border-slate-700 flex items-center justify-between px-4">
       {/* Left side: Breadcrumbs */}
       <div className="flex items-center min-w-0">
         <Breadcrumbs />

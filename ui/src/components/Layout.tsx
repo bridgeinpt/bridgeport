@@ -222,10 +222,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   }, []); // Only run on mount
 
   return (
-    <div className="min-h-screen flex">
+    <div className="h-screen flex overflow-hidden">
       {/* Sidebar */}
       <aside
-        className={`bg-slate-900 border-r border-slate-700 flex flex-col h-screen transition-all duration-200 ${
+        className={`bg-slate-900 border-r border-slate-700 flex flex-col flex-shrink-0 transition-all duration-200 ${
           sidebarCollapsed ? 'w-14' : 'w-56'
         }`}
       >
