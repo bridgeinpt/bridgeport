@@ -259,7 +259,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 const env = environments.find((env) => env.id === e.target.value);
                 setSelectedEnvironment(env || null);
               }}
-              className="mt-1 w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-xs text-white"
+              className="mt-1 w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-sm text-white"
             >
               {environments.map((env) => (
                 <option key={env.id} value={env.id}>
@@ -316,7 +316,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                           )}
                           <item.icon className="w-4 h-4 flex-shrink-0" />
                           {!sidebarCollapsed && (
-                            <span className="text-xs">{item.name}</span>
+                            <span className="text-sm">{item.name}</span>
                           )}
                         </Link>
                       );
