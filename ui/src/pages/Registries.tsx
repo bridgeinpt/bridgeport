@@ -10,6 +10,7 @@ import {
   testRegistryConnection,
   getRegistryServices,
   checkRegistryUpdates,
+  deployService,
   type RegistryConnection,
   type RegistryConnectionInput,
   type RegistryService,
@@ -35,6 +36,7 @@ export default function Registries() {
   const [linkedServices, setLinkedServices] = useState<RegistryService[]>([]);
   const [loadingServices, setLoadingServices] = useState(false);
   const [checkingUpdates, setCheckingUpdates] = useState<string | null>(null);
+  const [updatingService, setUpdatingService] = useState<string | null>(null);
 
   // Form state
   const [formData, setFormData] = useState<RegistryConnectionInput>({
@@ -215,6 +217,24 @@ export default function Registries() {
     }
   };
 
+  const handleUpdateService = async (service: RegistryService) => {
+    if (!service.latestAvailableTag) return;
+    setUpdatingService(service.id);
+    try {
+      await deployService(service.id, { imageTag: service.latestAvailableTag, pullImage: true });
+      toast.success(`Updated ${service.name} to ${service.latestAvailableTag}`);
+      // Refresh services list
+      if (viewingServices) {
+        const { services } = await getRegistryServices(viewingServices);
+        setLinkedServices(services);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Update failed');
+    } finally {
+      setUpdatingService(null);
+    }
+  };
+
   if (!selectedEnvironment) {
     return (
       <div className="p-8">
@@ -369,8 +389,8 @@ export default function Registries() {
                             key={service.id}
                             className="flex items-center justify-between p-3 bg-slate-800/50 rounded"
                           >
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
                                 <Link
                                   to={`/services/${service.id}`}
                                   className="text-white hover:text-primary-400 font-medium"
@@ -385,6 +405,9 @@ export default function Registries() {
                                   <span className="badge bg-yellow-500/20 text-yellow-400 text-xs">Update available</span>
                                 )}
                               </div>
+                              <p className="text-xs text-slate-400 font-mono mt-1 truncate">
+                                {service.imageName}
+                              </p>
                               <div className="flex items-center gap-4 mt-1 text-xs text-slate-500">
                                 <span className="font-mono">
                                   Current: <span className="text-slate-300">{service.imageTag}</span>
@@ -403,6 +426,15 @@ export default function Registries() {
                                 )}
                               </div>
                             </div>
+                            {hasUpdate && (
+                              <button
+                                onClick={() => handleUpdateService(service)}
+                                disabled={updatingService === service.id}
+                                className="btn btn-sm btn-primary ml-3 flex-shrink-0"
+                              >
+                                {updatingService === service.id ? 'Updating...' : 'Update'}
+                              </button>
+                            )}
                           </div>
                         );
                       })}

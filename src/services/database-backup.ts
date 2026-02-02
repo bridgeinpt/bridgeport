@@ -1,11 +1,20 @@
 import { prisma } from '../lib/db.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
-import { SSHClient, LocalClient, isLocalhost, type CommandClient } from '../lib/ssh.js';
+import { SSHClient, LocalClient, isLocalhost, type CommandClient, type LocalExecOptions } from '../lib/ssh.js';
 import { getEnvironmentSshKey, getEnvironmentSpacesConfig } from '../routes/environments.js';
 import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { readFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
+
+export type BackupStep = 'connect' | 'dump' | 'upload';
+
+export interface BackupError {
+  message: string;
+  step: BackupStep;
+  stderr?: string;
+  exitCode?: number;
+}
 
 export interface DatabaseInput {
   name: string;
@@ -250,22 +259,27 @@ async function executeBackup(backupId: string): Promise<void> {
   const tempPath = useSpaces ? join(tmpdir(), `backup-${backupId}.sql`) : null;
   const targetPath = tempPath || backup.storagePath;
 
+  let currentStep: BackupStep = 'connect';
+
   try {
     let dumpCommand = '';
     let client: CommandClient;
+    let password = '';
+    let execOptions: LocalExecOptions | undefined;
 
     if (db.type === 'postgres' && db.host) {
       // Postgres: run pg_dump locally (connects remotely to database)
       client = new LocalClient();
 
       let username = '';
-      let password = '';
       if (db.encryptedCredentials && db.credentialsNonce) {
         const creds = decrypt(db.encryptedCredentials, db.credentialsNonce);
         [username, password] = creds.split(':');
       }
 
-      dumpCommand = `PGPASSWORD='${password}' pg_dump -h ${db.host} -p ${db.port || 5432} -U ${username} -d ${db.databaseName} > "${targetPath}"`;
+      // Pass password via environment variable for security (not visible in ps)
+      dumpCommand = `pg_dump -h ${db.host} -p ${db.port || 5432} -U ${username} -d ${db.databaseName} > "${targetPath}"`;
+      execOptions = { env: { PGPASSWORD: password } };
     } else if (db.type === 'sqlite' && db.filePath) {
       if (!db.server) {
         throw new Error('SQLite databases require a server to be configured');
@@ -297,6 +311,7 @@ async function executeBackup(backupId: string): Promise<void> {
     }
 
     await client.connect();
+    currentStep = 'dump';
 
     // Ensure backup directory exists (for local storage)
     if (!useSpaces) {
@@ -304,9 +319,15 @@ async function executeBackup(backupId: string): Promise<void> {
       await client.exec(`mkdir -p "${targetDir}"`);
     }
 
-    const result = await client.exec(dumpCommand);
+    const result = await client.exec(dumpCommand, execOptions);
     if (result.code !== 0) {
-      throw new Error(result.stderr || 'Backup command failed');
+      const error: BackupError = {
+        message: result.stderr || 'Backup command failed',
+        step: 'dump',
+        stderr: result.stderr,
+        exitCode: result.code,
+      };
+      throw error;
     }
 
     // Get file size
@@ -317,6 +338,7 @@ async function executeBackup(backupId: string): Promise<void> {
 
     // Upload to Spaces if configured
     if (useSpaces && tempPath) {
+      currentStep = 'upload';
       const spacesConfig = await getEnvironmentSpacesConfig(db.environmentId);
       if (!spacesConfig) {
         throw new Error('Spaces not configured for this environment. Go to Settings > Spaces to configure.');
@@ -363,12 +385,23 @@ async function executeBackup(backupId: string): Promise<void> {
       await unlink(tempPath).catch(() => {});
     }
 
-    const message = error instanceof Error ? error.message : 'Unknown error';
+    // Build structured error
+    let backupError: BackupError;
+    if (error && typeof error === 'object' && 'step' in error) {
+      // Already a BackupError
+      backupError = error as BackupError;
+    } else {
+      backupError = {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        step: currentStep,
+      };
+    }
+
     await prisma.databaseBackup.update({
       where: { id: backupId },
       data: {
         status: 'failed',
-        error: message,
+        error: JSON.stringify(backupError),
         completedAt: new Date(),
       },
     });

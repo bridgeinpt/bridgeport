@@ -26,6 +26,23 @@ const DATABASE_TYPES = [
   { value: 'sqlite', label: 'SQLite' },
 ] as const;
 
+interface BackupError {
+  message: string;
+  step: 'connect' | 'dump' | 'upload';
+  stderr?: string;
+  exitCode?: number;
+}
+
+function parseBackupError(error: string | null): BackupError | string | null {
+  if (!error) return null;
+  try {
+    return JSON.parse(error) as BackupError;
+  } catch {
+    // Legacy string error
+    return error;
+  }
+}
+
 const STORAGE_TYPES = [
   { value: 'local', label: 'Local Storage' },
   { value: 'spaces', label: 'DO Spaces' },
@@ -789,43 +806,75 @@ export default function Databases() {
                 <div className="text-slate-400 text-center py-8">No backups yet</div>
               ) : (
                 <div className="space-y-2">
-                  {backups.map((backup) => (
-                    <div
-                      key={backup.id}
-                      className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg"
-                    >
-                      <div>
-                        <p className="text-sm text-white font-mono">{backup.filename}</p>
-                        <div className="flex items-center gap-3 text-xs text-slate-400 mt-1">
-                          <span>{formatBytes(backup.size)}</span>
-                          <span>{backup.type}</span>
-                          <span
-                            className={
-                              backup.status === 'completed'
-                                ? 'text-green-400'
-                                : backup.status === 'failed'
-                                ? 'text-red-400'
-                                : 'text-yellow-400'
-                            }
-                          >
-                            {backup.status}
-                          </span>
-                          <span>
-                            {format(new Date(backup.createdAt), 'MMM d, yyyy h:mm a')}
-                          </span>
-                        </div>
-                        {backup.error && (
-                          <p className="text-xs text-red-400 mt-1">{backup.error}</p>
-                        )}
-                      </div>
-                      <button
-                        onClick={() => handleDeleteBackup(backup)}
-                        className="btn btn-ghost text-sm text-red-400 hover:text-red-300"
+                  {backups.map((backup) => {
+                    const parsedError = parseBackupError(backup.error);
+                    const isStructuredError = parsedError && typeof parsedError === 'object';
+                    return (
+                      <div
+                        key={backup.id}
+                        className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg"
                       >
-                        Delete
-                      </button>
-                    </div>
-                  ))}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-white font-mono">{backup.filename}</p>
+                          <div className="flex items-center gap-3 text-xs text-slate-400 mt-1">
+                            <span>{formatBytes(backup.size)}</span>
+                            <span>{backup.type}</span>
+                            <span
+                              className={
+                                backup.status === 'completed'
+                                  ? 'text-green-400'
+                                  : backup.status === 'failed'
+                                  ? 'text-red-400'
+                                  : 'text-yellow-400'
+                              }
+                            >
+                              {backup.status}
+                            </span>
+                            <span>
+                              {format(new Date(backup.createdAt), 'MMM d, yyyy h:mm a')}
+                            </span>
+                          </div>
+                          {parsedError && (
+                            <div className="mt-2">
+                              {isStructuredError ? (
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-red-500/20 text-red-400 uppercase">
+                                      {parsedError.step}
+                                    </span>
+                                    <span className="text-xs text-red-400">{parsedError.message}</span>
+                                    {parsedError.exitCode !== undefined && (
+                                      <span className="text-xs text-slate-500">
+                                        (exit code: {parsedError.exitCode})
+                                      </span>
+                                    )}
+                                  </div>
+                                  {parsedError.stderr && (
+                                    <details className="mt-1">
+                                      <summary className="text-xs text-slate-500 cursor-pointer hover:text-slate-400">
+                                        Show error details
+                                      </summary>
+                                      <pre className="mt-1 p-2 bg-slate-900 rounded text-xs text-red-300 overflow-x-auto max-h-32">
+                                        {parsedError.stderr}
+                                      </pre>
+                                    </details>
+                                  )}
+                                </div>
+                              ) : (
+                                <p className="text-xs text-red-400">{parsedError}</p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => handleDeleteBackup(backup)}
+                          className="btn btn-ghost text-sm text-red-400 hover:text-red-300 ml-2"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

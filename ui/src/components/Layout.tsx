@@ -16,6 +16,8 @@ import {
   InfoIcon,
   LogoutIcon,
   UserIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
 } from './Icons';
 
 interface NavItem {
@@ -66,6 +68,19 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const { user, setUser, logout } = useAuthStore();
   const { selectedEnvironment, setSelectedEnvironment, clearSelectedEnvironment } = useAppStore();
   const [environments, setEnvironments] = useState<Environment[]>([]);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+
+  const toggleGroup = (name: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) {
+        next.delete(name);
+      } else {
+        next.add(name);
+      }
+      return next;
+    });
+  };
 
   // Account modal state
   const [showAccountModal, setShowAccountModal] = useState(false);
@@ -161,15 +176,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen flex">
       {/* Sidebar */}
-      <aside className="w-64 bg-slate-900 border-r border-slate-700 flex flex-col">
-        <div className="p-4 border-b border-slate-700">
+      <aside className="w-64 bg-slate-900 border-r border-slate-700 flex flex-col h-screen">
+        <div className="p-4 border-b border-slate-700 flex-shrink-0">
           <Link to="/">
             <img src="/logo.svg" alt="BridgePort" className="h-20" />
           </Link>
         </div>
 
         {/* Environment selector */}
-        <div className="p-4 border-b border-slate-700">
+        <div className="p-4 border-b border-slate-700 flex-shrink-0">
           <label className="text-xs text-slate-400 uppercase tracking-wide">
             Environment
           </label>
@@ -189,56 +204,68 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </select>
         </div>
 
-        <nav className="flex-1 p-4 space-y-6 overflow-y-auto">
+        <nav className="flex-1 p-4 space-y-4 overflow-y-auto min-h-0">
           {navigationGroups.map((group) => {
             const visibleItems = group.items.filter(
               (item) => !item.adminOnly || isAdmin(user)
             );
             if (visibleItems.length === 0) return null;
 
+            const isCollapsed = collapsedGroups.has(group.name);
+
             return (
               <div key={group.name}>
-                <h3 className="text-xs text-slate-500 uppercase tracking-wider font-medium mb-2 px-3">
-                  {group.name}
-                </h3>
-                <div className="space-y-1">
-                  {visibleItems.map((item) => {
-                    const isActive = location.pathname === item.href;
-                    return (
-                      <Link
-                        key={item.name}
-                        to={item.href}
-                        className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
-                          isActive
-                            ? 'bg-primary-600 text-white'
-                            : 'text-slate-300 hover:bg-slate-800'
-                        }`}
-                      >
-                        <item.icon className="w-5 h-5" />
-                        {item.name}
-                      </Link>
-                    );
-                  })}
-                </div>
+                <button
+                  onClick={() => toggleGroup(group.name)}
+                  className="flex items-center justify-between w-full text-xs text-slate-500 uppercase tracking-wider font-medium mb-2 px-3 hover:text-slate-400 transition-colors"
+                >
+                  <span>{group.name}</span>
+                  {isCollapsed ? (
+                    <ChevronRightIcon className="w-4 h-4" />
+                  ) : (
+                    <ChevronDownIcon className="w-4 h-4" />
+                  )}
+                </button>
+                {!isCollapsed && (
+                  <div className="space-y-1">
+                    {visibleItems.map((item) => {
+                      const isActive = location.pathname === item.href;
+                      return (
+                        <Link
+                          key={item.name}
+                          to={item.href}
+                          className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
+                            isActive
+                              ? 'bg-primary-600 text-white'
+                              : 'text-slate-300 hover:bg-slate-800'
+                          }`}
+                        >
+                          <item.icon className="w-5 h-5" />
+                          {item.name}
+                        </Link>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             );
           })}
         </nav>
 
-        <div className="p-4 border-t border-slate-700">
+        <div className="p-4 border-t border-slate-700 flex-shrink-0">
           <div className="flex items-center justify-between">
-            <div className="text-sm">
+            <div className="text-sm min-w-0">
               <div className="flex items-center gap-2">
-                <p className="text-white font-medium">{user?.name || user?.email}</p>
+                <p className="text-white font-medium truncate">{user?.name || user?.email}</p>
                 {user?.role && (
-                  <span className="px-1.5 py-0.5 text-[10px] rounded bg-slate-700 text-slate-300 uppercase">
+                  <span className="px-1.5 py-0.5 text-[10px] rounded bg-slate-700 text-slate-300 uppercase flex-shrink-0">
                     {user.role}
                   </span>
                 )}
               </div>
-              <p className="text-slate-400 text-xs">{user?.email}</p>
+              <p className="text-slate-400 text-xs truncate">{user?.email}</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-shrink-0">
               <button
                 onClick={openAccountModal}
                 className="text-slate-400 hover:text-white"

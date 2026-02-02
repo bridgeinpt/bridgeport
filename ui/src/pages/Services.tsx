@@ -47,8 +47,7 @@ export default function Services() {
   const [services, setServices] = useState<ServiceWithServer[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Selection state
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Filter state
   const [showUpdatesOnly, setShowUpdatesOnly] = useState(false);
 
   // Bulk deploy state
@@ -84,48 +83,8 @@ export default function Services() {
   // Filtered services based on "show updates only" toggle
   const filteredServices = showUpdatesOnly ? servicesWithUpdates : services;
 
-  // Selected services that have updates (only these can be bulk deployed)
-  const selectedServicesWithUpdates = servicesWithUpdates.filter((s) =>
-    selectedIds.has(s.id)
-  );
-
-  const toggleSelect = (id: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
-
-  const toggleSelectAll = () => {
-    const displayedWithUpdates = filteredServices.filter(
-      (s) => s.latestAvailableTag && s.latestAvailableTag !== s.imageTag
-    );
-    const allSelected = displayedWithUpdates.every((s) => selectedIds.has(s.id));
-
-    if (allSelected) {
-      // Deselect all
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        displayedWithUpdates.forEach((s) => next.delete(s.id));
-        return next;
-      });
-    } else {
-      // Select all with updates
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        displayedWithUpdates.forEach((s) => next.add(s.id));
-        return next;
-      });
-    }
-  };
-
-  const handleBulkDeploy = async () => {
-    if (selectedServicesWithUpdates.length === 0) return;
+  const handleBulkDeployAll = async () => {
+    if (servicesWithUpdates.length === 0) return;
 
     setBulkDeploying(true);
     setDeployResults(null);
@@ -133,7 +92,7 @@ export default function Services() {
 
     const results: DeployResult[] = [];
 
-    for (const service of selectedServicesWithUpdates) {
+    for (const service of servicesWithUpdates) {
       try {
         await deployService(service.id, {
           imageTag: service.latestAvailableTag!,
@@ -161,9 +120,6 @@ export default function Services() {
     }
 
     setBulkDeploying(false);
-
-    // Clear selection and refresh
-    setSelectedIds(new Set());
 
     // Reload services
     if (selectedEnvironment?.id) {
@@ -211,25 +167,25 @@ export default function Services() {
         </div>
         <div className="flex items-center gap-4">
           {servicesWithUpdates.length > 0 && (
-            <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={showUpdatesOnly}
-                onChange={(e) => setShowUpdatesOnly(e.target.checked)}
-                className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-primary-600 focus:ring-primary-500"
-              />
-              Show updates only ({servicesWithUpdates.length})
-            </label>
-          )}
-          {selectedServicesWithUpdates.length > 0 && (
-            <button
-              onClick={handleBulkDeploy}
-              disabled={bulkDeploying}
-              className="btn btn-primary flex items-center gap-2"
-            >
-              <RefreshIcon className={`w-4 h-4 ${bulkDeploying ? 'animate-spin' : ''}`} />
-              Deploy Selected ({selectedServicesWithUpdates.length})
-            </button>
+            <>
+              <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showUpdatesOnly}
+                  onChange={(e) => setShowUpdatesOnly(e.target.checked)}
+                  className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-primary-600 focus:ring-primary-500"
+                />
+                Show updates only ({servicesWithUpdates.length})
+              </label>
+              <button
+                onClick={handleBulkDeployAll}
+                disabled={bulkDeploying}
+                className="btn btn-primary flex items-center gap-2"
+              >
+                <RefreshIcon className={`w-4 h-4 ${bulkDeploying ? 'animate-spin' : ''}`} />
+                Update All ({servicesWithUpdates.length})
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -247,7 +203,7 @@ export default function Services() {
         {deployResults === null ? (
           <div className="flex flex-col items-center justify-center py-8">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500 mb-4"></div>
-            <p className="text-slate-400">Deploying {selectedServicesWithUpdates.length} services...</p>
+            <p className="text-slate-400">Deploying {servicesWithUpdates.length} services...</p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -325,24 +281,6 @@ export default function Services() {
             <table className="w-full">
               <thead>
                 <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
-                  {servicesWithUpdates.length > 0 && (
-                    <th className="pb-3 pr-3 w-8">
-                      <input
-                        type="checkbox"
-                        checked={
-                          filteredServices.filter(
-                            (s) => s.latestAvailableTag && s.latestAvailableTag !== s.imageTag
-                          ).length > 0 &&
-                          filteredServices
-                            .filter((s) => s.latestAvailableTag && s.latestAvailableTag !== s.imageTag)
-                            .every((s) => selectedIds.has(s.id))
-                        }
-                        onChange={toggleSelectAll}
-                        className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-primary-600 focus:ring-primary-500"
-                        title="Select all with updates"
-                      />
-                    </th>
-                  )}
                   <th className="pb-3 font-medium">Service</th>
                   <th className="pb-3 font-medium">Server</th>
                   <th className="pb-3 font-medium">Image</th>
@@ -359,20 +297,6 @@ export default function Services() {
                   const hasUpdate = service.latestAvailableTag && service.latestAvailableTag !== service.imageTag;
                   return (
                     <tr key={service.id} className={`text-slate-300 ${hasUpdate ? 'bg-primary-900/10' : ''}`}>
-                      {servicesWithUpdates.length > 0 && (
-                        <td className="py-4 pr-3">
-                          {hasUpdate ? (
-                            <input
-                              type="checkbox"
-                              checked={selectedIds.has(service.id)}
-                              onChange={() => toggleSelect(service.id)}
-                              className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-primary-600 focus:ring-primary-500"
-                            />
-                          ) : (
-                            <span className="w-4 h-4 block" />
-                          )}
-                        </td>
-                      )}
                       <td className="py-4">
                         <Link
                           to={`/services/${service.id}`}

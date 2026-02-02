@@ -12,9 +12,14 @@ export interface SSHExecResult {
   code: number;
 }
 
+export interface LocalExecOptions {
+  env?: Record<string, string>;
+  timeout?: number;
+}
+
 export interface CommandClient {
   connect(): Promise<void>;
-  exec(command: string, options?: ExecOptions): Promise<SSHExecResult>;
+  exec(command: string, options?: ExecOptions | LocalExecOptions): Promise<SSHExecResult>;
   execStream(command: string, onData: (data: string, isStderr: boolean) => void): Promise<number>;
   writeFile(remotePath: string, content: Buffer): Promise<void>;
   disconnect(): void;
@@ -39,11 +44,12 @@ export class LocalClient implements CommandClient {
     // No connection needed for local execution
   }
 
-  async exec(command: string): Promise<SSHExecResult> {
+  async exec(command: string, options?: LocalExecOptions): Promise<SSHExecResult> {
     try {
       const { stdout, stderr } = await execAsync(command, {
         maxBuffer: 10 * 1024 * 1024, // 10MB buffer
-        timeout: 60000, // 60 second timeout
+        timeout: options?.timeout || 60000, // 60 second timeout
+        env: options?.env ? { ...process.env, ...options.env } : undefined,
       });
       return { stdout, stderr, code: 0 };
     } catch (error) {
