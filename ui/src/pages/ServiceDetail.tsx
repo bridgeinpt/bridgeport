@@ -149,6 +149,10 @@ export default function ServiceDetail() {
   const [dependencies, setDependencies] = useState<ServiceDependency[]>([]);
   const [managedImage, setManagedImage] = useState<ManagedImage | null>(null);
 
+  // Pagination hooks (must be at top level)
+  const deploymentPagination = usePagination({ data: deployments, defaultPageSize: 10 });
+  const healthPagination = usePagination({ data: healthCheckHistory, defaultPageSize: 10 });
+
   useEffect(() => {
     if (id) {
       setLoading(true);
@@ -1371,10 +1375,7 @@ export default function ServiceDetail() {
       </div>
 
       {/* Deployment History */}
-      {(() => {
-        const deploymentPagination = usePagination({ data: deployments, defaultPageSize: 10 });
-        return (
-          <div className="panel">
+      <div className="panel">
             <h3 className="text-lg font-semibold text-white mb-4">
               Deployment History
             </h3>
@@ -1478,14 +1479,9 @@ export default function ServiceDetail() {
               <p className="text-slate-400">No deployments yet</p>
             )}
           </div>
-        );
-      })()}
 
       {/* Health Check History */}
-      {(() => {
-        const healthPagination = usePagination({ data: healthCheckHistory, defaultPageSize: 10 });
-        return (
-          <div className="panel mt-5">
+      <div className="panel mt-5">
             <h3 className="text-lg font-semibold text-white mb-4">
               Health Check History
             </h3>
@@ -1582,8 +1578,6 @@ export default function ServiceDetail() {
               <p className="text-slate-400">No health checks recorded yet</p>
             )}
           </div>
-        );
-      })()}
 
       {/* Action History */}
       <div className="panel mt-5">

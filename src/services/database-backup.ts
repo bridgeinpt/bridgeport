@@ -325,8 +325,9 @@ async function executeBackup(backupId: string): Promise<void> {
 
       // Pass password and SSL mode via environment variables for security (not visible in ps)
       // DigitalOcean and most managed databases require SSL
-      dumpCommand = `pg_dump --no-password -h ${db.host} -p ${db.port || 5432} -U ${username} -d ${db.databaseName} > "${targetPath}"`;
-      execOptions = { env: { PGPASSWORD: password, PGSSLMODE: 'require' } };
+      // Use 2>&1 to capture stderr in stdout so we get better error messages
+      dumpCommand = `pg_dump --no-password -h ${db.host} -p ${db.port || 5432} -U ${username} -d ${db.databaseName} -f "${targetPath}" 2>&1`;
+      execOptions = { env: { PGPASSWORD: password, PGSSLMODE: 'require' }, timeout: 300000 };
     } else if (db.type === 'sqlite' && db.filePath) {
       if (!db.server) {
         throw new Error('SQLite databases require a server to be configured');
@@ -368,10 +369,12 @@ async function executeBackup(backupId: string): Promise<void> {
 
     const result = await client.exec(dumpCommand, execOptions);
     if (result.code !== 0) {
+      // With 2>&1, errors are in stdout; also check stderr as fallback
+      const errorOutput = result.stdout || result.stderr || 'Backup command failed (no output)';
       const error: BackupError = {
-        message: result.stderr || 'Backup command failed',
+        message: errorOutput,
         step: 'dump',
-        stderr: result.stderr,
+        stderr: errorOutput,
         exitCode: result.code,
       };
       throw error;
