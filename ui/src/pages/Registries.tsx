@@ -9,6 +9,7 @@ import {
   deleteRegistryConnection,
   testRegistryConnection,
   getRegistryServices,
+  checkRegistryUpdates,
   type RegistryConnection,
   type RegistryConnectionInput,
   type RegistryService,
@@ -33,6 +34,7 @@ export default function Registries() {
   const [viewingServices, setViewingServices] = useState<string | null>(null);
   const [linkedServices, setLinkedServices] = useState<RegistryService[]>([]);
   const [loadingServices, setLoadingServices] = useState(false);
+  const [checkingUpdates, setCheckingUpdates] = useState<string | null>(null);
 
   // Form state
   const [formData, setFormData] = useState<RegistryConnectionInput>({
@@ -194,6 +196,25 @@ export default function Registries() {
     }
   };
 
+  const handleCheckUpdates = async (id: string) => {
+    setCheckingUpdates(id);
+    try {
+      const result = await checkRegistryUpdates(id);
+      toast.success(
+        `Checked ${result.summary.checked} services: ${result.summary.withUpdates} with updates`
+      );
+      // Refresh services list if viewing
+      if (viewingServices === id) {
+        const { services } = await getRegistryServices(id);
+        setLinkedServices(services);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to check updates');
+    } finally {
+      setCheckingUpdates(null);
+    }
+  };
+
   if (!selectedEnvironment) {
     return (
       <div className="p-8">
@@ -284,12 +305,21 @@ export default function Registries() {
                 </div>
                 <div className="flex gap-2">
                   {(registry._count?.services || 0) > 0 && (
-                    <button
-                      onClick={() => handleViewServices(registry.id)}
-                      className="btn btn-ghost text-sm"
-                    >
-                      {viewingServices === registry.id ? 'Hide Services' : 'View Services'}
-                    </button>
+                    <>
+                      <button
+                        onClick={() => handleCheckUpdates(registry.id)}
+                        disabled={checkingUpdates === registry.id}
+                        className="btn btn-secondary text-sm"
+                      >
+                        {checkingUpdates === registry.id ? 'Checking...' : 'Check Updates'}
+                      </button>
+                      <button
+                        onClick={() => handleViewServices(registry.id)}
+                        className="btn btn-ghost text-sm"
+                      >
+                        {viewingServices === registry.id ? 'Hide Services' : 'View Services'}
+                      </button>
+                    </>
                   )}
                   <button
                     onClick={() => handleTest(registry.id)}
@@ -332,25 +362,50 @@ export default function Registries() {
                     <p className="text-sm text-slate-500">No services linked to this registry</p>
                   ) : (
                     <div className="space-y-2">
-                      {linkedServices.map((service) => (
-                        <div
-                          key={service.id}
-                          className="flex items-center justify-between p-2 bg-slate-800/50 rounded"
-                        >
-                          <div>
-                            <Link
-                              to={`/services/${service.id}`}
-                              className="text-white hover:text-primary-400"
-                            >
-                              {service.name}
-                            </Link>
-                            <span className="text-slate-500 text-sm ml-2">on {service.server.name}</span>
+                      {linkedServices.map((service) => {
+                        const hasUpdate = service.latestAvailableTag && service.latestAvailableTag !== service.imageTag;
+                        return (
+                          <div
+                            key={service.id}
+                            className="flex items-center justify-between p-3 bg-slate-800/50 rounded"
+                          >
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <Link
+                                  to={`/services/${service.id}`}
+                                  className="text-white hover:text-primary-400 font-medium"
+                                >
+                                  {service.name}
+                                </Link>
+                                <span className="text-slate-500 text-sm">on {service.server.name}</span>
+                                {service.autoUpdate && (
+                                  <span className="badge bg-primary-500/20 text-primary-400 text-xs">Auto-update</span>
+                                )}
+                                {hasUpdate && (
+                                  <span className="badge bg-yellow-500/20 text-yellow-400 text-xs">Update available</span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-4 mt-1 text-xs text-slate-500">
+                                <span className="font-mono">
+                                  Current: <span className="text-slate-300">{service.imageTag}</span>
+                                </span>
+                                {service.latestAvailableTag && (
+                                  <span className="font-mono">
+                                    Latest: <span className={hasUpdate ? 'text-yellow-400' : 'text-slate-300'}>
+                                      {service.latestAvailableTag}
+                                    </span>
+                                  </span>
+                                )}
+                                {service.lastUpdateCheckAt && (
+                                  <span>
+                                    Checked {formatDistanceToNow(new Date(service.lastUpdateCheckAt), { addSuffix: true })}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                          <span className="text-slate-400 font-mono text-sm">
-                            {service.imageName}:{service.imageTag}
-                          </span>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>

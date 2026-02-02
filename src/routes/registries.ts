@@ -261,6 +261,10 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
           name: true,
           imageName: true,
           imageTag: true,
+          autoUpdate: true,
+          latestAvailableTag: true,
+          latestAvailableDigest: true,
+          lastUpdateCheckAt: true,
           server: {
             select: { id: true, name: true },
           },
@@ -269,6 +273,71 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
       });
 
       return { services };
+    }
+  );
+
+  // Force check updates for all services linked to this registry
+  fastify.post(
+    '/api/registries/:id/check-updates',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      const registry = await getRegistryConnection(id);
+      if (!registry) {
+        return reply.code(404).send({ error: 'Registry connection not found' });
+      }
+
+      const creds = await getRegistryCredentials(id);
+      if (!creds) {
+        return reply.code(400).send({ error: 'Could not get registry credentials' });
+      }
+
+      const services = await prisma.service.findMany({
+        where: { registryConnectionId: id, discoveryStatus: 'found' },
+        select: { id: true, name: true },
+      });
+
+      const results: Array<{ serviceId: string; name: string; hasUpdate: boolean; latestTag?: string; error?: string }> = [];
+
+      for (const service of services) {
+        try {
+          const { checkServiceUpdate } = await import('../lib/scheduler.js');
+          const result = await checkServiceUpdate(service.id);
+          results.push({
+            serviceId: service.id,
+            name: service.name,
+            hasUpdate: result.hasUpdate,
+            latestTag: result.latestTag,
+            error: result.error,
+          });
+        } catch (error) {
+          results.push({
+            serviceId: service.id,
+            name: service.name,
+            hasUpdate: false,
+            error: error instanceof Error ? error.message : 'Check failed',
+          });
+        }
+      }
+
+      await logAudit({
+        action: 'check_updates',
+        resourceType: 'registry',
+        resourceId: id,
+        resourceName: registry.name,
+        details: { servicesChecked: services.length, updatesFound: results.filter(r => r.hasUpdate).length },
+        userId: request.authUser!.id,
+      });
+
+      return {
+        results,
+        summary: {
+          checked: results.length,
+          withUpdates: results.filter(r => r.hasUpdate).length,
+          errors: results.filter(r => r.error).length,
+        }
+      };
     }
   );
 }

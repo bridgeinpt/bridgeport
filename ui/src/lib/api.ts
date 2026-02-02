@@ -674,11 +674,33 @@ export interface RegistryService {
   name: string;
   imageName: string;
   imageTag: string;
+  autoUpdate: boolean;
+  latestAvailableTag: string | null;
+  latestAvailableDigest: string | null;
+  lastUpdateCheckAt: string | null;
   server: { id: string; name: string };
 }
 
 export const getRegistryServices = (id: string) =>
   api.get<{ services: RegistryService[] }>(`/registries/${id}/services`);
+
+export interface CheckUpdatesResult {
+  results: Array<{
+    serviceId: string;
+    name: string;
+    hasUpdate: boolean;
+    latestTag?: string;
+    error?: string;
+  }>;
+  summary: {
+    checked: number;
+    withUpdates: number;
+    errors: number;
+  };
+}
+
+export const checkRegistryUpdates = (id: string) =>
+  api.post<CheckUpdatesResult>(`/registries/${id}/check-updates`);
 
 export const listRegistryRepositories = (id: string) =>
   api.get<{ repositories: RegistryRepository[] }>(`/registries/${id}/repositories`);
