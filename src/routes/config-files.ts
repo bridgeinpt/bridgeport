@@ -640,17 +640,25 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         return reply.code(400).send({ error: 'No file uploaded' });
       }
 
-      // Get form fields
-      const fields: Record<string, string> = {};
-      for (const [key, value] of Object.entries(data.fields)) {
-        if (value && typeof value === 'object' && 'value' in value) {
-          fields[key] = (value as { value: string }).value;
+      // Get form fields - fastify multipart returns fields as objects with 'value' property
+      const getFieldValue = (field: unknown): string | undefined => {
+        if (!field) return undefined;
+        if (typeof field === 'string') return field;
+        if (Array.isArray(field)) {
+          const first = field[0];
+          if (first && typeof first === 'object' && 'value' in first) {
+            return (first as { value: string }).value;
+          }
         }
-      }
+        if (typeof field === 'object' && 'value' in field) {
+          return (field as { value: string }).value;
+        }
+        return undefined;
+      };
 
-      const name = fields.name;
-      const filename = fields.filename || data.filename;
-      const description = fields.description;
+      const name = getFieldValue(data.fields.name);
+      const filename = getFieldValue(data.fields.filename) || data.filename;
+      const description = getFieldValue(data.fields.description);
 
       if (!name) {
         return reply.code(400).send({ error: 'name is required' });
