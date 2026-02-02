@@ -323,9 +323,10 @@ async function executeBackup(backupId: string): Promise<void> {
         [username, password] = creds.split(':');
       }
 
-      // Pass password via environment variable for security (not visible in ps)
-      dumpCommand = `pg_dump -h ${db.host} -p ${db.port || 5432} -U ${username} -d ${db.databaseName} > "${targetPath}"`;
-      execOptions = { env: { PGPASSWORD: password } };
+      // Pass password and SSL mode via environment variables for security (not visible in ps)
+      // DigitalOcean and most managed databases require SSL
+      dumpCommand = `pg_dump --no-password -h ${db.host} -p ${db.port || 5432} -U ${username} -d ${db.databaseName} > "${targetPath}"`;
+      execOptions = { env: { PGPASSWORD: password, PGSSLMODE: 'require' } };
     } else if (db.type === 'sqlite' && db.filePath) {
       if (!db.server) {
         throw new Error('SQLite databases require a server to be configured');
