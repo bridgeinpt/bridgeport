@@ -112,7 +112,8 @@ export async function deployService(
 
         if (cf.isBinary) {
           // Binary files: content is base64-encoded, decode on the server
-          await client.exec(`echo "${cf.content}" | base64 -d > "${cfPath}"`);
+          // Use heredoc to avoid shell argument length limits
+          await client.exec(`base64 -d > "${cfPath}" << 'BASE64EOF'\n${cf.content}\nBASE64EOF`);
         } else {
           // Text files: use heredoc
           await client.exec(`cat > "${cfPath}" << 'CFEOF'\n${cf.content}\nCFEOF`);

@@ -550,8 +550,9 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
 
             if (configFile.isBinary) {
               // Binary files: content is base64-encoded, decode on the server
+              // Use heredoc to avoid shell argument length limits
               ({ code, stderr } = await client.exec(
-                `echo "${configFile.content}" | base64 -d > "${targetPath}"`
+                `base64 -d > "${targetPath}" << 'BASE64EOF'\n${configFile.content}\nBASE64EOF`
               ));
             } else {
               // Text files: resolve ${SECRET_KEY} placeholders and trim trailing empty lines
