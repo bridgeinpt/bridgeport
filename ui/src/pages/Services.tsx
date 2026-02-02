@@ -1,11 +1,24 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppStore } from '../lib/store';
-import { getEnvironment, type Service, type ExposedPort } from '../lib/api';
+import { getEnvironment, deployService, type Service, type ExposedPort } from '../lib/api';
 import { formatDistanceToNow } from 'date-fns';
+import { getContainerStatusColor, getHealthStatusColor } from '../lib/status';
+import { Modal } from '../components/Modal';
+import { CheckIcon, WarningIcon, RefreshIcon } from '../components/Icons';
+import { useToast } from '../components/Toast';
 
 interface ServiceWithServer extends Service {
   serverName: string;
+}
+
+interface DeployResult {
+  serviceId: string;
+  serviceName: string;
+  serverName: string;
+  imageTag: string;
+  success: boolean;
+  error?: string;
 }
 
 function parseExposedPorts(portsJson: string | null): ExposedPort[] {
@@ -28,40 +41,20 @@ function formatPorts(ports: ExposedPort[], maxDisplay = 2): string {
   return displayed.join(', ');
 }
 
-function getContainerStatusColor(status: string): string {
-  switch (status) {
-    case 'running':
-      return 'badge-success';
-    case 'stopped':
-    case 'exited':
-    case 'dead':
-      return 'badge-error';
-    case 'restarting':
-    case 'paused':
-    case 'created':
-      return 'badge-warning';
-    default:
-      return 'badge-warning';
-  }
-}
-
-function getHealthStatusColor(status: string): string {
-  switch (status) {
-    case 'healthy':
-      return 'badge-success';
-    case 'unhealthy':
-      return 'badge-error';
-    case 'none':
-      return 'bg-slate-600 text-slate-300';
-    default:
-      return 'badge-warning';
-  }
-}
-
 export default function Services() {
   const { selectedEnvironment } = useAppStore();
+  const toast = useToast();
   const [services, setServices] = useState<ServiceWithServer[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Selection state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showUpdatesOnly, setShowUpdatesOnly] = useState(false);
+
+  // Bulk deploy state
+  const [bulkDeploying, setBulkDeploying] = useState(false);
+  const [deployResults, setDeployResults] = useState<DeployResult[] | null>(null);
+  const [showDeployResults, setShowDeployResults] = useState(false);
 
   useEffect(() => {
     if (selectedEnvironment?.id) {
@@ -82,6 +75,115 @@ export default function Services() {
         .finally(() => setLoading(false));
     }
   }, [selectedEnvironment?.id]);
+
+  // Services with available updates
+  const servicesWithUpdates = services.filter(
+    (s) => s.latestAvailableTag && s.latestAvailableTag !== s.imageTag
+  );
+
+  // Filtered services based on "show updates only" toggle
+  const filteredServices = showUpdatesOnly ? servicesWithUpdates : services;
+
+  // Selected services that have updates (only these can be bulk deployed)
+  const selectedServicesWithUpdates = servicesWithUpdates.filter((s) =>
+    selectedIds.has(s.id)
+  );
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    const displayedWithUpdates = filteredServices.filter(
+      (s) => s.latestAvailableTag && s.latestAvailableTag !== s.imageTag
+    );
+    const allSelected = displayedWithUpdates.every((s) => selectedIds.has(s.id));
+
+    if (allSelected) {
+      // Deselect all
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        displayedWithUpdates.forEach((s) => next.delete(s.id));
+        return next;
+      });
+    } else {
+      // Select all with updates
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        displayedWithUpdates.forEach((s) => next.add(s.id));
+        return next;
+      });
+    }
+  };
+
+  const handleBulkDeploy = async () => {
+    if (selectedServicesWithUpdates.length === 0) return;
+
+    setBulkDeploying(true);
+    setDeployResults(null);
+    setShowDeployResults(true);
+
+    const results: DeployResult[] = [];
+
+    for (const service of selectedServicesWithUpdates) {
+      try {
+        await deployService(service.id, {
+          imageTag: service.latestAvailableTag!,
+          pullImage: true,
+        });
+        results.push({
+          serviceId: service.id,
+          serviceName: service.name,
+          serverName: service.serverName,
+          imageTag: service.latestAvailableTag!,
+          success: true,
+        });
+      } catch (err) {
+        results.push({
+          serviceId: service.id,
+          serviceName: service.name,
+          serverName: service.serverName,
+          imageTag: service.latestAvailableTag!,
+          success: false,
+          error: err instanceof Error ? err.message : 'Deploy failed',
+        });
+      }
+      // Update results as we go
+      setDeployResults([...results]);
+    }
+
+    setBulkDeploying(false);
+
+    // Clear selection and refresh
+    setSelectedIds(new Set());
+
+    // Reload services
+    if (selectedEnvironment?.id) {
+      const { environment } = await getEnvironment(selectedEnvironment.id);
+      const allServices: ServiceWithServer[] = [];
+      environment.servers.forEach((server) => {
+        server.services.forEach((service) => {
+          allServices.push({ ...service, serverName: server.name });
+        });
+      });
+      setServices(allServices);
+    }
+
+    const successCount = results.filter((r) => r.success).length;
+    if (successCount === results.length) {
+      toast.success(`Deployed ${successCount} services successfully`);
+    } else {
+      toast.error(`${results.length - successCount} of ${results.length} deploys failed`);
+    }
+  };
 
   if (loading) {
     return (
@@ -107,14 +209,140 @@ export default function Services() {
             All services in {selectedEnvironment?.name}
           </p>
         </div>
+        <div className="flex items-center gap-4">
+          {servicesWithUpdates.length > 0 && (
+            <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={showUpdatesOnly}
+                onChange={(e) => setShowUpdatesOnly(e.target.checked)}
+                className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-primary-600 focus:ring-primary-500"
+              />
+              Show updates only ({servicesWithUpdates.length})
+            </label>
+          )}
+          {selectedServicesWithUpdates.length > 0 && (
+            <button
+              onClick={handleBulkDeploy}
+              disabled={bulkDeploying}
+              className="btn btn-primary flex items-center gap-2"
+            >
+              <RefreshIcon className={`w-4 h-4 ${bulkDeploying ? 'animate-spin' : ''}`} />
+              Deploy Selected ({selectedServicesWithUpdates.length})
+            </button>
+          )}
+        </div>
       </div>
 
+      {/* Bulk Deploy Results Modal */}
+      <Modal
+        isOpen={showDeployResults}
+        onClose={() => {
+          setShowDeployResults(false);
+          setDeployResults(null);
+        }}
+        title="Bulk Deploy"
+        size="md"
+      >
+        {deployResults === null ? (
+          <div className="flex flex-col items-center justify-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500 mb-4"></div>
+            <p className="text-slate-400">Deploying {selectedServicesWithUpdates.length} services...</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* Summary */}
+            <div className={`p-3 rounded-lg ${
+              deployResults.every(r => r.success)
+                ? 'bg-green-500/10 border border-green-500/30'
+                : deployResults.some(r => r.success)
+                ? 'bg-yellow-500/10 border border-yellow-500/30'
+                : 'bg-red-500/10 border border-red-500/30'
+            }`}>
+              <div className="flex items-center gap-2">
+                {deployResults.every(r => r.success) ? (
+                  <CheckIcon className="w-5 h-5 text-green-400" />
+                ) : (
+                  <WarningIcon className="w-5 h-5 text-yellow-400" />
+                )}
+                <span className={
+                  deployResults.every(r => r.success) ? 'text-green-400' :
+                  deployResults.some(r => r.success) ? 'text-yellow-400' : 'text-red-400'
+                }>
+                  {deployResults.filter(r => r.success).length} of {deployResults.length} deployed successfully
+                </span>
+              </div>
+            </div>
+
+            {/* Results List */}
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {deployResults.map((result) => (
+                <div
+                  key={result.serviceId}
+                  className={`p-2 rounded-lg text-sm ${
+                    result.success ? 'bg-slate-800/50' : 'bg-red-500/10'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-white">{result.serviceName}</span>
+                      <span className="text-slate-500 mx-2">on</span>
+                      <span className="text-slate-400">{result.serverName}</span>
+                      <span className="text-slate-500 mx-2">→</span>
+                      <span className="font-mono text-primary-400">{result.imageTag}</span>
+                    </div>
+                    {result.success ? (
+                      <CheckIcon className="w-4 h-4 text-green-400" />
+                    ) : (
+                      <WarningIcon className="w-4 h-4 text-red-400" />
+                    )}
+                  </div>
+                  {result.error && (
+                    <p className="text-red-400 text-xs mt-1">{result.error}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                onClick={() => {
+                  setShowDeployResults(false);
+                  setDeployResults(null);
+                }}
+                className="btn btn-primary"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       <div className="card">
-        {services.length > 0 ? (
+        {filteredServices.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
+                  {servicesWithUpdates.length > 0 && (
+                    <th className="pb-3 pr-3 w-8">
+                      <input
+                        type="checkbox"
+                        checked={
+                          filteredServices.filter(
+                            (s) => s.latestAvailableTag && s.latestAvailableTag !== s.imageTag
+                          ).length > 0 &&
+                          filteredServices
+                            .filter((s) => s.latestAvailableTag && s.latestAvailableTag !== s.imageTag)
+                            .every((s) => selectedIds.has(s.id))
+                        }
+                        onChange={toggleSelectAll}
+                        className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-primary-600 focus:ring-primary-500"
+                        title="Select all with updates"
+                      />
+                    </th>
+                  )}
                   <th className="pb-3 font-medium">Service</th>
                   <th className="pb-3 font-medium">Server</th>
                   <th className="pb-3 font-medium">Image</th>
@@ -126,10 +354,25 @@ export default function Services() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-700">
-                {services.map((service) => {
+                {filteredServices.map((service) => {
                   const ports = parseExposedPorts(service.exposedPorts);
+                  const hasUpdate = service.latestAvailableTag && service.latestAvailableTag !== service.imageTag;
                   return (
-                    <tr key={service.id} className="text-slate-300">
+                    <tr key={service.id} className={`text-slate-300 ${hasUpdate ? 'bg-primary-900/10' : ''}`}>
+                      {servicesWithUpdates.length > 0 && (
+                        <td className="py-4 pr-3">
+                          {hasUpdate ? (
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(service.id)}
+                              onChange={() => toggleSelect(service.id)}
+                              className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-primary-600 focus:ring-primary-500"
+                            />
+                          ) : (
+                            <span className="w-4 h-4 block" />
+                          )}
+                        </td>
+                      )}
                       <td className="py-4">
                         <Link
                           to={`/services/${service.id}`}
@@ -154,6 +397,12 @@ export default function Services() {
                           {service.imageName.split('/').pop()}
                         </span>
                         :<span className="text-primary-400">{service.imageTag}</span>
+                        {hasUpdate && (
+                          <div className="flex items-center gap-1 mt-1">
+                            <span className="text-xs text-slate-500">→</span>
+                            <span className="text-xs text-green-400 font-mono">{service.latestAvailableTag}</span>
+                          </div>
+                        )}
                       </td>
                       <td className="py-4 font-mono text-sm text-slate-400">
                         {formatPorts(ports)}

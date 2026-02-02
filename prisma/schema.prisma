@@ -221,8 +221,9 @@ model ConfigFile {
 
 // Links config files to services with target path on server
 model ServiceFile {
-  id         String @id @default(cuid())
-  targetPath String // Full path on server (e.g., /opt/caddy/docker-compose.yml)
+  id           String    @id @default(cuid())
+  targetPath   String    // Full path on server (e.g., /opt/caddy/docker-compose.yml)
+  lastSyncedAt DateTime? // Last time this file was successfully synced to the server
 
   serviceId    String
   service      Service    @relation(fields: [serviceId], references: [id], onDelete: Cascade)

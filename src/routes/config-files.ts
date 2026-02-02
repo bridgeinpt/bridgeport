@@ -54,7 +54,9 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           _count: { select: { services: true } },
           services: {
             select: {
+              id: true,
               targetPath: true,
+              lastSyncedAt: true,
               service: {
                 select: {
                   id: true,
@@ -68,7 +70,48 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         orderBy: { name: 'asc' },
       });
 
-      return { configFiles };
+      // Compute sync status for each config file
+      const configFilesWithSyncStatus = configFiles.map((file) => {
+        // Determine sync status based on service attachments
+        let syncStatus: 'synced' | 'pending' | 'never' | 'not_attached' = 'not_attached';
+        let pendingCount = 0;
+        let syncedCount = 0;
+        let neverSyncedCount = 0;
+
+        if (file.services.length > 0) {
+          for (const sf of file.services) {
+            if (!sf.lastSyncedAt) {
+              neverSyncedCount++;
+            } else if (new Date(sf.lastSyncedAt) < new Date(file.updatedAt)) {
+              // File was updated after last sync
+              pendingCount++;
+            } else {
+              syncedCount++;
+            }
+          }
+
+          if (neverSyncedCount === file.services.length) {
+            syncStatus = 'never';
+          } else if (pendingCount > 0 || neverSyncedCount > 0) {
+            syncStatus = 'pending';
+          } else {
+            syncStatus = 'synced';
+          }
+        }
+
+        return {
+          ...file,
+          syncStatus,
+          syncCounts: {
+            synced: syncedCount,
+            pending: pendingCount,
+            never: neverSyncedCount,
+            total: file.services.length,
+          },
+        };
+      });
+
+      return { configFiles: configFilesWithSyncStatus };
     }
   );
 
@@ -96,7 +139,19 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         return reply.code(404).send({ error: 'Config file not found' });
       }
 
-      return { configFile };
+      // Add sync status to each service attachment
+      const servicesWithSyncStatus = configFile.services.map((sf) => {
+        let syncStatus: 'synced' | 'pending' | 'never' = 'never';
+        if (sf.lastSyncedAt) {
+          syncStatus = new Date(sf.lastSyncedAt) >= new Date(configFile.updatedAt) ? 'synced' : 'pending';
+        }
+        return {
+          ...sf,
+          syncStatus,
+        };
+      });
+
+      return { configFile: { ...configFile, services: servicesWithSyncStatus } };
     }
   );
 
@@ -591,6 +646,11 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
                 error: stderr || 'Failed to write file',
               });
             } else {
+              // Update lastSyncedAt timestamp for successful sync
+              await prisma.serviceFile.update({
+                where: { id: serviceFile.id },
+                data: { lastSyncedAt: new Date() },
+              });
               results.push({ file: configFile.name, targetPath, success: true });
             }
           } catch (err) {
@@ -620,6 +680,456 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         success: allSuccess,
         userId: request.authUser!.id,
         environmentId: service.server.environmentId,
+      });
+
+      return { results, success: allSuccess };
+    }
+  );
+
+  // Get config file sync status for all services on a server
+  fastify.get(
+    '/api/servers/:serverId/config-files-status',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { serverId } = request.params as { serverId: string };
+
+      const server = await prisma.server.findUnique({
+        where: { id: serverId },
+        include: {
+          services: {
+            include: {
+              files: {
+                include: {
+                  configFile: {
+                    select: {
+                      id: true,
+                      name: true,
+                      filename: true,
+                      updatedAt: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (!server) {
+        return reply.code(404).send({ error: 'Server not found' });
+      }
+
+      // Build config file status list
+      const configFilesMap = new Map<string, {
+        id: string;
+        name: string;
+        filename: string;
+        updatedAt: Date;
+        attachments: Array<{
+          serviceFileId: string;
+          serviceId: string;
+          serviceName: string;
+          targetPath: string;
+          lastSyncedAt: Date | null;
+          syncStatus: 'synced' | 'pending' | 'never';
+        }>;
+      }>();
+
+      for (const service of server.services) {
+        for (const sf of service.files) {
+          const cf = sf.configFile;
+          if (!configFilesMap.has(cf.id)) {
+            configFilesMap.set(cf.id, {
+              id: cf.id,
+              name: cf.name,
+              filename: cf.filename,
+              updatedAt: cf.updatedAt,
+              attachments: [],
+            });
+          }
+
+          let syncStatus: 'synced' | 'pending' | 'never' = 'never';
+          if (sf.lastSyncedAt) {
+            syncStatus = new Date(sf.lastSyncedAt) >= new Date(cf.updatedAt) ? 'synced' : 'pending';
+          }
+
+          configFilesMap.get(cf.id)!.attachments.push({
+            serviceFileId: sf.id,
+            serviceId: service.id,
+            serviceName: service.name,
+            targetPath: sf.targetPath,
+            lastSyncedAt: sf.lastSyncedAt,
+            syncStatus,
+          });
+        }
+      }
+
+      const configFiles = Array.from(configFilesMap.values()).map((cf) => {
+        // Determine overall sync status for this config file on this server
+        let overallSyncStatus: 'synced' | 'pending' | 'never' = 'synced';
+        for (const att of cf.attachments) {
+          if (att.syncStatus === 'never') {
+            overallSyncStatus = 'never';
+            break;
+          } else if (att.syncStatus === 'pending') {
+            overallSyncStatus = 'pending';
+          }
+        }
+
+        return {
+          ...cf,
+          overallSyncStatus,
+        };
+      });
+
+      // Count totals
+      const totals = {
+        synced: configFiles.filter((cf) => cf.overallSyncStatus === 'synced').length,
+        pending: configFiles.filter((cf) => cf.overallSyncStatus === 'pending').length,
+        never: configFiles.filter((cf) => cf.overallSyncStatus === 'never').length,
+        total: configFiles.length,
+      };
+
+      return { configFiles, totals };
+    }
+  );
+
+  // Sync all config files for all services on a server
+  fastify.post(
+    '/api/servers/:serverId/sync-all-files',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { serverId } = request.params as { serverId: string };
+
+      const server = await prisma.server.findUnique({
+        where: { id: serverId },
+        include: {
+          services: {
+            include: {
+              files: {
+                include: { configFile: true },
+              },
+            },
+          },
+        },
+      });
+
+      if (!server) {
+        return reply.code(404).send({ error: 'Server not found' });
+      }
+
+      // Collect all service files that need syncing
+      const serviceFilesToSync: Array<{
+        serviceFile: typeof server.services[0]['files'][0];
+        service: typeof server.services[0];
+      }> = [];
+
+      for (const service of server.services) {
+        for (const sf of service.files) {
+          serviceFilesToSync.push({ serviceFile: sf, service });
+        }
+      }
+
+      if (serviceFilesToSync.length === 0) {
+        return reply.code(400).send({ error: 'No config files attached to services on this server' });
+      }
+
+      const results: Array<{
+        configFileName: string;
+        serviceName: string;
+        targetPath: string;
+        success: boolean;
+        error?: string;
+      }> = [];
+
+      // Create SSH connection
+      const { client, error: clientError } = await createClientForServer(
+        server.hostname,
+        server.environmentId,
+        getEnvironmentSshKey
+      );
+
+      if (!client) {
+        return reply.code(400).send({ error: clientError || 'Failed to create SSH client' });
+      }
+
+      try {
+        await client.connect();
+
+        for (const { serviceFile: sf, service } of serviceFilesToSync) {
+          const configFile = sf.configFile;
+
+          try {
+            // Ensure target directory exists
+            const targetDir = sf.targetPath.substring(0, sf.targetPath.lastIndexOf('/'));
+            await client.exec(`mkdir -p "${targetDir}"`);
+
+            let code: number;
+            let stderr: string;
+
+            if (configFile.isBinary) {
+              const fileBuffer = Buffer.from(configFile.content, 'base64');
+              try {
+                await client.writeFile(sf.targetPath, fileBuffer);
+                code = 0;
+                stderr = '';
+              } catch (writeErr) {
+                code = 1;
+                stderr = writeErr instanceof Error ? writeErr.message : 'SFTP write failed';
+              }
+            } else {
+              const { content: rawContent, missing } = await resolveSecretPlaceholders(
+                server.environmentId,
+                configFile.content
+              );
+              const resolvedContent = rawContent.trimEnd();
+
+              if (missing.length > 0) {
+                results.push({
+                  configFileName: configFile.name,
+                  serviceName: service.name,
+                  targetPath: sf.targetPath,
+                  success: false,
+                  error: `Missing secrets: ${missing.join(', ')}`,
+                });
+                continue;
+              }
+
+              ({ code, stderr } = await client.exec(
+                `cat > "${sf.targetPath}" << 'CONFIGFILE_EOF'\n${resolvedContent}\nCONFIGFILE_EOF`
+              ));
+            }
+
+            if (code !== 0) {
+              results.push({
+                configFileName: configFile.name,
+                serviceName: service.name,
+                targetPath: sf.targetPath,
+                success: false,
+                error: stderr || 'Failed to write file',
+              });
+            } else {
+              await prisma.serviceFile.update({
+                where: { id: sf.id },
+                data: { lastSyncedAt: new Date() },
+              });
+              results.push({
+                configFileName: configFile.name,
+                serviceName: service.name,
+                targetPath: sf.targetPath,
+                success: true,
+              });
+            }
+          } catch (err) {
+            results.push({
+              configFileName: configFile.name,
+              serviceName: service.name,
+              targetPath: sf.targetPath,
+              success: false,
+              error: err instanceof Error ? err.message : 'Unknown error',
+            });
+          }
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Connection failed';
+        return reply.code(500).send({ error: message });
+      } finally {
+        client.disconnect();
+      }
+
+      const allSuccess = results.every((r) => r.success);
+
+      await logAudit({
+        action: 'sync_files',
+        resourceType: 'server',
+        resourceId: server.id,
+        resourceName: server.name,
+        details: { results, allSuccess, totalFiles: results.length },
+        success: allSuccess,
+        userId: request.authUser!.id,
+        environmentId: server.environmentId,
+      });
+
+      return { results, success: allSuccess };
+    }
+  );
+
+  // Sync a config file to all attached services
+  fastify.post(
+    '/api/config-files/:id/sync-all',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      const configFile = await prisma.configFile.findUnique({
+        where: { id },
+        include: {
+          services: {
+            include: {
+              service: {
+                include: { server: true },
+              },
+            },
+          },
+        },
+      });
+
+      if (!configFile) {
+        return reply.code(404).send({ error: 'Config file not found' });
+      }
+
+      if (configFile.services.length === 0) {
+        return reply.code(400).send({ error: 'Config file is not attached to any services' });
+      }
+
+      const results: Array<{
+        serviceId: string;
+        serviceName: string;
+        serverName: string;
+        targetPath: string;
+        success: boolean;
+        error?: string;
+      }> = [];
+
+      // Group services by server to minimize SSH connections
+      const serverGroups = new Map<string, typeof configFile.services>();
+      for (const sf of configFile.services) {
+        const serverId = sf.service.server.id;
+        if (!serverGroups.has(serverId)) {
+          serverGroups.set(serverId, []);
+        }
+        serverGroups.get(serverId)!.push(sf);
+      }
+
+      for (const [, serviceFiles] of serverGroups) {
+        const server = serviceFiles[0].service.server;
+
+        const { client, error: clientError } = await createClientForServer(
+          server.hostname,
+          server.environmentId,
+          getEnvironmentSshKey
+        );
+
+        if (!client) {
+          for (const sf of serviceFiles) {
+            results.push({
+              serviceId: sf.service.id,
+              serviceName: sf.service.name,
+              serverName: server.name,
+              targetPath: sf.targetPath,
+              success: false,
+              error: clientError || 'Failed to create SSH client',
+            });
+          }
+          continue;
+        }
+
+        try {
+          await client.connect();
+
+          for (const sf of serviceFiles) {
+            try {
+              // Ensure target directory exists
+              const targetDir = sf.targetPath.substring(0, sf.targetPath.lastIndexOf('/'));
+              await client.exec(`mkdir -p "${targetDir}"`);
+
+              let code: number;
+              let stderr: string;
+
+              if (configFile.isBinary) {
+                const fileBuffer = Buffer.from(configFile.content, 'base64');
+                try {
+                  await client.writeFile(sf.targetPath, fileBuffer);
+                  code = 0;
+                  stderr = '';
+                } catch (writeErr) {
+                  code = 1;
+                  stderr = writeErr instanceof Error ? writeErr.message : 'SFTP write failed';
+                }
+              } else {
+                const { content: rawContent, missing } = await resolveSecretPlaceholders(
+                  server.environmentId,
+                  configFile.content
+                );
+                const resolvedContent = rawContent.trimEnd();
+
+                if (missing.length > 0) {
+                  results.push({
+                    serviceId: sf.service.id,
+                    serviceName: sf.service.name,
+                    serverName: server.name,
+                    targetPath: sf.targetPath,
+                    success: false,
+                    error: `Missing secrets: ${missing.join(', ')}`,
+                  });
+                  continue;
+                }
+
+                ({ code, stderr } = await client.exec(
+                  `cat > "${sf.targetPath}" << 'CONFIGFILE_EOF'\n${resolvedContent}\nCONFIGFILE_EOF`
+                ));
+              }
+
+              if (code !== 0) {
+                results.push({
+                  serviceId: sf.service.id,
+                  serviceName: sf.service.name,
+                  serverName: server.name,
+                  targetPath: sf.targetPath,
+                  success: false,
+                  error: stderr || 'Failed to write file',
+                });
+              } else {
+                await prisma.serviceFile.update({
+                  where: { id: sf.id },
+                  data: { lastSyncedAt: new Date() },
+                });
+                results.push({
+                  serviceId: sf.service.id,
+                  serviceName: sf.service.name,
+                  serverName: server.name,
+                  targetPath: sf.targetPath,
+                  success: true,
+                });
+              }
+            } catch (err) {
+              results.push({
+                serviceId: sf.service.id,
+                serviceName: sf.service.name,
+                serverName: server.name,
+                targetPath: sf.targetPath,
+                success: false,
+                error: err instanceof Error ? err.message : 'Unknown error',
+              });
+            }
+          }
+        } catch (error) {
+          for (const sf of serviceFiles) {
+            results.push({
+              serviceId: sf.service.id,
+              serviceName: sf.service.name,
+              serverName: server.name,
+              targetPath: sf.targetPath,
+              success: false,
+              error: error instanceof Error ? error.message : 'Connection failed',
+            });
+          }
+        } finally {
+          client.disconnect();
+        }
+      }
+
+      const allSuccess = results.every((r) => r.success);
+
+      await logAudit({
+        action: 'sync_files',
+        resourceType: 'config_file',
+        resourceId: configFile.id,
+        resourceName: configFile.name,
+        details: { results, allSuccess, syncedTo: results.length },
+        success: allSuccess,
+        userId: request.authUser!.id,
+        environmentId: configFile.environmentId,
       });
 
       return { results, success: allSuccess };

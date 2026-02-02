@@ -19,6 +19,18 @@ import {
   type Service,
 } from '../lib/api';
 import { formatDistanceToNow } from 'date-fns';
+import { Modal } from '../components/Modal';
+import { CheckIcon, WarningIcon, RefreshIcon } from '../components/Icons';
+import { useToast } from '../components/Toast';
+
+interface DeployAllResult {
+  serviceId: string;
+  serviceName: string;
+  serverName: string;
+  imageTag: string;
+  success: boolean;
+  error?: string;
+}
 
 interface Alert {
   id: string;
@@ -41,6 +53,7 @@ interface DatabaseWithBackups extends Database {
 
 export default function Dashboard() {
   const { selectedEnvironment } = useAppStore();
+  const toast = useToast();
   const [environment, setEnvironment] = useState<EnvironmentWithServers | null>(null);
   const [metrics, setMetrics] = useState<MetricsSummaryServer[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
@@ -48,6 +61,11 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [deploying, setDeploying] = useState<string | null>(null);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
+
+  // Deploy all state
+  const [deployingAll, setDeployingAll] = useState(false);
+  const [deployAllResults, setDeployAllResults] = useState<DeployAllResult[] | null>(null);
+  const [showDeployAllResults, setShowDeployAllResults] = useState(false);
 
   useEffect(() => {
     if (selectedEnvironment?.id) {
@@ -246,6 +264,58 @@ export default function Dashboard() {
     }
   };
 
+  const handleDeployAll = async () => {
+    if (servicesWithUpdates.length === 0) return;
+
+    setDeployingAll(true);
+    setDeployAllResults(null);
+    setShowDeployAllResults(true);
+
+    const results: DeployAllResult[] = [];
+
+    for (const service of servicesWithUpdates) {
+      try {
+        await deployService(service.id, {
+          imageTag: service.latestAvailableTag!,
+          pullImage: true,
+        });
+        results.push({
+          serviceId: service.id,
+          serviceName: service.name,
+          serverName: service.serverName,
+          imageTag: service.latestAvailableTag!,
+          success: true,
+        });
+      } catch (err) {
+        results.push({
+          serviceId: service.id,
+          serviceName: service.name,
+          serverName: service.serverName,
+          imageTag: service.latestAvailableTag!,
+          success: false,
+          error: err instanceof Error ? err.message : 'Deploy failed',
+        });
+      }
+      // Update results as we go
+      setDeployAllResults([...results]);
+    }
+
+    setDeployingAll(false);
+
+    // Refresh environment data
+    if (selectedEnvironment?.id) {
+      const envRes = await getEnvironment(selectedEnvironment.id);
+      setEnvironment(envRes.environment);
+    }
+
+    const successCount = results.filter((r) => r.success).length;
+    if (successCount === results.length) {
+      toast.success(`Deployed all ${successCount} services successfully`);
+    } else {
+      toast.error(`${results.length - successCount} of ${results.length} deploys failed`);
+    }
+  };
+
   if (loading) {
     return (
       <div className="p-8">
@@ -403,6 +473,91 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Deploy All Results Modal */}
+      <Modal
+        isOpen={showDeployAllResults}
+        onClose={() => {
+          setShowDeployAllResults(false);
+          setDeployAllResults(null);
+        }}
+        title="Deploy All Updates"
+        size="md"
+      >
+        {deployAllResults === null ? (
+          <div className="flex flex-col items-center justify-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500 mb-4"></div>
+            <p className="text-slate-400">Deploying {servicesWithUpdates.length} services...</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* Summary */}
+            <div className={`p-3 rounded-lg ${
+              deployAllResults.every(r => r.success)
+                ? 'bg-green-500/10 border border-green-500/30'
+                : deployAllResults.some(r => r.success)
+                ? 'bg-yellow-500/10 border border-yellow-500/30'
+                : 'bg-red-500/10 border border-red-500/30'
+            }`}>
+              <div className="flex items-center gap-2">
+                {deployAllResults.every(r => r.success) ? (
+                  <CheckIcon className="w-5 h-5 text-green-400" />
+                ) : (
+                  <WarningIcon className="w-5 h-5 text-yellow-400" />
+                )}
+                <span className={
+                  deployAllResults.every(r => r.success) ? 'text-green-400' :
+                  deployAllResults.some(r => r.success) ? 'text-yellow-400' : 'text-red-400'
+                }>
+                  {deployAllResults.filter(r => r.success).length} of {deployAllResults.length} deployed successfully
+                </span>
+              </div>
+            </div>
+
+            {/* Results List */}
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {deployAllResults.map((result) => (
+                <div
+                  key={result.serviceId}
+                  className={`p-2 rounded-lg text-sm ${
+                    result.success ? 'bg-slate-800/50' : 'bg-red-500/10'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-white">{result.serviceName}</span>
+                      <span className="text-slate-500 mx-2">on</span>
+                      <span className="text-slate-400">{result.serverName}</span>
+                      <span className="text-slate-500 mx-2">→</span>
+                      <span className="font-mono text-primary-400">{result.imageTag}</span>
+                    </div>
+                    {result.success ? (
+                      <CheckIcon className="w-4 h-4 text-green-400" />
+                    ) : (
+                      <WarningIcon className="w-4 h-4 text-red-400" />
+                    )}
+                  </div>
+                  {result.error && (
+                    <p className="text-red-400 text-xs mt-1">{result.error}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                onClick={() => {
+                  setShowDeployAllResults(false);
+                  setDeployAllResults(null);
+                }}
+                className="btn btn-primary"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       {/* Available Updates */}
       {servicesWithUpdates.length > 0 && (
         <div className="card mb-8">
@@ -413,23 +568,33 @@ export default function Dashboard() {
                 ({servicesWithUpdates.length})
               </span>
             </h2>
-            <button
-              onClick={handleCheckAllUpdates}
-              disabled={checkingUpdates}
-              className="btn btn-sm btn-secondary"
-            >
-              {checkingUpdates ? (
-                <>
-                  <svg className="animate-spin -ml-1 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Checking...
-                </>
-              ) : (
-                'Check Now'
-              )}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleDeployAll}
+                disabled={deployingAll || deploying !== null}
+                className="btn btn-sm btn-primary flex items-center gap-2"
+              >
+                <RefreshIcon className={`w-4 h-4 ${deployingAll ? 'animate-spin' : ''}`} />
+                {deployingAll ? 'Deploying...' : 'Deploy All'}
+              </button>
+              <button
+                onClick={handleCheckAllUpdates}
+                disabled={checkingUpdates}
+                className="btn btn-sm btn-secondary"
+              >
+                {checkingUpdates ? (
+                  <>
+                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Checking...
+                  </>
+                ) : (
+                  'Check Now'
+                )}
+              </button>
+            </div>
           </div>
           <div className="space-y-3">
             {servicesWithUpdates.map((service) => (

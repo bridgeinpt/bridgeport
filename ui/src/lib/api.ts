@@ -407,6 +407,19 @@ export interface Deployment {
   serviceId: string;
 }
 
+export interface SecretUsageService {
+  id: string;
+  name: string;
+  serverName: string;
+}
+
+export interface SecretUsageConfigFile {
+  id: string;
+  name: string;
+  filename: string;
+  services: SecretUsageService[];
+}
+
 export interface Secret {
   id: string;
   key: string;
@@ -414,6 +427,10 @@ export interface Secret {
   neverReveal: boolean;
   createdAt: string;
   updatedAt: string;
+  // Usage information
+  usedByConfigFiles?: SecretUsageConfigFile[];
+  usedByServices?: SecretUsageService[];
+  usageCount?: number;
 }
 
 export interface SecretInput {
@@ -482,12 +499,22 @@ export const getAuditLogs = (filters: AuditLogFilters = {}) => {
 
 // Config Files
 export interface ConfigFileServiceAttachment {
+  id: string;
   targetPath: string;
+  lastSyncedAt: string | null;
+  syncStatus?: 'synced' | 'pending' | 'never';
   service: {
     id: string;
     name: string;
     server: { id: string; name: string };
   };
+}
+
+export interface ConfigFileSyncCounts {
+  synced: number;
+  pending: number;
+  never: number;
+  total: number;
 }
 
 export interface ConfigFile {
@@ -504,6 +531,8 @@ export interface ConfigFile {
   environmentId: string;
   _count?: { services: number };
   services?: ConfigFileServiceAttachment[];
+  syncStatus?: 'synced' | 'pending' | 'never' | 'not_attached';
+  syncCounts?: ConfigFileSyncCounts;
 }
 
 export interface ConfigFileInput {
@@ -572,6 +601,58 @@ export const updateServiceFile = (serviceId: string, configFileId: string, targe
 
 export const syncServiceFiles = (serviceId: string) =>
   api.post<{ results: SyncResult[]; success: boolean }>(`/services/${serviceId}/sync-files`);
+
+export interface ConfigFileSyncResult {
+  serviceId: string;
+  serviceName: string;
+  serverName: string;
+  targetPath: string;
+  success: boolean;
+  error?: string;
+}
+
+export const syncConfigFileToAll = (configFileId: string) =>
+  api.post<{ results: ConfigFileSyncResult[]; success: boolean }>(`/config-files/${configFileId}/sync-all`);
+
+// Server Config Files Sync Status
+export interface ServerConfigFileAttachment {
+  serviceFileId: string;
+  serviceId: string;
+  serviceName: string;
+  targetPath: string;
+  lastSyncedAt: string | null;
+  syncStatus: 'synced' | 'pending' | 'never';
+}
+
+export interface ServerConfigFileStatus {
+  id: string;
+  name: string;
+  filename: string;
+  updatedAt: string;
+  overallSyncStatus: 'synced' | 'pending' | 'never';
+  attachments: ServerConfigFileAttachment[];
+}
+
+export interface ServerConfigFilesSyncTotals {
+  synced: number;
+  pending: number;
+  never: number;
+  total: number;
+}
+
+export const getServerConfigFilesStatus = (serverId: string) =>
+  api.get<{ configFiles: ServerConfigFileStatus[]; totals: ServerConfigFilesSyncTotals }>(`/servers/${serverId}/config-files-status`);
+
+export interface ServerSyncAllResult {
+  configFileName: string;
+  serviceName: string;
+  targetPath: string;
+  success: boolean;
+  error?: string;
+}
+
+export const syncAllServerFiles = (serverId: string) =>
+  api.post<{ results: ServerSyncAllResult[]; success: boolean }>(`/servers/${serverId}/sync-all-files`);
 
 // File History
 export interface FileHistoryEntry {

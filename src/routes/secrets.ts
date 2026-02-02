@@ -24,14 +24,100 @@ const updateSecretSchema = z.object({
 });
 
 export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
-  // List secrets (without values)
+  // List secrets (without values) with usage information
   fastify.get(
     '/api/environments/:envId/secrets',
     { preHandler: [fastify.authenticate] },
     async (request) => {
       const { envId } = request.params as { envId: string };
       const secrets = await listSecrets(envId);
-      return { secrets };
+
+      // Get all config files for this environment to check for secret usage
+      const configFiles = await prisma.configFile.findMany({
+        where: { environmentId: envId },
+        select: {
+          id: true,
+          name: true,
+          filename: true,
+          content: true,
+          services: {
+            select: {
+              service: {
+                select: {
+                  id: true,
+                  name: true,
+                  server: {
+                    select: {
+                      id: true,
+                      name: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+
+      // Build usage map for each secret
+      const secretsWithUsage = secrets.map((secret) => {
+        // Look for patterns like ${SECRET_KEY}, $SECRET_KEY, or {{SECRET_KEY}}
+        const keyPatterns = [
+          `\${${secret.key}}`,
+          `$${secret.key}`,
+          `{{${secret.key}}}`,
+          // Also look for the key in .env file format: KEY=
+          new RegExp(`^${secret.key}=`, 'm'),
+        ];
+
+        const usedByConfigFiles: Array<{
+          id: string;
+          name: string;
+          filename: string;
+          services: Array<{ id: string; name: string; serverName: string }>;
+        }> = [];
+
+        for (const file of configFiles) {
+          const contentMatches = keyPatterns.some((pattern) => {
+            if (pattern instanceof RegExp) {
+              return pattern.test(file.content);
+            }
+            return file.content.includes(pattern);
+          });
+
+          if (contentMatches) {
+            usedByConfigFiles.push({
+              id: file.id,
+              name: file.name,
+              filename: file.filename,
+              services: file.services.map((sf) => ({
+                id: sf.service.id,
+                name: sf.service.name,
+                serverName: sf.service.server.name,
+              })),
+            });
+          }
+        }
+
+        // Derive unique services that use this secret
+        const usedByServices = new Map<string, { id: string; name: string; serverName: string }>();
+        for (const file of usedByConfigFiles) {
+          for (const service of file.services) {
+            if (!usedByServices.has(service.id)) {
+              usedByServices.set(service.id, service);
+            }
+          }
+        }
+
+        return {
+          ...secret,
+          usedByConfigFiles,
+          usedByServices: Array.from(usedByServices.values()),
+          usageCount: usedByServices.size,
+        };
+      });
+
+      return { secrets: secretsWithUsage };
     }
   );
 

@@ -34,6 +34,12 @@ import {
 import { useAppStore } from '../lib/store';
 import { useToast } from '../components/Toast';
 import { formatDistanceToNow, format } from 'date-fns';
+import {
+  getContainerStatusColor,
+  getHealthStatusColor,
+  getOverallStatusDotColor,
+  getContainerHealthTextColor,
+} from '../lib/status';
 
 function parseExposedPorts(portsJson: string | null): ExposedPort[] {
   if (!portsJson) return [];
@@ -41,60 +47,6 @@ function parseExposedPorts(portsJson: string | null): ExposedPort[] {
     return JSON.parse(portsJson);
   } catch {
     return [];
-  }
-}
-
-function getContainerStatusColor(status: string): string {
-  switch (status) {
-    case 'running':
-      return 'badge-success';
-    case 'stopped':
-    case 'exited':
-    case 'dead':
-      return 'badge-error';
-    case 'restarting':
-    case 'paused':
-    case 'created':
-      return 'badge-warning';
-    default:
-      return 'badge-warning';
-  }
-}
-
-function getHealthStatusColor(status: string): string {
-  switch (status) {
-    case 'healthy':
-      return 'badge-success';
-    case 'unhealthy':
-      return 'badge-error';
-    case 'none':
-      return 'bg-slate-600 text-slate-300';
-    default:
-      return 'badge-warning';
-  }
-}
-
-function getOverallStatusDotColor(status: string): string {
-  switch (status) {
-    case 'healthy':
-      return 'bg-green-500';
-    case 'running':
-      return 'bg-blue-500';
-    case 'unhealthy':
-      return 'bg-red-500';
-    default:
-      return 'bg-yellow-500';
-  }
-}
-
-function getContainerHealthTextColor(health: string): string {
-  switch (health) {
-    case 'healthy':
-      return 'text-green-400';
-    case 'unhealthy':
-      return 'text-red-400';
-    default:
-      return 'text-yellow-400';
   }
 }
 

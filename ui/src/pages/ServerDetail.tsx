@@ -15,15 +15,23 @@ import {
   removeAgent,
   updateServer,
   deleteServer,
+  getServerConfigFilesStatus,
+  syncAllServerFiles,
   type ServerWithServices,
   type MetricsMode,
   type ServerMetrics,
   type CreateServiceInput,
   type UpdateServerInput,
   type ExposedPort,
+  type ServerConfigFileStatus,
+  type ServerConfigFilesSyncTotals,
+  type ServerSyncAllResult,
 } from '../lib/api';
 import { useToast } from '../components/Toast';
 import { formatDistanceToNow } from 'date-fns';
+import { getContainerStatusColor, getHealthStatusColor, getSyncStatusColor } from '../lib/status';
+import { Modal } from '../components/Modal';
+import { RefreshIcon, CheckIcon, WarningIcon, FileIcon } from '../components/Icons';
 
 function parseExposedPorts(portsJson: string | null): ExposedPort[] {
   if (!portsJson) return [];
@@ -43,36 +51,6 @@ function formatPorts(ports: ExposedPort[], maxDisplay = 3): string {
     displayed.push(`+${ports.length - maxDisplay}`);
   }
   return displayed.join(', ');
-}
-
-function getContainerStatusColor(status: string): string {
-  switch (status) {
-    case 'running':
-      return 'badge-success';
-    case 'stopped':
-    case 'exited':
-    case 'dead':
-      return 'badge-error';
-    case 'restarting':
-    case 'paused':
-    case 'created':
-      return 'badge-warning';
-    default:
-      return 'badge-warning';
-  }
-}
-
-function getHealthStatusColor(status: string): string {
-  switch (status) {
-    case 'healthy':
-      return 'badge-success';
-    case 'unhealthy':
-      return 'badge-error';
-    case 'none':
-      return 'bg-slate-600 text-slate-300';
-    default:
-      return 'badge-warning';
-  }
 }
 
 interface AgentStatus {
@@ -124,6 +102,14 @@ export default function ServerDetail() {
   });
   const [editTagInput, setEditTagInput] = useState('');
 
+  // Config files sync status
+  const [configFilesStatus, setConfigFilesStatus] = useState<ServerConfigFileStatus[]>([]);
+  const [configFilesTotals, setConfigFilesTotals] = useState<ServerConfigFilesSyncTotals | null>(null);
+  const [loadingConfigFiles, setLoadingConfigFiles] = useState(false);
+  const [syncingAllFiles, setSyncingAllFiles] = useState(false);
+  const [syncResults, setSyncResults] = useState<ServerSyncAllResult[] | null>(null);
+  const [showSyncResults, setShowSyncResults] = useState(false);
+
   useEffect(() => {
     if (id) {
       setLoading(true);
@@ -140,8 +126,53 @@ export default function ServerDetail() {
           }
         })
         .finally(() => setLoading(false));
+
+      // Load config files sync status
+      loadConfigFilesStatus(id);
     }
   }, [id]);
+
+  const loadConfigFilesStatus = async (serverId: string) => {
+    setLoadingConfigFiles(true);
+    try {
+      const result = await getServerConfigFilesStatus(serverId);
+      setConfigFilesStatus(result.configFiles);
+      setConfigFilesTotals(result.totals);
+    } catch {
+      // Ignore errors - config files section is optional
+    } finally {
+      setLoadingConfigFiles(false);
+    }
+  };
+
+  const handleSyncAllFiles = async () => {
+    if (!id) return;
+    setSyncingAllFiles(true);
+    setSyncResults(null);
+    setShowSyncResults(true);
+    try {
+      const result = await syncAllServerFiles(id);
+      setSyncResults(result.results);
+      // Reload config files status
+      await loadConfigFilesStatus(id);
+      if (result.success) {
+        toast.success('All files synced successfully');
+      } else {
+        toast.error('Some files failed to sync');
+      }
+    } catch (err) {
+      setSyncResults([{
+        configFileName: '',
+        serviceName: '',
+        targetPath: '',
+        success: false,
+        error: err instanceof Error ? err.message : 'Sync failed',
+      }]);
+      toast.error('Failed to sync files');
+    } finally {
+      setSyncingAllFiles(false);
+    }
+  };
 
   const handleHealthCheck = async () => {
     if (!id) return;
@@ -716,6 +747,201 @@ export default function ServerDetail() {
           </p>
         )}
       </div>
+
+      {/* Config Files Sync Status */}
+      {(configFilesStatus.length > 0 || loadingConfigFiles) && (
+        <div className="card mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <h3 className="text-lg font-semibold text-white">Config Files</h3>
+              {configFilesTotals && (
+                <div className="flex items-center gap-2 text-sm">
+                  {configFilesTotals.synced > 0 && (
+                    <span className="px-2 py-0.5 rounded bg-green-500/20 text-green-400">
+                      {configFilesTotals.synced} synced
+                    </span>
+                  )}
+                  {configFilesTotals.pending > 0 && (
+                    <span className="px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-400">
+                      {configFilesTotals.pending} pending
+                    </span>
+                  )}
+                  {configFilesTotals.never > 0 && (
+                    <span className="px-2 py-0.5 rounded bg-slate-600 text-slate-300">
+                      {configFilesTotals.never} never synced
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+            {(configFilesTotals?.pending || 0) + (configFilesTotals?.never || 0) > 0 && (
+              <button
+                onClick={handleSyncAllFiles}
+                disabled={syncingAllFiles}
+                className="btn btn-primary text-sm flex items-center gap-2"
+              >
+                <RefreshIcon className={`w-4 h-4 ${syncingAllFiles ? 'animate-spin' : ''}`} />
+                {syncingAllFiles ? 'Syncing...' : 'Sync All'}
+              </button>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            {configFilesStatus.map((cf) => (
+              <div
+                key={cf.id}
+                className={`p-3 rounded-lg bg-slate-800/50 ${
+                  cf.overallSyncStatus === 'pending' ? 'border border-yellow-500/30' :
+                  cf.overallSyncStatus === 'never' ? 'border border-slate-600' : ''
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <FileIcon className="w-4 h-4 text-slate-400" />
+                    <div>
+                      <Link
+                        to={`/config-files`}
+                        className="text-white hover:text-primary-400 font-medium"
+                      >
+                        {cf.name}
+                      </Link>
+                      <span className="text-slate-500 ml-2 text-sm font-mono">{cf.filename}</span>
+                    </div>
+                  </div>
+                  <span className={`px-2 py-0.5 text-xs rounded ${getSyncStatusColor(cf.overallSyncStatus)}`}>
+                    {cf.overallSyncStatus === 'synced' ? 'Synced' :
+                     cf.overallSyncStatus === 'pending' ? 'Outdated' : 'Never synced'}
+                  </span>
+                </div>
+                {/* Show per-service breakdown if multiple */}
+                {cf.attachments.length > 1 && (
+                  <div className="mt-2 pl-7 space-y-1">
+                    {cf.attachments.map((att) => (
+                      <div key={att.serviceFileId} className="flex items-center justify-between text-sm">
+                        <div>
+                          <Link
+                            to={`/services/${att.serviceId}`}
+                            className="text-primary-400 hover:text-primary-300"
+                          >
+                            {att.serviceName}
+                          </Link>
+                          <span className="text-slate-500 ml-2">→</span>
+                          <code className="text-slate-400 ml-2 text-xs">{att.targetPath}</code>
+                        </div>
+                        <span className={`px-1.5 py-0.5 text-xs rounded ${getSyncStatusColor(att.syncStatus)}`}>
+                          {att.syncStatus === 'synced' ? 'Synced' :
+                           att.syncStatus === 'pending' ? 'Outdated' : 'Never'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* Show single attachment inline */}
+                {cf.attachments.length === 1 && (
+                  <div className="mt-1 pl-7 text-sm text-slate-400">
+                    <Link
+                      to={`/services/${cf.attachments[0].serviceId}`}
+                      className="text-primary-400 hover:text-primary-300"
+                    >
+                      {cf.attachments[0].serviceName}
+                    </Link>
+                    <span className="mx-2">→</span>
+                    <code className="text-xs">{cf.attachments[0].targetPath}</code>
+                    {cf.attachments[0].lastSyncedAt && (
+                      <span className="text-slate-500 ml-2">
+                        (synced {formatDistanceToNow(new Date(cf.attachments[0].lastSyncedAt), { addSuffix: true })})
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Sync Results Modal */}
+      <Modal
+        isOpen={showSyncResults}
+        onClose={() => {
+          setShowSyncResults(false);
+          setSyncResults(null);
+        }}
+        title="Sync Results"
+        size="md"
+      >
+        {syncResults === null ? (
+          <div className="flex flex-col items-center justify-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500 mb-4"></div>
+            <p className="text-slate-400">Syncing all config files...</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {/* Summary */}
+            <div className={`p-3 rounded-lg ${
+              syncResults.every(r => r.success)
+                ? 'bg-green-500/10 border border-green-500/30'
+                : syncResults.some(r => r.success)
+                ? 'bg-yellow-500/10 border border-yellow-500/30'
+                : 'bg-red-500/10 border border-red-500/30'
+            }`}>
+              <div className="flex items-center gap-2">
+                {syncResults.every(r => r.success) ? (
+                  <CheckIcon className="w-5 h-5 text-green-400" />
+                ) : (
+                  <WarningIcon className="w-5 h-5 text-yellow-400" />
+                )}
+                <span className={
+                  syncResults.every(r => r.success) ? 'text-green-400' :
+                  syncResults.some(r => r.success) ? 'text-yellow-400' : 'text-red-400'
+                }>
+                  {syncResults.filter(r => r.success).length} of {syncResults.length} synced successfully
+                </span>
+              </div>
+            </div>
+
+            {/* Results List */}
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {syncResults.map((result, i) => (
+                <div
+                  key={i}
+                  className={`p-2 rounded-lg text-sm ${
+                    result.success ? 'bg-slate-800/50' : 'bg-red-500/10'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-white">{result.configFileName}</span>
+                      <span className="text-slate-500"> → </span>
+                      <span className="text-primary-400">{result.serviceName}</span>
+                    </div>
+                    {result.success ? (
+                      <CheckIcon className="w-4 h-4 text-green-400" />
+                    ) : (
+                      <WarningIcon className="w-4 h-4 text-red-400" />
+                    )}
+                  </div>
+                  {result.error && (
+                    <p className="text-red-400 text-xs mt-1">{result.error}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                onClick={() => {
+                  setShowSyncResults(false);
+                  setSyncResults(null);
+                }}
+                className="btn btn-primary"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* Active Services */}
       {(() => {
