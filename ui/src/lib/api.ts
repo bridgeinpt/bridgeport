@@ -213,6 +213,16 @@ export const deleteSpacesConfig = (id: string) =>
 export const listServers = (envId: string) =>
   api.get<{ servers: Server[] }>(`/environments/${envId}/servers`);
 
+export interface CreateServerInput {
+  name: string;
+  hostname: string;
+  publicIp?: string;
+  tags?: string[];
+}
+
+export const createServer = (envId: string, data: CreateServerInput) =>
+  api.post<{ server: Server }>(`/environments/${envId}/servers`, data);
+
 export const getServer = (id: string) =>
   api.get<{ server: ServerWithServices }>(`/servers/${id}`);
 

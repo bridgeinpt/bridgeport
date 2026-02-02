@@ -1,14 +1,21 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppStore } from '../lib/store';
-import { listServers, checkServerHealth, discoverContainers, type Server } from '../lib/api';
+import { listServers, checkServerHealth, discoverContainers, createServer, type Server } from '../lib/api';
 import { formatDistanceToNow } from 'date-fns';
+import { Modal } from '../components/Modal';
 
 export default function Servers() {
   const { selectedEnvironment } = useAppStore();
   const [servers, setServers] = useState<Server[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newHostname, setNewHostname] = useState('');
+  const [newPublicIp, setNewPublicIp] = useState('');
+  const [newTags, setNewTags] = useState('');
 
   useEffect(() => {
     if (selectedEnvironment?.id) {
@@ -49,6 +56,32 @@ export default function Servers() {
     }
   };
 
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedEnvironment?.id) return;
+    setCreating(true);
+    try {
+      const tags = newTags
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean);
+      const { server } = await createServer(selectedEnvironment.id, {
+        name: newName,
+        hostname: newHostname,
+        publicIp: newPublicIp || undefined,
+        tags: tags.length > 0 ? tags : undefined,
+      });
+      setServers((prev) => [...prev, server]);
+      setShowCreate(false);
+      setNewName('');
+      setNewHostname('');
+      setNewPublicIp('');
+      setNewTags('');
+    } finally {
+      setCreating(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="p-8">
@@ -73,8 +106,94 @@ export default function Servers() {
             Manage servers in {selectedEnvironment?.name}
           </p>
         </div>
-        <button className="btn btn-primary">Add Server</button>
+        <button onClick={() => setShowCreate(true)} className="btn btn-primary">Add Server</button>
       </div>
+
+      {/* Create Server Modal */}
+      <Modal
+        isOpen={showCreate}
+        onClose={() => {
+          setShowCreate(false);
+          setNewName('');
+          setNewHostname('');
+          setNewPublicIp('');
+          setNewTags('');
+        }}
+        title="Add Server"
+        size="md"
+      >
+        <form onSubmit={handleCreate} className="space-y-4">
+          <div>
+            <label className="block text-sm text-slate-400 mb-1">Name</label>
+            <input
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="gateway-1"
+              className="input"
+              required
+            />
+            <p className="text-xs text-slate-500 mt-1">
+              Human-readable name for the server
+            </p>
+          </div>
+          <div>
+            <label className="block text-sm text-slate-400 mb-1">Hostname</label>
+            <input
+              type="text"
+              value={newHostname}
+              onChange={(e) => setNewHostname(e.target.value)}
+              placeholder="10.20.10.2"
+              className="input"
+              required
+            />
+            <p className="text-xs text-slate-500 mt-1">
+              Private IP or hostname for SSH access
+            </p>
+          </div>
+          <div>
+            <label className="block text-sm text-slate-400 mb-1">Public IP (optional)</label>
+            <input
+              type="text"
+              value={newPublicIp}
+              onChange={(e) => setNewPublicIp(e.target.value)}
+              placeholder="203.0.113.10"
+              className="input"
+            />
+          </div>
+          <div>
+            <label className="block text-sm text-slate-400 mb-1">Tags (optional)</label>
+            <input
+              type="text"
+              value={newTags}
+              onChange={(e) => setNewTags(e.target.value)}
+              placeholder="web, production"
+              className="input"
+            />
+            <p className="text-xs text-slate-500 mt-1">
+              Comma-separated list of tags
+            </p>
+          </div>
+          <div className="flex gap-2 justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                setShowCreate(false);
+                setNewName('');
+                setNewHostname('');
+                setNewPublicIp('');
+                setNewTags('');
+              }}
+              className="btn btn-ghost"
+            >
+              Cancel
+            </button>
+            <button type="submit" disabled={creating} className="btn btn-primary">
+              {creating ? 'Creating...' : 'Add Server'}
+            </button>
+          </div>
+        </form>
+      </Modal>
 
       <div className="space-y-4">
         {servers.map((server) => (
@@ -149,7 +268,7 @@ export default function Servers() {
         {servers.length === 0 && (
           <div className="card text-center py-12">
             <p className="text-slate-400">No servers configured</p>
-            <button className="btn btn-primary mt-4">Add First Server</button>
+            <button onClick={() => setShowCreate(true)} className="btn btn-primary mt-4">Add First Server</button>
           </div>
         )}
       </div>
