@@ -234,7 +234,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <Link to="/" className="flex items-center">
             {sidebarCollapsed ? (
               // Compact icon when collapsed - show just the crane part
-              <svg width="28" height="28" viewBox="0 0 60 60" className="text-burgundy-700">
+              <svg width="28" height="28" viewBox="0 0 60 60" className="text-brand-600">
                 <rect x="5" y="5" width="6" height="30" fill="currentColor" />
                 <rect x="11" y="5" width="30" height="6" fill="currentColor" />
                 <line x1="41" y1="8" x2="41" y2="30" stroke="currentColor" strokeWidth="3" />
@@ -312,7 +312,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                         >
                           {/* Burgundy accent stripe for active items */}
                           {isActive && (
-                            <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-burgundy-700 rounded-r" />
+                            <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-brand-600 rounded-r" />
                           )}
                           <item.icon className="w-4 h-4 flex-shrink-0" />
                           {!sidebarCollapsed && (
@@ -371,7 +371,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 onClick={() => { setAccountTab('profile'); setError(null); setSuccess(null); }}
                 className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
                   accountTab === 'profile'
-                    ? 'border-burgundy-700 text-burgundy-500'
+                    ? 'border-brand-600 text-brand-500'
                     : 'border-transparent text-slate-400 hover:text-white'
                 }`}
               >
@@ -381,7 +381,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 onClick={() => { setAccountTab('password'); setError(null); setSuccess(null); }}
                 className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
                   accountTab === 'password'
-                    ? 'border-burgundy-700 text-burgundy-500'
+                    ? 'border-brand-600 text-brand-500'
                     : 'border-transparent text-slate-400 hover:text-white'
                 }`}
               >
