@@ -571,10 +571,11 @@ export const uploadAssetFile = (
   description?: string
 ) => {
   const formData = new FormData();
-  formData.append('file', file);
+  // Fields must come BEFORE file for @fastify/multipart request.file() to see them
   formData.append('name', name);
   if (filename) formData.append('filename', filename);
   if (description) formData.append('description', description);
+  formData.append('file', file);
   return api.upload<{ configFile: ConfigFile }>(
     `/environments/${envId}/asset-files/upload`,
     formData
