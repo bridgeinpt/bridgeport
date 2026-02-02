@@ -245,28 +245,13 @@ async function executeBackup(backupId: string): Promise<void> {
   try {
     let dumpCommand = '';
     let targetPath = backup.storagePath;
-
-    if (!db.server) {
-      throw new Error('No server configured for this database');
-    }
-
-    // Create appropriate client based on hostname
     let client: CommandClient;
-    if (isLocalhost(db.server.hostname)) {
-      client = new LocalClient();
-    } else {
-      const sshCreds = await getEnvironmentSshKey(db.environmentId);
-      if (!sshCreds) {
-        throw new Error('SSH key not configured for this environment');
-      }
-      client = new SSHClient({
-        hostname: db.server.hostname,
-        username: sshCreds.username,
-        privateKey: sshCreds.privateKey,
-      });
-    }
 
     if (db.type === 'postgres' && db.host) {
+      // Postgres: run pg_dump locally (connects remotely to database)
+      // No server needed - BridgePort has pg_dump installed
+      client = new LocalClient();
+
       // Get credentials
       let username = '';
       let password = '';
@@ -275,8 +260,27 @@ async function executeBackup(backupId: string): Promise<void> {
         [username, password] = creds.split(':');
       }
 
-      dumpCommand = `PGPASSWORD='${password}' pg_dump -h ${db.host} -p ${db.port || 5432} -U ${username} -d ${db.databaseName} > ${targetPath}`;
+      dumpCommand = `PGPASSWORD='${password}' pg_dump -h ${db.host} -p ${db.port || 5432} -U ${username} -d ${db.databaseName} > "${targetPath}"`;
     } else if (db.type === 'sqlite' && db.filePath) {
+      // SQLite: need to run on the server where the file lives
+      if (!db.server) {
+        throw new Error('SQLite databases require a server to be configured');
+      }
+
+      if (isLocalhost(db.server.hostname)) {
+        client = new LocalClient();
+      } else {
+        const sshCreds = await getEnvironmentSshKey(db.environmentId);
+        if (!sshCreds) {
+          throw new Error('SSH key not configured for this environment');
+        }
+        client = new SSHClient({
+          hostname: db.server.hostname,
+          username: sshCreds.username,
+          privateKey: sshCreds.privateKey,
+        });
+      }
+
       dumpCommand = `sqlite3 "${db.filePath}" ".dump" > "${targetPath}"`;
     } else {
       throw new Error(`Unsupported database type or missing configuration: ${db.type}`);

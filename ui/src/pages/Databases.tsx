@@ -268,39 +268,21 @@ export default function Databases() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm text-slate-400 mb-1">Type</label>
-                  <select
-                    value={formData.type}
-                    onChange={(e) =>
-                      setFormData({ ...formData, type: e.target.value as 'postgres' | 'mysql' | 'sqlite' })
-                    }
-                    className="input"
-                  >
-                    {DATABASE_TYPES.map((t) => (
-                      <option key={t.value} value={t.value}>
-                        {t.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm text-slate-400 mb-1">Server</label>
-                  <select
-                    value={formData.serverId}
-                    onChange={(e) => setFormData({ ...formData, serverId: e.target.value })}
-                    className="input"
-                    required
-                  >
-                    <option value="">Select server...</option>
-                    {servers.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Type</label>
+                <select
+                  value={formData.type}
+                  onChange={(e) =>
+                    setFormData({ ...formData, type: e.target.value as 'postgres' | 'mysql' | 'sqlite', serverId: '' })
+                  }
+                  className="input"
+                >
+                  {DATABASE_TYPES.map((t) => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               {formData.type !== 'sqlite' && (
@@ -360,16 +342,35 @@ export default function Databases() {
               )}
 
               {formData.type === 'sqlite' && (
-                <div>
-                  <label className="block text-sm text-slate-400 mb-1">File Path</label>
-                  <input
-                    type="text"
-                    value={formData.filePath}
-                    onChange={(e) => setFormData({ ...formData, filePath: e.target.value })}
-                    placeholder="/path/to/database.db"
-                    className="input font-mono text-sm"
-                  />
-                </div>
+                <>
+                  <div>
+                    <label className="block text-sm text-slate-400 mb-1">Server</label>
+                    <select
+                      value={formData.serverId}
+                      onChange={(e) => setFormData({ ...formData, serverId: e.target.value })}
+                      className="input"
+                      required
+                    >
+                      <option value="">Select server...</option>
+                      {servers.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-slate-500 mt-1">Server where the SQLite file is located</p>
+                  </div>
+                  <div>
+                    <label className="block text-sm text-slate-400 mb-1">File Path</label>
+                    <input
+                      type="text"
+                      value={formData.filePath}
+                      onChange={(e) => setFormData({ ...formData, filePath: e.target.value })}
+                      placeholder="/path/to/database.db"
+                      className="input font-mono text-sm"
+                    />
+                  </div>
+                </>
               )}
 
               <div>
