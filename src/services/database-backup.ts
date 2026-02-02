@@ -277,7 +277,7 @@ async function executeBackup(backupId: string): Promise<void> {
 
       dumpCommand = `PGPASSWORD='${password}' pg_dump -h ${db.host} -p ${db.port || 5432} -U ${username} -d ${db.databaseName} > ${targetPath}`;
     } else if (db.type === 'sqlite' && db.filePath) {
-      dumpCommand = `sqlite3 ${db.filePath} .dump > ${targetPath}`;
+      dumpCommand = `sqlite3 "${db.filePath}" ".dump" > "${targetPath}"`;
     } else {
       throw new Error(`Unsupported database type or missing configuration: ${db.type}`);
     }
