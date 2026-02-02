@@ -4,6 +4,7 @@ import { checkServiceHealth } from '../services/services.js';
 import { RegistryFactory, type RegistryCredentials } from './registry.js';
 import { getRegistryCredentials } from '../services/registries.js';
 import { deployService } from '../services/deploy.js';
+import { extractRepoName } from './image-utils.js';
 import {
   collectServerMetricsSSH,
   collectServiceMetrics,
@@ -33,13 +34,7 @@ const DEFAULT_CONFIG: SchedulerConfig = {
   metricsRetentionDays: 7,
 };
 
-let serverHealthTimer: NodeJS.Timeout | null = null;
-let serviceHealthTimer: NodeJS.Timeout | null = null;
-let discoveryTimer: NodeJS.Timeout | null = null;
-let updateCheckTimer: NodeJS.Timeout | null = null;
-let metricsTimer: NodeJS.Timeout | null = null;
-let backupCheckTimer: NodeJS.Timeout | null = null;
-let cleanupTimer: NodeJS.Timeout | null = null;
+const timers = new Map<string, NodeJS.Timeout>();
 let isRunning = false;
 
 /**
@@ -114,26 +109,6 @@ async function runDiscovery(): Promise<void> {
   } catch (error) {
     console.error('[Scheduler] Discovery run failed:', error);
   }
-}
-
-/**
- * Extract repository name from full image name
- * e.g., "registry.digitalocean.com/bios-registry/app-api" -> "app-api"
- */
-function extractRepoName(imageName: string, repositoryPrefix: string | null): string {
-  // Remove registry domain and any prefix
-  const parts = imageName.split('/');
-  let repo = parts[parts.length - 1];
-
-  // If there's a prefix pattern like "prefix/repo", handle it
-  if (repositoryPrefix && parts.length > 1) {
-    const prefixIdx = parts.findIndex((p) => p === repositoryPrefix);
-    if (prefixIdx >= 0 && prefixIdx < parts.length - 1) {
-      repo = parts.slice(prefixIdx + 1).join('/');
-    }
-  }
-
-  return repo;
 }
 
 /**
@@ -429,15 +404,13 @@ export function startScheduler(config: Partial<SchedulerConfig> = {}): void {
   }, 5000);
 
   // Set up periodic timers
-  serverHealthTimer = setInterval(runServerHealthChecks, cfg.serverHealthIntervalMs);
-  serviceHealthTimer = setInterval(runServiceHealthChecks, cfg.serviceHealthIntervalMs);
-  discoveryTimer = setInterval(runDiscovery, cfg.discoveryIntervalMs);
-  updateCheckTimer = setInterval(runUpdateChecks, cfg.updateCheckIntervalMs);
-  metricsTimer = setInterval(runMetricsCollection, cfg.metricsIntervalMs);
-  backupCheckTimer = setInterval(runBackupChecks, cfg.backupCheckIntervalMs);
-
-  // Run cleanup once per hour
-  cleanupTimer = setInterval(() => runMetricsCleanup(cfg.metricsRetentionDays), 60 * 60 * 1000);
+  timers.set('serverHealth', setInterval(runServerHealthChecks, cfg.serverHealthIntervalMs));
+  timers.set('serviceHealth', setInterval(runServiceHealthChecks, cfg.serviceHealthIntervalMs));
+  timers.set('discovery', setInterval(runDiscovery, cfg.discoveryIntervalMs));
+  timers.set('updateCheck', setInterval(runUpdateChecks, cfg.updateCheckIntervalMs));
+  timers.set('metrics', setInterval(runMetricsCollection, cfg.metricsIntervalMs));
+  timers.set('backupCheck', setInterval(runBackupChecks, cfg.backupCheckIntervalMs));
+  timers.set('cleanup', setInterval(() => runMetricsCleanup(cfg.metricsRetentionDays), 60 * 60 * 1000));
 }
 
 /**
@@ -450,40 +423,10 @@ export function stopScheduler(): void {
 
   console.log('[Scheduler] Stopping');
 
-  if (serverHealthTimer) {
-    clearInterval(serverHealthTimer);
-    serverHealthTimer = null;
+  for (const timer of timers.values()) {
+    clearInterval(timer);
   }
-
-  if (serviceHealthTimer) {
-    clearInterval(serviceHealthTimer);
-    serviceHealthTimer = null;
-  }
-
-  if (discoveryTimer) {
-    clearInterval(discoveryTimer);
-    discoveryTimer = null;
-  }
-
-  if (updateCheckTimer) {
-    clearInterval(updateCheckTimer);
-    updateCheckTimer = null;
-  }
-
-  if (metricsTimer) {
-    clearInterval(metricsTimer);
-    metricsTimer = null;
-  }
-
-  if (backupCheckTimer) {
-    clearInterval(backupCheckTimer);
-    backupCheckTimer = null;
-  }
-
-  if (cleanupTimer) {
-    clearInterval(cleanupTimer);
-    cleanupTimer = null;
-  }
+  timers.clear();
 
   isRunning = false;
 }

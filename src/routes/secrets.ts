@@ -35,7 +35,7 @@ const createTemplateSchema = z.object({
   template: z.string().min(1),
 });
 
-export async function secretRoutes(fastify: FastifyInstance) {
+export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
   // List secrets (without values)
   fastify.get(
     '/api/environments/:envId/secrets',

@@ -18,7 +18,7 @@ const updateSettingsSchema = z.object({
   allowSecretReveal: z.boolean().optional(),
 });
 
-export async function environmentRoutes(fastify: FastifyInstance) {
+export async function environmentRoutes(fastify: FastifyInstance): Promise<void> {
   // List environments
   fastify.get(
     '/api/environments',

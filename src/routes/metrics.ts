@@ -46,7 +46,7 @@ const serverMetricsIngestSchema = z.object({
     .optional(),
 });
 
-export async function metricsRoutes(fastify: FastifyInstance) {
+export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
   // Get metrics for a server
   fastify.get(
     '/api/servers/:id/metrics',

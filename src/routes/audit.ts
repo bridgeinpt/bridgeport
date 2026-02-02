@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { getAuditLogs } from '../services/audit.js';
 
-export async function auditRoutes(fastify: FastifyInstance) {
+export async function auditRoutes(fastify: FastifyInstance): Promise<void> {
   // List audit logs
   fastify.get(
     '/api/audit-logs',

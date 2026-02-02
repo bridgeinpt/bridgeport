@@ -1,8 +1,22 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 
 export const prisma = new PrismaClient({
   log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
 });
+
+/**
+ * Check if an error is a Prisma "record not found" error.
+ * This includes P2025 (record not found) and NotFoundError from findUniqueOrThrow.
+ */
+export function isPrismaNotFoundError(error: unknown): boolean {
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    return error.code === 'P2025';
+  }
+  if (error instanceof Error && error.name === 'NotFoundError') {
+    return true;
+  }
+  return false;
+}
 
 export async function initializeDatabase(): Promise<void> {
   try {

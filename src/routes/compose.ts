@@ -11,7 +11,7 @@ const composeTemplateSchema = z.object({
   composeTemplate: z.string().min(1),
 });
 
-export async function composeRoutes(fastify: FastifyInstance) {
+export async function composeRoutes(fastify: FastifyInstance): Promise<void> {
   // Preview generated artifacts for a service (without deploying)
   fastify.get(
     '/api/services/:id/compose/preview',

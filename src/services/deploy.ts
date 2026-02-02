@@ -1,6 +1,6 @@
 import path from 'path';
 import { prisma } from '../lib/db.js';
-import { SSHClient, LocalClient, DockerSSH, isLocalhost, type CommandClient } from '../lib/ssh.js';
+import { DockerSSH, createClientForServer, type CommandClient } from '../lib/ssh.js';
 import { registryClient } from '../lib/registry.js';
 import { generateDeploymentArtifacts, saveDeploymentArtifacts } from './compose.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
@@ -60,20 +60,13 @@ export async function deployService(
     log(`Starting deployment of ${service.name} with tag ${imageTag}`);
 
     // Create appropriate client based on hostname
-    let client: CommandClient;
-    if (isLocalhost(service.server.hostname)) {
-      client = new LocalClient();
-      log('Using local execution for localhost');
-    } else {
-      const sshCreds = await getEnvironmentSshKey(service.server.environmentId);
-      if (!sshCreds) {
-        throw new Error('SSH key not configured for this environment');
-      }
-      client = new SSHClient({
-        hostname: service.server.hostname,
-        username: sshCreds.username,
-        privateKey: sshCreds.privateKey,
-      });
+    const { client, error: clientError } = await createClientForServer(
+      service.server.hostname,
+      service.server.environmentId,
+      getEnvironmentSshKey
+    );
+    if (!client) {
+      throw new Error(clientError || 'Failed to create SSH client');
     }
 
     const docker = new DockerSSH(client);
@@ -237,19 +230,13 @@ export async function getContainerLogs(
   });
 
   // Create appropriate client based on hostname
-  let client: CommandClient;
-  if (isLocalhost(service.server.hostname)) {
-    client = new LocalClient();
-  } else {
-    const sshCreds = await getEnvironmentSshKey(service.server.environmentId);
-    if (!sshCreds) {
-      throw new Error('SSH key not configured for this environment');
-    }
-    client = new SSHClient({
-      hostname: service.server.hostname,
-      username: sshCreds.username,
-      privateKey: sshCreds.privateKey,
-    });
+  const { client, error: clientError } = await createClientForServer(
+    service.server.hostname,
+    service.server.environmentId,
+    getEnvironmentSshKey
+  );
+  if (!client) {
+    throw new Error(clientError || 'Failed to create SSH client');
   }
 
   const docker = new DockerSSH(client);

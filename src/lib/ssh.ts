@@ -246,6 +246,45 @@ export function createClient(options: SSHClientOptions): CommandClient {
   return new SSHClient(options);
 }
 
+export interface SSHCredentials {
+  username: string;
+  privateKey: string;
+}
+
+export type GetSSHCredentials = (environmentId: string) => Promise<SSHCredentials | null>;
+
+export interface CreateClientResult {
+  client: CommandClient | null;
+  error?: string;
+}
+
+/**
+ * Create appropriate client (SSH or Local) for a server, handling credential lookup.
+ * Returns the client or an error message if SSH credentials are not configured.
+ */
+export async function createClientForServer(
+  hostname: string,
+  environmentId: string,
+  getCredentials: GetSSHCredentials
+): Promise<CreateClientResult> {
+  if (isLocalhost(hostname)) {
+    return { client: new LocalClient() };
+  }
+
+  const sshCreds = await getCredentials(environmentId);
+  if (!sshCreds) {
+    return { client: null, error: 'SSH key not configured for this environment' };
+  }
+
+  return {
+    client: new SSHClient({
+      hostname,
+      username: sshCreds.username,
+      privateKey: sshCreds.privateKey,
+    }),
+  };
+}
+
 // Docker-specific commands
 export class DockerSSH {
   private client: CommandClient;

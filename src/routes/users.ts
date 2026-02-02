@@ -25,7 +25,7 @@ const changePasswordSchema = z.object({
   newPassword: z.string().min(8),
 });
 
-export async function userRoutes(fastify: FastifyInstance) {
+export async function userRoutes(fastify: FastifyInstance): Promise<void> {
   // List all users (admin only)
   fastify.get(
     '/api/users',

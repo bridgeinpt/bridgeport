@@ -29,7 +29,7 @@ function verifyWebhookSignature(
   );
 }
 
-export async function webhookRoutes(fastify: FastifyInstance) {
+export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
   // CI/CD deployment webhook
   fastify.post('/api/webhooks/deploy', async (request, reply) => {
     const signature = request.headers['x-webhook-signature'] as string;

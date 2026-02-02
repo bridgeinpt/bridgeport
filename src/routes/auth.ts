@@ -24,7 +24,7 @@ const createTokenSchema = z.object({
   expiresInDays: z.number().optional(),
 });
 
-export async function authRoutes(fastify: FastifyInstance) {
+export async function authRoutes(fastify: FastifyInstance): Promise<void> {
   // Login
   fastify.post('/api/auth/login', async (request, reply) => {
     const body = loginSchema.safeParse(request.body);

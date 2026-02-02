@@ -1,29 +1,8 @@
 import { prisma } from '../lib/db.js';
-import { SSHClient, LocalClient, DockerSSH, isLocalhost, createClient } from '../lib/ssh.js';
+import { SSHClient, LocalClient, DockerSSH, isLocalhost, createClientForServer } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
+import { parseRegistryFromImage } from '../lib/image-utils.js';
 import type { Server, Service, RegistryConnection } from '@prisma/client';
-
-/**
- * Parse registry URL from an image name
- * Examples:
- *   registry.digitalocean.com/bios-registry/app-api -> registry.digitalocean.com
- *   ghcr.io/owner/repo -> ghcr.io
- *   nginx -> docker.io (Docker Hub)
- *   caddy:2-alpine -> docker.io
- */
-function parseRegistryFromImage(imageName: string): { registryUrl: string; isDockerHub: boolean } {
-  // Remove tag if present
-  const nameWithoutTag = imageName.split(':')[0];
-  const parts = nameWithoutTag.split('/');
-
-  // Docker Hub images (official or user)
-  if (parts.length === 1 || (parts.length === 2 && !parts[0].includes('.'))) {
-    return { registryUrl: 'docker.io', isDockerHub: true };
-  }
-
-  // Private registry: first part contains a dot (domain)
-  return { registryUrl: parts[0], isDockerHub: false };
-}
 
 /**
  * Find a matching registry for an image or create a new one
@@ -217,27 +196,19 @@ export interface DiscoverResult {
   missing: string[];
 }
 
-/**
- * Extract just the image name (last path segment) from a full image path
- * Examples:
- *   registry.digitalocean.com/bios-registry/app-api -> app-api
- *   ghcr.io/owner/repo -> repo
- *   nginx -> nginx
- *   caddy:2-alpine -> caddy
- */
-function extractImageName(fullImagePath: string): string {
-  // Remove tag if present
-  const nameWithoutTag = fullImagePath.split(':')[0];
-  const parts = nameWithoutTag.split('/');
-  return parts[parts.length - 1];
+export interface UrlHealthResult {
+  success: boolean;
+  statusCode?: number;
+  error?: string;
 }
 
 /**
- * Determine health status from container health and URL check result
+ * Determine health status from container health and optional URL check result
  */
-function determineHealthStatus(
+export function determineHealthStatus(
   containerHealth: string | undefined,
-  running: boolean
+  running: boolean,
+  urlHealth?: UrlHealthResult | null
 ): string {
   if (!running) {
     return 'unknown';
@@ -248,11 +219,35 @@ function determineHealthStatus(
   if (containerHealth === 'unhealthy') {
     return 'unhealthy';
   }
-  // Container has no HEALTHCHECK configured
+  // No Docker HEALTHCHECK, but we have URL check
+  if (urlHealth) {
+    return urlHealth.success ? 'healthy' : 'unhealthy';
+  }
+  // Container has no HEALTHCHECK configured and no URL check
   if (!containerHealth) {
     return 'none';
   }
   return 'unknown';
+}
+
+/**
+ * Determine overall service status from container state and health status
+ */
+export function determineOverallStatus(
+  containerState: string,
+  running: boolean,
+  healthStatus: string
+): string {
+  if (!running) {
+    return containerState === 'not_found' ? 'not_found' : 'stopped';
+  }
+  if (healthStatus === 'unhealthy') {
+    return 'unhealthy';
+  }
+  if (healthStatus === 'healthy') {
+    return 'healthy';
+  }
+  return 'running';
 }
 
 export async function discoverContainers(serverId: string): Promise<DiscoverResult> {
@@ -267,20 +262,13 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
   });
 
   // Create appropriate client based on hostname
-  let client;
-  if (isLocalhost(server.hostname)) {
-    client = new LocalClient();
-  } else {
-    // Get SSH credentials from environment for remote servers
-    const sshCreds = await getEnvironmentSshKey(server.environmentId);
-    if (!sshCreds) {
-      throw new Error('SSH key not configured for this environment');
-    }
-    client = new SSHClient({
-      hostname: server.hostname,
-      username: sshCreds.username,
-      privateKey: sshCreds.privateKey,
-    });
+  const { client, error: clientError } = await createClientForServer(
+    server.hostname,
+    server.environmentId,
+    getEnvironmentSshKey
+  );
+  if (!client) {
+    throw new Error(clientError || 'Failed to create SSH client');
   }
 
   const docker = new DockerSSH(client);

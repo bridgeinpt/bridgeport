@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { prisma } from '../lib/db.js';
-import { SSHClient, LocalClient, isLocalhost, type CommandClient } from '../lib/ssh.js';
+import { prisma, isPrismaNotFoundError } from '../lib/db.js';
+import { createClientForServer, type CommandClient } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from './environments.js';
 import { logAudit } from '../services/audit.js';
 import { resolveSecretPlaceholders } from '../services/secrets.js';
@@ -25,7 +25,7 @@ const attachFileSchema = z.object({
   targetPath: z.string().min(1),
 });
 
-export async function configFileRoutes(fastify: FastifyInstance) {
+export async function configFileRoutes(fastify: FastifyInstance): Promise<void> {
   // List config files for environment
   fastify.get(
     '/api/environments/:envId/config-files',
@@ -174,8 +174,11 @@ export async function configFileRoutes(fastify: FastifyInstance) {
         });
 
         return { configFile };
-      } catch {
-        return reply.code(404).send({ error: 'Config file not found' });
+      } catch (error) {
+        if (isPrismaNotFoundError(error)) {
+          return reply.code(404).send({ error: 'Config file not found' });
+        }
+        throw error;
       }
     }
   );
@@ -277,8 +280,11 @@ export async function configFileRoutes(fastify: FastifyInstance) {
         }
 
         return { success: true };
-      } catch {
-        return reply.code(404).send({ error: 'Config file not found' });
+      } catch (error) {
+        if (isPrismaNotFoundError(error)) {
+          return reply.code(404).send({ error: 'Config file not found' });
+        }
+        throw error;
       }
     }
   );
@@ -392,8 +398,11 @@ export async function configFileRoutes(fastify: FastifyInstance) {
         });
 
         return { success: true };
-      } catch {
-        return reply.code(404).send({ error: 'File attachment not found' });
+      } catch (error) {
+        if (isPrismaNotFoundError(error)) {
+          return reply.code(404).send({ error: 'File attachment not found' });
+        }
+        throw error;
       }
     }
   );
@@ -424,19 +433,13 @@ export async function configFileRoutes(fastify: FastifyInstance) {
       }
 
       // Create appropriate client based on hostname
-      let client: CommandClient;
-      if (isLocalhost(service.server.hostname)) {
-        client = new LocalClient();
-      } else {
-        const sshCreds = await getEnvironmentSshKey(service.server.environmentId);
-        if (!sshCreds) {
-          return reply.code(400).send({ error: 'SSH key not configured for this environment' });
-        }
-        client = new SSHClient({
-          hostname: service.server.hostname,
-          username: sshCreds.username,
-          privateKey: sshCreds.privateKey,
-        });
+      const { client, error: clientError } = await createClientForServer(
+        service.server.hostname,
+        service.server.environmentId,
+        getEnvironmentSshKey
+      );
+      if (!client) {
+        return reply.code(400).send({ error: clientError });
       }
 
       const results: Array<{ file: string; targetPath: string; success: boolean; error?: string }> = [];

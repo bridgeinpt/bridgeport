@@ -49,7 +49,7 @@ const importTerraformSchema = z.object({
   ),
 });
 
-export async function serverRoutes(fastify: FastifyInstance) {
+export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
   // List servers for environment
   fastify.get(
     '/api/environments/:envId/servers',

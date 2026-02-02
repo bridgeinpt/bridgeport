@@ -75,6 +75,30 @@ function getHealthStatusColor(status: string): string {
   }
 }
 
+function getOverallStatusDotColor(status: string): string {
+  switch (status) {
+    case 'healthy':
+      return 'bg-green-500';
+    case 'running':
+      return 'bg-blue-500';
+    case 'unhealthy':
+      return 'bg-red-500';
+    default:
+      return 'bg-yellow-500';
+  }
+}
+
+function getContainerHealthTextColor(health: string): string {
+  switch (health) {
+    case 'healthy':
+      return 'text-green-400';
+    case 'unhealthy':
+      return 'text-red-400';
+    default:
+      return 'text-yellow-400';
+  }
+}
+
 export default function ServiceDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -893,17 +917,7 @@ export default function ServiceDetail() {
             <div className="space-y-4">
               {/* Overall Status */}
               <div className="flex items-center gap-3">
-                <span
-                  className={`w-3 h-3 rounded-full ${
-                    healthCheckResult.status === 'healthy'
-                      ? 'bg-green-500'
-                      : healthCheckResult.status === 'running'
-                      ? 'bg-blue-500'
-                      : healthCheckResult.status === 'unhealthy'
-                      ? 'bg-red-500'
-                      : 'bg-yellow-500'
-                  }`}
-                />
+                <span className={`w-3 h-3 rounded-full ${getOverallStatusDotColor(healthCheckResult.status)}`} />
                 <span className="text-white font-medium capitalize">{healthCheckResult.status}</span>
               </div>
 
@@ -928,15 +942,7 @@ export default function ServiceDetail() {
                   {healthCheckResult.container.health && (
                     <div>
                       <dt className="text-slate-500">Health</dt>
-                      <dd
-                        className={
-                          healthCheckResult.container.health === 'healthy'
-                            ? 'text-green-400'
-                            : healthCheckResult.container.health === 'unhealthy'
-                            ? 'text-red-400'
-                            : 'text-yellow-400'
-                        }
-                      >
+                      <dd className={getContainerHealthTextColor(healthCheckResult.container.health)}>
                         {healthCheckResult.container.health}
                       </dd>
                     </div>

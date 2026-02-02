@@ -43,7 +43,7 @@ const scheduleSchema = z.object({
   enabled: z.boolean().optional(),
 });
 
-export async function databaseRoutes(fastify: FastifyInstance) {
+export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // List databases for environment
   fastify.get(
     '/api/environments/:envId/databases',

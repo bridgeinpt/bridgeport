@@ -40,7 +40,7 @@ const updateRegistrySchema = z.object({
   autoLinkPattern: z.string().nullable().optional(),
 });
 
-export async function registryRoutes(fastify: FastifyInstance) {
+export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
   // List registry connections for environment
   fastify.get(
     '/api/environments/:envId/registries',

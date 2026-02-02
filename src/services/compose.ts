@@ -1,7 +1,7 @@
 import { prisma } from '../lib/db.js';
-import { decrypt } from '../lib/crypto.js';
 import { createHash } from 'crypto';
 import YAML from 'yaml';
+import { getSecretsForEnv, resolveSecretPlaceholders } from './secrets.js';
 
 export interface ComposeConfig {
   version?: string;
@@ -35,22 +35,6 @@ function computeChecksum(content: string): string {
 }
 
 /**
- * Get all secrets for an environment as a key-value map
- */
-export async function getSecretsMap(environmentId: string): Promise<Record<string, string>> {
-  const secrets = await prisma.secret.findMany({
-    where: { environmentId },
-  });
-
-  const result: Record<string, string> = {};
-  for (const secret of secrets) {
-    result[secret.key] = decrypt(secret.encryptedValue, secret.nonce);
-  }
-
-  return result;
-}
-
-/**
  * Generate env file content from template and secrets
  */
 export async function generateEnvContent(
@@ -65,20 +49,10 @@ export async function generateEnvContent(
     throw new Error(`Env template not found: ${templateName}`);
   }
 
-  const secrets = await getSecretsMap(environmentId);
+  const { content, missing } = await resolveSecretPlaceholders(environmentId, template.template);
 
-  let content = template.template;
-
-  // Replace ${SECRET_KEY} placeholders
-  for (const [key, value] of Object.entries(secrets)) {
-    content = content.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), value);
-  }
-
-  // Check for unresolved placeholders
-  const unresolved = content.match(/\$\{[A-Z_][A-Z0-9_]*\}/g);
-  if (unresolved) {
-    const missing = [...new Set(unresolved)].join(', ');
-    throw new Error(`Missing secrets for placeholders: ${missing}`);
+  if (missing.length > 0) {
+    throw new Error(`Missing secrets for placeholders: ${missing.map(m => `\${${m}}`).join(', ')}`);
   }
 
   return content;
@@ -119,17 +93,14 @@ export async function generateDeploymentArtifacts(
   }
 
   // Load config files and resolve secret placeholders
-  const secrets = await getSecretsMap(environmentId);
   for (const sf of service.files) {
-    let content = sf.configFile.content;
-
-    // Resolve ${SECRET_KEY} placeholders
-    for (const [key, value] of Object.entries(secrets)) {
-      content = content.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), value);
-    }
+    const { content: resolvedContent } = await resolveSecretPlaceholders(
+      environmentId,
+      sf.configFile.content
+    );
 
     // Trim trailing empty lines
-    content = content.trimEnd();
+    const content = resolvedContent.trimEnd();
 
     const checksum = createHash('sha256').update(content).digest('hex');
     artifacts.configFiles.push({

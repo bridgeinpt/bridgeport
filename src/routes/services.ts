@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { prisma } from '../lib/db.js';
+import { prisma, isPrismaNotFoundError } from '../lib/db.js';
 import {
   deployService,
   getDeploymentHistory,
@@ -8,10 +8,12 @@ import {
   getContainerLogs,
   getLatestImageTags,
 } from '../services/deploy.js';
-import { SSHClient, LocalClient, DockerSSH, isLocalhost } from '../lib/ssh.js';
+import { DockerSSH, createClientForServer } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from './environments.js';
 import { logAudit } from '../services/audit.js';
 import { checkServiceUpdate } from '../lib/scheduler.js';
+import { stripRegistryPrefix } from '../lib/image-utils.js';
+import { determineHealthStatus, determineOverallStatus } from '../services/servers.js';
 
 const createServiceSchema = z.object({
   name: z.string().min(1),
@@ -40,7 +42,7 @@ const deploySchema = z.object({
   pullImage: z.boolean().default(true),
 });
 
-export async function serviceRoutes(fastify: FastifyInstance) {
+export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
   // List services for server
   fastify.get(
     '/api/servers/:serverId/services',
@@ -155,8 +157,11 @@ export async function serviceRoutes(fastify: FastifyInstance) {
         });
 
         return { service };
-      } catch {
-        return reply.code(404).send({ error: 'Service not found' });
+      } catch (error) {
+        if (isPrismaNotFoundError(error)) {
+          return reply.code(404).send({ error: 'Service not found' });
+        }
+        throw error;
       }
     }
   );
@@ -187,8 +192,11 @@ export async function serviceRoutes(fastify: FastifyInstance) {
         }
 
         return { success: true };
-      } catch {
-        return reply.code(404).send({ error: 'Service not found' });
+      } catch (error) {
+        if (isPrismaNotFoundError(error)) {
+          return reply.code(404).send({ error: 'Service not found' });
+        }
+        throw error;
       }
     }
   );
@@ -313,19 +321,13 @@ export async function serviceRoutes(fastify: FastifyInstance) {
       }
 
       // Create appropriate client based on hostname
-      let client;
-      if (isLocalhost(service.server.hostname)) {
-        client = new LocalClient();
-      } else {
-        const sshCreds = await getEnvironmentSshKey(service.server.environmentId);
-        if (!sshCreds) {
-          return reply.code(400).send({ error: 'SSH key not configured for this environment' });
-        }
-        client = new SSHClient({
-          hostname: service.server.hostname,
-          username: sshCreds.username,
-          privateKey: sshCreds.privateKey,
-        });
+      const { client, error } = await createClientForServer(
+        service.server.hostname,
+        service.server.environmentId,
+        getEnvironmentSshKey
+      );
+      if (!client) {
+        return reply.code(400).send({ error });
       }
 
       reply.raw.writeHead(200, {
@@ -373,7 +375,7 @@ export async function serviceRoutes(fastify: FastifyInstance) {
       }
 
       // Extract repository name from full image name
-      const repoName = service.imageName.replace('registry.digitalocean.com/bios-registry/', '');
+      const repoName = stripRegistryPrefix(service.imageName);
 
       try {
         const tags = await getLatestImageTags(repoName);
@@ -402,19 +404,13 @@ export async function serviceRoutes(fastify: FastifyInstance) {
       }
 
       // Create appropriate client based on hostname
-      let client;
-      if (isLocalhost(service.server.hostname)) {
-        client = new LocalClient();
-      } else {
-        const sshCreds = await getEnvironmentSshKey(service.server.environmentId);
-        if (!sshCreds) {
-          return reply.code(400).send({ error: 'SSH key not configured for this environment' });
-        }
-        client = new SSHClient({
-          hostname: service.server.hostname,
-          username: sshCreds.username,
-          privateKey: sshCreds.privateKey,
-        });
+      const { client, error } = await createClientForServer(
+        service.server.hostname,
+        service.server.environmentId,
+        getEnvironmentSshKey
+      );
+      if (!client) {
+        return reply.code(400).send({ error });
       }
 
       const docker = new DockerSSH(client);
@@ -472,19 +468,13 @@ export async function serviceRoutes(fastify: FastifyInstance) {
       }
 
       // Create appropriate client based on hostname
-      let client;
-      if (isLocalhost(service.server.hostname)) {
-        client = new LocalClient();
-      } else {
-        const sshCreds = await getEnvironmentSshKey(service.server.environmentId);
-        if (!sshCreds) {
-          return reply.code(400).send({ error: 'SSH key not configured for this environment' });
-        }
-        client = new SSHClient({
-          hostname: service.server.hostname,
-          username: sshCreds.username,
-          privateKey: sshCreds.privateKey,
-        });
+      const { client, error } = await createClientForServer(
+        service.server.hostname,
+        service.server.environmentId,
+        getEnvironmentSshKey
+      );
+      if (!client) {
+        return reply.code(400).send({ error });
       }
 
       const docker = new DockerSSH(client);
@@ -504,35 +494,19 @@ export async function serviceRoutes(fastify: FastifyInstance) {
         // Determine container status
         const containerStatus = containerInfo.state;
 
-        // Determine health status
-        let healthStatus: string;
-        if (!containerInfo.running) {
-          healthStatus = 'unknown';
-        } else if (containerInfo.health === 'healthy') {
-          healthStatus = 'healthy';
-        } else if (containerInfo.health === 'unhealthy') {
-          healthStatus = 'unhealthy';
-        } else if (urlHealth) {
-          // No Docker HEALTHCHECK, but we have URL check
-          healthStatus = urlHealth.success ? 'healthy' : 'unhealthy';
-        } else if (!containerInfo.health) {
-          // No HEALTHCHECK and no URL configured
-          healthStatus = 'none';
-        } else {
-          healthStatus = 'unknown';
-        }
+        // Determine health status using shared function
+        const healthStatus = determineHealthStatus(
+          containerInfo.health,
+          containerInfo.running,
+          urlHealth
+        );
 
-        // Determine overall status (for backwards compatibility)
-        let status: string;
-        if (!containerInfo.running) {
-          status = containerInfo.state === 'not_found' ? 'not_found' : 'stopped';
-        } else if (healthStatus === 'unhealthy') {
-          status = 'unhealthy';
-        } else if (healthStatus === 'healthy') {
-          status = 'healthy';
-        } else {
-          status = 'running';
-        }
+        // Determine overall status using shared function
+        const status = determineOverallStatus(
+          containerInfo.state,
+          containerInfo.running,
+          healthStatus
+        );
 
         // Serialize ports to JSON
         const exposedPorts = containerInfo.ports.length > 0
