@@ -11,6 +11,7 @@ import {
   getRegistryServices,
   checkRegistryUpdates,
   deployService,
+  updateService,
   type RegistryConnection,
   type RegistryConnectionInput,
   type RegistryService,
@@ -37,6 +38,7 @@ export default function Registries() {
   const [loadingServices, setLoadingServices] = useState(false);
   const [checkingUpdates, setCheckingUpdates] = useState<string | null>(null);
   const [updatingService, setUpdatingService] = useState<string | null>(null);
+  const [unlinkingService, setUnlinkingService] = useState<string | null>(null);
 
   // Form state
   const [formData, setFormData] = useState<RegistryConnectionInput>({
@@ -235,6 +237,24 @@ export default function Registries() {
     }
   };
 
+  const handleUnlinkService = async (service: RegistryService) => {
+    if (!confirm(`Unlink "${service.name}" from this registry?`)) return;
+    setUnlinkingService(service.id);
+    try {
+      await updateService(service.id, { registryConnectionId: null });
+      toast.success(`Unlinked ${service.name}`);
+      // Refresh services list
+      if (viewingServices) {
+        const { services } = await getRegistryServices(viewingServices);
+        setLinkedServices(services);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unlink failed');
+    } finally {
+      setUnlinkingService(null);
+    }
+  };
+
   if (!selectedEnvironment) {
     return (
       <div className="p-8">
@@ -426,15 +446,25 @@ export default function Registries() {
                                 )}
                               </div>
                             </div>
-                            {hasUpdate && (
+                            <div className="flex items-center gap-2 ml-3 flex-shrink-0">
+                              {hasUpdate && (
+                                <button
+                                  onClick={() => handleUpdateService(service)}
+                                  disabled={updatingService === service.id}
+                                  className="btn btn-sm btn-primary"
+                                >
+                                  {updatingService === service.id ? 'Updating...' : 'Update'}
+                                </button>
+                              )}
                               <button
-                                onClick={() => handleUpdateService(service)}
-                                disabled={updatingService === service.id}
-                                className="btn btn-sm btn-primary ml-3 flex-shrink-0"
+                                onClick={() => handleUnlinkService(service)}
+                                disabled={unlinkingService === service.id}
+                                className="btn btn-sm btn-ghost text-slate-400 hover:text-red-400"
+                                title="Unlink from registry"
                               >
-                                {updatingService === service.id ? 'Updating...' : 'Update'}
+                                {unlinkingService === service.id ? '...' : '×'}
                               </button>
-                            )}
+                            </div>
                           </div>
                         );
                       })}
