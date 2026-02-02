@@ -1,8 +1,21 @@
 services:
+  # Init container to fix volume permissions (runs as root, then exits)
+  bridgeport-init:
+    image: alpine:3.20
+    container_name: bridgeport-init
+    command: chown -R 1000:1000 /app/data /app/uploads
+    volumes:
+      - bridgeport-data:/app/data
+      - bridgeport-uploads:/app/uploads
+    restart: "no"
+
   bridgeport:
     image: registry.digitalocean.com/bios-registry/bridgeport:latest
     container_name: bridgeport
     restart: unless-stopped
+    depends_on:
+      bridgeport-init:
+        condition: service_completed_successfully
     expose:
       - "3000"
     env_file:
