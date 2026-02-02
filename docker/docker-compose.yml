@@ -1,38 +1,31 @@
 services:
-  # Init container to fix volume permissions (runs as root, then exits)
-  bridgeport-init:
-    image: alpine:3.20
-    container_name: bridgeport-init
-    command: chown -R 1000:1000 /app/data /app/uploads
-    volumes:
-      - bridgeport-data:/app/data
-      - bridgeport-uploads:/app/uploads
-    restart: "no"
-
   bridgeport:
     image: registry.digitalocean.com/bios-registry/bridgeport:latest
     container_name: bridgeport
     restart: unless-stopped
-    depends_on:
-      bridgeport-init:
-        condition: service_completed_successfully
-    expose:
-      - "3000"
+    ports:
+      - "3000:3000"
     env_file:
       - .env
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=file:/app/data/bridgeport.db
+      - DATABASE_URL=file:/data/bridgeport.db
       - SSH_KEY_PATH=/app/.ssh/bios-infra
       - SSH_USER=root
-      - UPLOAD_DIR=/app/uploads
+      - UPLOAD_DIR=/data/uploads
     user: "1000:1000"  # Run as node user (non-root)
     volumes:
-      - bridgeport-data:/app/data
-      - bridgeport-uploads:/app/uploads
+      - ./data:/data
       - /root/.ssh/bios-infra:/app/.ssh/bios-infra:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     networks:
       - caddy
+
   caddy:
     image: caddy:2-alpine
     container_name: caddy
@@ -44,16 +37,16 @@ services:
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./certs:/certs:ro
-      - caddy-data:/data
-      - caddy-config:/config
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - bridgeport
     networks:
       - caddy
 
 volumes:
-  bridgeport-data:
-  bridgeport-uploads:
-  caddy-data:
-  caddy-config:
+  caddy_data:
+  caddy_config:
 
 networks:
   caddy:
