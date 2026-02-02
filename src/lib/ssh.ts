@@ -484,11 +484,12 @@ export class DockerSSH {
     return stdout + stderr; // Docker logs go to both
   }
 
-  async composeUp(composePath: string, serviceName?: string): Promise<void> {
+  async composeUp(composePath: string, serviceName?: string, forceRecreate: boolean = true): Promise<void> {
     const compose = await this.getComposeCommand();
+    const forceFlag = forceRecreate ? '--force-recreate' : '';
     const cmd = serviceName
-      ? `${compose} -f ${composePath} up -d ${serviceName}`
-      : `${compose} -f ${composePath} up -d`;
+      ? `${compose} -f ${composePath} up -d ${forceFlag} ${serviceName}`
+      : `${compose} -f ${composePath} up -d ${forceFlag}`;
 
     const { code, stderr } = await this.client.exec(this.pathPrefix + cmd);
     if (code !== 0) {
