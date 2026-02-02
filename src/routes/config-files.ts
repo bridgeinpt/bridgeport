@@ -434,6 +434,69 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
     }
   );
 
+  // Update service file target path
+  fastify.patch(
+    '/api/services/:serviceId/files/:fileId',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { serviceId, fileId } = request.params as { serviceId: string; fileId: string };
+      const body = z.object({ targetPath: z.string().min(1) }).safeParse(request.body);
+
+      if (!body.success) {
+        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
+      }
+
+      try {
+        const serviceFile = await prisma.serviceFile.findFirst({
+          where: { serviceId, configFileId: fileId },
+          include: {
+            configFile: { select: { name: true } },
+            service: { include: { server: true } },
+          },
+        });
+
+        if (!serviceFile) {
+          return reply.code(404).send({ error: 'File not attached to this service' });
+        }
+
+        const updated = await prisma.serviceFile.update({
+          where: { id: serviceFile.id },
+          data: { targetPath: body.data.targetPath },
+          include: {
+            configFile: {
+              select: {
+                id: true,
+                name: true,
+                filename: true,
+                description: true,
+                isBinary: true,
+                mimeType: true,
+                fileSize: true,
+              },
+            },
+          },
+        });
+
+        await logAudit({
+          action: 'update',
+          resourceType: 'service_file',
+          resourceId: serviceFile.id,
+          resourceName: `${serviceFile.configFile.name} -> ${serviceFile.service.name}`,
+          details: { oldTargetPath: serviceFile.targetPath, newTargetPath: body.data.targetPath },
+          userId: request.authUser!.id,
+          environmentId: serviceFile.service.server.environmentId,
+        });
+
+        return { serviceFile: updated };
+      } catch (error) {
+        if (isPrismaNotFoundError(error)) {
+          return reply.code(404).send({ error: 'File attachment not found' });
+        }
+        throw error;
+      }
+    }
+  );
+
   // Sync files to server (copy all attached files to their target paths)
   fastify.post(
     '/api/services/:id/sync-files',

@@ -15,6 +15,7 @@ import {
   getConfigFile,
   attachServiceFile,
   detachServiceFile,
+  updateServiceFile,
   syncServiceFiles,
   checkServiceUpdates,
   listRegistryConnections,
@@ -147,6 +148,9 @@ export default function ServiceDetail() {
   const [newFileContent, setNewFileContent] = useState('');
   const [newFileDescription, setNewFileDescription] = useState('');
   const [creatingFile, setCreatingFile] = useState(false);
+  const [editingMountPath, setEditingMountPath] = useState<string | null>(null);
+  const [editMountPathValue, setEditMountPathValue] = useState('');
+  const [savingMountPath, setSavingMountPath] = useState(false);
 
   // Registry and auto-update state
   const [registries, setRegistries] = useState<RegistryConnection[]>([]);
@@ -539,6 +543,45 @@ export default function ServiceDetail() {
     if (!confirm('Detach this file from the service?')) return;
     await detachServiceFile(id, configFileId);
     setAttachedFiles((prev) => prev.filter((f) => f.configFileId !== configFileId));
+  };
+
+  const startEditMountPath = (configFileId: string, currentPath: string) => {
+    setEditingMountPath(configFileId);
+    setEditMountPathValue(currentPath);
+  };
+
+  const cancelEditMountPath = () => {
+    setEditingMountPath(null);
+    setEditMountPathValue('');
+  };
+
+  const saveMountPath = async (configFileId: string) => {
+    if (!id || !editMountPathValue.trim()) {
+      cancelEditMountPath();
+      return;
+    }
+    setSavingMountPath(true);
+    try {
+      const { serviceFile } = await updateServiceFile(id, configFileId, editMountPathValue.trim());
+      setAttachedFiles((prev) =>
+        prev.map((f) => (f.configFileId === configFileId ? serviceFile : f))
+      );
+      setEditingMountPath(null);
+      toast.success('Mount path updated');
+    } catch {
+      toast.error('Failed to update mount path');
+    } finally {
+      setSavingMountPath(false);
+    }
+  };
+
+  const handleMountPathKeyDown = (e: React.KeyboardEvent, configFileId: string) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      saveMountPath(configFileId);
+    } else if (e.key === 'Escape') {
+      cancelEditMountPath();
+    }
   };
 
   const handleSyncFiles = async () => {
@@ -1467,7 +1510,7 @@ export default function ServiceDetail() {
                 key={file.id}
                 className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg"
               >
-                <div className="flex-1">
+                <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-white font-medium">{file.configFile.name}</span>
                     <span className="text-xs text-slate-500">({file.configFile.filename})</span>
@@ -1477,7 +1520,31 @@ export default function ServiceDetail() {
                       </span>
                     )}
                   </div>
-                  <code className="text-sm text-green-400">{file.targetPath}</code>
+                  {editingMountPath === file.configFileId ? (
+                    <div className="flex items-center gap-2 mt-1">
+                      <input
+                        type="text"
+                        value={editMountPathValue}
+                        onChange={(e) => setEditMountPathValue(e.target.value)}
+                        onKeyDown={(e) => handleMountPathKeyDown(e, file.configFileId)}
+                        onBlur={() => saveMountPath(file.configFileId)}
+                        disabled={savingMountPath}
+                        autoFocus
+                        className="flex-1 bg-slate-900 border border-primary-500 rounded px-2 py-0.5 text-green-400 font-mono text-sm focus:outline-none focus:ring-1 focus:ring-primary-500"
+                      />
+                    </div>
+                  ) : (
+                    <code
+                      className="text-sm text-green-400 cursor-pointer hover:text-green-300 group flex items-center gap-1"
+                      onClick={() => startEditMountPath(file.configFileId, file.targetPath)}
+                      title="Click to edit mount path"
+                    >
+                      {file.targetPath}
+                      <svg className="w-3 h-3 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                      </svg>
+                    </code>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   {!file.configFile.isBinary && (

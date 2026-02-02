@@ -543,6 +543,9 @@ export const attachServiceFile = (serviceId: string, data: ServiceFileInput) =>
 export const detachServiceFile = (serviceId: string, configFileId: string) =>
   api.delete<{ success: boolean }>(`/services/${serviceId}/files/${configFileId}`);
 
+export const updateServiceFile = (serviceId: string, configFileId: string, targetPath: string) =>
+  api.patch<{ serviceFile: ServiceFile }>(`/services/${serviceId}/files/${configFileId}`, { targetPath });
+
 export const syncServiceFiles = (serviceId: string) =>
   api.post<{ results: SyncResult[]; success: boolean }>(`/services/${serviceId}/sync-files`);
 
