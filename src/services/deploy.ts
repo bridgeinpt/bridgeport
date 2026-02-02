@@ -111,9 +111,9 @@ export async function deployService(
         log(`Writing config file: ${cf.name} -> ${cfPath}`);
 
         if (cf.isBinary) {
-          // Binary files: content is base64-encoded, decode on the server
-          // Use heredoc to avoid shell argument length limits
-          await client.exec(`base64 -d > "${cfPath}" << 'BASE64EOF'\n${cf.content}\nBASE64EOF`);
+          // Binary files: use SFTP for reliable transfer of large files
+          const fileBuffer = Buffer.from(cf.content, 'base64');
+          await client.writeFile(cfPath, fileBuffer);
         } else {
           // Text files: use heredoc
           await client.exec(`cat > "${cfPath}" << 'CFEOF'\n${cf.content}\nCFEOF`);

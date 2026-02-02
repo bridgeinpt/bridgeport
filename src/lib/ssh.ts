@@ -1,7 +1,7 @@
 import { Client, type ConnectConfig, type ExecOptions } from 'ssh2';
 import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
-import { readFile, stat } from 'fs/promises';
+import { readFile, stat, writeFile as fsWriteFile } from 'fs/promises';
 import { config } from './config.js';
 
 const execAsync = promisify(exec);
@@ -16,6 +16,7 @@ export interface CommandClient {
   connect(): Promise<void>;
   exec(command: string, options?: ExecOptions): Promise<SSHExecResult>;
   execStream(command: string, onData: (data: string, isStderr: boolean) => void): Promise<number>;
+  writeFile(remotePath: string, content: Buffer): Promise<void>;
   disconnect(): void;
 }
 
@@ -78,6 +79,10 @@ export class LocalClient implements CommandClient {
 
       child.on('error', reject);
     });
+  }
+
+  async writeFile(remotePath: string, content: Buffer): Promise<void> {
+    await fsWriteFile(remotePath, content);
   }
 
   disconnect(): void {
@@ -213,6 +218,35 @@ export class SSHClient implements CommandClient {
         });
 
         stream.on('error', reject);
+      });
+    });
+  }
+
+  async writeFile(remotePath: string, content: Buffer): Promise<void> {
+    if (!this.client) {
+      await this.connect();
+    }
+
+    return new Promise((resolve, reject) => {
+      this.client!.sftp((err, sftp) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+
+        const writeStream = sftp.createWriteStream(remotePath);
+
+        writeStream.on('error', (err: Error) => {
+          sftp.end();
+          reject(err);
+        });
+
+        writeStream.on('close', () => {
+          sftp.end();
+          resolve();
+        });
+
+        writeStream.end(content);
       });
     });
   }

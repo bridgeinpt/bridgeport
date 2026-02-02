@@ -549,11 +549,16 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
             let stderr: string;
 
             if (configFile.isBinary) {
-              // Binary files: content is base64-encoded, decode on the server
-              // Use heredoc to avoid shell argument length limits
-              ({ code, stderr } = await client.exec(
-                `base64 -d > "${targetPath}" << 'BASE64EOF'\n${configFile.content}\nBASE64EOF`
-              ));
+              // Binary files: use SFTP for reliable transfer of large files
+              const fileBuffer = Buffer.from(configFile.content, 'base64');
+              try {
+                await client.writeFile(targetPath, fileBuffer);
+                code = 0;
+                stderr = '';
+              } catch (writeErr) {
+                code = 1;
+                stderr = writeErr instanceof Error ? writeErr.message : 'SFTP write failed';
+              }
             } else {
               // Text files: resolve ${SECRET_KEY} placeholders and trim trailing empty lines
               const { content: rawContent, missing } = await resolveSecretPlaceholders(
