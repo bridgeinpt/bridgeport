@@ -912,6 +912,22 @@ export const regenerateAgentToken = (id: string) =>
 export type DatabaseType = 'postgres' | 'mysql' | 'sqlite';
 export type BackupStorageType = 'local' | 'spaces';
 
+export interface LastBackupInfo {
+  id: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  type: 'manual' | 'scheduled';
+  createdAt: string;
+  completedAt: string | null;
+  error: string | null;
+}
+
+export interface ScheduleInfo {
+  enabled: boolean;
+  cronExpression: string;
+  lastRunAt: string | null;
+  nextRunAt: string | null;
+}
+
 export interface Database {
   id: string;
   name: string;
@@ -930,6 +946,8 @@ export interface Database {
   updatedAt: string;
   environmentId: string;
   _count?: { backups: number; services: number };
+  lastBackup?: LastBackupInfo | null;
+  schedule?: ScheduleInfo | null;
 }
 
 export interface DatabaseInput {

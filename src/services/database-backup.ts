@@ -33,6 +33,22 @@ export interface DatabaseInput {
   backupSpacesPrefix?: string;
 }
 
+export interface LastBackupInfo {
+  id: string;
+  status: string;
+  type: string;
+  createdAt: Date;
+  completedAt: Date | null;
+  error: string | null;
+}
+
+export interface ScheduleInfo {
+  enabled: boolean;
+  cronExpression: string;
+  lastRunAt: Date | null;
+  nextRunAt: Date | null;
+}
+
 export interface DatabaseOutput {
   id: string;
   name: string;
@@ -51,6 +67,8 @@ export interface DatabaseOutput {
   updatedAt: Date;
   environmentId: string;
   _count?: { backups: number; services: number };
+  lastBackup?: LastBackupInfo | null;
+  schedule?: ScheduleInfo | null;
 }
 
 export async function createDatabase(
@@ -154,10 +172,37 @@ export async function listDatabases(environmentId: string): Promise<DatabaseOutp
   const dbs = await prisma.database.findMany({
     where: { environmentId },
     orderBy: { name: 'asc' },
-    include: { _count: { select: { backups: true, services: true } } },
+    include: {
+      _count: { select: { backups: true, services: true } },
+      backups: {
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+        select: {
+          id: true,
+          status: true,
+          type: true,
+          createdAt: true,
+          completedAt: true,
+          error: true,
+        },
+      },
+      schedule: {
+        select: {
+          enabled: true,
+          cronExpression: true,
+          lastRunAt: true,
+          nextRunAt: true,
+        },
+      },
+    },
   });
 
-  return dbs.map(toOutput);
+  return dbs.map((db) => {
+    const output = toOutput(db);
+    output.lastBackup = db.backups[0] || null;
+    output.schedule = db.schedule || null;
+    return output;
+  });
 }
 
 export async function deleteDatabase(id: string): Promise<void> {

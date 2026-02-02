@@ -916,9 +916,51 @@ export default function Databases() {
                     <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
                       <span>{db._count?.backups || 0} backups</span>
                       <span>Storage: {STORAGE_TYPES.find((t) => t.value === db.backupStorageType)?.label}</span>
-                      <span>
-                        Updated {formatDistanceToNow(new Date(db.updatedAt), { addSuffix: true })}
-                      </span>
+                      {db.schedule && (
+                        <span className={db.schedule.enabled ? 'text-green-400' : 'text-slate-500'}>
+                          {db.schedule.enabled ? 'Scheduled' : 'Schedule disabled'}
+                        </span>
+                      )}
+                    </div>
+                    {/* Backup Status Row */}
+                    <div className="flex items-center gap-3 mt-2">
+                      {db.lastBackup ? (
+                        <>
+                          <span
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${
+                              db.lastBackup.status === 'completed'
+                                ? 'bg-green-500/20 text-green-400'
+                                : db.lastBackup.status === 'failed'
+                                ? 'bg-red-500/20 text-red-400'
+                                : db.lastBackup.status === 'in_progress'
+                                ? 'bg-blue-500/20 text-blue-400'
+                                : 'bg-slate-500/20 text-slate-400'
+                            }`}
+                          >
+                            {db.lastBackup.status === 'completed' && (
+                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                            {db.lastBackup.status === 'failed' && (
+                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            )}
+                            {db.lastBackup.status === 'in_progress' && (
+                              <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                              </svg>
+                            )}
+                            Last backup: {db.lastBackup.status.replace('_', ' ')}
+                          </span>
+                          <span className="text-xs text-slate-500">
+                            {formatDistanceToNow(new Date(db.lastBackup.createdAt), { addSuffix: true })}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-xs text-slate-500 italic">No backups yet</span>
+                      )}
                     </div>
                   </div>
                 </div>
