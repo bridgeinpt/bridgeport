@@ -11,6 +11,9 @@ const createConfigFileSchema = z.object({
   filename: z.string().min(1),
   content: z.string(),
   description: z.string().optional(),
+  isBinary: z.boolean().optional(),
+  mimeType: z.string().optional(),
+  fileSize: z.number().int().positive().optional(),
 });
 
 const updateConfigFileSchema = z.object({
@@ -18,6 +21,9 @@ const updateConfigFileSchema = z.object({
   filename: z.string().min(1).optional(),
   content: z.string().optional(),
   description: z.string().nullable().optional(),
+  isBinary: z.boolean().optional(),
+  mimeType: z.string().nullable().optional(),
+  fileSize: z.number().int().positive().nullable().optional(),
 });
 
 const attachFileSchema = z.object({
@@ -40,6 +46,9 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           name: true,
           filename: true,
           description: true,
+          isBinary: true,
+          mimeType: true,
+          fileSize: true,
           createdAt: true,
           updatedAt: true,
           _count: { select: { services: true } },
@@ -302,7 +311,15 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           files: {
             include: {
               configFile: {
-                select: { id: true, name: true, filename: true, description: true },
+                select: {
+                  id: true,
+                  name: true,
+                  filename: true,
+                  description: true,
+                  isBinary: true,
+                  mimeType: true,
+                  fileSize: true,
+                },
               },
             },
           },
@@ -337,7 +354,17 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
             targetPath: body.data.targetPath,
           },
           include: {
-            configFile: { select: { id: true, name: true, filename: true } },
+            configFile: {
+              select: {
+                id: true,
+                name: true,
+                filename: true,
+                description: true,
+                isBinary: true,
+                mimeType: true,
+                fileSize: true,
+              },
+            },
           },
         });
 
@@ -451,31 +478,41 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           const { configFile, targetPath } = serviceFile;
 
           try {
-            // Resolve ${SECRET_KEY} placeholders in content and trim trailing empty lines
-            const { content: rawContent, missing } = await resolveSecretPlaceholders(
-              service.server.environmentId,
-              configFile.content
-            );
-            const resolvedContent = rawContent.trimEnd();
-
-            if (missing.length > 0) {
-              results.push({
-                file: configFile.name,
-                targetPath,
-                success: false,
-                error: `Missing secrets: ${missing.join(', ')}`,
-              });
-              continue;
-            }
-
             // Ensure target directory exists
             const targetDir = targetPath.substring(0, targetPath.lastIndexOf('/'));
             await client.exec(`mkdir -p "${targetDir}"`);
 
-            // Write file content using heredoc with quoted delimiter to prevent shell expansion
-            const { code, stderr } = await client.exec(
-              `cat > "${targetPath}" << 'CONFIGFILE_EOF'\n${resolvedContent}\nCONFIGFILE_EOF`
-            );
+            let code: number;
+            let stderr: string;
+
+            if (configFile.isBinary) {
+              // Binary files: content is base64-encoded, decode on the server
+              ({ code, stderr } = await client.exec(
+                `echo "${configFile.content}" | base64 -d > "${targetPath}"`
+              ));
+            } else {
+              // Text files: resolve ${SECRET_KEY} placeholders and trim trailing empty lines
+              const { content: rawContent, missing } = await resolveSecretPlaceholders(
+                service.server.environmentId,
+                configFile.content
+              );
+              const resolvedContent = rawContent.trimEnd();
+
+              if (missing.length > 0) {
+                results.push({
+                  file: configFile.name,
+                  targetPath,
+                  success: false,
+                  error: `Missing secrets: ${missing.join(', ')}`,
+                });
+                continue;
+              }
+
+              // Write file content using heredoc with quoted delimiter to prevent shell expansion
+              ({ code, stderr } = await client.exec(
+                `cat > "${targetPath}" << 'CONFIGFILE_EOF'\n${resolvedContent}\nCONFIGFILE_EOF`
+              ));
+            }
 
             if (code !== 0) {
               results.push({
@@ -517,6 +554,89 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
       });
 
       return { results, success: allSuccess };
+    }
+  );
+
+  // Upload asset file (binary)
+  fastify.post(
+    '/api/environments/:envId/asset-files/upload',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { envId } = request.params as { envId: string };
+
+      // Check environment exists
+      const environment = await prisma.environment.findUnique({
+        where: { id: envId },
+      });
+      if (!environment) {
+        return reply.code(404).send({ error: 'Environment not found' });
+      }
+
+      const data = await request.file();
+      if (!data) {
+        return reply.code(400).send({ error: 'No file uploaded' });
+      }
+
+      // Get form fields
+      const fields: Record<string, string> = {};
+      for (const [key, value] of Object.entries(data.fields)) {
+        if (value && typeof value === 'object' && 'value' in value) {
+          fields[key] = (value as { value: string }).value;
+        }
+      }
+
+      const name = fields.name;
+      const filename = fields.filename || data.filename;
+      const description = fields.description;
+
+      if (!name) {
+        return reply.code(400).send({ error: 'name is required' });
+      }
+      if (!filename) {
+        return reply.code(400).send({ error: 'filename is required' });
+      }
+
+      // Read file and convert to base64
+      const chunks: Buffer[] = [];
+      for await (const chunk of data.file) {
+        chunks.push(chunk);
+      }
+      const fileBuffer = Buffer.concat(chunks);
+      const content = fileBuffer.toString('base64');
+      const fileSize = fileBuffer.length;
+      const mimeType = data.mimetype || 'application/octet-stream';
+
+      try {
+        const configFile = await prisma.configFile.create({
+          data: {
+            name,
+            filename,
+            content,
+            description: description || null,
+            isBinary: true,
+            mimeType,
+            fileSize,
+            environmentId: envId,
+          },
+        });
+
+        await logAudit({
+          action: 'create',
+          resourceType: 'config_file',
+          resourceId: configFile.id,
+          resourceName: configFile.name,
+          details: { isBinary: true, mimeType, fileSize },
+          userId: request.authUser!.id,
+          environmentId: envId,
+        });
+
+        return { configFile };
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('Unique constraint')) {
+          return reply.code(409).send({ error: 'Config file with this name already exists' });
+        }
+        throw error;
+      }
     }
   );
 }

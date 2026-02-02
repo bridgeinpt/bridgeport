@@ -109,7 +109,14 @@ export async function deployService(
         await client.exec(`mkdir -p "${cfDir}"`);
 
         log(`Writing config file: ${cf.name} -> ${cfPath}`);
-        await client.exec(`cat > "${cfPath}" << 'CFEOF'\n${cf.content}\nCFEOF`);
+
+        if (cf.isBinary) {
+          // Binary files: content is base64-encoded, decode on the server
+          await client.exec(`echo "${cf.content}" | base64 -d > "${cfPath}"`);
+        } else {
+          // Text files: use heredoc
+          await client.exec(`cat > "${cfPath}" << 'CFEOF'\n${cf.content}\nCFEOF`);
+        }
 
         // Set restrictive permissions for .env files (contain secrets)
         if (cf.name.endsWith('.env')) {

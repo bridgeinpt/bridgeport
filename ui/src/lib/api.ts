@@ -78,6 +78,36 @@ class ApiClient {
   delete<T>(path: string): Promise<T> {
     return this.request<T>('DELETE', path);
   }
+
+  async upload<T>(path: string, formData: FormData): Promise<T> {
+    const headers: Record<string, string> = {};
+    // Don't set Content-Type - browser will set it with boundary for multipart
+
+    const token = this.getToken();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE}${path}`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    if (response.status === 401) {
+      this.setToken(null);
+      window.location.href = '/login';
+      throw new Error('Unauthorized');
+    }
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error((data as ApiError).error || 'Upload failed');
+    }
+
+    return data as T;
+  }
 }
 
 export const api = new ApiClient();
@@ -442,6 +472,9 @@ export interface ConfigFile {
   filename: string;
   content: string;
   description: string | null;
+  isBinary: boolean;
+  mimeType: string | null;
+  fileSize: number | null;
   createdAt: string;
   updatedAt: string;
   environmentId: string;
@@ -454,6 +487,9 @@ export interface ConfigFileInput {
   filename: string;
   content: string;
   description?: string;
+  isBinary?: boolean;
+  mimeType?: string;
+  fileSize?: number;
 }
 
 export interface ServiceFile {
@@ -465,6 +501,9 @@ export interface ServiceFile {
     name: string;
     filename: string;
     description: string | null;
+    isBinary?: boolean;
+    mimeType?: string | null;
+    fileSize?: number | null;
   };
 }
 
@@ -520,6 +559,24 @@ export const getConfigFileHistory = (id: string) =>
 
 export const restoreConfigFile = (id: string, historyId: string) =>
   api.post<{ configFile: ConfigFile }>(`/config-files/${id}/restore/${historyId}`);
+
+export const uploadAssetFile = (
+  envId: string,
+  file: File,
+  name: string,
+  filename?: string,
+  description?: string
+) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('name', name);
+  if (filename) formData.append('filename', filename);
+  if (description) formData.append('description', description);
+  return api.upload<{ configFile: ConfigFile }>(
+    `/environments/${envId}/asset-files/upload`,
+    formData
+  );
+};
 
 // Registry Connections
 export interface RegistryConnection {

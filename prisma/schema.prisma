@@ -203,8 +203,11 @@ model ConfigFile {
   id          String   @id @default(cuid())
   name        String   // Display name (e.g., "gateway-compose", "cloudflare-cert")
   filename    String   // Target filename on server (e.g., "docker-compose.yml", "cloudflare-origin.pem")
-  content     String   // File content (stored in DB for simplicity)
+  content     String   // File content (stored in DB for simplicity, base64-encoded for binary)
   description String?
+  isBinary    Boolean  @default(false) // Whether this is a binary/asset file
+  mimeType    String?  // MIME type for binary files (e.g., "application/x-x509-ca-cert")
+  fileSize    Int?     // Size in bytes for display
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

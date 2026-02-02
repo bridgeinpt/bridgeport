@@ -8,6 +8,7 @@ import {
   deleteConfigFile,
   getConfigFileHistory,
   restoreConfigFile,
+  uploadAssetFile,
   type ConfigFile,
   type FileHistoryEntry,
 } from '../lib/api';
@@ -40,6 +41,12 @@ export default function ConfigFiles() {
   const [selectedHistoryEntry, setSelectedHistoryEntry] = useState<FileHistoryEntry | null>(null);
   const [attachedFilter, setAttachedFilter] = useState<boolean>(false);
   const [serviceFilter, setServiceFilter] = useState<string>('');
+  const [showUpload, setShowUpload] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadName, setUploadName] = useState('');
+  const [uploadFilename, setUploadFilename] = useState('');
+  const [uploadDescription, setUploadDescription] = useState('');
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     if (selectedEnvironment?.id) {
@@ -155,6 +162,36 @@ export default function ConfigFiles() {
     setSelectedHistoryEntry(null);
   };
 
+  const handleUpload = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedEnvironment?.id || !uploadFile) return;
+    setUploading(true);
+    try {
+      const { configFile } = await uploadAssetFile(
+        selectedEnvironment.id,
+        uploadFile,
+        uploadName,
+        uploadFilename || uploadFile.name,
+        uploadDescription || undefined
+      );
+      setConfigFiles((prev) => [...prev, configFile]);
+      setShowUpload(false);
+      setUploadFile(null);
+      setUploadName('');
+      setUploadFilename('');
+      setUploadDescription('');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const formatFileSize = (bytes: number | null): string => {
+    if (bytes === null) return 'Unknown';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
   // Filter config files based on filters
   const filteredConfigFiles = configFiles.filter((f) => {
     // "Only attached" filter
@@ -205,9 +242,14 @@ export default function ConfigFiles() {
             Manage config files (compose files, Caddyfiles, certificates) for {selectedEnvironment.name}
           </p>
         </div>
-        <button onClick={() => setShowCreate(true)} className="btn btn-primary">
-          New Config File
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => setShowUpload(true)} className="btn btn-secondary">
+            Upload Asset
+          </button>
+          <button onClick={() => setShowCreate(true)} className="btn btn-primary">
+            New Config File
+          </button>
+        </div>
       </div>
 
       {/* Create Modal */}
@@ -290,6 +332,97 @@ export default function ConfigFiles() {
         </div>
       )}
 
+      {/* Upload Asset Modal */}
+      {showUpload && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-lg p-6">
+            <h3 className="text-lg font-semibold text-white mb-4">Upload Asset File</h3>
+            <form onSubmit={handleUpload} className="space-y-4">
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">File</label>
+                <input
+                  type="file"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) {
+                      setUploadFile(file);
+                      // Auto-suggest name from filename (without extension)
+                      if (!uploadName) {
+                        const nameWithoutExt = file.name.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9-_]/g, '-');
+                        setUploadName(nameWithoutExt);
+                      }
+                      // Auto-fill filename
+                      if (!uploadFilename) {
+                        setUploadFilename(file.name);
+                      }
+                    }
+                  }}
+                  className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:bg-slate-700 file:text-white hover:file:bg-slate-600"
+                  required
+                />
+                {uploadFile && (
+                  <p className="text-xs text-slate-500 mt-1">
+                    {formatFileSize(uploadFile.size)} • {uploadFile.type || 'unknown type'}
+                  </p>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm text-slate-400 mb-1">Display Name</label>
+                  <input
+                    type="text"
+                    value={uploadName}
+                    onChange={(e) => setUploadName(e.target.value)}
+                    placeholder="cloudflare-cert"
+                    className="input"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-slate-400 mb-1">Filename</label>
+                  <input
+                    type="text"
+                    value={uploadFilename}
+                    onChange={(e) => setUploadFilename(e.target.value)}
+                    placeholder="cert.pem"
+                    className="input"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">Defaults to uploaded filename</p>
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Description (optional)</label>
+                <input
+                  type="text"
+                  value={uploadDescription}
+                  onChange={(e) => setUploadDescription(e.target.value)}
+                  placeholder="Cloudflare origin certificate"
+                  className="input"
+                />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowUpload(false);
+                    setUploadFile(null);
+                    setUploadName('');
+                    setUploadFilename('');
+                    setUploadDescription('');
+                  }}
+                  className="btn btn-ghost"
+                >
+                  Cancel
+                </button>
+                <button type="submit" disabled={uploading} className="btn btn-primary">
+                  {uploading ? 'Uploading...' : 'Upload'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Edit Modal */}
       {editingFile && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -310,13 +443,32 @@ export default function ConfigFiles() {
               </div>
               <div>
                 <label className="block text-sm text-slate-400 mb-1">Content</label>
-                <textarea
-                  value={editContent}
-                  onChange={(e) => setEditContent(e.target.value)}
-                  rows={20}
-                  className="input font-mono text-sm"
-                  autoFocus
-                />
+                {editingFile.isBinary ? (
+                  <div className="p-4 bg-slate-800/50 rounded-lg border border-slate-700">
+                    <div className="flex items-center gap-3 text-slate-400">
+                      <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      <div>
+                        <p className="text-white font-medium">Binary File</p>
+                        <p className="text-sm text-slate-500">
+                          {formatFileSize(editingFile.fileSize)} • {editingFile.mimeType || 'Unknown type'}
+                        </p>
+                        <p className="text-xs text-slate-500 mt-1">
+                          Binary files cannot be edited. Re-upload to replace.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <textarea
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    rows={20}
+                    className="input font-mono text-sm"
+                    autoFocus
+                  />
+                )}
               </div>
               <div className="flex gap-2 justify-end">
                 <button
@@ -378,17 +530,36 @@ export default function ConfigFiles() {
               </div>
             )}
 
-            <pre className="flex-1 overflow-auto p-4 bg-slate-950 rounded-lg text-sm font-mono text-slate-300">
-              {viewingFile.content}
-            </pre>
+            {viewingFile.isBinary ? (
+              <div className="flex-1 flex items-center justify-center p-8 bg-slate-950 rounded-lg">
+                <div className="text-center">
+                  <svg className="w-16 h-16 text-slate-500 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <p className="text-white font-medium mb-1">Binary File</p>
+                  <p className="text-slate-400 text-sm">
+                    {formatFileSize(viewingFile.fileSize)} • {viewingFile.mimeType || 'Unknown type'}
+                  </p>
+                  <p className="text-slate-500 text-xs mt-2">
+                    Binary file content cannot be displayed
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <pre className="flex-1 overflow-auto p-4 bg-slate-950 rounded-lg text-sm font-mono text-slate-300">
+                {viewingFile.content}
+              </pre>
+            )}
 
             <div className="mt-4 flex justify-end gap-2">
-              <button
-                onClick={() => navigator.clipboard.writeText(viewingFile.content)}
-                className="btn btn-secondary"
-              >
-                Copy Content
-              </button>
+              {!viewingFile.isBinary && (
+                <button
+                  onClick={() => navigator.clipboard.writeText(viewingFile.content)}
+                  className="btn btn-secondary"
+                >
+                  Copy Content
+                </button>
+              )}
               <button
                 onClick={() => {
                   startEdit(viewingFile);
@@ -540,8 +711,18 @@ export default function ConfigFiles() {
           <div key={file.id} className="card hover:border-slate-600 transition-colors">
             <div className="flex items-start justify-between mb-2">
               <div className="flex-1 min-w-0">
-                <h3 className="font-medium text-white truncate">{file.name}</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="font-medium text-white truncate">{file.name}</h3>
+                  {file.isBinary && (
+                    <span className="px-1.5 py-0.5 text-xs bg-purple-900/30 text-purple-400 rounded" title={file.mimeType || 'Binary file'}>
+                      binary
+                    </span>
+                  )}
+                </div>
                 <p className="text-sm text-slate-400 truncate font-mono">{file.filename}</p>
+                {file.isBinary && file.fileSize && (
+                  <p className="text-xs text-slate-500">{formatFileSize(file.fileSize)}</p>
+                )}
               </div>
               <div className="flex gap-1 ml-2">
                 <button

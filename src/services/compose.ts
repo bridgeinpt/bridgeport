@@ -26,7 +26,7 @@ export interface ComposeService {
 
 export interface GeneratedArtifacts {
   compose: { name: string; content: string; checksum: string };
-  configFiles: Array<{ name: string; content: string; checksum: string; mountPath: string }>;
+  configFiles: Array<{ name: string; content: string; checksum: string; mountPath: string; isBinary: boolean }>;
 }
 
 function computeChecksum(content: string): string {
@@ -57,15 +57,22 @@ export async function generateDeploymentArtifacts(
     configFiles: [],
   };
 
-  // Load config files and resolve secret placeholders
+  // Load config files and resolve secret placeholders (skip for binary files)
   for (const sf of service.files) {
-    const { content: resolvedContent } = await resolveSecretPlaceholders(
-      environmentId,
-      sf.configFile.content
-    );
+    const isBinary = sf.configFile.isBinary;
+    let content: string;
 
-    // Trim trailing empty lines
-    const content = resolvedContent.trimEnd();
+    if (isBinary) {
+      // Binary files: pass through content as-is (already base64-encoded)
+      content = sf.configFile.content;
+    } else {
+      // Text files: resolve secret placeholders and trim trailing empty lines
+      const { content: resolvedContent } = await resolveSecretPlaceholders(
+        environmentId,
+        sf.configFile.content
+      );
+      content = resolvedContent.trimEnd();
+    }
 
     const checksum = createHash('sha256').update(content).digest('hex');
     artifacts.configFiles.push({
@@ -73,6 +80,7 @@ export async function generateDeploymentArtifacts(
       content,
       checksum,
       mountPath: sf.targetPath,
+      isBinary,
     });
   }
 
