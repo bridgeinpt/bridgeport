@@ -324,36 +324,48 @@ export class DockerSSH {
   private client: CommandClient;
   // Ensure docker is in PATH for non-interactive SSH sessions
   private readonly pathPrefix = 'export PATH="/usr/local/bin:/usr/bin:$PATH" && ';
-  // Cache detected compose command (docker compose vs docker-compose)
-  private composeCmd: string | null = null;
+  // Cache detected compose command and version
+  private composeInfo: { cmd: string; majorVersion: number } | null = null;
 
   constructor(client: CommandClient) {
     this.client = client;
   }
 
-  // Detect which compose command is available
-  private async getComposeCommand(): Promise<string> {
-    if (this.composeCmd) {
-      return this.composeCmd;
+  // Detect which compose command is available and its major version
+  private async getComposeInfo(): Promise<{ cmd: string; majorVersion: number }> {
+    if (this.composeInfo) {
+      return this.composeInfo;
     }
 
     // Try docker compose (new plugin style) first
-    const { code: pluginCode } = await this.client.exec(this.pathPrefix + 'docker compose version 2>/dev/null');
-    if (pluginCode === 0) {
-      this.composeCmd = 'docker compose';
-      return this.composeCmd;
+    const { stdout: v2Out, code: pluginCode } = await this.client.exec(
+      this.pathPrefix + 'docker compose version --short 2>/dev/null'
+    );
+    if (pluginCode === 0 && v2Out.trim()) {
+      const version = parseInt(v2Out.trim().split('.')[0], 10);
+      this.composeInfo = { cmd: 'docker compose', majorVersion: version >= 2 ? version : 2 };
+      return this.composeInfo;
     }
 
     // Fall back to docker-compose (standalone)
-    const { code: standaloneCode } = await this.client.exec(this.pathPrefix + 'docker-compose version 2>/dev/null');
-    if (standaloneCode === 0) {
-      this.composeCmd = 'docker-compose';
-      return this.composeCmd;
+    const { stdout: v1Out, code: standaloneCode } = await this.client.exec(
+      this.pathPrefix + 'docker-compose version --short 2>/dev/null'
+    );
+    if (standaloneCode === 0 && v1Out.trim()) {
+      const version = parseInt(v1Out.trim().split('.')[0], 10);
+      this.composeInfo = { cmd: 'docker-compose', majorVersion: version || 1 };
+      return this.composeInfo;
     }
 
-    // Default to docker compose and let it fail with a clear error
-    this.composeCmd = 'docker compose';
-    return this.composeCmd;
+    // Default to docker compose v2 and let it fail with a clear error
+    this.composeInfo = { cmd: 'docker compose', majorVersion: 2 };
+    return this.composeInfo;
+  }
+
+  // Backward-compatible wrapper for existing code
+  private async getComposeCommand(): Promise<string> {
+    const { cmd } = await this.getComposeInfo();
+    return cmd;
   }
 
   async listContainers(): Promise<Array<{
@@ -519,15 +531,34 @@ export class DockerSSH {
   }
 
   async composeUp(composePath: string, serviceName?: string, forceRecreate: boolean = true): Promise<void> {
-    const compose = await this.getComposeCommand();
-    const forceFlag = forceRecreate ? '--force-recreate' : '';
-    const cmd = serviceName
-      ? `${compose} -f ${composePath} up -d ${forceFlag} ${serviceName}`
-      : `${compose} -f ${composePath} up -d ${forceFlag}`;
+    const { cmd: compose, majorVersion } = await this.getComposeInfo();
 
-    const { code, stderr } = await this.client.exec(this.pathPrefix + cmd);
-    if (code !== 0) {
-      throw new Error(`Failed to run compose up: ${stderr}`);
+    if (forceRecreate && majorVersion === 1) {
+      // docker-compose v1.x has a bug with --force-recreate on newer Docker versions
+      // (KeyError: 'ContainerConfig'). Work around by using rm + up instead.
+      const rmCmd = serviceName
+        ? `${compose} -f ${composePath} rm -f -s ${serviceName}`
+        : `${compose} -f ${composePath} down`;
+      await this.client.exec(this.pathPrefix + rmCmd);
+
+      const upCmd = serviceName
+        ? `${compose} -f ${composePath} up -d ${serviceName}`
+        : `${compose} -f ${composePath} up -d`;
+      const { code, stderr } = await this.client.exec(this.pathPrefix + upCmd);
+      if (code !== 0) {
+        throw new Error(`Failed to run compose up: ${stderr}`);
+      }
+    } else {
+      // docker compose v2.x: use --force-recreate normally
+      const forceFlag = forceRecreate ? '--force-recreate' : '';
+      const cmd = serviceName
+        ? `${compose} -f ${composePath} up -d ${forceFlag} ${serviceName}`
+        : `${compose} -f ${composePath} up -d ${forceFlag}`;
+
+      const { code, stderr } = await this.client.exec(this.pathPrefix + cmd);
+      if (code !== 0) {
+        throw new Error(`Failed to run compose up: ${stderr}`);
+      }
     }
   }
 
