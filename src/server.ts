@@ -29,6 +29,9 @@ import { notificationRoutes } from './routes/notifications.js';
 import { smtpRoutes } from './routes/admin/smtp.js';
 import { webhookAdminRoutes } from './routes/admin/webhooks.js';
 import { initializeNotificationTypes } from './services/notifications.js';
+import { managedImageRoutes } from './routes/managed-images.js';
+import { serviceDependencyRoutes } from './routes/service-dependencies.js';
+import { deploymentPlanRoutes } from './routes/deployment-plans.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -123,6 +126,9 @@ async function buildServer() {
   await fastify.register(notificationRoutes);
   await fastify.register(smtpRoutes);
   await fastify.register(webhookAdminRoutes);
+  await fastify.register(managedImageRoutes);
+  await fastify.register(serviceDependencyRoutes);
+  await fastify.register(deploymentPlanRoutes);
 
   // Health check
   fastify.get('/health', async () => {

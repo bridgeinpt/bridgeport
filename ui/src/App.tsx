@@ -19,6 +19,9 @@ import Monitoring from './pages/Monitoring';
 import Settings from './pages/Settings';
 import Notifications from './pages/Notifications';
 import NotificationSettings from './pages/admin/NotificationSettings';
+import ManagedImages from './pages/ManagedImages';
+import DeploymentPlans from './pages/DeploymentPlans';
+import DeploymentPlanDetail from './pages/DeploymentPlanDetail';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { token } = useAuthStore();
@@ -52,6 +55,9 @@ export default function App() {
                 <Route path="/secrets" element={<Secrets />} />
                 <Route path="/config-files" element={<ConfigFiles />} />
                 <Route path="/registries" element={<Registries />} />
+                <Route path="/managed-images" element={<ManagedImages />} />
+                <Route path="/deployment-plans" element={<DeploymentPlans />} />
+                <Route path="/deployment-plans/:id" element={<DeploymentPlanDetail />} />
                 <Route path="/databases" element={<Databases />} />
                 <Route path="/activity" element={<Activity />} />
                 <Route path="/notifications" element={<Notifications />} />

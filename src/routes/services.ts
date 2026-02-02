@@ -32,6 +32,10 @@ const updateServiceSchema = z.object({
   healthCheckUrl: z.string().nullable().optional(),
   autoUpdate: z.boolean().optional(),
   registryConnectionId: z.string().nullable().optional(),
+  // Health check configuration for deployment orchestration
+  healthWaitMs: z.number().int().min(0).optional(),
+  healthRetries: z.number().int().min(1).optional(),
+  healthIntervalMs: z.number().int().min(0).optional(),
 });
 
 const deploySchema = z.object({

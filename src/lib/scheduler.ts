@@ -16,6 +16,7 @@ import {
 import { checkDueBackups } from '../services/database-backup.js';
 import { sendSystemNotification, NOTIFICATION_TYPES, cleanupOldNotifications } from '../services/notifications.js';
 import { recordFailure, recordSuccess } from '../services/bounce-tracker.js';
+import { buildDeploymentPlan, executePlan } from '../services/orchestration.js';
 
 interface SchedulerConfig {
   serverHealthIntervalMs: number;
@@ -225,6 +226,30 @@ async function checkServiceForUpdates(
 }
 
 /**
+ * Check if a service should use orchestrated deployment
+ * (has dependencies or is linked to a managed image)
+ */
+async function shouldUseOrchestration(serviceId: string): Promise<boolean> {
+  const service = await prisma.service.findUnique({
+    where: { id: serviceId },
+    select: {
+      managedImageId: true,
+      dependencies: { select: { id: true } },
+      dependents: { select: { id: true } },
+    },
+  });
+
+  if (!service) return false;
+
+  // Use orchestration if service has a managed image or has dependencies/dependents
+  return !!(
+    service.managedImageId ||
+    service.dependencies.length > 0 ||
+    service.dependents.length > 0
+  );
+}
+
+/**
  * Run update checks on all services with registry connections
  */
 async function runUpdateChecks(): Promise<void> {
@@ -241,6 +266,7 @@ async function runUpdateChecks(): Promise<void> {
         autoUpdate: true,
         registryConnectionId: true,
         imageTag: true,
+        managedImageId: true,
         server: {
           select: {
             environment: {
@@ -268,6 +294,9 @@ async function runUpdateChecks(): Promise<void> {
       byRegistry.get(key)!.push(service);
     }
 
+    // Track services that need orchestrated deployment (by managed image)
+    const orchestratedUpdates = new Map<string, { managedImageId: string; latestTag: string; environmentId: string }>();
+
     // Check updates for each registry
     for (const [registryId, registryServices] of byRegistry) {
       const creds = await getRegistryCredentials(registryId);
@@ -287,21 +316,78 @@ async function runUpdateChecks(): Promise<void> {
 
             // Auto-deploy if enabled
             if (service.autoUpdate && result.latestTag) {
-              console.log(`[Scheduler] Auto-deploying ${service.name} to ${result.latestTag}`);
-              try {
-                await deployService(service.id, 'scheduler', null, {
-                  imageTag: result.latestTag,
-                  pullImage: true,
-                });
-                console.log(`[Scheduler] Auto-deploy successful for ${service.name}`);
-              } catch (deployError) {
-                console.error(`[Scheduler] Auto-deploy failed for ${service.name}:`, deployError);
+              // Check if this service should use orchestrated deployment
+              const useOrchestration = await shouldUseOrchestration(service.id);
+
+              if (useOrchestration && service.managedImageId) {
+                // For services linked to managed images, batch them together
+                // We'll deploy the managed image which handles all linked services
+                if (!orchestratedUpdates.has(service.managedImageId)) {
+                  orchestratedUpdates.set(service.managedImageId, {
+                    managedImageId: service.managedImageId,
+                    latestTag: result.latestTag,
+                    environmentId: service.server.environment.id,
+                  });
+                }
+              } else if (useOrchestration) {
+                // Service has dependencies but no managed image - create a deployment plan just for this service
+                console.log(`[Scheduler] Orchestrated auto-deploy for ${service.name} to ${result.latestTag}`);
+                try {
+                  const plan = await buildDeploymentPlan({
+                    environmentId: service.server.environment.id,
+                    serviceIds: [service.id],
+                    imageTag: result.latestTag,
+                    triggeredBy: 'scheduler',
+                    triggerType: 'auto_update',
+                  });
+                  await executePlan(plan.id);
+                  console.log(`[Scheduler] Orchestrated auto-deploy successful for ${service.name}`);
+                } catch (deployError) {
+                  console.error(`[Scheduler] Orchestrated auto-deploy failed for ${service.name}:`, deployError);
+                }
+              } else {
+                // Simple direct deployment for services without dependencies
+                console.log(`[Scheduler] Direct auto-deploying ${service.name} to ${result.latestTag}`);
+                try {
+                  await deployService(service.id, 'scheduler', null, {
+                    imageTag: result.latestTag,
+                    pullImage: true,
+                  });
+                  console.log(`[Scheduler] Auto-deploy successful for ${service.name}`);
+                } catch (deployError) {
+                  console.error(`[Scheduler] Auto-deploy failed for ${service.name}:`, deployError);
+                }
               }
             }
           }
         } catch (error) {
           console.error(`[Scheduler] Update check failed for ${service.name}:`, error);
         }
+      }
+    }
+
+    // Execute orchestrated deployments for managed images
+    for (const [managedImageId, updateInfo] of orchestratedUpdates) {
+      try {
+        const managedImage = await prisma.managedImage.findUnique({
+          where: { id: managedImageId },
+          select: { name: true },
+        });
+        console.log(
+          `[Scheduler] Orchestrated deploy for managed image "${managedImage?.name}" to ${updateInfo.latestTag}`
+        );
+
+        const plan = await buildDeploymentPlan({
+          environmentId: updateInfo.environmentId,
+          managedImageId: managedImageId,
+          imageTag: updateInfo.latestTag,
+          triggeredBy: 'scheduler',
+          triggerType: 'auto_update',
+        });
+        await executePlan(plan.id);
+        console.log(`[Scheduler] Orchestrated deploy successful for managed image "${managedImage?.name}"`);
+      } catch (deployError) {
+        console.error(`[Scheduler] Orchestrated deploy failed for managed image ${managedImageId}:`, deployError);
       }
     }
   } catch (error) {

@@ -25,6 +25,7 @@ model User {
   databaseBackups         DatabaseBackup[]
   notifications           Notification[]
   notificationPreferences NotificationPreference[]
+  deploymentPlans         DeploymentPlan[]
 }
 
 model ApiToken {
@@ -62,6 +63,8 @@ model Environment {
   registryConnections  RegistryConnection[]
   databases            Database[]
   notifications        Notification[]
+  managedImages        ManagedImage[]
+  deploymentPlans      DeploymentPlan[]
 }
 
 model Server {
@@ -135,6 +138,11 @@ model Service {
   latestAvailableDigest String?   // Digest of latest tag (for comparing even if tag is "latest")
   lastUpdateCheckAt     DateTime?
 
+  // Per-service health check configuration for deployment orchestration
+  healthWaitMs     Int @default(30000)  // Wait after deploy before checking (default 30s)
+  healthRetries    Int @default(3)      // Number of health check attempts
+  healthIntervalMs Int @default(5000)   // Interval between retries (default 5s)
+
   serverId    String
   server      Server        @relation(fields: [serverId], references: [id], onDelete: Cascade)
   deployments Deployment[]
@@ -144,6 +152,17 @@ model Service {
 
   registryConnectionId String?
   registryConnection   RegistryConnection? @relation(fields: [registryConnectionId], references: [id], onDelete: SetNull)
+
+  // Link to managed image (optional)
+  managedImageId String?
+  managedImage   ManagedImage? @relation(fields: [managedImageId], references: [id], onDelete: SetNull)
+
+  // Dependencies
+  dependencies ServiceDependency[] @relation("ServiceDependencies")
+  dependents   ServiceDependency[] @relation("ServiceDependents")
+
+  // Deployment plan steps
+  deploymentSteps DeploymentPlanStep[]
 
   @@unique([serverId, name])
 }
@@ -170,6 +189,7 @@ model ServiceMetrics {
 model Deployment {
   id           String   @id @default(cuid())
   imageTag     String
+  previousTag  String?  // Tag before this deployment (for rollback)
   status       String   // pending, deploying, success, failed
   logs         String?  // Deployment logs
   triggeredBy  String   // user email or "webhook"
@@ -182,6 +202,9 @@ model Deployment {
   userId    String?
   user      User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
   artifacts DeploymentArtifact[]
+
+  // Link to deployment plan step if part of orchestrated deployment
+  planSteps DeploymentPlanStep[]
 
   @@index([serviceId, startedAt(sort: Desc)])
 }
@@ -310,6 +333,7 @@ model RegistryConnection {
   environmentId String
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
   services      Service[]
+  managedImages ManagedImage[]
 
   @@unique([environmentId, name])
 }
@@ -504,4 +528,116 @@ model BounceTracker {
   alertSentAt         DateTime?
 
   @@unique([resourceType, resourceId, eventType])
+}
+
+// ==================== Deployment Orchestration ====================
+
+// Central image management - one image can be linked to multiple services
+model ManagedImage {
+  id           String   @id @default(cuid())
+  name         String   // Display name: "BIOS Backend"
+  imageName    String   // Full path: registry.digitalocean.com/bios-registry/bios-backend
+  currentTag   String   // Currently deployed tag
+  latestTag    String?  // Latest from registry
+  latestDigest String?
+  lastCheckedAt DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  environmentId        String
+  environment          Environment         @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  registryConnectionId String?
+  registryConnection   RegistryConnection? @relation(fields: [registryConnectionId], references: [id], onDelete: SetNull)
+
+  tagHistory      ImageTagHistory[]
+  services        Service[]
+  deploymentPlans DeploymentPlan[]
+
+  @@unique([environmentId, imageName])
+}
+
+// History of deployed tags for a managed image
+model ImageTagHistory {
+  id         String   @id @default(cuid())
+  tag        String
+  digest     String?
+  deployedAt DateTime @default(now())
+  deployedBy String?  // user email or "scheduler"
+
+  managedImageId String
+  managedImage   ManagedImage @relation(fields: [managedImageId], references: [id], onDelete: Cascade)
+
+  @@index([managedImageId, deployedAt(sort: Desc)])
+}
+
+// Service dependencies - control deployment order
+model ServiceDependency {
+  id   String @id @default(cuid())
+  type String // "health_before" | "deploy_after"
+
+  dependentId String  // Service that waits
+  dependent   Service @relation("ServiceDependencies", fields: [dependentId], references: [id], onDelete: Cascade)
+  dependsOnId String  // Service that must be ready first
+  dependsOn   Service @relation("ServiceDependents", fields: [dependsOnId], references: [id], onDelete: Cascade)
+
+  @@unique([dependentId, dependsOnId])
+}
+
+// Orchestrated deployment tracking
+model DeploymentPlan {
+  id          String    @id @default(cuid())
+  name        String
+  status      String    @default("pending") // pending|running|completed|failed|cancelled|rolled_back
+  imageTag    String?   // Target tag
+  triggerType String    // manual|webhook|auto_update
+  triggeredBy String?
+
+  // Rollback config - always rolls back ALL services on failure
+  autoRollback Boolean @default(true)
+
+  startedAt   DateTime?
+  completedAt DateTime?
+  error       String?
+  logs        String?
+
+  createdAt DateTime @default(now())
+
+  environmentId  String
+  environment    Environment   @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  managedImageId String?
+  managedImage   ManagedImage? @relation(fields: [managedImageId], references: [id], onDelete: SetNull)
+  userId         String?
+  user           User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  steps DeploymentPlanStep[]
+
+  @@index([environmentId, createdAt(sort: Desc)])
+}
+
+// Individual steps in a deployment plan
+model DeploymentPlanStep {
+  id     String @id @default(cuid())
+  order  Int
+  status String @default("pending") // pending|running|success|failed|skipped|rolled_back
+  action String // deploy|health_check|rollback
+
+  targetTag   String?
+  previousTag String? // For rollback
+
+  healthPassed  Boolean?
+  healthDetails String? // JSON
+
+  startedAt   DateTime?
+  completedAt DateTime?
+  error       String?
+  logs        String?
+
+  deploymentPlanId String
+  deploymentPlan   DeploymentPlan @relation(fields: [deploymentPlanId], references: [id], onDelete: Cascade)
+  serviceId        String?
+  service          Service?       @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  deploymentId     String?
+  deployment       Deployment?    @relation(fields: [deploymentId], references: [id], onDelete: SetNull)
+
+  @@index([deploymentPlanId, order])
 }

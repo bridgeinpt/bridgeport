@@ -17,6 +17,7 @@ export interface DeployOptions {
 export interface DeployResult {
   deployment: Deployment;
   logs: string;
+  previousTag: string | null;
 }
 
 export async function deployService(
@@ -35,12 +36,14 @@ export async function deployService(
   });
 
   const imageTag = options.imageTag || service.imageTag;
+  const previousTag = service.imageTag; // Store previous tag for rollback
   const logs: string[] = [];
 
-  // Create deployment record
+  // Create deployment record with previousTag for rollback support
   const deployment = await prisma.deployment.create({
     data: {
       imageTag,
+      previousTag,
       status: 'pending',
       triggeredBy,
       serviceId,
@@ -208,7 +211,7 @@ export async function deployService(
       }
     );
 
-    return { deployment: finalDeployment, logs: logs.join('\n') };
+    return { deployment: finalDeployment, logs: logs.join('\n'), previousTag };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     log(`ERROR: ${errorMessage}`);
@@ -234,7 +237,7 @@ export async function deployService(
       }
     );
 
-    return { deployment: failedDeployment, logs: logs.join('\n') };
+    return { deployment: failedDeployment, logs: logs.join('\n'), previousTag };
   }
 }
 

@@ -47,6 +47,33 @@ interface NavGroup {
   items: NavItem[];
 }
 
+// Inline icons for orchestration features
+function ImageIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+      />
+    </svg>
+  );
+}
+
+function PlanIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
+      />
+    </svg>
+  );
+}
+
 const navigationGroups: NavGroup[] = [
   {
     name: 'Operations',
@@ -54,6 +81,13 @@ const navigationGroups: NavGroup[] = [
       { name: 'Dashboard', href: '/', icon: HomeIcon },
       { name: 'Services', href: '/services', icon: CubeIcon },
       { name: 'Servers', href: '/servers', icon: ServerIcon },
+    ],
+  },
+  {
+    name: 'Orchestration',
+    items: [
+      { name: 'Managed Images', href: '/managed-images', icon: ImageIcon },
+      { name: 'Deployment Plans', href: '/deployment-plans', icon: PlanIcon },
     ],
   },
   {

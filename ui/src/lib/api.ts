@@ -408,6 +408,11 @@ export interface Service {
   latestAvailableDigest: string | null;
   lastUpdateCheckAt: string | null;
   registryConnectionId: string | null;
+  // Orchestration fields
+  managedImageId: string | null;
+  healthWaitMs: number;
+  healthRetries: number;
+  healthIntervalMs: number;
 }
 
 export interface ServiceWithServer extends Service {
@@ -1181,3 +1186,210 @@ export const deleteWebhook = (id: string) =>
 
 export const testWebhook = (id: string) =>
   api.post<{ success: boolean; message: string }>(`/admin/webhooks/${id}/test`);
+
+// ==================== Deployment Orchestration ====================
+
+// Managed Images
+export interface ManagedImage {
+  id: string;
+  name: string;
+  imageName: string;
+  currentTag: string;
+  latestTag: string | null;
+  latestDigest: string | null;
+  lastCheckedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  environmentId: string;
+  registryConnectionId: string | null;
+  registryConnection?: RegistryConnection | null;
+  services: Service[];
+}
+
+export interface ManagedImageInput {
+  name: string;
+  imageName: string;
+  currentTag: string;
+  registryConnectionId?: string | null;
+}
+
+export interface ImageTagHistory {
+  id: string;
+  tag: string;
+  digest: string | null;
+  deployedAt: string;
+  deployedBy: string | null;
+  managedImageId: string;
+}
+
+export const listManagedImages = (envId: string) =>
+  api.get<{ images: ManagedImage[] }>(`/environments/${envId}/managed-images`);
+
+export const createManagedImage = (envId: string, data: ManagedImageInput) =>
+  api.post<{ image: ManagedImage }>(`/environments/${envId}/managed-images`, data);
+
+export const getManagedImage = (id: string) =>
+  api.get<{ image: ManagedImage }>(`/managed-images/${id}`);
+
+export const updateManagedImage = (id: string, data: Partial<ManagedImageInput>) =>
+  api.patch<{ image: ManagedImage }>(`/managed-images/${id}`, data);
+
+export const deleteManagedImage = (id: string) =>
+  api.delete<{ success: boolean }>(`/managed-images/${id}`);
+
+export const deployManagedImage = (id: string, imageTag: string, autoRollback = true) =>
+  api.post<{ plan: DeploymentPlan }>(`/managed-images/${id}/deploy`, { imageTag, autoRollback });
+
+export const getManagedImageHistory = (id: string, limit?: number) =>
+  api.get<{ history: ImageTagHistory[] }>(`/managed-images/${id}/history${limit ? `?limit=${limit}` : ''}`);
+
+export const linkServiceToManagedImage = (imageId: string, serviceId: string) =>
+  api.post<{ service: Service }>(`/managed-images/${imageId}/link/${serviceId}`);
+
+export const unlinkServiceFromManagedImage = (imageId: string, serviceId: string) =>
+  api.delete<{ service: Service }>(`/managed-images/${imageId}/link/${serviceId}`);
+
+export const getLinkableServices = (imageId: string) =>
+  api.get<{ services: Service[] }>(`/managed-images/${imageId}/linkable-services`);
+
+// Service Dependencies
+export type DependencyType = 'health_before' | 'deploy_after';
+
+export interface ServiceDependency {
+  id: string;
+  type: DependencyType;
+  dependentId: string;
+  dependsOnId: string;
+  dependsOn: Service & { server?: { name: string } };
+}
+
+export interface ServiceDependent {
+  id: string;
+  type: DependencyType;
+  dependentId: string;
+  dependsOnId: string;
+  dependent: Service & { server?: { name: string } };
+}
+
+export const getServiceDependencies = (serviceId: string) =>
+  api.get<{ dependencies: ServiceDependency[]; dependents: ServiceDependent[] }>(
+    `/services/${serviceId}/dependencies`
+  );
+
+export const addServiceDependency = (serviceId: string, dependsOnId: string, type: DependencyType) =>
+  api.post<{ dependency: ServiceDependency }>(`/services/${serviceId}/dependencies`, {
+    dependsOnId,
+    type,
+  });
+
+export const removeServiceDependency = (dependencyId: string) =>
+  api.delete<{ success: boolean }>(`/dependencies/${dependencyId}`);
+
+export const getAvailableDependencies = (serviceId: string) =>
+  api.get<{ services: (Service & { server: { name: string } })[] }>(
+    `/services/${serviceId}/available-dependencies`
+  );
+
+export interface DependencyGraphNode {
+  id: string;
+  name: string;
+  server: string;
+  managedImage: { id: string; name: string } | null;
+  status: string;
+  healthStatus: string;
+  dependencyCount: number;
+  dependentCount: number;
+}
+
+export interface DependencyGraphEdge {
+  id: string;
+  from: string;
+  to: string;
+  type: DependencyType;
+}
+
+export const getDependencyGraph = (envId: string) =>
+  api.get<{ nodes: DependencyGraphNode[]; edges: DependencyGraphEdge[]; deploymentOrder: string[][] }>(
+    `/environments/${envId}/dependency-graph`
+  );
+
+// Deployment Plans
+export type DeploymentPlanStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'rolled_back';
+export type DeploymentStepStatus = 'pending' | 'running' | 'success' | 'failed' | 'skipped' | 'rolled_back';
+export type DeploymentStepAction = 'deploy' | 'health_check' | 'rollback';
+
+export interface DeploymentPlanStep {
+  id: string;
+  order: number;
+  status: DeploymentStepStatus;
+  action: DeploymentStepAction;
+  targetTag: string | null;
+  previousTag: string | null;
+  healthPassed: boolean | null;
+  healthDetails: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  error: string | null;
+  logs: string | null;
+  deploymentPlanId: string;
+  serviceId: string | null;
+  deploymentId: string | null;
+  service?: (Service & { server?: { name: string } }) | null;
+  deployment?: Deployment | null;
+}
+
+export interface DeploymentPlan {
+  id: string;
+  name: string;
+  status: DeploymentPlanStatus;
+  imageTag: string | null;
+  triggerType: 'manual' | 'webhook' | 'auto_update';
+  triggeredBy: string | null;
+  autoRollback: boolean;
+  startedAt: string | null;
+  completedAt: string | null;
+  error: string | null;
+  logs: string | null;
+  createdAt: string;
+  environmentId: string;
+  managedImageId: string | null;
+  userId: string | null;
+  steps: DeploymentPlanStep[];
+  managedImage?: { id: string; name: string } | null;
+  user?: { id: string; email: string; name: string | null } | null;
+  environment?: { id: string; name: string } | null;
+}
+
+export interface CreateDeploymentPlanInput {
+  serviceIds: string[];
+  imageTag: string;
+  autoRollback?: boolean;
+}
+
+export const listDeploymentPlans = (envId: string, limit?: number) =>
+  api.get<{ plans: DeploymentPlan[] }>(`/environments/${envId}/deployment-plans${limit ? `?limit=${limit}` : ''}`);
+
+export const createDeploymentPlan = (envId: string, data: CreateDeploymentPlanInput, execute = false) =>
+  api.post<{ plan: DeploymentPlan }>(`/environments/${envId}/deployment-plans?execute=${execute}`, data);
+
+export const getDeploymentPlan = (id: string) =>
+  api.get<{ plan: DeploymentPlan }>(`/deployment-plans/${id}`);
+
+export const executeDeploymentPlan = (id: string) =>
+  api.post<{ success: boolean; message: string }>(`/deployment-plans/${id}/execute`);
+
+export const cancelDeploymentPlan = (id: string) =>
+  api.post<{ success: boolean }>(`/deployment-plans/${id}/cancel`);
+
+export const rollbackDeploymentPlan = (id: string) =>
+  api.post<{ success: boolean; message: string }>(`/deployment-plans/${id}/rollback`);
+
+// Service health configuration (for update)
+export interface ServiceHealthConfig {
+  healthWaitMs?: number;
+  healthRetries?: number;
+  healthIntervalMs?: number;
+}
+
+export const updateServiceHealthConfig = (serviceId: string, config: ServiceHealthConfig) =>
+  api.patch<{ service: Service }>(`/services/${serviceId}`, config);

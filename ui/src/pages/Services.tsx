@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppStore } from '../lib/store';
-import { getEnvironment, deployService, type Service, type ExposedPort } from '../lib/api';
+import { getEnvironment, deployService, getDependencyGraph, type Service, type ExposedPort, type DependencyGraphNode } from '../lib/api';
 import { formatDistanceToNow } from 'date-fns';
 import { getContainerStatusColor, getHealthStatusColor } from '../lib/status';
 import { Modal } from '../components/Modal';
@@ -55,11 +55,17 @@ export default function Services() {
   const [deployResults, setDeployResults] = useState<DeployResult[] | null>(null);
   const [showDeployResults, setShowDeployResults] = useState(false);
 
+  // Dependency graph nodes for indicators
+  const [dependencyNodes, setDependencyNodes] = useState<Map<string, DependencyGraphNode>>(new Map());
+
   useEffect(() => {
     if (selectedEnvironment?.id) {
       setLoading(true);
-      getEnvironment(selectedEnvironment.id)
-        .then(({ environment }) => {
+      Promise.all([
+        getEnvironment(selectedEnvironment.id),
+        getDependencyGraph(selectedEnvironment.id).catch(() => ({ nodes: [], edges: [], deploymentOrder: [] })),
+      ])
+        .then(([{ environment }, graph]) => {
           const allServices: ServiceWithServer[] = [];
           environment.servers.forEach((server) => {
             server.services.forEach((service) => {
@@ -70,6 +76,11 @@ export default function Services() {
             });
           });
           setServices(allServices);
+
+          // Build map of dependency nodes
+          const nodeMap = new Map<string, DependencyGraphNode>();
+          graph.nodes.forEach((node) => nodeMap.set(node.id, node));
+          setDependencyNodes(nodeMap);
         })
         .finally(() => setLoading(false));
     }
@@ -295,15 +306,39 @@ export default function Services() {
                 {filteredServices.map((service) => {
                   const ports = parseExposedPorts(service.exposedPorts);
                   const hasUpdate = service.latestAvailableTag && service.latestAvailableTag !== service.imageTag;
+                  const depNode = dependencyNodes.get(service.id);
+                  const hasDependencies = depNode && (depNode.dependencyCount > 0 || depNode.dependentCount > 0);
+                  const hasManagedImage = depNode?.managedImage;
                   return (
                     <tr key={service.id} className={`text-slate-300 ${hasUpdate ? 'bg-primary-900/10' : ''}`}>
                       <td className="py-4">
-                        <Link
-                          to={`/services/${service.id}`}
-                          className="text-white hover:text-primary-400 font-medium"
-                        >
-                          {service.name}
-                        </Link>
+                        <div className="flex items-center gap-2">
+                          <Link
+                            to={`/services/${service.id}`}
+                            className="text-white hover:text-primary-400 font-medium"
+                          >
+                            {service.name}
+                          </Link>
+                          {hasManagedImage && (
+                            <span
+                              className="w-2 h-2 bg-primary-400 rounded-full"
+                              title="Linked to managed image"
+                            />
+                          )}
+                          {hasDependencies && (
+                            <span
+                              className="flex items-center gap-0.5 text-xs text-slate-500"
+                              title={`${depNode.dependencyCount} dependencies, ${depNode.dependentCount} dependents`}
+                            >
+                              {depNode.dependencyCount > 0 && (
+                                <span className="text-green-400">↑{depNode.dependencyCount}</span>
+                              )}
+                              {depNode.dependentCount > 0 && (
+                                <span className="text-blue-400">↓{depNode.dependentCount}</span>
+                              )}
+                            </span>
+                          )}
+                        </div>
                         <p className="text-sm text-slate-400 font-mono">
                           {service.containerName}
                         </p>

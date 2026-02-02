@@ -21,6 +21,8 @@ import {
   listRegistryConnections,
   getAuditLogs,
   getServiceHistory,
+  getServiceDependencies,
+  getManagedImage,
   type ServiceWithServer,
   type Deployment,
   type ServiceFile,
@@ -30,7 +32,11 @@ import {
   type AuditLog,
   type ExposedPort,
   type ServiceHistoryEntry,
+  type ServiceDependency,
+  type ManagedImage,
 } from '../lib/api';
+import { DependencyEditor } from '../components/DependencyEditor';
+import { HealthConfigEditor } from '../components/HealthConfigEditor';
 import { useAppStore } from '../lib/store';
 import { useToast } from '../components/Toast';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -137,6 +143,10 @@ export default function ServiceDetail() {
   const [actionHistory, setActionHistory] = useState<ServiceHistoryEntry[]>([]);
   const [showAllHistory, setShowAllHistory] = useState(false);
 
+  // Orchestration state
+  const [dependencies, setDependencies] = useState<ServiceDependency[]>([]);
+  const [managedImage, setManagedImage] = useState<ManagedImage | null>(null);
+
   useEffect(() => {
     if (id) {
       setLoading(true);
@@ -144,12 +154,19 @@ export default function ServiceDetail() {
         getService(id).then(({ service }) => {
           setService(service);
           setImageTag(service.imageTag);
+          // Load managed image if linked
+          if (service.managedImageId) {
+            getManagedImage(service.managedImageId)
+              .then(({ image }) => setManagedImage(image))
+              .catch(() => setManagedImage(null));
+          }
         }),
         getDeploymentHistory(id).then(({ deployments }) => setDeployments(deployments)),
         listServiceFiles(id).then(({ files }) => setAttachedFiles(files)),
         getAuditLogs({ resourceType: 'service', resourceId: id, action: 'health_check', limit: 10 })
           .then(({ logs }) => setHealthCheckHistory(logs)),
         getServiceHistory(id, 20).then(({ logs }) => setActionHistory(logs)),
+        getServiceDependencies(id).then(({ dependencies }) => setDependencies(dependencies)),
       ]).finally(() => setLoading(false));
     }
   }, [id]);
@@ -241,6 +258,12 @@ export default function ServiceDetail() {
     } else if (e.key === 'Escape') {
       cancelEditingName();
     }
+  };
+
+  const refreshDependencies = async () => {
+    if (!id) return;
+    const { dependencies } = await getServiceDependencies(id);
+    setDependencies(dependencies);
   };
 
   // Inline deploy card editing handlers
@@ -1036,6 +1059,88 @@ export default function ServiceDetail() {
               </dd>
             </div>
           </dl>
+        </div>
+      </div>
+
+      {/* Orchestration Row: Dependencies & Health Config */}
+      <div className="grid grid-cols-2 gap-6 mb-8">
+        {/* Dependencies Card */}
+        <div className="card">
+          <h3 className="text-lg font-semibold text-white mb-4">Dependencies</h3>
+          <DependencyEditor serviceId={id!} onUpdate={refreshDependencies} />
+          {dependencies.length > 0 && (
+            <div className="mt-4 pt-4 border-t border-slate-700">
+              <p className="text-xs text-slate-500 mb-2">Current Dependencies</p>
+              <div className="space-y-2">
+                {dependencies.map((dep) => (
+                  <div
+                    key={dep.id}
+                    className="flex items-center justify-between p-2 bg-slate-800/50 rounded"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs px-1.5 py-0.5 rounded ${
+                        dep.type === 'health_before'
+                          ? 'bg-green-500/20 text-green-400'
+                          : 'bg-blue-500/20 text-blue-400'
+                      }`}>
+                        {dep.type === 'health_before' ? 'waits for healthy' : 'deploys after'}
+                      </span>
+                      <Link
+                        to={`/services/${dep.dependsOn.id}`}
+                        className="text-primary-400 hover:underline"
+                      >
+                        {dep.dependsOn.name}
+                      </Link>
+                    </div>
+                    <span className="text-xs text-slate-500">
+                      on {dep.dependsOn.server?.name}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {managedImage && (
+            <div className="mt-4 pt-4 border-t border-slate-700">
+              <p className="text-xs text-slate-500 mb-2">Managed Image</p>
+              <Link
+                to="/managed-images"
+                className="flex items-center gap-2 p-2 bg-primary-500/10 border border-primary-500/30 rounded hover:bg-primary-500/20"
+              >
+                <svg className="w-4 h-4 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                <span className="text-white font-medium">{managedImage.name}</span>
+                <span className="text-xs text-primary-400 font-mono ml-auto">
+                  :{managedImage.currentTag}
+                </span>
+              </Link>
+            </div>
+          )}
+        </div>
+
+        {/* Health Check Config Card */}
+        <div className="card">
+          <h3 className="text-lg font-semibold text-white mb-4">Health Check Config</h3>
+          <p className="text-sm text-slate-400 mb-4">
+            Configure how health checks work during orchestrated deployments.
+          </p>
+          {service && (
+            <HealthConfigEditor
+              serviceId={id!}
+              initialConfig={{
+                healthWaitMs: service.healthWaitMs ?? 30000,
+                healthRetries: service.healthRetries ?? 3,
+                healthIntervalMs: service.healthIntervalMs ?? 5000,
+              }}
+              onUpdate={() => {
+                // Refresh service to get updated health config
+                if (id) {
+                  getService(id).then(({ service }) => setService(service));
+                }
+              }}
+            />
+          )}
         </div>
       </div>
 
