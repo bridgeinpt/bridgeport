@@ -7,6 +7,7 @@ import {
   getSpacesConfig,
   updateSpacesConfig,
   deleteSpacesConfig,
+  testSpacesConfig,
   listServers,
   listDatabases,
   type Server,
@@ -43,6 +44,12 @@ export default function Settings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editingSpaces, setEditingSpaces] = useState(false);
+  const [testingSpaces, setTestingSpaces] = useState(false);
+  const [spacesTestResult, setSpacesTestResult] = useState<{
+    success: boolean;
+    message: string;
+    buckets?: string[];
+  } | null>(null);
   const [spacesForm, setSpacesForm] = useState({
     spacesAccessKey: '',
     spacesSecretKey: '',
@@ -140,6 +147,25 @@ export default function Settings() {
       toast.error('Failed to remove Spaces configuration');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleTestSpaces = async () => {
+    if (!selectedEnvironment?.id) return;
+    setTestingSpaces(true);
+    setSpacesTestResult(null);
+    try {
+      const result = await testSpacesConfig(selectedEnvironment.id);
+      setSpacesTestResult(result);
+      if (result.success) {
+        toast.success('Connection successful');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Connection test failed';
+      setSpacesTestResult({ success: false, message });
+      toast.error(message);
+    } finally {
+      setTestingSpaces(false);
     }
   };
 
@@ -375,21 +401,68 @@ export default function Settings() {
                 <span className="text-white font-mono text-xs">{spacesConfig.spacesEndpoint}</span>
               </div>
             </div>
-            {isAdmin(user) && (
-              <button
-                onClick={() => {
-                  setSpacesForm({
-                    spacesAccessKey: spacesConfig.spacesAccessKey || '',
-                    spacesSecretKey: '',
-                    spacesRegion: spacesConfig.spacesRegion || 'fra1',
-                  });
-                  setEditingSpaces(true);
-                }}
-                className="btn btn-secondary text-sm mt-4"
-              >
-                Update Configuration
-              </button>
+
+            {/* Test Result */}
+            {spacesTestResult && (
+              <div className={`mt-4 p-3 rounded-lg ${
+                spacesTestResult.success
+                  ? 'bg-green-500/10 border border-green-500/30'
+                  : 'bg-red-500/10 border border-red-500/30'
+              }`}>
+                <div className="flex items-center gap-2 mb-1">
+                  {spacesTestResult.success ? (
+                    <svg className="w-4 h-4 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : (
+                    <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  )}
+                  <span className={spacesTestResult.success ? 'text-green-400' : 'text-red-400'}>
+                    {spacesTestResult.message}
+                  </span>
+                </div>
+                {spacesTestResult.success && spacesTestResult.buckets && spacesTestResult.buckets.length > 0 && (
+                  <div className="mt-2 text-sm">
+                    <span className="text-slate-400">Available buckets:</span>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {spacesTestResult.buckets.map((bucket) => (
+                        <span key={bucket} className="px-2 py-0.5 bg-slate-700 rounded text-xs text-white font-mono">
+                          {bucket}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
+
+            <div className="flex gap-2 mt-4">
+              <button
+                onClick={handleTestSpaces}
+                disabled={testingSpaces}
+                className="btn btn-secondary text-sm"
+              >
+                {testingSpaces ? 'Testing...' : 'Test Connection'}
+              </button>
+              {isAdmin(user) && (
+                <button
+                  onClick={() => {
+                    setSpacesForm({
+                      spacesAccessKey: spacesConfig.spacesAccessKey || '',
+                      spacesSecretKey: '',
+                      spacesRegion: spacesConfig.spacesRegion || 'fra1',
+                    });
+                    setSpacesTestResult(null);
+                    setEditingSpaces(true);
+                  }}
+                  className="btn btn-ghost text-sm"
+                >
+                  Update
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           <div className="p-4 bg-slate-800 rounded-lg text-center">

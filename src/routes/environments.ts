@@ -4,6 +4,7 @@ import { prisma } from '../lib/db.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
 import { logAudit } from '../services/audit.js';
 import { requireAdmin } from '../plugins/authorize.js';
+import { S3Client, ListBucketsCommand } from '@aws-sdk/client-s3';
 
 const createEnvSchema = z.object({
   name: z.string().min(1).max(50),
@@ -391,6 +392,50 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
       });
 
       return { success: true, message: 'Spaces configuration removed' };
+    }
+  );
+
+  // Test Spaces configuration
+  fastify.post(
+    '/api/environments/:id/spaces/test',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      const spacesConfig = await getEnvironmentSpacesConfig(id);
+      if (!spacesConfig) {
+        return reply.code(400).send({
+          success: false,
+          error: 'Spaces is not configured for this environment'
+        });
+      }
+
+      try {
+        const s3Client = new S3Client({
+          endpoint: `https://${spacesConfig.endpoint}`,
+          region: spacesConfig.region,
+          credentials: {
+            accessKeyId: spacesConfig.accessKey,
+            secretAccessKey: spacesConfig.secretKey,
+          },
+        });
+
+        // Try to list buckets - this verifies credentials are valid
+        const result = await s3Client.send(new ListBucketsCommand({}));
+        const bucketNames = result.Buckets?.map(b => b.Name) || [];
+
+        return {
+          success: true,
+          message: 'Connection successful',
+          buckets: bucketNames,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Connection test failed';
+        return reply.code(400).send({
+          success: false,
+          error: message
+        });
+      }
     }
   );
 }
