@@ -1,7 +1,7 @@
 import { prisma } from '../lib/db.js';
 import { createHash } from 'crypto';
 import YAML from 'yaml';
-import { getSecretsForEnv, resolveSecretPlaceholders } from './secrets.js';
+import { resolveSecretPlaceholders } from './secrets.js';
 
 export interface ComposeConfig {
   version?: string;
@@ -26,36 +26,11 @@ export interface ComposeService {
 
 export interface GeneratedArtifacts {
   compose: { name: string; content: string; checksum: string };
-  envFile?: { name: string; content: string; checksum: string };
   configFiles: Array<{ name: string; content: string; checksum: string; mountPath: string }>;
 }
 
 function computeChecksum(content: string): string {
   return createHash('sha256').update(content).digest('hex');
-}
-
-/**
- * Generate env file content from template and secrets
- */
-export async function generateEnvContent(
-  environmentId: string,
-  templateName: string
-): Promise<string> {
-  const template = await prisma.envTemplate.findUnique({
-    where: { name: templateName },
-  });
-
-  if (!template) {
-    throw new Error(`Env template not found: ${templateName}`);
-  }
-
-  const { content, missing } = await resolveSecretPlaceholders(environmentId, template.template);
-
-  if (missing.length > 0) {
-    throw new Error(`Missing secrets for placeholders: ${missing.map(m => `\${${m}}`).join(', ')}`);
-  }
-
-  return content;
 }
 
 /**
@@ -81,16 +56,6 @@ export async function generateDeploymentArtifacts(
     compose: { name: '', content: '', checksum: '' },
     configFiles: [],
   };
-
-  // Generate env file if template specified
-  if (service.envTemplateName) {
-    const envContent = (await generateEnvContent(environmentId, service.envTemplateName)).trimEnd();
-    artifacts.envFile = {
-      name: `${service.name}.env`,
-      content: envContent,
-      checksum: computeChecksum(envContent),
-    };
-  }
 
   // Load config files and resolve secret placeholders
   for (const sf of service.files) {
@@ -127,11 +92,6 @@ export async function generateDeploymentArtifacts(
       FULL_IMAGE: `${service.imageName}:${service.imageTag}`,
     };
 
-    // Add env file reference if generated
-    if (artifacts.envFile) {
-      vars.ENV_FILE = `./${artifacts.envFile.name}`;
-    }
-
     // Add config file mount paths
     artifacts.configFiles.forEach((cf, i) => {
       vars[`CONFIG_FILE_${i}`] = cf.mountPath;
@@ -154,11 +114,6 @@ export async function generateDeploymentArtifacts(
     };
 
     const svc = composeConfig.services[service.name];
-
-    // Add env file if generated
-    if (artifacts.envFile) {
-      svc.env_file = [`./${artifacts.envFile.name}`];
-    }
 
     // Add volume mounts for config files (use absolute paths since files are written to their target paths)
     if (artifacts.configFiles.length > 0) {
@@ -195,16 +150,6 @@ export async function saveDeploymentArtifacts(
       deploymentId,
     },
   ];
-
-  if (artifacts.envFile) {
-    createData.push({
-      type: 'env',
-      name: artifacts.envFile.name,
-      content: artifacts.envFile.content,
-      checksum: artifacts.envFile.checksum,
-      deploymentId,
-    });
-  }
 
   for (const cf of artifacts.configFiles) {
     createData.push({

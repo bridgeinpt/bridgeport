@@ -1,7 +1,6 @@
 import type {
   ServiceWithServer,
   Deployment,
-  EnvTemplate,
   ServiceFile,
   ConfigFile,
   SyncResult,
@@ -28,7 +27,6 @@ export interface UpdateCheckResult {
 export {
   ServiceWithServer,
   Deployment,
-  EnvTemplate,
   ServiceFile,
   ConfigFile,
   SyncResult,

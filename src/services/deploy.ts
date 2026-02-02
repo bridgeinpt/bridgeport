@@ -4,6 +4,7 @@ import { DockerSSH, createClientForServer, type CommandClient } from '../lib/ssh
 import { registryClient } from '../lib/registry.js';
 import { generateDeploymentArtifacts, saveDeploymentArtifacts } from './compose.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
+import { checkServiceUpdate } from '../lib/scheduler.js';
 import type { Deployment, Service } from '@prisma/client';
 
 export interface DeployOptions {
@@ -98,14 +99,6 @@ export async function deployService(
       log(`Writing compose file to ${composePath}`);
       await client.exec(`cat > ${composePath} << 'COMPOSEEOF'\n${artifacts.compose.content}\nCOMPOSEEOF`);
 
-      // Upload env file if generated
-      if (artifacts.envFile) {
-        log(`Writing ${artifacts.envFile.name}`);
-        const envPath = `${deployDir}/${artifacts.envFile.name}`;
-        await client.exec(`cat > ${envPath} << 'ENVEOF'\n${artifacts.envFile.content}\nENVEOF`);
-        await client.exec(`chmod 600 ${envPath}`);
-      }
-
       // Upload config files to their configured target paths
       for (const cf of artifacts.configFiles) {
         // Use the configured mountPath (targetPath) for the file
@@ -117,6 +110,11 @@ export async function deployService(
 
         log(`Writing config file: ${cf.name} -> ${cfPath}`);
         await client.exec(`cat > "${cfPath}" << 'CFEOF'\n${cf.content}\nCFEOF`);
+
+        // Set restrictive permissions for .env files (contain secrets)
+        if (cf.name.endsWith('.env')) {
+          await client.exec(`chmod 600 "${cfPath}"`);
+        }
       }
 
       // Save artifacts to database
@@ -173,6 +171,11 @@ export async function deployService(
         status: 'running',
         lastCheckedAt: new Date(),
       },
+    });
+
+    // Check for available image updates in background (don't block deploy)
+    checkServiceUpdate(serviceId).catch((err) => {
+      console.error(`[Deploy] Failed to check updates for service ${serviceId}:`, err);
     });
 
     // Mark deployment as successful

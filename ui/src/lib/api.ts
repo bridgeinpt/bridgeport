@@ -180,7 +180,6 @@ export interface CreateServiceInput {
   imageName: string;
   imageTag?: string;
   composePath?: string;
-  envTemplateName?: string;
   healthCheckUrl?: string;
 }
 
@@ -322,7 +321,6 @@ export interface Service {
   imageName: string;
   imageTag: string;
   composePath: string | null;
-  envTemplateName: string | null;
   healthCheckUrl: string | null;
   status: string;
   containerStatus: string; // running, stopped, exited, created, restarting, paused, dead, not_found
@@ -377,38 +375,6 @@ export interface DeployOptions {
   pullImage?: boolean;
 }
 
-// Env Templates
-export interface EnvTemplate {
-  id: string;
-  name: string;
-  template: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface EnvTemplateInput {
-  name: string;
-  template: string;
-}
-
-export const listEnvTemplates = () =>
-  api.get<{ templates: EnvTemplate[] }>('/env-templates');
-
-export const getEnvTemplate = (name: string) =>
-  api.get<{ template: EnvTemplate }>(`/env-templates/${name}`);
-
-export const createEnvTemplate = (data: EnvTemplateInput) =>
-  api.post<{ template: EnvTemplate }>('/env-templates', data);
-
-export const updateEnvTemplate = (name: string, template: string) =>
-  api.put<{ template: EnvTemplate }>(`/env-templates/${name}`, { template });
-
-export const deleteEnvTemplate = (name: string) =>
-  api.delete<{ success: boolean }>(`/env-templates/${name}`);
-
-export const generateEnvPreview = (envId: string, templateName: string) =>
-  api.post<{ content: string }>(`/environments/${envId}/generate-env`, { templateName });
-
 // Service updates
 export const updateService = (id: string, data: Partial<ServiceUpdate>) =>
   api.patch<{ service: Service }>(`/services/${id}`, data);
@@ -419,7 +385,6 @@ export interface ServiceUpdate {
   imageName?: string;
   imageTag?: string;
   composePath?: string | null;
-  envTemplateName?: string | null;
   healthCheckUrl?: string | null;
   autoUpdate?: boolean;
   registryConnectionId?: string | null;
@@ -555,12 +520,6 @@ export const getConfigFileHistory = (id: string) =>
 
 export const restoreConfigFile = (id: string, historyId: string) =>
   api.post<{ configFile: ConfigFile }>(`/config-files/${id}/restore/${historyId}`);
-
-export const getEnvTemplateHistory = (name: string) =>
-  api.get<{ history: FileHistoryEntry[] }>(`/env-templates/${name}/history`);
-
-export const restoreEnvTemplate = (name: string, historyId: string) =>
-  api.post<{ template: EnvTemplate }>(`/env-templates/${name}/restore/${historyId}`);
 
 // Registry Connections
 export interface RegistryConnection {

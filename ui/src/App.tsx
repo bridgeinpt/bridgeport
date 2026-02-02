@@ -9,7 +9,6 @@ import ServerDetail from './pages/ServerDetail';
 import Services from './pages/Services';
 import ServiceDetail from './pages/ServiceDetail';
 import Secrets from './pages/Secrets';
-import EnvTemplates from './pages/EnvTemplates';
 import ConfigFiles from './pages/ConfigFiles';
 import Activity from './pages/Activity';
 import About from './pages/About';
@@ -49,7 +48,6 @@ export default function App() {
                 <Route path="/services" element={<Services />} />
                 <Route path="/services/:id" element={<ServiceDetail />} />
                 <Route path="/secrets" element={<Secrets />} />
-                <Route path="/env-templates" element={<EnvTemplates />} />
                 <Route path="/config-files" element={<ConfigFiles />} />
                 <Route path="/registries" element={<Registries />} />
                 <Route path="/databases" element={<Databases />} />

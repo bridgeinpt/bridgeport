@@ -21,7 +21,6 @@ const createServiceSchema = z.object({
   imageName: z.string().min(1),
   imageTag: z.string().default('latest'),
   composePath: z.string().optional(),
-  envTemplateName: z.string().optional(),
 });
 
 const updateServiceSchema = z.object({
@@ -30,7 +29,6 @@ const updateServiceSchema = z.object({
   imageName: z.string().min(1).optional(),
   imageTag: z.string().optional(),
   composePath: z.string().nullable().optional(),
-  envTemplateName: z.string().nullable().optional(),
   healthCheckUrl: z.string().nullable().optional(),
   autoUpdate: z.boolean().optional(),
   registryConnectionId: z.string().nullable().optional(),
@@ -539,12 +537,26 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           running: containerInfo.running,
         };
 
+        // Check for available image updates if registry is linked
+        let updateInfo: { hasUpdate: boolean; latestTag?: string } | null = null;
+        if (service.registryConnectionId) {
+          try {
+            const updateResult = await checkServiceUpdate(id);
+            updateInfo = {
+              hasUpdate: updateResult.hasUpdate,
+              latestTag: updateResult.latestTag,
+            };
+          } catch (err) {
+            console.error(`[HealthCheck] Failed to check updates for ${service.name}:`, err);
+          }
+        }
+
         await logAudit({
           action: 'health_check',
           resourceType: 'service',
           resourceId: id,
           resourceName: service.name,
-          details: { status, containerStatus, healthStatus, containerHealth, urlHealth, exposedPorts },
+          details: { status, containerStatus, healthStatus, containerHealth, urlHealth, exposedPorts, updateInfo },
           userId: request.authUser!.id,
           environmentId: service.server.environmentId,
         });
@@ -558,6 +570,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           exposedPorts: containerInfo.ports,
           imageTag: currentImageTag,
           lastCheckedAt: new Date().toISOString(),
+          updateInfo,
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Health check failed';

@@ -175,9 +175,8 @@ Environment   - Logical grouping with SSH key, allowSecretReveal setting
 Server        - Physical/virtual machine with metricsMode (ssh/agent/disabled)
 Service       - Docker container
 Secret        - Encrypted key-value with neverReveal flag
-EnvTemplate   - Template for .env generation
-ConfigFile    - Synced configuration files
-FileHistory   - Edit history for config files and env templates
+ConfigFile    - Synced configuration files (including .env files with secret placeholders)
+FileHistory   - Edit history for config files
 Database      - Registered database for backups
 DatabaseBackup - Backup record with status
 BackupSchedule - Cron-based backup scheduling

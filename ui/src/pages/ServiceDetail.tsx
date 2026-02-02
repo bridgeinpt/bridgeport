@@ -8,7 +8,6 @@ import {
   getServiceLogs,
   getDeploymentHistory,
   updateService,
-  listEnvTemplates,
   checkServiceHealth,
   listServiceFiles,
   listConfigFiles,
@@ -23,7 +22,6 @@ import {
   getServiceHistory,
   type ServiceWithServer,
   type Deployment,
-  type EnvTemplate,
   type ServiceFile,
   type ConfigFile,
   type SyncResult,
@@ -106,7 +104,6 @@ export default function ServiceDetail() {
   const toast = useToast();
   const [service, setService] = useState<ServiceWithServer | null>(null);
   const [deployments, setDeployments] = useState<Deployment[]>([]);
-  const [templates, setTemplates] = useState<EnvTemplate[]>([]);
   const [logs, setLogs] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [deploying, setDeploying] = useState(false);
@@ -118,8 +115,16 @@ export default function ServiceDetail() {
   const [saving, setSaving] = useState(false);
   const [imageTag, setImageTag] = useState('');
 
+  // Inline deploy card editing state
+  const [editingImageName, setEditingImageName] = useState(false);
+  const [editingCurrentTag, setEditingCurrentTag] = useState(false);
+  const [editingRegistry, setEditingRegistry] = useState(false);
+  const [inlineImageName, setInlineImageName] = useState('');
+  const [inlineCurrentTag, setInlineCurrentTag] = useState('');
+  const [inlineRegistryId, setInlineRegistryId] = useState('');
+  const [savingInline, setSavingInline] = useState(false);
+
   // Config edit state
-  const [editEnvTemplate, setEditEnvTemplate] = useState<string>('');
   const [editComposePath, setEditComposePath] = useState<string>('');
   const [editContainerName, setEditContainerName] = useState<string>('');
   const [editImageName, setEditImageName] = useState<string>('');
@@ -185,7 +190,6 @@ export default function ServiceDetail() {
           setImageTag(service.imageTag);
         }),
         getDeploymentHistory(id).then(({ deployments }) => setDeployments(deployments)),
-        listEnvTemplates().then(({ templates }) => setTemplates(templates)),
         listServiceFiles(id).then(({ files }) => setAttachedFiles(files)),
         getAuditLogs({ resourceType: 'service', resourceId: id, action: 'health_check', limit: 10 })
           .then(({ logs }) => setHealthCheckHistory(logs)),
@@ -280,6 +284,100 @@ export default function ServiceDetail() {
       saveEditName();
     } else if (e.key === 'Escape') {
       cancelEditingName();
+    }
+  };
+
+  // Inline deploy card editing handlers
+  const startEditImageName = () => {
+    if (service) {
+      setInlineImageName(service.imageName || '');
+      setEditingImageName(true);
+    }
+  };
+
+  const startEditCurrentTag = () => {
+    if (service) {
+      setInlineCurrentTag(service.imageTag || '');
+      setEditingCurrentTag(true);
+    }
+  };
+
+  const startEditRegistry = () => {
+    if (service) {
+      setInlineRegistryId(service.registryConnectionId || '');
+      setEditingRegistry(true);
+    }
+  };
+
+  const cancelInlineEdit = () => {
+    setEditingImageName(false);
+    setEditingCurrentTag(false);
+    setEditingRegistry(false);
+  };
+
+  const saveInlineImageName = async () => {
+    if (!id || !service || inlineImageName === service.imageName) {
+      cancelInlineEdit();
+      return;
+    }
+    setSavingInline(true);
+    try {
+      const { service: updated } = await updateService(id, { imageName: inlineImageName });
+      setService((prev) => (prev ? { ...prev, imageName: updated.imageName } : null));
+      setEditingImageName(false);
+      toast.success('Image name updated');
+    } catch {
+      toast.error('Failed to update image name');
+    } finally {
+      setSavingInline(false);
+    }
+  };
+
+  const saveInlineCurrentTag = async () => {
+    if (!id || !service || inlineCurrentTag === service.imageTag) {
+      cancelInlineEdit();
+      return;
+    }
+    setSavingInline(true);
+    try {
+      const { service: updated } = await updateService(id, { imageTag: inlineCurrentTag });
+      setService((prev) => (prev ? { ...prev, imageTag: updated.imageTag } : null));
+      setImageTag(updated.imageTag); // Also update the deploy tag input
+      setEditingCurrentTag(false);
+      toast.success('Image tag updated');
+    } catch {
+      toast.error('Failed to update image tag');
+    } finally {
+      setSavingInline(false);
+    }
+  };
+
+  const saveInlineRegistry = async () => {
+    if (!id || !service || inlineRegistryId === (service.registryConnectionId || '')) {
+      cancelInlineEdit();
+      return;
+    }
+    setSavingInline(true);
+    try {
+      const { service: updated } = await updateService(id, {
+        registryConnectionId: inlineRegistryId || null,
+      });
+      setService((prev) => (prev ? { ...prev, registryConnectionId: updated.registryConnectionId } : null));
+      setEditingRegistry(false);
+      toast.success('Registry updated');
+    } catch {
+      toast.error('Failed to update registry');
+    } finally {
+      setSavingInline(false);
+    }
+  };
+
+  const handleInlineKeyDown = (e: React.KeyboardEvent, saveHandler: () => void) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      saveHandler();
+    } else if (e.key === 'Escape') {
+      cancelInlineEdit();
     }
   };
 
@@ -391,7 +489,6 @@ export default function ServiceDetail() {
 
   const openConfig = () => {
     if (!service) return;
-    setEditEnvTemplate(service.envTemplateName || '');
     setEditComposePath(service.composePath || '');
     setEditContainerName(service.containerName || '');
     setEditImageName(service.imageName || '');
@@ -405,7 +502,6 @@ export default function ServiceDetail() {
     setSaving(true);
     try {
       const { service: updated } = await updateService(id, {
-        envTemplateName: editEnvTemplate || null,
         composePath: editComposePath || null,
         containerName: editContainerName || undefined,
         imageName: editImageName || undefined,
@@ -682,32 +778,103 @@ export default function ServiceDetail() {
             )}
           </div>
           <div className="space-y-4">
-            {/* Image info */}
+            {/* Image info - editable */}
             <div className="grid grid-cols-2 gap-4 p-3 bg-slate-800/50 rounded-lg">
               <div>
                 <dt className="text-xs text-slate-500 uppercase tracking-wide">Image Name</dt>
-                <dd className="text-white font-mono text-sm mt-0.5">
-                  {service.imageName || <span className="text-slate-500 italic">Not set</span>}
-                </dd>
+                {editingImageName ? (
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <input
+                      type="text"
+                      value={inlineImageName}
+                      onChange={(e) => setInlineImageName(e.target.value)}
+                      onKeyDown={(e) => handleInlineKeyDown(e, saveInlineImageName)}
+                      onBlur={saveInlineImageName}
+                      disabled={savingInline}
+                      autoFocus
+                      className="flex-1 bg-slate-900 border border-primary-500 rounded px-2 py-0.5 text-white font-mono text-sm focus:outline-none focus:ring-1 focus:ring-primary-500"
+                    />
+                  </div>
+                ) : (
+                  <dd
+                    className="text-white font-mono text-sm mt-0.5 cursor-pointer hover:text-primary-400 group flex items-center gap-1"
+                    onClick={startEditImageName}
+                    title="Click to edit"
+                  >
+                    {service.imageName || <span className="text-slate-500 italic">Not set</span>}
+                    <svg className="w-3 h-3 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                    </svg>
+                  </dd>
+                )}
               </div>
               <div>
                 <dt className="text-xs text-slate-500 uppercase tracking-wide">Image Tag</dt>
-                <dd className="text-white font-mono text-sm mt-0.5">
-                  {service.imageTag || <span className="text-slate-500 italic">Not set</span>}
-                </dd>
+                {editingCurrentTag ? (
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <input
+                      type="text"
+                      value={inlineCurrentTag}
+                      onChange={(e) => setInlineCurrentTag(e.target.value)}
+                      onKeyDown={(e) => handleInlineKeyDown(e, saveInlineCurrentTag)}
+                      onBlur={saveInlineCurrentTag}
+                      disabled={savingInline}
+                      autoFocus
+                      className="flex-1 bg-slate-900 border border-primary-500 rounded px-2 py-0.5 text-white font-mono text-sm focus:outline-none focus:ring-1 focus:ring-primary-500"
+                    />
+                  </div>
+                ) : (
+                  <dd
+                    className="text-white font-mono text-sm mt-0.5 cursor-pointer hover:text-primary-400 group flex items-center gap-1"
+                    onClick={startEditCurrentTag}
+                    title="Click to edit"
+                  >
+                    {service.imageTag || <span className="text-slate-500 italic">Not set</span>}
+                    <svg className="w-3 h-3 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                    </svg>
+                  </dd>
+                )}
               </div>
               <div>
                 <dt className="text-xs text-slate-500 uppercase tracking-wide">Registry</dt>
-                <dd className="text-white text-sm mt-0.5">
-                  {(() => {
-                    const registry = registries.find(r => r.id === service.registryConnectionId);
-                    return registry ? (
-                      <span className="text-primary-400">{registry.name}</span>
-                    ) : (
-                      <span className="text-slate-500 italic">Not linked</span>
-                    );
-                  })()}
-                </dd>
+                {editingRegistry ? (
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <select
+                      value={inlineRegistryId}
+                      onChange={(e) => setInlineRegistryId(e.target.value)}
+                      onBlur={saveInlineRegistry}
+                      disabled={savingInline}
+                      autoFocus
+                      className="flex-1 bg-slate-900 border border-primary-500 rounded px-2 py-0.5 text-white text-sm focus:outline-none focus:ring-1 focus:ring-primary-500"
+                    >
+                      <option value="">None</option>
+                      {registries.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name} {r.isDefault ? '(default)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <dd
+                    className="text-white text-sm mt-0.5 cursor-pointer hover:text-primary-400 group flex items-center gap-1"
+                    onClick={startEditRegistry}
+                    title="Click to edit"
+                  >
+                    {(() => {
+                      const registry = registries.find(r => r.id === service.registryConnectionId);
+                      return registry ? (
+                        <span className="text-primary-400">{registry.name}</span>
+                      ) : (
+                        <span className="text-slate-500 italic">Not linked</span>
+                      );
+                    })()}
+                    <svg className="w-3 h-3 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                    </svg>
+                  </dd>
+                )}
               </div>
               <div>
                 <dt className="text-xs text-slate-500 uppercase tracking-wide">Current Image</dt>
@@ -845,12 +1012,6 @@ export default function ServiceDetail() {
                     </div>
                   );
                 })()}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-slate-400">Env Template</dt>
-              <dd className={service.envTemplateName ? 'text-primary-400 font-mono' : 'text-slate-500'}>
-                {service.envTemplateName || 'Not configured'}
               </dd>
             </div>
             {service.composePath && (
@@ -1521,26 +1682,6 @@ export default function ServiceDetail() {
               Configure Service
             </h3>
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">
-                  Env Template
-                </label>
-                <select
-                  value={editEnvTemplate}
-                  onChange={(e) => setEditEnvTemplate(e.target.value)}
-                  className="input"
-                >
-                  <option value="">None</option>
-                  {templates.map((t) => (
-                    <option key={t.id} value={t.name}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-slate-500 mt-1">
-                  Template used to generate .env file during deployment
-                </p>
-              </div>
               <div>
                 <label className="block text-sm text-slate-400 mb-1">
                   Compose Path

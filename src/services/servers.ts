@@ -2,6 +2,7 @@ import { prisma } from '../lib/db.js';
 import { SSHClient, LocalClient, DockerSSH, isLocalhost, createClientForServer } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 import { parseRegistryFromImage } from '../lib/image-utils.js';
+import { checkServiceUpdate } from '../lib/scheduler.js';
 import type { Server, Service, RegistryConnection } from '@prisma/client';
 
 /**
@@ -374,6 +375,16 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
           },
         });
         missing.push(existingService.name);
+      }
+    }
+
+    // Check for available image updates for discovered services with registry connections
+    for (const service of services) {
+      if (service.registryConnectionId) {
+        // Run in background, don't block discovery
+        checkServiceUpdate(service.id).catch((err) => {
+          console.error(`[Discovery] Failed to check updates for ${service.name}:`, err);
+        });
       }
     }
 

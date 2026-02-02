@@ -113,7 +113,6 @@ model Service {
   imageName       String   // e.g., registry.digitalocean.com/bios-registry/app-api
   imageTag        String   @default("latest")
   composePath     String?  // Path to docker-compose.yml on server
-  envTemplateName String?  // Reference to env template
   composeTemplate String?  // Docker compose template with placeholders
   healthCheckUrl  String?  // Optional URL to check for health (e.g., http://localhost:8000/health)
   status          String   @default("unknown") // running, stopped, unhealthy, healthy, unknown (kept for backwards compatibility)
@@ -199,16 +198,6 @@ model Secret {
   @@unique([environmentId, key])
 }
 
-model EnvTemplate {
-  id        String   @id @default(cuid())
-  name      String   @unique // e.g., app-api, keycloak
-  template  String   // Template content with ${SECRET_NAME} placeholders
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  history FileHistory[]
-}
-
 // Config files (compose files, Caddyfile, certificates, etc.)
 model ConfigFile {
   id          String   @id @default(cuid())
@@ -276,7 +265,7 @@ model AuditLog {
   @@index([environmentId])
 }
 
-// Edit history for config files and env templates
+// Edit history for config files
 model FileHistory {
   id        String   @id @default(cuid())
   content   String   // Previous content
@@ -287,11 +276,8 @@ model FileHistory {
 
   configFileId  String?
   configFile    ConfigFile?  @relation(fields: [configFileId], references: [id], onDelete: Cascade)
-  envTemplateId String?
-  envTemplate   EnvTemplate? @relation(fields: [envTemplateId], references: [id], onDelete: Cascade)
 
   @@index([configFileId, editedAt(sort: Desc)])
-  @@index([envTemplateId, editedAt(sort: Desc)])
 }
 
 // Registry connection for image update checking
