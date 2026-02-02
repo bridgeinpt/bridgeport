@@ -37,6 +37,8 @@ import {
 } from '../lib/api';
 import { DependencyEditor } from '../components/DependencyEditor';
 import { HealthConfigEditor } from '../components/HealthConfigEditor';
+import Pagination from '../components/Pagination';
+import { usePagination } from '../hooks/usePagination';
 import { useAppStore } from '../lib/store';
 import { useToast } from '../components/Toast';
 import { formatDistanceToNow, format } from 'date-fns';
@@ -1369,179 +1371,219 @@ export default function ServiceDetail() {
       </div>
 
       {/* Deployment History */}
-      <div className="panel">
-        <h3 className="text-lg font-semibold text-white mb-4">
-          Deployment History
-        </h3>
-        {deployments.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
-                  <th className="pb-3 font-medium">Tag</th>
-                  <th className="pb-3 font-medium">Status</th>
-                  <th className="pb-3 font-medium">Triggered By</th>
-                  <th className="pb-3 font-medium">Started</th>
-                  <th className="pb-3 font-medium">Duration</th>
-                  <th className="pb-3 font-medium"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-700">
-                {deployments.map((deployment) => (
-                  <>
-                    <tr key={deployment.id} className="text-slate-300">
-                      <td className="py-3 font-mono text-primary-400">
-                        {deployment.imageTag}
-                      </td>
-                      <td className="py-3">
-                        <span
-                          className={`badge ${
-                            deployment.status === 'success'
-                              ? 'badge-success'
-                              : deployment.status === 'failed'
-                              ? 'badge-error'
-                              : deployment.status === 'deploying'
-                              ? 'badge-info'
-                              : 'badge-warning'
-                          }`}
-                        >
-                          {deployment.status}
-                        </span>
-                      </td>
-                      <td className="py-3">{deployment.triggeredBy}</td>
-                      <td className="py-3 text-sm">
-                        {format(new Date(deployment.startedAt), 'MMM d, HH:mm')}
-                      </td>
-                      <td className="py-3 text-sm text-slate-400">
-                        {deployment.completedAt
-                          ? `${Math.round(
-                              (new Date(deployment.completedAt).getTime() -
-                                new Date(deployment.startedAt).getTime()) /
-                                1000
-                            )}s`
-                          : '-'}
-                      </td>
-                      <td className="py-3 text-right">
-                        {deployment.logs && (
-                          <button
-                            onClick={() =>
-                              setExpandedDeployment(
-                                expandedDeployment === deployment.id ? null : deployment.id
-                              )
-                            }
-                            className={`text-sm ${
-                              deployment.status === 'failed'
-                                ? 'text-red-400 hover:text-red-300'
-                                : 'text-slate-400 hover:text-white'
-                            }`}
-                          >
-                            {expandedDeployment === deployment.id ? 'Hide Logs' : 'View Logs'}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                    {expandedDeployment === deployment.id && deployment.logs && (
-                      <tr key={`${deployment.id}-logs`}>
-                        <td colSpan={6} className="p-0">
-                          <pre className="p-4 bg-slate-950 text-xs text-slate-300 font-mono overflow-x-auto max-h-64 overflow-y-auto">
-                            {deployment.logs}
-                          </pre>
-                        </td>
+      {(() => {
+        const deploymentPagination = usePagination({ data: deployments, defaultPageSize: 10 });
+        return (
+          <div className="panel">
+            <h3 className="text-lg font-semibold text-white mb-4">
+              Deployment History
+            </h3>
+            {deployments.length > 0 ? (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
+                        <th className="pb-3 font-medium">Tag</th>
+                        <th className="pb-3 font-medium">Status</th>
+                        <th className="pb-3 font-medium">Triggered By</th>
+                        <th className="pb-3 font-medium">Started</th>
+                        <th className="pb-3 font-medium">Duration</th>
+                        <th className="pb-3 font-medium"></th>
                       </tr>
-                    )}
-                  </>
-                ))}
-              </tbody>
-            </table>
+                    </thead>
+                    <tbody className="divide-y divide-slate-700">
+                      {deploymentPagination.paginatedData.map((deployment) => (
+                        <>
+                          <tr key={deployment.id} className="text-slate-300">
+                            <td className="py-3 font-mono text-primary-400">
+                              {deployment.imageTag}
+                            </td>
+                            <td className="py-3">
+                              <span
+                                className={`badge ${
+                                  deployment.status === 'success'
+                                    ? 'badge-success'
+                                    : deployment.status === 'failed'
+                                    ? 'badge-error'
+                                    : deployment.status === 'deploying'
+                                    ? 'badge-info'
+                                    : 'badge-warning'
+                                }`}
+                              >
+                                {deployment.status}
+                              </span>
+                            </td>
+                            <td className="py-3">{deployment.triggeredBy}</td>
+                            <td className="py-3 text-sm">
+                              {format(new Date(deployment.startedAt), 'MMM d, HH:mm')}
+                            </td>
+                            <td className="py-3 text-sm text-slate-400">
+                              {deployment.completedAt
+                                ? `${Math.round(
+                                    (new Date(deployment.completedAt).getTime() -
+                                      new Date(deployment.startedAt).getTime()) /
+                                      1000
+                                  )}s`
+                                : '-'}
+                            </td>
+                            <td className="py-3 text-right">
+                              {deployment.logs && (
+                                <button
+                                  onClick={() =>
+                                    setExpandedDeployment(
+                                      expandedDeployment === deployment.id ? null : deployment.id
+                                    )
+                                  }
+                                  className={`text-sm ${
+                                    deployment.status === 'failed'
+                                      ? 'text-red-400 hover:text-red-300'
+                                      : 'text-slate-400 hover:text-white'
+                                  }`}
+                                >
+                                  {expandedDeployment === deployment.id ? 'Hide Logs' : 'View Logs'}
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                          {expandedDeployment === deployment.id && deployment.logs && (
+                            <tr key={`${deployment.id}-logs`}>
+                              <td colSpan={6} className="p-0">
+                                <pre className="p-4 bg-slate-950 text-xs text-slate-300 font-mono overflow-x-auto max-h-64 overflow-y-auto">
+                                  {deployment.logs}
+                                </pre>
+                              </td>
+                            </tr>
+                          )}
+                        </>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {deploymentPagination.totalPages > 1 && (
+                  <div className="mt-4">
+                    <Pagination
+                      currentPage={deploymentPagination.currentPage}
+                      totalPages={deploymentPagination.totalPages}
+                      totalItems={deploymentPagination.totalItems}
+                      pageSize={deploymentPagination.pageSize}
+                      onPageChange={deploymentPagination.setPage}
+                      onPageSizeChange={deploymentPagination.setPageSize}
+                      pageSizeOptions={[10, 25, 50]}
+                    />
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="text-slate-400">No deployments yet</p>
+            )}
           </div>
-        ) : (
-          <p className="text-slate-400">No deployments yet</p>
-        )}
-      </div>
+        );
+      })()}
 
       {/* Health Check History */}
-      <div className="panel mt-5">
-        <h3 className="text-lg font-semibold text-white mb-4">
-          Health Check History
-        </h3>
-        {healthCheckHistory.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
-                  <th className="pb-3 font-medium">Time</th>
-                  <th className="pb-3 font-medium">Status</th>
-                  <th className="pb-3 font-medium">Container</th>
-                  <th className="pb-3 font-medium">URL Check</th>
-                  <th className="pb-3 font-medium">User</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-700">
-                {healthCheckHistory.map((log) => {
-                  const details = log.details ? JSON.parse(log.details) : null;
-                  return (
-                    <tr key={log.id} className="text-slate-300">
-                      <td className="py-3 text-sm">
-                        {format(new Date(log.createdAt), 'MMM d, HH:mm:ss')}
-                      </td>
-                      <td className="py-3">
-                        {log.success ? (
-                          <span
-                            className={`badge ${
-                              details?.status === 'healthy'
-                                ? 'badge-success'
-                                : details?.status === 'running'
-                                ? 'badge-info'
-                                : details?.status === 'unhealthy'
-                                ? 'badge-error'
-                                : 'badge-warning'
-                            }`}
-                          >
-                            {details?.status || 'unknown'}
-                          </span>
-                        ) : (
-                          <span className="badge badge-error">failed</span>
-                        )}
-                      </td>
-                      <td className="py-3 text-sm">
-                        {details?.containerHealth ? (
-                          <span
-                            className={
-                              details.containerHealth.running ? 'text-green-400' : 'text-red-400'
-                            }
-                          >
-                            {details.containerHealth.state}
-                            {details.containerHealth.health && ` (${details.containerHealth.health})`}
-                          </span>
-                        ) : (
-                          <span className="text-slate-500">-</span>
-                        )}
-                      </td>
-                      <td className="py-3 text-sm">
-                        {details?.urlHealth ? (
-                          <span
-                            className={details.urlHealth.success ? 'text-green-400' : 'text-red-400'}
-                          >
-                            {details.urlHealth.success ? 'OK' : 'Failed'}
-                            {details.urlHealth.statusCode && ` (${details.urlHealth.statusCode})`}
-                          </span>
-                        ) : (
-                          <span className="text-slate-500">-</span>
-                        )}
-                      </td>
-                      <td className="py-3 text-sm text-slate-400">
-                        {log.user?.email || 'System'}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+      {(() => {
+        const healthPagination = usePagination({ data: healthCheckHistory, defaultPageSize: 10 });
+        return (
+          <div className="panel mt-5">
+            <h3 className="text-lg font-semibold text-white mb-4">
+              Health Check History
+            </h3>
+            {healthCheckHistory.length > 0 ? (
+              <>
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
+                        <th className="pb-3 font-medium">Time</th>
+                        <th className="pb-3 font-medium">Status</th>
+                        <th className="pb-3 font-medium">Container</th>
+                        <th className="pb-3 font-medium">URL Check</th>
+                        <th className="pb-3 font-medium">User</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-700">
+                      {healthPagination.paginatedData.map((log) => {
+                        const details = log.details ? JSON.parse(log.details) : null;
+                        return (
+                          <tr key={log.id} className="text-slate-300">
+                            <td className="py-3 text-sm">
+                              {format(new Date(log.createdAt), 'MMM d, HH:mm:ss')}
+                            </td>
+                            <td className="py-3">
+                              {log.success ? (
+                                <span
+                                  className={`badge ${
+                                    details?.status === 'healthy'
+                                      ? 'badge-success'
+                                      : details?.status === 'running'
+                                      ? 'badge-info'
+                                      : details?.status === 'unhealthy'
+                                      ? 'badge-error'
+                                      : 'badge-warning'
+                                  }`}
+                                >
+                                  {details?.status || 'unknown'}
+                                </span>
+                              ) : (
+                                <span className="badge badge-error">failed</span>
+                              )}
+                            </td>
+                            <td className="py-3 text-sm">
+                              {details?.containerHealth ? (
+                                <span
+                                  className={
+                                    details.containerHealth.running ? 'text-green-400' : 'text-red-400'
+                                  }
+                                >
+                                  {details.containerHealth.state}
+                                  {details.containerHealth.health && ` (${details.containerHealth.health})`}
+                                </span>
+                              ) : (
+                                <span className="text-slate-500">-</span>
+                              )}
+                            </td>
+                            <td className="py-3 text-sm">
+                              {details?.urlHealth ? (
+                                <span
+                                  className={details.urlHealth.success ? 'text-green-400' : 'text-red-400'}
+                                >
+                                  {details.urlHealth.success ? 'OK' : 'Failed'}
+                                  {details.urlHealth.statusCode && ` (${details.urlHealth.statusCode})`}
+                                </span>
+                              ) : (
+                                <span className="text-slate-500">-</span>
+                              )}
+                            </td>
+                            <td className="py-3 text-sm text-slate-400">
+                              {log.user?.email || 'System'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                {healthPagination.totalPages > 1 && (
+                  <div className="mt-4">
+                    <Pagination
+                      currentPage={healthPagination.currentPage}
+                      totalPages={healthPagination.totalPages}
+                      totalItems={healthPagination.totalItems}
+                      pageSize={healthPagination.pageSize}
+                      onPageChange={healthPagination.setPage}
+                      onPageSizeChange={healthPagination.setPageSize}
+                      pageSizeOptions={[10, 25, 50]}
+                    />
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="text-slate-400">No health checks recorded yet</p>
+            )}
           </div>
-        ) : (
-          <p className="text-slate-400">No health checks recorded yet</p>
-        )}
-      </div>
+        );
+      })()}
 
       {/* Action History */}
       <div className="panel mt-5">
