@@ -539,7 +539,7 @@ export default function ConfigFiles() {
         isOpen={!!viewingFile}
         onClose={() => setViewingFile(null)}
         title={viewingFile?.name || ''}
-        size="lg"
+        size="3xl"
       >
         {viewingFile && (
           <div className="flex flex-col" style={{ maxHeight: 'calc(90vh - 120px)' }}>
