@@ -14,6 +14,8 @@ import {
   collectServerDataSSH,
 } from '../services/metrics.js';
 import { checkDueBackups } from '../services/database-backup.js';
+import { sendSystemNotification, NOTIFICATION_TYPES, cleanupOldNotifications } from '../services/notifications.js';
+import { recordFailure, recordSuccess } from '../services/bounce-tracker.js';
 
 interface SchedulerConfig {
   serverHealthIntervalMs: number;
@@ -23,6 +25,7 @@ interface SchedulerConfig {
   metricsIntervalMs: number;
   backupCheckIntervalMs: number;
   metricsRetentionDays: number;
+  notificationRetentionDays: number;
 }
 
 const DEFAULT_CONFIG: SchedulerConfig = {
@@ -33,6 +36,7 @@ const DEFAULT_CONFIG: SchedulerConfig = {
   metricsIntervalMs: 5 * 60 * 1000, // 5 minutes
   backupCheckIntervalMs: 60 * 1000, // 1 minute
   metricsRetentionDays: 7,
+  notificationRetentionDays: 30,
 };
 
 const timers = new Map<string, NodeJS.Timeout>();
@@ -45,14 +49,45 @@ async function runServerHealthChecks(): Promise<void> {
   try {
     const servers = await prisma.server.findMany({
       where: { metricsMode: { not: 'agent' } }, // Skip agent servers - they report health directly
-      select: { id: true, name: true },
+      select: { id: true, name: true, status: true, environmentId: true },
     });
 
     console.log(`[Scheduler] Running health checks on ${servers.length} servers (excluding agent-mode)`);
 
     for (const server of servers) {
       try {
+        const prevStatus = server.status;
         await checkServerHealth(server.id);
+
+        // Get updated status
+        const updated = await prisma.server.findUnique({
+          where: { id: server.id },
+          select: { status: true },
+        });
+
+        if (updated) {
+          if (updated.status === 'unhealthy' && prevStatus !== 'unhealthy') {
+            // Server became unhealthy - use bounce tracking
+            const bounce = await recordFailure('server', server.id, 'offline', NOTIFICATION_TYPES.SYSTEM_SERVER_OFFLINE);
+            if (bounce.shouldAlert) {
+              await sendSystemNotification(
+                NOTIFICATION_TYPES.SYSTEM_SERVER_OFFLINE,
+                server.environmentId,
+                { serverName: server.name }
+              );
+            }
+          } else if (updated.status === 'healthy' && prevStatus === 'unhealthy') {
+            // Server recovered
+            const bounce = await recordSuccess('server', server.id, 'offline');
+            if (bounce.wasRecovered) {
+              await sendSystemNotification(
+                NOTIFICATION_TYPES.SYSTEM_SERVER_ONLINE,
+                server.environmentId,
+                { serverName: server.name }
+              );
+            }
+          }
+        }
       } catch (error) {
         console.error(`[Scheduler] Health check failed for server ${server.name}:`, error);
       }
@@ -346,6 +381,9 @@ async function runMetricsCollection(): Promise<void> {
           continue;
         }
 
+        // Get previous status for comparison
+        const prevServerStatus = server.status;
+
         // Update server health status
         await prisma.server.update({
           where: { id: server.id },
@@ -354,6 +392,27 @@ async function runMetricsCollection(): Promise<void> {
             lastCheckedAt: new Date(),
           },
         });
+
+        // Handle server status changes
+        if (data.serverHealth.status === 'unhealthy' && prevServerStatus !== 'unhealthy') {
+          const bounce = await recordFailure('server', server.id, 'offline', NOTIFICATION_TYPES.SYSTEM_SERVER_OFFLINE);
+          if (bounce.shouldAlert) {
+            await sendSystemNotification(
+              NOTIFICATION_TYPES.SYSTEM_SERVER_OFFLINE,
+              server.environmentId,
+              { serverName: server.name }
+            );
+          }
+        } else if (data.serverHealth.status === 'healthy' && prevServerStatus === 'unhealthy') {
+          const bounce = await recordSuccess('server', server.id, 'offline');
+          if (bounce.wasRecovered) {
+            await sendSystemNotification(
+              NOTIFICATION_TYPES.SYSTEM_SERVER_ONLINE,
+              server.environmentId,
+              { serverName: server.name }
+            );
+          }
+        }
 
         // Save server metrics
         if (data.serverMetrics) {
@@ -364,6 +423,12 @@ async function runMetricsCollection(): Promise<void> {
         for (const serviceData of data.serviceData) {
           const service = server.services.find((s) => s.containerName === serviceData.containerName);
           if (!service) continue;
+
+          // Get previous status for comparison
+          const prevService = await prisma.service.findUnique({
+            where: { id: service.id },
+            select: { containerStatus: true, healthStatus: true },
+          });
 
           // Save metrics
           if (serviceData.metrics) {
@@ -380,6 +445,59 @@ async function runMetricsCollection(): Promise<void> {
               lastCheckedAt: new Date(),
             },
           });
+
+          // Handle container status changes (crash detection)
+          const crashStates = ['exited', 'dead'];
+          const wasCrashed = prevService && crashStates.includes(prevService.containerStatus);
+          const isCrashed = crashStates.includes(serviceData.containerStatus);
+          const isRunning = serviceData.containerStatus === 'running';
+
+          if (isCrashed && !wasCrashed) {
+            // Container crashed
+            const bounce = await recordFailure('service', service.id, 'crash', NOTIFICATION_TYPES.SYSTEM_CONTAINER_CRASH);
+            if (bounce.shouldAlert) {
+              await sendSystemNotification(
+                NOTIFICATION_TYPES.SYSTEM_CONTAINER_CRASH,
+                server.environmentId,
+                { containerName: service.containerName, serverName: server.name }
+              );
+            }
+          } else if (isRunning && wasCrashed) {
+            // Container recovered
+            const bounce = await recordSuccess('service', service.id, 'crash');
+            if (bounce.wasRecovered) {
+              await sendSystemNotification(
+                NOTIFICATION_TYPES.SYSTEM_CONTAINER_RECOVERED,
+                server.environmentId,
+                { containerName: service.containerName, serverName: server.name }
+              );
+            }
+          }
+
+          // Handle health check status changes
+          if (serviceData.healthStatus === 'unhealthy' && prevService?.healthStatus !== 'unhealthy') {
+            const bounce = await recordFailure('service', service.id, 'health_check', NOTIFICATION_TYPES.SYSTEM_HEALTH_CHECK_FAILED);
+            if (bounce.shouldAlert) {
+              await sendSystemNotification(
+                NOTIFICATION_TYPES.SYSTEM_HEALTH_CHECK_FAILED,
+                server.environmentId,
+                {
+                  resourceType: 'Service',
+                  resourceName: service.containerName,
+                  error: 'Health check failed',
+                }
+              );
+            }
+          } else if (serviceData.healthStatus === 'healthy' && prevService?.healthStatus === 'unhealthy') {
+            const bounce = await recordSuccess('service', service.id, 'health_check');
+            if (bounce.wasRecovered) {
+              await sendSystemNotification(
+                NOTIFICATION_TYPES.SYSTEM_HEALTH_CHECK_RECOVERED,
+                server.environmentId,
+                { resourceType: 'Service', resourceName: service.containerName }
+              );
+            }
+          }
         }
       } catch (error) {
         console.error(`[Scheduler] Combined metrics/health collection failed for server ${server.name}:`, error);
@@ -412,6 +530,20 @@ async function runMetricsCleanup(retentionDays: number): Promise<void> {
     }
   } catch (error) {
     console.error('[Scheduler] Metrics cleanup failed:', error);
+  }
+}
+
+/**
+ * Clean up old notifications
+ */
+async function runNotificationCleanup(retentionDays: number): Promise<void> {
+  try {
+    const deleted = await cleanupOldNotifications(retentionDays);
+    if (deleted > 0) {
+      console.log(`[Scheduler] Cleaned up ${deleted} old notification records`);
+    }
+  } catch (error) {
+    console.error('[Scheduler] Notification cleanup failed:', error);
   }
 }
 
@@ -449,6 +581,7 @@ export function startScheduler(config: Partial<SchedulerConfig> = {}): void {
   timers.set('metrics', setInterval(runMetricsCollection, cfg.metricsIntervalMs));
   timers.set('backupCheck', setInterval(runBackupChecks, cfg.backupCheckIntervalMs));
   timers.set('cleanup', setInterval(() => runMetricsCleanup(cfg.metricsRetentionDays), 60 * 60 * 1000));
+  timers.set('notificationCleanup', setInterval(() => runNotificationCleanup(cfg.notificationRetentionDays), 24 * 60 * 60 * 1000)); // Daily
 }
 
 /**

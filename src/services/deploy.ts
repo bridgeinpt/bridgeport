@@ -5,6 +5,7 @@ import { registryClient } from '../lib/registry.js';
 import { generateDeploymentArtifacts, saveDeploymentArtifacts } from './compose.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 import { checkServiceUpdate } from '../lib/scheduler.js';
+import { sendSystemNotification, NOTIFICATION_TYPES } from './notifications.js';
 import type { Deployment, Service } from '@prisma/client';
 
 export interface DeployOptions {
@@ -196,6 +197,17 @@ export async function deployService(
       },
     });
 
+    // Send success notification
+    await sendSystemNotification(
+      NOTIFICATION_TYPES.SYSTEM_DEPLOYMENT_SUCCESS,
+      service.server.environmentId,
+      {
+        serviceName: service.name,
+        imageTag,
+        serverName: service.server.name,
+      }
+    );
+
     return { deployment: finalDeployment, logs: logs.join('\n') };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -209,6 +221,18 @@ export async function deployService(
         completedAt: new Date(),
       },
     });
+
+    // Send failure notification
+    await sendSystemNotification(
+      NOTIFICATION_TYPES.SYSTEM_DEPLOYMENT_FAILED,
+      service.server.environmentId,
+      {
+        serviceName: service.name,
+        imageTag,
+        serverName: service.server.name,
+        error: errorMessage,
+      }
+    );
 
     return { deployment: failedDeployment, logs: logs.join('\n') };
   }

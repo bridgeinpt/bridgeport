@@ -6,6 +6,7 @@ import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client
 import { readFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { sendSystemNotification, NOTIFICATION_TYPES } from './notifications.js';
 
 export type BackupStep = 'connect' | 'dump' | 'upload';
 
@@ -379,6 +380,13 @@ async function executeBackup(backupId: string): Promise<void> {
         completedAt: new Date(),
       },
     });
+
+    // Send success notification
+    await sendSystemNotification(
+      NOTIFICATION_TYPES.SYSTEM_BACKUP_SUCCESS,
+      db.environmentId,
+      { databaseName: db.name }
+    );
   } catch (error) {
     // Clean up temp file on error
     if (tempPath) {
@@ -405,6 +413,18 @@ async function executeBackup(backupId: string): Promise<void> {
         completedAt: new Date(),
       },
     });
+
+    // Send failure notification
+    await sendSystemNotification(
+      NOTIFICATION_TYPES.SYSTEM_BACKUP_FAILED,
+      db.environmentId,
+      {
+        databaseName: db.name,
+        error: backupError.message,
+        step: backupError.step,
+      }
+    );
+
     throw error;
   }
 }

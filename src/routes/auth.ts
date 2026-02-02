@@ -7,6 +7,7 @@ import {
   listApiTokens,
   deleteApiToken,
 } from '../services/auth.js';
+import { send, NOTIFICATION_TYPES } from '../services/notifications.js';
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -108,6 +109,11 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
         body.data.name,
         expiresAt
       );
+
+      // Notify user about API token creation
+      await send(NOTIFICATION_TYPES.USER_API_TOKEN_CREATED, request.authUser!.id, {
+        tokenName: body.data.name,
+      });
 
       // Only return the full token once
       return {

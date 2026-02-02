@@ -20,6 +20,21 @@ import {
   ChevronRightIcon,
 } from './Icons';
 
+// Inline bell icon for navigation (without import conflict)
+function NavBellIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+      />
+    </svg>
+  );
+}
+import NotificationBell from './NotificationBell';
+
 interface NavItem {
   name: string;
   href: string;
@@ -57,7 +72,9 @@ const navigationGroups: NavGroup[] = [
     name: 'System',
     items: [
       { name: 'Audit Logs', href: '/activity', icon: ActivityIcon },
+      { name: 'Notifications', href: '/notifications', icon: NavBellIcon },
       { name: 'Users', href: '/users', icon: UsersIcon, adminOnly: true },
+      { name: 'Notification Config', href: '/admin/notifications', icon: NavBellIcon, adminOnly: true },
       { name: 'Settings', href: '/settings', icon: SettingsIcon },
     ],
   },
@@ -266,6 +283,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               <p className="text-slate-400 text-xs truncate">{user?.email}</p>
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
+              <NotificationBell />
               <button
                 onClick={openAccountModal}
                 className="text-slate-400 hover:text-white"

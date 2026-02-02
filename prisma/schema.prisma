@@ -18,11 +18,13 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  apiTokens        ApiToken[]
-  deployments      Deployment[]
-  auditLogs        AuditLog[]
-  fileHistory      FileHistory[]
-  databaseBackups  DatabaseBackup[]
+  apiTokens               ApiToken[]
+  deployments             Deployment[]
+  auditLogs               AuditLog[]
+  fileHistory             FileHistory[]
+  databaseBackups         DatabaseBackup[]
+  notifications           Notification[]
+  notificationPreferences NotificationPreference[]
 }
 
 model ApiToken {
@@ -59,6 +61,7 @@ model Environment {
   auditLogs            AuditLog[]
   registryConnections  RegistryConnection[]
   databases            Database[]
+  notifications        Notification[]
 }
 
 model Server {
@@ -391,4 +394,114 @@ model ServiceDatabase {
   database   Database @relation(fields: [databaseId], references: [id], onDelete: Cascade)
 
   @@unique([serviceId, databaseId])
+}
+
+// Notification types (user and system events)
+model NotificationType {
+  id              String   @id @default(cuid())
+  category        String   // "user" | "system"
+  code            String   @unique // e.g., "user.account_created", "system.backup_failed"
+  name            String
+  description     String?
+  template        String   // Message template with {{placeholders}}
+  defaultChannels String   @default("[\"in_app\"]") // JSON array: ["in_app", "email", "webhook"]
+  severity        String   @default("info") // "info" | "warning" | "critical"
+
+  // Bounce settings (for system notifications with repeated failures)
+  bounceEnabled   Boolean  @default(false) // Whether this type uses bounce logic
+  bounceThreshold Int      @default(3)     // Consecutive failures before alerting
+  bounceCooldown  Int      @default(900)   // Seconds before allowing another alert (default 15 min)
+
+  createdAt       DateTime @default(now())
+
+  notifications Notification[]
+  preferences   NotificationPreference[]
+}
+
+// Individual notifications sent to users
+model Notification {
+  id            String    @id @default(cuid())
+  typeId        String
+  type          NotificationType @relation(fields: [typeId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title         String
+  message       String
+  data          String?   // JSON context for additional data
+  environmentId String?
+  environment   Environment? @relation(fields: [environmentId], references: [id], onDelete: SetNull)
+
+  inAppReadAt   DateTime?
+  emailSentAt   DateTime?
+  webhookSentAt DateTime?
+
+  createdAt     DateTime  @default(now())
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, inAppReadAt])
+}
+
+// User preferences for notification types
+model NotificationPreference {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  typeId         String
+  type           NotificationType @relation(fields: [typeId], references: [id], onDelete: Cascade)
+  inAppEnabled   Boolean  @default(true)
+  emailEnabled   Boolean  @default(false)
+  webhookEnabled Boolean  @default(true)
+  environmentIds String?  // JSON array of environment IDs, null = all environments
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([userId, typeId])
+}
+
+// SMTP configuration for email notifications
+model SmtpConfig {
+  id                String   @id @default(cuid())
+  host              String
+  port              Int      @default(587)
+  secure            Boolean  @default(false)
+  username          String?
+  encryptedPassword String?
+  passwordNonce     String?
+  fromAddress       String
+  fromName          String   @default("BridgePort")
+  enabled           Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+// Outgoing webhook configurations
+model WebhookConfig {
+  id              String    @id @default(cuid())
+  name            String
+  url             String
+  encryptedSecret String?
+  secretNonce     String?
+  headers         String?   // JSON custom headers
+  enabled         Boolean   @default(true)
+  typeFilter      String?   // JSON array of type codes to filter
+  environmentIds  String?   // JSON array of environment IDs
+  lastTriggeredAt DateTime?
+  successCount    Int       @default(0)
+  failureCount    Int       @default(0)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+// Tracks consecutive failures for bounce logic
+model BounceTracker {
+  id                  String    @id @default(cuid())
+  resourceType        String    // "server" | "service" | "database"
+  resourceId          String
+  eventType           String    // "health_check" | "offline" | "crash" | "backup"
+  consecutiveFailures Int       @default(0)
+  lastFailedAt        DateTime?
+  lastSuccessAt       DateTime?
+  alertSentAt         DateTime?
+
+  @@unique([resourceType, resourceId, eventType])
 }

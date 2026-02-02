@@ -25,6 +25,10 @@ import { registryRoutes } from './routes/registries.js';
 import { userRoutes } from './routes/users.js';
 import { metricsRoutes } from './routes/metrics.js';
 import { databaseRoutes } from './routes/databases.js';
+import { notificationRoutes } from './routes/notifications.js';
+import { smtpRoutes } from './routes/admin/smtp.js';
+import { webhookAdminRoutes } from './routes/admin/webhooks.js';
+import { initializeNotificationTypes } from './services/notifications.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -59,6 +63,9 @@ async function buildServer() {
 
   // Bootstrap admin user from env vars (if configured and no users exist)
   await bootstrapAdminUser(config.ADMIN_EMAIL, config.ADMIN_PASSWORD);
+
+  // Initialize notification types
+  await initializeNotificationTypes();
 
   // Ensure upload directory exists
   await mkdir(config.UPLOAD_DIR, { recursive: true });
@@ -113,6 +120,9 @@ async function buildServer() {
   await fastify.register(userRoutes);
   await fastify.register(metricsRoutes);
   await fastify.register(databaseRoutes);
+  await fastify.register(notificationRoutes);
+  await fastify.register(smtpRoutes);
+  await fastify.register(webhookAdminRoutes);
 
   // Health check
   fastify.get('/health', async () => {

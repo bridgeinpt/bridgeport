@@ -990,3 +990,184 @@ export const setBackupSchedule = (
 
 export const deleteBackupSchedule = (databaseId: string) =>
   api.delete<{ success: boolean }>(`/databases/${databaseId}/schedule`);
+
+// Notifications
+export interface NotificationType {
+  id: string;
+  category: 'user' | 'system';
+  code: string;
+  name: string;
+  description: string | null;
+  template: string;
+  defaultChannels: string;
+  severity: 'info' | 'warning' | 'critical';
+  bounceEnabled: boolean;
+  bounceThreshold: number;
+  bounceCooldown: number;
+  createdAt: string;
+}
+
+export interface NotificationWithType {
+  id: string;
+  typeId: string;
+  userId: string;
+  title: string;
+  message: string;
+  data: string | null;
+  environmentId: string | null;
+  inAppReadAt: string | null;
+  emailSentAt: string | null;
+  webhookSentAt: string | null;
+  createdAt: string;
+  type: NotificationType;
+}
+
+export interface NotificationPreference {
+  id: string;
+  userId: string;
+  typeId: string;
+  inAppEnabled: boolean;
+  emailEnabled: boolean;
+  webhookEnabled: boolean;
+  environmentIds: string | null;
+  createdAt: string;
+  updatedAt: string;
+  type: NotificationType;
+}
+
+export interface ListNotificationsOptions {
+  limit?: number;
+  offset?: number;
+  unreadOnly?: boolean;
+  environmentId?: string;
+  category?: 'user' | 'system';
+}
+
+export const listNotifications = (options: ListNotificationsOptions = {}) => {
+  const params = new URLSearchParams();
+  if (options.limit) params.append('limit', options.limit.toString());
+  if (options.offset) params.append('offset', options.offset.toString());
+  if (options.unreadOnly) params.append('unreadOnly', 'true');
+  if (options.environmentId) params.append('environmentId', options.environmentId);
+  if (options.category) params.append('category', options.category);
+  const query = params.toString();
+  return api.get<{ notifications: NotificationWithType[]; total: number }>(
+    `/notifications${query ? `?${query}` : ''}`
+  );
+};
+
+export const getNotificationsUnreadCount = () =>
+  api.get<{ count: number }>('/notifications/unread-count');
+
+export const markNotificationAsRead = (id: string) =>
+  api.post<{ notification: NotificationWithType }>(`/notifications/${id}/read`);
+
+export const markAllNotificationsAsRead = () =>
+  api.post<{ count: number }>('/notifications/read-all');
+
+export const getNotificationPreferences = () =>
+  api.get<{ preferences: NotificationPreference[] }>('/notifications/preferences');
+
+export const updateNotificationPreference = (
+  typeId: string,
+  data: {
+    inAppEnabled?: boolean;
+    emailEnabled?: boolean;
+    webhookEnabled?: boolean;
+    environmentIds?: string[] | null;
+  }
+) => api.put<{ preference: NotificationPreference }>(`/notifications/preferences/${typeId}`, data);
+
+// Admin notification routes
+export const getAdminNotificationTypes = () =>
+  api.get<{ types: NotificationType[] }>('/admin/notification-types');
+
+export const updateAdminNotificationType = (
+  id: string,
+  data: {
+    defaultChannels?: string[];
+    bounceEnabled?: boolean;
+    bounceThreshold?: number;
+    bounceCooldown?: number;
+  }
+) => api.put<{ type: NotificationType }>(`/admin/notification-types/${id}`, data);
+
+// SMTP Configuration
+export interface SmtpConfig {
+  id: string;
+  host: string;
+  port: number;
+  secure: boolean;
+  username: string | null;
+  hasPassword: boolean;
+  fromAddress: string;
+  fromName: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SmtpConfigInput {
+  host: string;
+  port: number;
+  secure: boolean;
+  username?: string;
+  password?: string;
+  fromAddress: string;
+  fromName?: string;
+  enabled?: boolean;
+}
+
+export const getSmtpConfig = () =>
+  api.get<{ config: SmtpConfig | null }>('/admin/smtp');
+
+export const saveSmtpConfig = (data: SmtpConfigInput) =>
+  api.put<{ config: SmtpConfig }>('/admin/smtp', data);
+
+export const testSmtpConnection = (to?: string) =>
+  api.post<{ success: boolean; message: string }>('/admin/smtp/test', to ? { to } : {});
+
+// Outgoing Webhooks
+export interface WebhookConfig {
+  id: string;
+  name: string;
+  url: string;
+  hasSecret: boolean;
+  headers: string | null;
+  enabled: boolean;
+  typeFilter: string | null;
+  environmentIds: string | null;
+  lastTriggeredAt: string | null;
+  successCount: number;
+  failureCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WebhookConfigInput {
+  name: string;
+  url: string;
+  secret?: string;
+  headers?: Record<string, string>;
+  enabled?: boolean;
+  typeFilter?: string[];
+  environmentIds?: string[];
+}
+
+export const listWebhooks = () =>
+  api.get<{ webhooks: WebhookConfig[] }>('/admin/webhooks');
+
+export const getWebhook = (id: string) =>
+  api.get<{ webhook: WebhookConfig }>(`/admin/webhooks/${id}`);
+
+export const createWebhook = (data: WebhookConfigInput) =>
+  api.post<{ webhook: WebhookConfig }>('/admin/webhooks', data);
+
+export const updateWebhook = (id: string, data: Partial<WebhookConfigInput>) =>
+  api.put<{ webhook: WebhookConfig }>(`/admin/webhooks/${id}`, data);
+
+export const deleteWebhook = (id: string) =>
+  api.delete<{ success: boolean }>(`/admin/webhooks/${id}`);
+
+export const testWebhook = (id: string) =>
+  api.post<{ success: boolean; message: string }>(`/admin/webhooks/${id}/test`);

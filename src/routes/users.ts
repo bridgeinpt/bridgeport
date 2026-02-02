@@ -5,6 +5,7 @@ import { prisma } from '../lib/db.js';
 import { requireAdmin, requireAdminOrSelf } from '../plugins/authorize.js';
 import { logAudit } from '../services/audit.js';
 import type { UserRole } from '../services/auth.js';
+import { send, NOTIFICATION_TYPES } from '../services/notifications.js';
 
 const SALT_ROUNDS = 12;
 
@@ -146,6 +147,9 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
         userId: request.authUser!.id,
       });
 
+      // Send notification to the new user
+      await send(NOTIFICATION_TYPES.USER_ACCOUNT_CREATED, user.id, {});
+
       return { user };
     }
   );
@@ -205,6 +209,14 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
         details: updateData,
         userId: request.authUser!.id,
       });
+
+      // Notify user if role changed
+      if (updateData.role && updateData.role !== existingUser.role) {
+        await send(NOTIFICATION_TYPES.USER_ROLE_CHANGED, user.id, {
+          oldRole: existingUser.role,
+          newRole: updateData.role,
+        });
+      }
 
       return { user };
     }
@@ -296,6 +308,11 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
         resourceName: user.email,
         details: { passwordChanged: true, changedBy: isAdmin && !isSelf ? 'admin' : 'self' },
         userId: request.authUser!.id,
+      });
+
+      // Notify user that password was changed
+      await send(NOTIFICATION_TYPES.USER_PASSWORD_CHANGED, id, {
+        changedBy: isAdmin && !isSelf ? ' by an administrator' : '',
       });
 
       return { success: true, message: 'Password updated successfully' };
