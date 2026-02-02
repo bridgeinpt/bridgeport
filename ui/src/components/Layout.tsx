@@ -106,14 +106,9 @@ const navigationGroups: NavGroup[] = [
     name: 'System',
     items: [
       { name: 'Audit Logs', href: '/activity', icon: ActivityIcon },
-    ],
-  },
-  {
-    name: 'Settings',
-    items: [
-      { name: 'Environment', href: '/settings', icon: SettingsIcon },
       { name: 'Users', href: '/users', icon: UsersIcon, adminOnly: true },
-      { name: 'Notifications', href: '/admin/notifications', icon: NavBellIcon, adminOnly: true },
+      { name: 'Environment Config', href: '/settings', icon: SettingsIcon },
+      { name: 'Notifications Config', href: '/admin/notifications', icon: NavBellIcon, adminOnly: true },
     ],
   },
 ];
