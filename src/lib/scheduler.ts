@@ -736,6 +736,7 @@ async function runAgentStalenessCheck(): Promise<void> {
         name: true,
         agentStatus: true,
         lastAgentPushAt: true,
+        agentStatusChangedAt: true,
         environmentId: true,
       },
     });
@@ -770,9 +771,59 @@ async function runAgentStalenessCheck(): Promise<void> {
       if (newStatus) {
         await prisma.server.update({
           where: { id: server.id },
-          data: { agentStatus: newStatus },
+          data: { agentStatus: newStatus, agentStatusChangedAt: new Date() },
         });
         console.log(`[Scheduler] Agent ${server.name} marked as ${newStatus}`);
+      }
+    }
+
+    // Check for agents that never connected (waiting/deploying with no push)
+    // These should be marked offline if they've been waiting too long
+    const waitingServers = await prisma.server.findMany({
+      where: {
+        metricsMode: 'agent',
+        lastAgentPushAt: null, // Never received a push
+        agentStatus: { in: ['waiting', 'deploying'] },
+        agentStatusChangedAt: { not: null }, // Has a status change time to check against
+      },
+      select: {
+        id: true,
+        name: true,
+        agentStatus: true,
+        agentStatusChangedAt: true,
+        environmentId: true,
+      },
+    });
+
+    for (const server of waitingServers) {
+      if (!server.agentStatusChangedAt) continue;
+
+      const statusChangedAt = new Date(server.agentStatusChangedAt);
+
+      if (statusChangedAt < offlineThreshold) {
+        // Agent has been waiting/deploying for too long without connecting - mark offline
+        await prisma.server.update({
+          where: { id: server.id },
+          data: { agentStatus: 'offline', agentStatusChangedAt: new Date() },
+        });
+        console.log(`[Scheduler] Agent ${server.name} marked as offline (never connected)`);
+
+        // Send notification
+        const bounce = await recordFailure('server', server.id, 'offline', NOTIFICATION_TYPES.SYSTEM_SERVER_OFFLINE);
+        if (bounce.shouldAlert) {
+          await sendSystemNotification(
+            NOTIFICATION_TYPES.SYSTEM_SERVER_OFFLINE,
+            server.environmentId,
+            { serverName: server.name, reason: 'Agent never connected after deployment' }
+          );
+        }
+      } else if (statusChangedAt < staleThreshold && server.agentStatus === 'waiting') {
+        // Agent has been waiting for a while - mark as stale
+        await prisma.server.update({
+          where: { id: server.id },
+          data: { agentStatus: 'stale', agentStatusChangedAt: new Date() },
+        });
+        console.log(`[Scheduler] Agent ${server.name} marked as stale (not connecting)`);
       }
     }
   } catch (error) {

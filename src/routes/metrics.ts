@@ -220,11 +220,17 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
       agentStatus: string;
       lastAgentPushAt: Date;
       agentVersion?: string;
+      agentStatusChangedAt?: Date;
     } = {
       lastCheckedAt: now,
       agentStatus: 'active',
       lastAgentPushAt: now,
     };
+
+    // Track status change time if status is changing
+    if (server.agentStatus !== 'active') {
+      serverUpdateData.agentStatusChangedAt = now;
+    }
 
     // Set server health status if provided
     if (serverHealthy !== undefined) {

@@ -23,7 +23,24 @@ const updateSettingsSchema = z.object({
   agentCallbackUrl: z.string().url().nullable().optional().or(z.literal('')),
   agentStaleThresholdMs: z.number().int().min(60000).max(600000).optional(),
   agentOfflineThresholdMs: z.number().int().min(120000).max(900000).optional(),
+  doRegistryToken: z.string().nullable().optional().or(z.literal('')),
 });
+
+/**
+ * Mask sensitive fields in settings response
+ */
+function maskSensitiveFields(settings: {
+  doRegistryToken?: string | null;
+  [key: string]: unknown;
+}): typeof settings & { doRegistryTokenSet: boolean } {
+  const masked = { ...settings, doRegistryTokenSet: !!settings.doRegistryToken };
+  // Replace actual token with masked version
+  if (masked.doRegistryToken) {
+    const token = masked.doRegistryToken;
+    masked.doRegistryToken = token.length > 8 ? `****${token.slice(-4)}` : '****';
+  }
+  return masked;
+}
 
 export async function systemSettingsRoutes(fastify: FastifyInstance): Promise<void> {
   // Get current system settings (all authenticated users)
@@ -33,7 +50,7 @@ export async function systemSettingsRoutes(fastify: FastifyInstance): Promise<vo
     async () => {
       const settings = await getSystemSettings();
       return {
-        settings,
+        settings: maskSensitiveFields(settings),
         defaults: SYSTEM_SETTINGS_DEFAULTS,
       };
     }
@@ -65,18 +82,30 @@ export async function systemSettingsRoutes(fastify: FastifyInstance): Promise<vo
         }
       }
 
-      const settings = await updateSystemSettings(body.data);
+      // Handle empty string as null for doRegistryToken
+      const updateData = { ...body.data };
+      if (updateData.doRegistryToken === '') {
+        updateData.doRegistryToken = null;
+      }
+
+      const settings = await updateSystemSettings(updateData);
+
+      // Don't log the actual token value in audit
+      const auditDetails = { ...body.data };
+      if (auditDetails.doRegistryToken) {
+        auditDetails.doRegistryToken = '(updated)';
+      }
 
       await logAudit({
         action: 'update',
         resourceType: 'system_settings',
         resourceId: 'singleton',
         resourceName: 'System Settings',
-        details: { changes: body.data },
+        details: { changes: auditDetails },
         userId: request.authUser!.id,
       });
 
-      return { settings };
+      return { settings: maskSensitiveFields(settings) };
     }
   );
 
@@ -96,7 +125,7 @@ export async function systemSettingsRoutes(fastify: FastifyInstance): Promise<vo
         userId: request.authUser!.id,
       });
 
-      return { settings, message: 'Settings reset to defaults' };
+      return { settings: maskSensitiveFields(settings), message: 'Settings reset to defaults' };
     }
   );
 }

@@ -1595,6 +1595,8 @@ export interface SystemSettings {
   agentCallbackUrl: string | null;
   agentStaleThresholdMs: number;
   agentOfflineThresholdMs: number;
+  doRegistryToken: string | null; // Masked value (last 4 chars) or null
+  doRegistryTokenSet: boolean;
   updatedAt: string;
 }
 
@@ -1627,6 +1629,7 @@ export interface SystemSettingsInput {
   agentCallbackUrl?: string | null;
   agentStaleThresholdMs?: number;
   agentOfflineThresholdMs?: number;
+  doRegistryToken?: string | null;
 }
 
 export const getSystemSettings = () =>
@@ -1800,6 +1803,7 @@ export interface AgentInfo {
   hasAgentToken: boolean;
   agentStatus: AgentStatus;
   agentVersion: string | null;
+  agentStatusChangedAt: string | null;
   lastCheckedAt: string | null;
   lastAgentPushAt: string | null;
   lastMetricsPush: string | null;

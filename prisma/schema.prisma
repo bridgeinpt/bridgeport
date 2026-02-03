@@ -88,9 +88,10 @@ model Server {
   agentToken  String? // Token for agent authentication
 
   // Agent status tracking
-  agentStatus     String    @default("unknown") // unknown|deploying|waiting|active|stale|offline
-  lastAgentPushAt DateTime? // When agent last pushed metrics (distinct from lastCheckedAt)
-  agentVersion    String? // Agent version reported by agent
+  agentStatus          String    @default("unknown") // unknown|deploying|waiting|active|stale|offline
+  lastAgentPushAt      DateTime? // When agent last pushed metrics (distinct from lastCheckedAt)
+  agentVersion         String? // Agent version reported by agent
+  agentStatusChangedAt DateTime? // When agent status last changed
 
   environmentId String
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
@@ -700,6 +701,9 @@ model SystemSettings {
   agentCallbackUrl        String? // Internal URL for agents to reach BridgePort (e.g., http://10.30.10.5:3000)
   agentStaleThresholdMs   Int     @default(180000) // 3 min - mark agent as "stale"
   agentOfflineThresholdMs Int     @default(300000) // 5 min - mark agent as "offline"
+
+  // Registry Configuration
+  doRegistryToken String? // DigitalOcean registry API token
 
   updatedAt DateTime @updatedAt
 }

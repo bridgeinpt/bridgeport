@@ -464,7 +464,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <TopBar onOpenAccount={openAccountModal} />
 
         {/* Main content */}
-        <main className="flex-1 overflow-auto">{children}</main>
+        <main className="flex-1 overflow-auto">
+          {/* Key forces remount of children when environment changes, resetting all local state */}
+          <div key={selectedEnvironment?.id || 'no-env'}>
+            {children}
+          </div>
+        </main>
       </div>
 
       {/* Account Modal */}

@@ -269,6 +269,7 @@ export default function MonitoringAgents() {
                   <th className="pb-3 font-medium">Server</th>
                   <th className="pb-3 font-medium">Metrics Mode</th>
                   <th className="pb-3 font-medium">Status</th>
+                  <th className="pb-3 font-medium">Status Changed</th>
                   <th className="pb-3 font-medium">Version</th>
                   <th className="pb-3 font-medium">Last Push</th>
                   <th className="pb-3 font-medium">Actions</th>
@@ -300,6 +301,11 @@ export default function MonitoringAgents() {
                       ) : (
                         <span className="text-slate-500">--</span>
                       )}
+                    </td>
+                    <td className="py-3 text-sm text-slate-500">
+                      {agent.metricsMode === 'agent' && agent.agentStatusChangedAt
+                        ? formatDistanceToNow(new Date(agent.agentStatusChangedAt), { addSuffix: true })
+                        : '--'}
                     </td>
                     <td className="py-3 text-sm text-slate-500 font-mono">
                       {agent.metricsMode === 'agent' && agent.agentVersion

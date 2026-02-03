@@ -15,6 +15,7 @@ interface FormData {
   agentCallbackUrl: string;
   agentStaleThresholdSec: number;
   agentOfflineThresholdSec: number;
+  doRegistryToken: string;
 }
 
 interface Defaults {
@@ -78,7 +79,9 @@ export default function SystemSettings() {
     agentCallbackUrl: '',
     agentStaleThresholdSec: 180,
     agentOfflineThresholdSec: 300,
+    doRegistryToken: '',
   });
+  const [doRegistryTokenSet, setDoRegistryTokenSet] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -104,7 +107,9 @@ export default function SystemSettings() {
         agentCallbackUrl: settings.agentCallbackUrl || '',
         agentStaleThresholdSec: msToSec(settings.agentStaleThresholdMs),
         agentOfflineThresholdSec: msToSec(settings.agentOfflineThresholdMs),
+        doRegistryToken: '',
       });
+      setDoRegistryTokenSet(settings.doRegistryTokenSet);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load settings');
     } finally {
@@ -119,7 +124,7 @@ export default function SystemSettings() {
       setError(null);
       setSuccess(null);
 
-      await updateSystemSettings({
+      const updateData: Parameters<typeof updateSystemSettings>[0] = {
         sshCommandTimeoutMs: secToMs(formData.sshCommandTimeoutSec),
         sshReadyTimeoutMs: secToMs(formData.sshReadyTimeoutSec),
         webhookMaxRetries: formData.webhookMaxRetries,
@@ -133,7 +138,14 @@ export default function SystemSettings() {
         agentCallbackUrl: formData.agentCallbackUrl || null,
         agentStaleThresholdMs: secToMs(formData.agentStaleThresholdSec),
         agentOfflineThresholdMs: secToMs(formData.agentOfflineThresholdSec),
-      });
+      };
+      // Only include doRegistryToken if it was changed (non-empty)
+      if (formData.doRegistryToken) {
+        updateData.doRegistryToken = formData.doRegistryToken;
+      }
+      const { settings } = await updateSystemSettings(updateData);
+      setDoRegistryTokenSet(settings.doRegistryTokenSet);
+      setFormData(prev => ({ ...prev, doRegistryToken: '' }));
 
       setSuccess('Settings saved successfully');
     } catch (err) {
@@ -168,7 +180,9 @@ export default function SystemSettings() {
         agentCallbackUrl: settings.agentCallbackUrl || '',
         agentStaleThresholdSec: msToSec(settings.agentStaleThresholdMs),
         agentOfflineThresholdSec: msToSec(settings.agentOfflineThresholdMs),
+        doRegistryToken: '',
       });
+      setDoRegistryTokenSet(settings.doRegistryTokenSet);
 
       setSuccess('Settings reset to defaults');
     } catch (err) {
@@ -307,6 +321,34 @@ export default function SystemSettings() {
           </div>
         </section>
 
+        {/* Registry Configuration */}
+        <section className="card p-5">
+          <h2 className="text-lg font-semibold text-white mb-4">Registry Configuration</h2>
+          <div>
+            <label className="block text-sm text-slate-400 mb-1">
+              DigitalOcean Registry Token
+            </label>
+            <div className="relative">
+              <input
+                type="password"
+                value={formData.doRegistryToken}
+                onChange={(e) => updateField('doRegistryToken', e.target.value)}
+                placeholder={doRegistryTokenSet ? '••••••••' : 'Enter token'}
+                className="input w-full pr-20"
+              />
+              {doRegistryTokenSet && (
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-green-400">
+                  Configured
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-500 mt-1">
+              API token for DigitalOcean Container Registry. Used for image pulls and tag listing.
+              Leave empty to keep current value. Falls back to DO_REGISTRY_TOKEN env var if not set.
+            </p>
+          </div>
+        </section>
+
         {/* Agent Configuration */}
         <section className="card p-5">
           <h2 className="text-lg font-semibold text-white mb-4">Agent Configuration</h2>
@@ -317,6 +359,7 @@ export default function SystemSettings() {
             <div>
               <label className="block text-sm text-slate-400 mb-1">
                 Callback URL
+                <span className="text-amber-500 ml-1">*</span>
               </label>
               <input
                 type="text"
@@ -327,7 +370,7 @@ export default function SystemSettings() {
               />
               <p className="text-xs text-slate-500 mt-1">
                 Internal URL for agents to reach BridgePort. Use the VPC IP of the BridgePort server.
-                If empty, falls back to AGENT_CALLBACK_URL env var or HOST:PORT.
+                <span className="text-amber-500 font-medium"> Required for agent deployment.</span>
               </p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

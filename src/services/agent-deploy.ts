@@ -3,7 +3,6 @@ import { join } from 'path';
 import { prisma } from '../lib/db.js';
 import { SSHClient, LocalClient, isLocalhost, type CommandClient } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
-import { config } from '../lib/config.js';
 import { getSystemSettings } from './system-settings.js';
 import crypto from 'crypto';
 
@@ -20,29 +19,12 @@ export function generateAgentToken(): string {
 
 /**
  * Get the BridgePort server URL for the agent to connect to.
- * Priority: System settings agentCallbackUrl > env var AGENT_CALLBACK_URL > HOST:PORT fallback.
+ * Must be configured in System Settings - no fallbacks.
+ * Returns null if not configured.
  */
-async function getBridgePortUrl(): Promise<string> {
-  // First priority: check system settings
+async function getBridgePortUrl(): Promise<string | null> {
   const settings = await getSystemSettings();
-  if (settings.agentCallbackUrl) {
-    return settings.agentCallbackUrl;
-  }
-
-  // Second priority: use explicit callback URL from env if configured
-  if (config.AGENT_CALLBACK_URL) {
-    return config.AGENT_CALLBACK_URL;
-  }
-
-  // Fallback: construct from HOST/PORT
-  // This only works if HOST is the actual internal IP, not 0.0.0.0
-  if (config.HOST && config.HOST !== '0.0.0.0') {
-    return `http://${config.HOST}:${config.PORT}`;
-  }
-
-  // Last resort - won't work for remote servers
-  console.warn('[Agent Deploy] agentCallbackUrl not set in system settings. Agent deployment may fail for remote servers.');
-  return `http://127.0.0.1:${config.PORT}`;
+  return settings.agentCallbackUrl || null;
 }
 
 /**
@@ -61,6 +43,18 @@ export async function deployAgent(
     return { success: false, error: 'Server not found' };
   }
 
+  // Determine the URL the agent should use to connect back
+  // Use provided URL, or get from system settings
+  const serverUrl = bridgeportUrl || (await getBridgePortUrl());
+
+  // Validate that callback URL is configured
+  if (!serverUrl) {
+    return {
+      success: false,
+      error: 'Agent Callback URL must be configured in System Settings before deploying agents',
+    };
+  }
+
   // Generate token if not exists
   let agentToken = server.agentToken;
   if (!agentToken) {
@@ -74,12 +68,8 @@ export async function deployAgent(
   // Set agent status to deploying
   await prisma.server.update({
     where: { id: serverId },
-    data: { agentStatus: 'deploying' },
+    data: { agentStatus: 'deploying', agentStatusChangedAt: new Date() },
   });
-
-  // Determine the URL the agent should use to connect back
-  // Use provided URL, or auto-detect from system settings / env var
-  const serverUrl = bridgeportUrl || (await getBridgePortUrl());
 
   // Create appropriate client based on hostname
   let client: CommandClient;
@@ -188,6 +178,7 @@ WantedBy=multi-user.target
       data: {
         metricsMode: 'agent',
         agentStatus: 'waiting',
+        agentStatusChangedAt: new Date(),
       },
     });
 
@@ -197,7 +188,7 @@ WantedBy=multi-user.target
     // Reset agent status on failure
     await prisma.server.update({
       where: { id: serverId },
-      data: { agentStatus: 'unknown' },
+      data: { agentStatus: 'unknown', agentStatusChangedAt: new Date() },
     });
     const message = error instanceof Error ? error.message : 'Unknown error';
     return { success: false, error: message };

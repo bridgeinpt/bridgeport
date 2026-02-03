@@ -20,6 +20,7 @@ export const SYSTEM_SETTINGS_DEFAULTS = {
   defaultLogLines: 50,
   agentStaleThresholdMs: 180000,
   agentOfflineThresholdMs: 300000,
+  doRegistryToken: null as string | null,
 };
 
 /**
@@ -77,6 +78,7 @@ export async function resetSystemSettings(): Promise<SystemSettings> {
       agentCallbackUrl: null,
       agentStaleThresholdMs: SYSTEM_SETTINGS_DEFAULTS.agentStaleThresholdMs,
       agentOfflineThresholdMs: SYSTEM_SETTINGS_DEFAULTS.agentOfflineThresholdMs,
+      doRegistryToken: null,
     },
   });
   return cachedSettings;

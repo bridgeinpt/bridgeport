@@ -730,6 +730,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
           agentToken: true,
           agentStatus: true,
           agentVersion: true,
+          agentStatusChangedAt: true,
           lastCheckedAt: true,
           lastAgentPushAt: true,
           metrics: {
@@ -749,6 +750,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         hasAgentToken: !!server.agentToken,
         agentStatus: server.agentStatus,
         agentVersion: server.agentVersion,
+        agentStatusChangedAt: server.agentStatusChangedAt,
         lastCheckedAt: server.lastCheckedAt,
         lastAgentPushAt: server.lastAgentPushAt,
         lastMetricsPush: server.metrics[0]?.collectedAt || null,
