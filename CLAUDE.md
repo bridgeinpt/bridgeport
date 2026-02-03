@@ -5,10 +5,11 @@ A lightweight, self-hosted deployment management tool for Docker-based infrastru
 ## Tech Stack
 
 - **Backend**: Node.js, Fastify, TypeScript
-- **Frontend**: React, Vite, Tailwind CSS
+- **Frontend**: React, Vite, Tailwind CSS, Recharts (charts)
 - **Database**: SQLite with Prisma ORM
 - **Encryption**: XChaCha20-Poly1305 for secrets
 - **Monitoring Agent**: Go
+- **CLI**: Go (Cobra framework)
 
 ## Project Structure
 
@@ -33,11 +34,18 @@ bridgeport/
 │   │   ├── registries.ts     # Registry connections
 │   │   ├── databases.ts      # Database backup management
 │   │   ├── metrics.ts        # Server/service metrics
+│   │   ├── monitoring.ts     # Health logs, metrics history, SSH testing
+│   │   ├── settings.ts       # Service types CRUD
+│   │   ├── spaces.ts         # Global Spaces configuration
+│   │   ├── system-settings.ts # System-wide operational settings
 │   │   ├── audit.ts          # Audit logs
 │   │   └── webhooks.ts       # CI/CD webhooks
 │   ├── services/             # Business logic
 │   │   ├── metrics.ts        # SSH metrics collection
-│   │   └── database-backup.ts # Backup execution
+│   │   ├── database-backup.ts # Backup execution
+│   │   ├── service-types.ts  # Service type utilities
+│   │   ├── system-settings.ts # Cached system settings singleton
+│   │   └── outgoing-webhooks.ts # Webhook delivery with retries
 │   └── plugins/              # Fastify plugins
 │       ├── authenticate.ts   # JWT authentication
 │       └── authorize.ts      # RBAC middleware
@@ -47,11 +55,20 @@ bridgeport/
 │   │   │   └── Layout.tsx    # Navigation sidebar with env selector
 │   │   ├── pages/            # Page components
 │   │   │   ├── Dashboard.tsx # Overview with server metrics
-│   │   │   ├── Monitoring.tsx # Dedicated monitoring dashboard
+│   │   │   ├── Monitoring.tsx # Metrics overview with charts
+│   │   │   ├── MonitoringHealth.tsx # Health check logs
+│   │   │   ├── MonitoringAgents.tsx # Agent management, SSH testing
 │   │   │   ├── Servers.tsx   # Server list
 │   │   │   ├── ServerDetail.tsx # Server config + monitoring
 │   │   │   ├── Services.tsx  # Service list
 │   │   │   ├── ServiceDetail.tsx # Service deploy + health checks
+│   │   │   ├── Databases.tsx # Database list
+│   │   │   ├── DatabaseDetail.tsx # Database config + backups
+│   │   │   ├── Settings.tsx  # Environment settings + scheduler config
+│   │   │   ├── settings/
+│   │   │   │   ├── ServiceTypes.tsx # Service type management
+│   │   │   │   ├── GlobalSpaces.tsx # Global Spaces configuration
+│   │   │   │   └── SystemSettings.tsx # System-wide settings
 │   │   │   └── ...           # Other pages
 │   │   └── lib/              # API client, store
 │   └── public/               # Static assets
@@ -60,6 +77,25 @@ bridgeport/
 │   ├── collector/
 │   │   ├── system.go         # CPU, memory, disk, load
 │   │   └── docker.go         # Container metrics
+│   ├── go.mod
+│   └── Makefile
+├── cli/                      # Go command-line interface
+│   ├── main.go               # CLI entry point
+│   ├── cmd/                  # Command implementations
+│   │   ├── root.go           # Root command, global flags
+│   │   ├── login.go          # Authentication
+│   │   ├── list.go           # List servers
+│   │   ├── status.go         # Server details
+│   │   ├── ssh.go            # SSH access
+│   │   ├── exec.go           # Container exec
+│   │   ├── logs.go           # Container logs
+│   │   └── run.go            # Predefined commands
+│   ├── internal/             # Internal packages
+│   │   ├── api/              # API client
+│   │   ├── config/           # Config management
+│   │   ├── ssh/              # SSH connectivity
+│   │   ├── docker/           # Docker operations
+│   │   └── output/           # Terminal formatting
 │   ├── go.mod
 │   └── Makefile
 ├── prisma/schema.prisma      # Database schema
@@ -91,6 +127,9 @@ cd ui && npm run build
 
 # Build Go agent
 cd bridgeport-agent && make build-linux
+
+# Build CLI
+cd cli && make build
 ```
 
 ## Key Patterns
@@ -170,19 +209,27 @@ SCHEDULER_BACKUP_CHECK_INTERVAL=60  # Backup schedule check (seconds)
 ## Key Models
 
 ```
-User          - Authentication with role (admin/operator/viewer), lastActiveAt for session tracking
-Environment   - Logical grouping with SSH key, allowSecretReveal setting
-Server        - Physical/virtual machine with metricsMode (ssh/agent/disabled)
-Service       - Docker container
-Secret        - Encrypted key-value with neverReveal flag
-ConfigFile    - Synced configuration files (including .env files with secret placeholders)
-FileHistory   - Edit history for config files
-Database      - Registered database for backups (editable after creation)
+User           - Authentication with role (admin/operator/viewer), lastActiveAt for session tracking
+Environment    - Logical grouping with SSH key, allowSecretReveal, schedulerConfig (per-env scheduler)
+Server         - Physical/virtual machine with metricsMode (ssh/agent/disabled)
+Service        - Docker container with optional serviceTypeId
+Secret         - Encrypted key-value with neverReveal flag
+ConfigFile     - Synced configuration files (including .env files with secret placeholders)
+FileHistory    - Edit history for config files
+Database       - Registered database for backups (editable after creation)
 DatabaseBackup - Backup record with status
 BackupSchedule - Cron-based backup scheduling
 ServerMetrics  - Time-series server metrics
 ServiceMetrics - Time-series container metrics
 RegistryConnection - Container registry with refreshIntervalMinutes, autoLinkPattern
+HealthCheckLog - Health check results with duration, status, response details
+
+# Global Settings
+ServiceType        - Predefined service types (Django, Node.js, etc.) with commands
+ServiceTypeCommand - Commands for a service type (shell, migrate, etc.)
+SpacesConfig       - Global DO Spaces credentials
+SpacesEnvironment  - Per-environment Spaces enable/disable
+SystemSettings     - System-wide operational settings (timeouts, limits, retries)
 ```
 
 ## UI Features
@@ -211,10 +258,16 @@ RegistryConnection - Container registry with refreshIntervalMinutes, autoLinkPat
 - **Active Users**: Shows which users are currently online (active in last 15 minutes)
 - **Session Tracking**: lastActiveAt updated on each authenticated request
 
-### Monitoring Dashboard (`/monitoring`)
-- Environment-wide server metrics overview
-- Service resource usage table sorted by CPU
+### Monitoring Hub (`/monitoring/*`)
+- **Overview** (`/monitoring`): Environment-wide metrics with time-series charts (Recharts)
+- **Health Checks** (`/monitoring/health`): Filterable health check logs with pagination
+- **Agents** (`/monitoring/agents`): Agent management, SSH connectivity testing
 - Auto-refresh every 30 seconds
+
+### Global Settings (`/settings/*`)
+- **System** (`/settings/system`): SSH timeouts, webhook retries, backup timeouts, limits
+- **Service Types** (`/settings/service-types`): Manage predefined service types and commands
+- **Spaces** (`/settings/spaces`): Global DO Spaces config with per-environment toggles
 
 ### About Page
 - Dynamic version display fetched from `/health` endpoint
@@ -227,3 +280,5 @@ RegistryConnection - Container registry with refreshIntervalMinutes, autoLinkPat
 - Audit logging is required for sensitive operations
 - File edits automatically save to history for rollback
 - Agent tokens are per-server, generated when enabling agent mode
+- System settings use a cached singleton pattern - call `getSystemSettings()` for current values
+- Health check logs are stored in `HealthCheckLog` with automatic cleanup based on retention settings

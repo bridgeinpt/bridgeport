@@ -10,15 +10,19 @@ Created by the Engineering Team at [BridgeIn](https://bridgein.pt).
 
 - **Server Management** - Register servers, health checks, container discovery via SSH
 - **Service Management** - Deploy, restart, and monitor Docker containers
+- **Service Types** - Predefined commands for Django, Node.js, and custom service types
 - **Registry Connections** - Connect to container registries with configurable refresh intervals and auto-linking
 - **Auto-Update** - Automatic update checking and optional auto-deployment for services
 - **Config File Management** - Store and sync configuration files to servers with edit history
 - **Secret Management** - Encrypted secret storage with env template substitution and reveal controls
-- **Database Backups** - PostgreSQL and SQLite backup management with scheduling
+- **Database Backups** - PostgreSQL and SQLite backup management with scheduling and Spaces storage
 - **Server Monitoring** - Real-time metrics via SSH polling or lightweight Go agent
+- **Monitoring Hub** - Health check logs, metrics charts, agent management, SSH testing
 - **User Management** - Role-based access control (Admin, Operator, Viewer), session tracking
 - **Self-Service Account** - All users can update profile and change password via sidebar
 - **Audit Logging** - Track all deployments and configuration changes
+- **System Settings** - Configurable timeouts, retry policies, and operational limits
+- **CLI Tool** - Command-line interface for SSH, logs, exec, and server management
 - **Web UI** - Dashboard with metrics, deployment management, and monitoring
 
 ## Quick Start
@@ -132,6 +136,7 @@ bridgeport/
 │       └── authorize.ts       # RBAC middleware
 ├── ui/                        # React frontend (Vite + Tailwind)
 ├── bridgeport-agent/          # Go monitoring agent
+├── cli/                       # Go command-line interface
 ├── prisma/schema.prisma       # Database schema
 └── docker/                    # Docker configuration
 ```
@@ -222,6 +227,14 @@ Manage PostgreSQL and SQLite database backups:
 - Backup storage on server filesystem or DO Spaces
 - Download and restore capabilities
 
+### Service Types
+Predefined configurations for common service patterns:
+- **Django** - Shell access, migrations, collectstatic commands
+- **Node.js** - Shell access, common npm commands
+- **Generic** - Basic shell access
+- Custom service types can be created with any commands
+- Assign service types to services for quick command execution via UI or CLI
+
 ### Server Monitoring
 Two methods for collecting server and container metrics:
 
@@ -235,6 +248,13 @@ Metrics collected:
 - Load averages, uptime
 - Per-container CPU and memory
 - Container restart counts
+
+### System Settings
+Global operational parameters (admin-only):
+- **SSH Timeouts** - Command and connection timeouts
+- **Webhook Settings** - Max retries, timeout, retry delays
+- **Backup Settings** - pg_dump timeout
+- **Limits** - Max upload size, active user window, registry max tags, default log lines
 
 ## Monitoring Agent
 
@@ -351,7 +371,9 @@ POST   /api/users/:id/change-password # Change password (admin or self, self req
 GET  /api/environments              # List environments
 POST /api/environments              # Create environment
 PUT  /api/environments/:id/ssh      # Upload SSH key
+GET  /api/environments/:id/ssh-key  # Get SSH credentials (for CLI)
 PUT  /api/environments/:id/settings # Update settings (reveal control, Spaces creds)
+GET  /api/environments/:id/spaces/buckets  # List available Spaces buckets
 ```
 
 ### Servers
@@ -374,6 +396,7 @@ POST  /api/services/:id/health        # Health check
 GET   /api/services/:id/logs          # Get logs
 GET   /api/services/:id/metrics       # Get container metrics
 POST  /api/services/:id/check-updates # Check for image updates
+POST  /api/services/:id/run-command   # Run predefined service type command
 ```
 
 ### Registry Connections
@@ -453,6 +476,37 @@ POST /api/metrics/ingest                         # Agent metrics push endpoint
 POST /api/webhooks/deploy   # Deployment webhook for CI/CD
 ```
 
+### Monitoring
+```bash
+GET  /api/monitoring/health-logs              # List health check logs (filterable)
+GET  /api/monitoring/health-logs/:id          # Get single health log
+GET  /api/monitoring/metrics-history          # Server/service metrics over time
+POST /api/monitoring/test-ssh/:serverId       # Test SSH connectivity to server
+```
+
+### Settings (Admin)
+```bash
+# Service Types
+GET    /api/settings/service-types            # List service types
+POST   /api/settings/service-types            # Create service type
+GET    /api/settings/service-types/:id        # Get service type
+PATCH  /api/settings/service-types/:id        # Update service type
+DELETE /api/settings/service-types/:id        # Delete service type
+POST   /api/settings/service-types/:id/commands  # Add command to service type
+DELETE /api/settings/service-types/:typeId/commands/:cmdId  # Remove command
+
+# Global Spaces Configuration
+GET    /api/settings/spaces                   # Get global Spaces config
+PUT    /api/settings/spaces                   # Update global Spaces config
+GET    /api/settings/spaces/environments      # List per-environment Spaces settings
+PUT    /api/settings/spaces/environments/:id  # Update environment Spaces settings
+
+# System Settings
+GET    /api/settings/system                   # Get system settings
+PATCH  /api/settings/system                   # Update system settings
+POST   /api/settings/system/reset             # Reset to defaults
+```
+
 ## Configuration
 
 | Variable | Description | Required | Default |
@@ -484,6 +538,52 @@ POST /api/webhooks/deploy   # Deployment webhook for CI/CD
 - **Audit**: All sensitive actions logged
 - **Secret Reveal Control**: Per-environment and per-secret visibility restrictions
 
+## CLI Tool
+
+BridgePort includes a command-line interface for managing infrastructure from the terminal.
+
+### Installation
+
+```bash
+cd cli
+make build
+sudo mv bridgeport /usr/local/bin/
+```
+
+### Quick Start
+
+```bash
+# Authenticate
+bridgeport login --url https://deploy.example.com
+
+# List servers with metrics
+bridgeport list
+
+# SSH into a server
+bridgeport ssh staging app-api
+
+# View container logs
+bridgeport logs staging app-api app-api -f
+
+# Execute command in container
+bridgeport exec staging app-api app-api -- python manage.py shell
+```
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `login` | Authenticate with BridgePort |
+| `list` | List all servers with metrics |
+| `status <env> <server>` | Show detailed server info |
+| `ssh <env> <server>` | SSH into a server |
+| `exec <env> <server> <service>` | Execute command in container |
+| `logs <env> <server> <service>` | View container logs |
+| `run <env> <server> <service> <cmd>` | Run predefined service command |
+| `completion` | Generate shell completions |
+
+See [cli/README.md](cli/README.md) for full documentation.
+
 ## Building
 
 ```bash
@@ -498,6 +598,9 @@ docker build -f docker/Dockerfile -t bridgeport .
 
 # Build monitoring agent
 cd bridgeport-agent && make build-linux
+
+# Build CLI (cross-platform)
+cd cli && make build-all
 ```
 
 ## License
