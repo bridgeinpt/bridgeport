@@ -395,6 +395,41 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
     }
   );
 
+  // List Spaces buckets
+  fastify.get(
+    '/api/environments/:id/spaces/buckets',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      const spacesConfig = await getEnvironmentSpacesConfig(id);
+      if (!spacesConfig) {
+        return reply.code(400).send({
+          error: 'Spaces is not configured for this environment'
+        });
+      }
+
+      try {
+        const s3Client = new S3Client({
+          endpoint: `https://${spacesConfig.endpoint}`,
+          region: spacesConfig.region,
+          credentials: {
+            accessKeyId: spacesConfig.accessKey,
+            secretAccessKey: spacesConfig.secretKey,
+          },
+        });
+
+        const result = await s3Client.send(new ListBucketsCommand({}));
+        const buckets = result.Buckets?.map(b => b.Name).filter((name): name is string => !!name) || [];
+
+        return { buckets };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to list buckets';
+        return reply.code(400).send({ error: message });
+      }
+    }
+  );
+
   // Test Spaces configuration
   fastify.post(
     '/api/environments/:id/spaces/test',

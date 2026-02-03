@@ -212,6 +212,9 @@ export const deleteSpacesConfig = (id: string) =>
 export const testSpacesConfig = (id: string) =>
   api.post<{ success: boolean; message: string; buckets?: string[] }>(`/environments/${id}/spaces/test`);
 
+export const listSpacesBuckets = (id: string) =>
+  api.get<{ buckets: string[] }>(`/environments/${id}/spaces/buckets`);
+
 // Servers
 export const listServers = (envId: string) =>
   api.get<{ servers: Server[] }>(`/environments/${envId}/servers`);

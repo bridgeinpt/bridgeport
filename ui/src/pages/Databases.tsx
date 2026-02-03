@@ -12,6 +12,7 @@ import {
   getBackupSchedule,
   setBackupSchedule,
   listServers,
+  listSpacesBuckets,
   type Database,
   type DatabaseInput,
   type DatabaseBackup,
@@ -65,6 +66,8 @@ export default function Databases() {
   const [schedule, setSchedule] = useState<BackupSchedule | null>(null);
   const [loadingBackups, setLoadingBackups] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
+  const [spacesBuckets, setSpacesBuckets] = useState<string[]>([]);
+  const [loadingBuckets, setLoadingBuckets] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState<DatabaseInput>({
@@ -106,6 +109,20 @@ export default function Databases() {
       setServers(serverRes.servers);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadBuckets = async () => {
+    if (!selectedEnvironment?.id) return;
+    setLoadingBuckets(true);
+    try {
+      const res = await listSpacesBuckets(selectedEnvironment.id);
+      setSpacesBuckets(res.buckets);
+    } catch {
+      // Spaces may not be configured - that's ok
+      setSpacesBuckets([]);
+    } finally {
+      setLoadingBuckets(false);
     }
   };
 
@@ -182,6 +199,10 @@ export default function Databases() {
       backupSpacesBucket: db.backupSpacesBucket || '',
       backupSpacesPrefix: db.backupSpacesPrefix || '',
     });
+    // Load buckets if using Spaces storage
+    if (db.backupStorageType === 'spaces') {
+      loadBuckets();
+    }
   };
 
   const handleEdit = async (e: React.FormEvent) => {
@@ -464,9 +485,13 @@ export default function Databases() {
                 <label className="block text-sm text-slate-400 mb-1">Backup Storage</label>
                 <select
                   value={formData.backupStorageType}
-                  onChange={(e) =>
-                    setFormData({ ...formData, backupStorageType: e.target.value as 'local' | 'spaces' })
-                  }
+                  onChange={(e) => {
+                    const newType = e.target.value as 'local' | 'spaces';
+                    setFormData({ ...formData, backupStorageType: newType });
+                    if (newType === 'spaces' && spacesBuckets.length === 0) {
+                      loadBuckets();
+                    }
+                  }}
                   className="input"
                 >
                   {STORAGE_TYPES.map((t) => (
@@ -488,6 +513,61 @@ export default function Databases() {
                     className="input font-mono text-sm"
                   />
                 </div>
+              )}
+
+              {formData.backupStorageType === 'spaces' && (
+                <>
+                  <div>
+                    <label className="block text-sm text-slate-400 mb-1">Spaces Bucket</label>
+                    <div className="flex gap-2">
+                      <select
+                        value={formData.backupSpacesBucket || ''}
+                        onChange={(e) => setFormData({ ...formData, backupSpacesBucket: e.target.value })}
+                        className="input flex-1"
+                      >
+                        <option value="">Select a bucket...</option>
+                        {spacesBuckets.map((bucket) => (
+                          <option key={bucket} value={bucket}>
+                            {bucket}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={loadBuckets}
+                        disabled={loadingBuckets}
+                        className="btn btn-ghost px-3"
+                        title="Refresh bucket list"
+                      >
+                        {loadingBuckets ? (
+                          <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                          </svg>
+                        ) : (
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+                    {spacesBuckets.length === 0 && !loadingBuckets && (
+                      <p className="text-xs text-slate-500 mt-1">
+                        No buckets found. Configure Spaces in Settings first.
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-sm text-slate-400 mb-1">Spaces Prefix</label>
+                    <input
+                      type="text"
+                      value={formData.backupSpacesPrefix || ''}
+                      onChange={(e) => setFormData({ ...formData, backupSpacesPrefix: e.target.value })}
+                      placeholder="backups/staging/"
+                      className="input font-mono text-sm"
+                    />
+                  </div>
+                </>
               )}
 
               <div className="flex gap-2 justify-end pt-4">
@@ -636,9 +716,13 @@ export default function Databases() {
                 <label className="block text-sm text-slate-400 mb-1">Backup Storage</label>
                 <select
                   value={formData.backupStorageType}
-                  onChange={(e) =>
-                    setFormData({ ...formData, backupStorageType: e.target.value as 'local' | 'spaces' })
-                  }
+                  onChange={(e) => {
+                    const newType = e.target.value as 'local' | 'spaces';
+                    setFormData({ ...formData, backupStorageType: newType });
+                    if (newType === 'spaces' && spacesBuckets.length === 0) {
+                      loadBuckets();
+                    }
+                  }}
                   className="input"
                 >
                   {STORAGE_TYPES.map((t) => (
@@ -666,19 +750,55 @@ export default function Databases() {
                 <>
                   <div>
                     <label className="block text-sm text-slate-400 mb-1">Spaces Bucket</label>
-                    <input
-                      type="text"
-                      value={formData.backupSpacesBucket}
-                      onChange={(e) => setFormData({ ...formData, backupSpacesBucket: e.target.value })}
-                      placeholder="my-bucket"
-                      className="input"
-                    />
+                    <div className="flex gap-2">
+                      <select
+                        value={formData.backupSpacesBucket || ''}
+                        onChange={(e) => setFormData({ ...formData, backupSpacesBucket: e.target.value })}
+                        className="input flex-1"
+                      >
+                        <option value="">Select a bucket...</option>
+                        {spacesBuckets.map((bucket) => (
+                          <option key={bucket} value={bucket}>
+                            {bucket}
+                          </option>
+                        ))}
+                        {/* Keep current value as option if not in list */}
+                        {formData.backupSpacesBucket && !spacesBuckets.includes(formData.backupSpacesBucket) && (
+                          <option value={formData.backupSpacesBucket}>
+                            {formData.backupSpacesBucket}
+                          </option>
+                        )}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={loadBuckets}
+                        disabled={loadingBuckets}
+                        className="btn btn-ghost px-3"
+                        title="Refresh bucket list"
+                      >
+                        {loadingBuckets ? (
+                          <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                          </svg>
+                        ) : (
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+                    {spacesBuckets.length === 0 && !loadingBuckets && (
+                      <p className="text-xs text-slate-500 mt-1">
+                        No buckets found. Configure Spaces in Settings first.
+                      </p>
+                    )}
                   </div>
                   <div>
                     <label className="block text-sm text-slate-400 mb-1">Spaces Prefix</label>
                     <input
                       type="text"
-                      value={formData.backupSpacesPrefix}
+                      value={formData.backupSpacesPrefix || ''}
                       onChange={(e) => setFormData({ ...formData, backupSpacesPrefix: e.target.value })}
                       placeholder="backups/staging/"
                       className="input font-mono text-sm"
