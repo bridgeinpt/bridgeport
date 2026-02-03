@@ -45,11 +45,13 @@ func (c *Client) ListServices(serverID string) ([]Service, error) {
 	if serverID != "" {
 		path = fmt.Sprintf("/api/services?serverId=%s", serverID)
 	}
-	var services []Service
-	if err := c.Get(path, &services); err != nil {
+	var response struct {
+		Services []Service `json:"services"`
+	}
+	if err := c.Get(path, &response); err != nil {
 		return nil, err
 	}
-	return services, nil
+	return response.Services, nil
 }
 
 // GetService returns a single service by ID
@@ -89,9 +91,11 @@ func (c *Client) GetRunCommand(serviceID, commandName string) (string, error) {
 
 // ListServiceTypes returns all service types with their commands
 func (c *Client) ListServiceTypes() ([]ServiceType, error) {
-	var types []ServiceType
-	if err := c.Get("/api/settings/service-types", &types); err != nil {
+	var response struct {
+		ServiceTypes []ServiceType `json:"serviceTypes"`
+	}
+	if err := c.Get("/api/settings/service-types", &response); err != nil {
 		return nil, err
 	}
-	return types, nil
+	return response.ServiceTypes, nil
 }

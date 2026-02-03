@@ -41,11 +41,13 @@ type SSHCredentials struct {
 
 // ListEnvironments returns all environments
 func (c *Client) ListEnvironments() ([]Environment, error) {
-	var envs []Environment
-	if err := c.Get("/api/environments", &envs); err != nil {
+	var response struct {
+		Environments []Environment `json:"environments"`
+	}
+	if err := c.Get("/api/environments", &response); err != nil {
 		return nil, err
 	}
-	return envs, nil
+	return response.Environments, nil
 }
 
 // GetEnvironment returns a single environment by ID
@@ -63,11 +65,13 @@ func (c *Client) ListServers(environmentID string) ([]Server, error) {
 	if environmentID != "" {
 		path = fmt.Sprintf("/api/servers?environmentId=%s", environmentID)
 	}
-	var servers []Server
-	if err := c.Get(path, &servers); err != nil {
+	var response struct {
+		Servers []Server `json:"servers"`
+	}
+	if err := c.Get(path, &response); err != nil {
 		return nil, err
 	}
-	return servers, nil
+	return response.Servers, nil
 }
 
 // GetServer returns a single server by ID
