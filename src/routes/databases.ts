@@ -13,11 +13,23 @@ import {
   setBackupSchedule,
   getBackupSchedule,
   deleteBackupSchedule,
+  getBackupDownload,
 } from '../services/database-backup.js';
 import { logAudit } from '../services/audit.js';
+import { prisma } from '../lib/db.js';
 
 const databaseTypeSchema = z.enum(['postgres', 'mysql', 'sqlite']);
 const storageTypeSchema = z.enum(['local', 'spaces']);
+const backupFormatSchema = z.enum(['plain', 'custom', 'tar']);
+const backupCompressionSchema = z.enum(['none', 'gzip']);
+
+const pgDumpOptionsSchema = z.object({
+  noOwner: z.boolean().optional(),
+  clean: z.boolean().optional(),
+  ifExists: z.boolean().optional(),
+  schemaOnly: z.boolean().optional(),
+  dataOnly: z.boolean().optional(),
+});
 
 const createDatabaseSchema = z.object({
   name: z.string().min(1),
@@ -33,6 +45,10 @@ const createDatabaseSchema = z.object({
   backupLocalPath: z.string().optional(),
   backupSpacesBucket: z.string().optional(),
   backupSpacesPrefix: z.string().optional(),
+  backupFormat: backupFormatSchema.optional(),
+  backupCompression: backupCompressionSchema.optional(),
+  backupCompressionLevel: z.number().min(1).max(9).optional(),
+  pgDumpOptions: pgDumpOptionsSchema.optional(),
 });
 
 const updateDatabaseSchema = createDatabaseSchema.partial();
@@ -214,18 +230,32 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
+      const { limit, offset } = request.query as { limit?: string; offset?: string };
 
       const database = await getDatabase(id);
       if (!database) {
         return reply.code(404).send({ error: 'Database not found' });
       }
 
-      const backups = await listBackups(id);
+      const { backups, total } = await listBackups(id, {
+        limit: limit ? parseInt(limit) : 50,
+        offset: offset ? parseInt(offset) : 0,
+      });
+
+      // Check if downloads are allowed
+      const environment = await prisma.environment.findUnique({
+        where: { id: database.environmentId },
+        select: { allowBackupDownload: true },
+      });
+      const allowDownload = environment?.allowBackupDownload ?? false;
+
       return {
         backups: backups.map((b) => ({
           ...b,
           size: Number(b.size), // Convert BigInt to number for JSON
         })),
+        total,
+        allowDownload,
       };
     }
   );
@@ -242,12 +272,42 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.code(404).send({ error: 'Backup not found' });
       }
 
+      // Check if downloads are allowed
+      const allowDownload = backup.database.environment.allowBackupDownload ?? false;
+
       return {
         backup: {
           ...backup,
           size: Number(backup.size),
         },
+        allowDownload,
       };
+    }
+  );
+
+  // Download backup
+  fastify.get(
+    '/api/backups/:id/download',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      try {
+        const result = await getBackupDownload(id);
+
+        if (result.type === 'url') {
+          // Redirect to presigned URL for Spaces
+          return { downloadUrl: result.url };
+        } else {
+          // Stream file content for local storage
+          reply.header('Content-Disposition', `attachment; filename="${result.filename}"`);
+          reply.header('Content-Type', 'application/octet-stream');
+          return reply.send(result.content);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Download failed';
+        return reply.code(400).send({ error: message });
+      }
     }
   );
 

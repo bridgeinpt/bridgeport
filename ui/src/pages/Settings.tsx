@@ -18,6 +18,7 @@ import { useToast } from '../components/Toast';
 
 interface EnvironmentSettings {
   allowSecretReveal: boolean;
+  allowBackupDownload: boolean;
 }
 
 interface ModuleStatus {
@@ -290,6 +291,27 @@ export default function Settings() {
                 type="checkbox"
                 checked={settings?.allowSecretReveal ?? true}
                 onChange={(e) => handleSettingChange('allowSecretReveal', e.target.checked)}
+                disabled={saving || !isAdmin(user)}
+                className="sr-only peer"
+              />
+              <div className={`w-11 h-6 bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600 ${
+                !isAdmin(user) ? 'opacity-50 cursor-not-allowed' : ''
+              }`}></div>
+            </label>
+          </div>
+
+          <div className="flex items-center justify-between p-4 bg-slate-800 rounded-lg">
+            <div>
+              <p className="font-medium text-white">Allow Backup Downloads</p>
+              <p className="text-sm text-slate-400">
+                Allow users to download database backups. Enable with caution for sensitive data.
+              </p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings?.allowBackupDownload ?? false}
+                onChange={(e) => handleSettingChange('allowBackupDownload', e.target.checked)}
                 disabled={saving || !isAdmin(user)}
                 className="sr-only peer"
               />

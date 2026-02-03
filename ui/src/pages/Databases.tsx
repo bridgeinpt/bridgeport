@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAppStore } from '../lib/store';
 import { useToast } from '../components/Toast';
 import {
@@ -6,20 +7,14 @@ import {
   createDatabase,
   updateDatabase,
   deleteDatabase,
-  listDatabaseBackups,
   createDatabaseBackup,
-  deleteDatabaseBackup,
-  getBackupSchedule,
-  setBackupSchedule,
   listServers,
   listSpacesBuckets,
   type Database,
   type DatabaseInput,
-  type DatabaseBackup,
-  type BackupSchedule,
   type Server,
 } from '../lib/api';
-import { formatDistanceToNow, format } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns';
 import Pagination from '../components/Pagination';
 import { usePagination } from '../hooks/usePagination';
 
@@ -28,23 +23,6 @@ const DATABASE_TYPES = [
   { value: 'mysql', label: 'MySQL' },
   { value: 'sqlite', label: 'SQLite' },
 ] as const;
-
-interface BackupError {
-  message: string;
-  step: 'connect' | 'dump' | 'upload';
-  stderr?: string;
-  exitCode?: number;
-}
-
-function parseBackupError(error: string | null): BackupError | string | null {
-  if (!error) return null;
-  try {
-    return JSON.parse(error) as BackupError;
-  } catch {
-    // Legacy string error
-    return error;
-  }
-}
 
 const STORAGE_TYPES = [
   { value: 'local', label: 'Local Storage' },
@@ -61,11 +39,7 @@ export default function Databases() {
   const [creating, setCreating] = useState(false);
   const [editingDb, setEditingDb] = useState<Database | null>(null);
   const [saving, setSaving] = useState(false);
-  const [viewingDb, setViewingDb] = useState<Database | null>(null);
-  const [backups, setBackups] = useState<DatabaseBackup[]>([]);
-  const [schedule, setSchedule] = useState<BackupSchedule | null>(null);
-  const [loadingBackups, setLoadingBackups] = useState(false);
-  const [backingUp, setBackingUp] = useState(false);
+  const [backingUpId, setBackingUpId] = useState<string | null>(null);
   const [spacesBuckets, setSpacesBuckets] = useState<string[]>([]);
   const [loadingBuckets, setLoadingBuckets] = useState(false);
 
@@ -82,14 +56,6 @@ export default function Databases() {
     backupStorageType: 'local',
     backupLocalPath: '/var/backups',
   });
-
-  // Schedule form
-  const [scheduleForm, setScheduleForm] = useState({
-    cronExpression: '0 2 * * *',
-    retentionDays: 7,
-    enabled: true,
-  });
-  const [editingSchedule, setEditingSchedule] = useState(false);
 
   useEffect(() => {
     if (selectedEnvironment?.id) {
@@ -243,72 +209,18 @@ export default function Databases() {
     }
   };
 
-  const viewDatabase = async (db: Database) => {
-    setViewingDb(db);
-    setLoadingBackups(true);
+  const handleQuickBackup = async (db: Database) => {
+    setBackingUpId(db.id);
     try {
-      const [backupsRes, scheduleRes] = await Promise.all([
-        listDatabaseBackups(db.id),
-        getBackupSchedule(db.id),
-      ]);
-      setBackups(backupsRes.backups);
-      setSchedule(scheduleRes.schedule);
-      if (scheduleRes.schedule) {
-        setScheduleForm({
-          cronExpression: scheduleRes.schedule.cronExpression,
-          retentionDays: scheduleRes.schedule.retentionDays,
-          enabled: scheduleRes.schedule.enabled,
-        });
-      }
-    } finally {
-      setLoadingBackups(false);
-    }
-  };
-
-  const handleBackup = async () => {
-    if (!viewingDb) return;
-    setBackingUp(true);
-    try {
-      await createDatabaseBackup(viewingDb.id);
-      // Refresh backups list
-      const { backups } = await listDatabaseBackups(viewingDb.id);
-      setBackups(backups);
-      toast.success('Backup created');
+      await createDatabaseBackup(db.id);
+      toast.success('Backup started');
+      // Refresh to show updated lastBackup
+      loadData();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Backup failed');
     } finally {
-      setBackingUp(false);
+      setBackingUpId(null);
     }
-  };
-
-  const handleDeleteBackup = async (backup: DatabaseBackup) => {
-    if (!confirm(`Delete backup "${backup.filename}"?`)) return;
-    try {
-      await deleteDatabaseBackup(backup.id);
-      setBackups((prev) => prev.filter((b) => b.id !== backup.id));
-      toast.success('Backup deleted');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Delete failed');
-    }
-  };
-
-  const handleSaveSchedule = async () => {
-    if (!viewingDb) return;
-    try {
-      const { schedule } = await setBackupSchedule(viewingDb.id, scheduleForm);
-      setSchedule(schedule);
-      setEditingSchedule(false);
-      toast.success('Schedule saved');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to save schedule');
-    }
-  };
-
-  const formatBytes = (bytes: number) => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
   };
 
   // Pagination
@@ -827,191 +739,6 @@ export default function Databases() {
         </div>
       )}
 
-      {/* Database Detail Modal */}
-      {viewingDb && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-3xl p-6 max-h-[90vh] flex flex-col">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="text-lg font-semibold text-white">{viewingDb.name}</h3>
-                <p className="text-sm text-slate-400">
-                  {DATABASE_TYPES.find((t) => t.value === viewingDb.type)?.label} •{' '}
-                  {viewingDb.host || viewingDb.filePath}
-                </p>
-              </div>
-              <button onClick={() => setViewingDb(null)} className="text-slate-400 hover:text-white">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="flex gap-2 mb-4">
-              <button onClick={handleBackup} disabled={backingUp} className="btn btn-primary">
-                {backingUp ? 'Backing up...' : 'Create Backup'}
-              </button>
-              <button onClick={() => setEditingSchedule(!editingSchedule)} className="btn btn-secondary">
-                {schedule ? 'Edit Schedule' : 'Set Schedule'}
-              </button>
-            </div>
-
-            {/* Schedule Section */}
-            {(editingSchedule || schedule) && (
-              <div className="mb-4 p-4 bg-slate-800/50 rounded-lg">
-                <h4 className="text-sm font-medium text-white mb-3">Backup Schedule</h4>
-                {editingSchedule ? (
-                  <div className="space-y-3">
-                    <div className="grid grid-cols-3 gap-3">
-                      <div className="col-span-2">
-                        <label className="block text-xs text-slate-400 mb-1">Cron Expression</label>
-                        <input
-                          type="text"
-                          value={scheduleForm.cronExpression}
-                          onChange={(e) =>
-                            setScheduleForm({ ...scheduleForm, cronExpression: e.target.value })
-                          }
-                          placeholder="0 2 * * *"
-                          className="input text-sm font-mono"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-slate-400 mb-1">Retention Days</label>
-                        <input
-                          type="number"
-                          value={scheduleForm.retentionDays}
-                          onChange={(e) =>
-                            setScheduleForm({ ...scheduleForm, retentionDays: parseInt(e.target.value) })
-                          }
-                          className="input text-sm"
-                        />
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        id="scheduleEnabled"
-                        checked={scheduleForm.enabled}
-                        onChange={(e) => setScheduleForm({ ...scheduleForm, enabled: e.target.checked })}
-                        className="rounded bg-slate-700 border-slate-600 text-primary-500"
-                      />
-                      <label htmlFor="scheduleEnabled" className="text-sm text-slate-300">
-                        Enabled
-                      </label>
-                    </div>
-                    <div className="flex gap-2">
-                      <button onClick={handleSaveSchedule} className="btn btn-primary text-sm">
-                        Save Schedule
-                      </button>
-                      <button onClick={() => setEditingSchedule(false)} className="btn btn-ghost text-sm">
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                ) : schedule ? (
-                  <div className="text-sm">
-                    <p className="text-slate-300">
-                      <span className="text-slate-500">Schedule:</span>{' '}
-                      <code className="font-mono">{schedule.cronExpression}</code>
-                    </p>
-                    <p className="text-slate-300">
-                      <span className="text-slate-500">Retention:</span> {schedule.retentionDays} days
-                    </p>
-                    <p className="text-slate-300">
-                      <span className="text-slate-500">Status:</span>{' '}
-                      <span className={schedule.enabled ? 'text-green-400' : 'text-slate-500'}>
-                        {schedule.enabled ? 'Enabled' : 'Disabled'}
-                      </span>
-                    </p>
-                  </div>
-                ) : null}
-              </div>
-            )}
-
-            {/* Backups List */}
-            <div className="flex-1 overflow-y-auto">
-              <h4 className="text-sm font-medium text-white mb-3">Backups</h4>
-              {loadingBackups ? (
-                <div className="text-slate-400">Loading backups...</div>
-              ) : backups.length === 0 ? (
-                <div className="text-slate-400 text-center py-8">No backups yet</div>
-              ) : (
-                <div className="space-y-2">
-                  {backups.map((backup) => {
-                    const parsedError = parseBackupError(backup.error);
-                    const isStructuredError = parsedError && typeof parsedError === 'object';
-                    return (
-                      <div
-                        key={backup.id}
-                        className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg"
-                      >
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm text-white font-mono">{backup.filename}</p>
-                          <div className="flex items-center gap-3 text-xs text-slate-400 mt-1">
-                            <span>{formatBytes(backup.size)}</span>
-                            <span>{backup.type}</span>
-                            <span
-                              className={
-                                backup.status === 'completed'
-                                  ? 'text-green-400'
-                                  : backup.status === 'failed'
-                                  ? 'text-red-400'
-                                  : 'text-yellow-400'
-                              }
-                            >
-                              {backup.status}
-                            </span>
-                            <span>
-                              {format(new Date(backup.createdAt), 'MMM d, yyyy h:mm a')}
-                            </span>
-                          </div>
-                          {parsedError && (
-                            <div className="mt-2">
-                              {isStructuredError ? (
-                                <div className="space-y-1">
-                                  <div className="flex items-center gap-2">
-                                    <span className="px-1.5 py-0.5 text-[10px] font-medium rounded bg-red-500/20 text-red-400 uppercase">
-                                      {parsedError.step}
-                                    </span>
-                                    <span className="text-xs text-red-400">{parsedError.message}</span>
-                                    {parsedError.exitCode !== undefined && (
-                                      <span className="text-xs text-slate-500">
-                                        (exit code: {parsedError.exitCode})
-                                      </span>
-                                    )}
-                                  </div>
-                                  {parsedError.stderr && (
-                                    <details className="mt-1">
-                                      <summary className="text-xs text-slate-500 cursor-pointer hover:text-slate-400">
-                                        Show error details
-                                      </summary>
-                                      <pre className="mt-1 p-2 bg-slate-900 rounded text-xs text-red-300 overflow-x-auto max-h-32">
-                                        {parsedError.stderr}
-                                      </pre>
-                                    </details>
-                                  )}
-                                </div>
-                              ) : (
-                                <p className="text-xs text-red-400">{parsedError}</p>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        <button
-                          onClick={() => handleDeleteBackup(backup)}
-                          className="btn btn-ghost text-sm text-red-400 hover:text-red-300 ml-2"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Databases List */}
       {databases.length === 0 ? (
         <div className="panel text-center py-12">
@@ -1047,9 +774,16 @@ export default function Databases() {
                       <span>{db._count?.backups || 0} backups</span>
                       <span>Storage: {STORAGE_TYPES.find((t) => t.value === db.backupStorageType)?.label}</span>
                       {db.schedule && (
-                        <span className={db.schedule.enabled ? 'text-green-400' : 'text-slate-500'}>
-                          {db.schedule.enabled ? 'Scheduled' : 'Schedule disabled'}
-                        </span>
+                        <>
+                          <span className={db.schedule.enabled ? 'text-green-400' : 'text-slate-500'}>
+                            {db.schedule.enabled ? 'Scheduled' : 'Schedule disabled'}
+                          </span>
+                          {db.schedule.enabled && db.schedule.nextRunAt && (
+                            <span className="text-slate-400">
+                              Next: {formatDistanceToNow(new Date(db.schedule.nextRunAt), { addSuffix: true })}
+                            </span>
+                          )}
+                        </>
                       )}
                     </div>
                     {/* Backup Status Row */}
@@ -1095,9 +829,16 @@ export default function Databases() {
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={() => viewDatabase(db)} className="btn btn-ghost text-sm">
-                    View
+                  <button
+                    onClick={() => handleQuickBackup(db)}
+                    disabled={backingUpId === db.id}
+                    className="btn btn-primary text-sm"
+                  >
+                    {backingUpId === db.id ? 'Starting...' : 'Backup'}
                   </button>
+                  <Link to={`/databases/${db.id}`} className="btn btn-ghost text-sm">
+                    View
+                  </Link>
                   <button onClick={() => openEditModal(db)} className="btn btn-ghost text-sm">
                     Edit
                   </button>

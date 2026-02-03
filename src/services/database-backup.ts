@@ -2,7 +2,8 @@ import { prisma } from '../lib/db.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
 import { SSHClient, LocalClient, isLocalhost, type CommandClient, type LocalExecOptions } from '../lib/ssh.js';
 import { getEnvironmentSshKey, getEnvironmentSpacesConfig } from '../routes/environments.js';
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { readFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -15,6 +16,14 @@ export interface BackupError {
   step: BackupStep;
   stderr?: string;
   exitCode?: number;
+}
+
+export interface PgDumpOptions {
+  noOwner?: boolean;
+  clean?: boolean;
+  ifExists?: boolean;
+  schemaOnly?: boolean;
+  dataOnly?: boolean;
 }
 
 export interface DatabaseInput {
@@ -31,6 +40,10 @@ export interface DatabaseInput {
   backupLocalPath?: string;
   backupSpacesBucket?: string;
   backupSpacesPrefix?: string;
+  backupFormat?: 'plain' | 'custom' | 'tar';
+  backupCompression?: 'none' | 'gzip';
+  backupCompressionLevel?: number;
+  pgDumpOptions?: PgDumpOptions;
 }
 
 export interface LastBackupInfo {
@@ -63,6 +76,10 @@ export interface DatabaseOutput {
   backupLocalPath: string | null;
   backupSpacesBucket: string | null;
   backupSpacesPrefix: string | null;
+  backupFormat: string;
+  backupCompression: string;
+  backupCompressionLevel: number;
+  pgDumpOptions: PgDumpOptions | null;
   createdAt: Date;
   updatedAt: Date;
   environmentId: string;
@@ -89,6 +106,10 @@ export async function createDatabase(
     backupLocalPath?: string;
     backupSpacesBucket?: string;
     backupSpacesPrefix?: string;
+    backupFormat: string;
+    backupCompression: string;
+    backupCompressionLevel: number;
+    pgDumpOptions?: string;
     environmentId: string;
   } = {
     name: input.name,
@@ -102,8 +123,15 @@ export async function createDatabase(
     backupLocalPath: input.backupLocalPath,
     backupSpacesBucket: input.backupSpacesBucket,
     backupSpacesPrefix: input.backupSpacesPrefix,
+    backupFormat: input.backupFormat || 'plain',
+    backupCompression: input.backupCompression || 'none',
+    backupCompressionLevel: input.backupCompressionLevel || 6,
     environmentId,
   };
+
+  if (input.pgDumpOptions) {
+    data.pgDumpOptions = JSON.stringify(input.pgDumpOptions);
+  }
 
   if (input.username && input.password) {
     const credentials = `${input.username}:${input.password}`;
@@ -137,6 +165,10 @@ export async function updateDatabase(
   if (input.backupLocalPath !== undefined) data.backupLocalPath = input.backupLocalPath;
   if (input.backupSpacesBucket !== undefined) data.backupSpacesBucket = input.backupSpacesBucket;
   if (input.backupSpacesPrefix !== undefined) data.backupSpacesPrefix = input.backupSpacesPrefix;
+  if (input.backupFormat !== undefined) data.backupFormat = input.backupFormat;
+  if (input.backupCompression !== undefined) data.backupCompression = input.backupCompression;
+  if (input.backupCompressionLevel !== undefined) data.backupCompressionLevel = input.backupCompressionLevel;
+  if (input.pgDumpOptions !== undefined) data.pgDumpOptions = JSON.stringify(input.pgDumpOptions);
 
   if (input.username !== undefined && input.password !== undefined) {
     if (input.username && input.password) {
@@ -223,11 +255,23 @@ function toOutput(db: {
   backupLocalPath: string | null;
   backupSpacesBucket: string | null;
   backupSpacesPrefix: string | null;
+  backupFormat: string;
+  backupCompression: string;
+  backupCompressionLevel: number;
+  pgDumpOptions: string | null;
   createdAt: Date;
   updatedAt: Date;
   environmentId: string;
   _count?: { backups: number; services: number };
 }): DatabaseOutput {
+  let parsedPgDumpOptions: PgDumpOptions | null = null;
+  if (db.pgDumpOptions) {
+    try {
+      parsedPgDumpOptions = JSON.parse(db.pgDumpOptions);
+    } catch {
+      // ignore parse errors
+    }
+  }
   return {
     id: db.id,
     name: db.name,
@@ -242,6 +286,10 @@ function toOutput(db: {
     backupLocalPath: db.backupLocalPath,
     backupSpacesBucket: db.backupSpacesBucket,
     backupSpacesPrefix: db.backupSpacesPrefix,
+    backupFormat: db.backupFormat,
+    backupCompression: db.backupCompression,
+    backupCompressionLevel: db.backupCompressionLevel,
+    pgDumpOptions: parsedPgDumpOptions,
     createdAt: db.createdAt,
     updatedAt: db.updatedAt,
     environmentId: db.environmentId,
@@ -262,7 +310,19 @@ export async function createBackup(
   if (!db) throw new Error('Database not found');
 
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const filename = `${db.name}-${timestamp}.sql`;
+
+  // Generate filename with appropriate extension based on format and compression
+  let extension = '.sql';
+  if (db.backupFormat === 'custom') {
+    extension = '.dump';
+  } else if (db.backupFormat === 'tar') {
+    extension = '.tar';
+  }
+  // Add gzip extension if using external compression (plain format)
+  if (db.backupCompression === 'gzip' && db.backupFormat === 'plain') {
+    extension += '.gz';
+  }
+  const filename = `${db.name}-${timestamp}${extension}`;
 
   const backup = await prisma.databaseBackup.create({
     data: {
@@ -276,6 +336,7 @@ export async function createBackup(
         : `${db.backupSpacesPrefix || ''}${filename}`,
       databaseId,
       triggeredById,
+      progress: 0,
     },
   });
 
@@ -288,9 +349,10 @@ export async function createBackup(
 }
 
 async function executeBackup(backupId: string): Promise<void> {
+  const startTime = Date.now();
   const backup = await prisma.databaseBackup.update({
     where: { id: backupId },
-    data: { status: 'in_progress' },
+    data: { status: 'in_progress', progress: 10 },
     include: {
       database: {
         include: { environment: true, server: true },
@@ -301,8 +363,29 @@ async function executeBackup(backupId: string): Promise<void> {
   const db = backup.database;
   const useSpaces = db.backupStorageType === 'spaces';
 
+  // Parse pg_dump options
+  let pgOpts: PgDumpOptions = {};
+  if (db.pgDumpOptions) {
+    try {
+      pgOpts = JSON.parse(db.pgDumpOptions);
+    } catch {
+      // ignore parse errors
+    }
+  }
+
+  // Determine file extension for temp file
+  let tempExtension = '.sql';
+  if (db.backupFormat === 'custom') {
+    tempExtension = '.dump';
+  } else if (db.backupFormat === 'tar') {
+    tempExtension = '.tar';
+  }
+  if (db.backupCompression === 'gzip' && db.backupFormat === 'plain') {
+    tempExtension += '.gz';
+  }
+
   // For Spaces, dump to temp file first; for local, dump to final path
-  const tempPath = useSpaces ? join(tmpdir(), `backup-${backupId}.sql`) : null;
+  const tempPath = useSpaces ? join(tmpdir(), `backup-${backupId}${tempExtension}`) : null;
   const targetPath = tempPath || backup.storagePath;
 
   let currentStep: BackupStep = 'connect';
@@ -323,10 +406,41 @@ async function executeBackup(backupId: string): Promise<void> {
         [username, password] = creds.split(':');
       }
 
-      // Pass password and SSL mode via environment variables for security (not visible in ps)
-      // DigitalOcean and most managed databases require SSL
+      // Build pg_dump command with format and options
+      const cmdParts = ['pg_dump', '--no-password'];
+
+      // Format flag
+      if (db.backupFormat === 'custom') {
+        cmdParts.push('-Fc'); // custom format (includes compression)
+      } else if (db.backupFormat === 'tar') {
+        cmdParts.push('-Ft'); // tar format
+      } else {
+        cmdParts.push('-Fp'); // plain text format
+      }
+
+      // pg_dump options
+      if (pgOpts.noOwner) cmdParts.push('--no-owner');
+      if (pgOpts.clean) cmdParts.push('--clean');
+      if (pgOpts.ifExists) cmdParts.push('--if-exists');
+      if (pgOpts.schemaOnly) cmdParts.push('--schema-only');
+      if (pgOpts.dataOnly) cmdParts.push('--data-only');
+
+      // Connection options
+      cmdParts.push(`-h ${db.host}`);
+      cmdParts.push(`-p ${db.port || 5432}`);
+      cmdParts.push(`-U ${username}`);
+      cmdParts.push(`-d ${db.databaseName}`);
+
+      // Output file or pipe through gzip
+      if (db.backupCompression === 'gzip' && db.backupFormat === 'plain') {
+        // Pipe through gzip for plain format
+        cmdParts.push(`| gzip -${db.backupCompressionLevel} > "${targetPath}"`);
+      } else {
+        cmdParts.push(`-f "${targetPath}"`);
+      }
+
       // Use 2>&1 to capture stderr in stdout so we get better error messages
-      dumpCommand = `pg_dump --no-password -h ${db.host} -p ${db.port || 5432} -U ${username} -d ${db.databaseName} -f "${targetPath}" 2>&1`;
+      dumpCommand = cmdParts.join(' ') + ' 2>&1';
       execOptions = { env: { PGPASSWORD: password, PGSSLMODE: 'require' }, timeout: 300000 };
     } else if (db.type === 'sqlite' && db.filePath) {
       if (!db.server) {
@@ -353,13 +467,24 @@ async function executeBackup(backupId: string): Promise<void> {
         });
       }
 
-      dumpCommand = `sqlite3 "${db.filePath}" ".dump" > "${targetPath}"`;
+      // SQLite compression support
+      if (db.backupCompression === 'gzip') {
+        dumpCommand = `sqlite3 "${db.filePath}" ".dump" | gzip -${db.backupCompressionLevel} > "${targetPath}"`;
+      } else {
+        dumpCommand = `sqlite3 "${db.filePath}" ".dump" > "${targetPath}"`;
+      }
     } else {
       throw new Error(`Unsupported database type or missing configuration: ${db.type}`);
     }
 
     await client.connect();
     currentStep = 'dump';
+
+    // Update progress: connected
+    await prisma.databaseBackup.update({
+      where: { id: backupId },
+      data: { progress: 30 },
+    });
 
     // Ensure backup directory exists (for local storage)
     if (!useSpaces) {
@@ -380,6 +505,12 @@ async function executeBackup(backupId: string): Promise<void> {
       throw error;
     }
 
+    // Update progress: dump complete
+    await prisma.databaseBackup.update({
+      where: { id: backupId },
+      data: { progress: 70 },
+    });
+
     // Get file size
     const sizeResult = await client.exec(`stat -c %s "${targetPath}" 2>/dev/null || stat -f %z "${targetPath}"`);
     const size = parseInt(sizeResult.stdout.trim()) || 0;
@@ -389,6 +520,13 @@ async function executeBackup(backupId: string): Promise<void> {
     // Upload to Spaces if configured
     if (useSpaces && tempPath) {
       currentStep = 'upload';
+
+      // Update progress: starting upload
+      await prisma.databaseBackup.update({
+        where: { id: backupId },
+        data: { progress: 80 },
+      });
+
       const spacesConfig = await getEnvironmentSpacesConfig(db.environmentId);
       if (!spacesConfig) {
         throw new Error('Spaces not configured for this environment. Go to Settings > Spaces to configure.');
@@ -410,22 +548,36 @@ async function executeBackup(backupId: string): Promise<void> {
       const fileContent = await readFile(tempPath);
       const spacesKey = backup.storagePath; // Already includes prefix + filename
 
+      // Determine content type
+      let contentType = 'application/sql';
+      if (db.backupFormat === 'custom') {
+        contentType = 'application/octet-stream';
+      } else if (db.backupFormat === 'tar') {
+        contentType = 'application/x-tar';
+      } else if (db.backupCompression === 'gzip') {
+        contentType = 'application/gzip';
+      }
+
       await s3Client.send(new PutObjectCommand({
         Bucket: db.backupSpacesBucket,
         Key: spacesKey,
         Body: fileContent,
-        ContentType: 'application/sql',
+        ContentType: contentType,
       }));
 
       // Clean up temp file
       await unlink(tempPath).catch(() => {});
     }
 
+    const duration = Math.round((Date.now() - startTime) / 1000);
+
     await prisma.databaseBackup.update({
       where: { id: backupId },
       data: {
         status: 'completed',
         size: BigInt(size),
+        progress: 100,
+        duration,
         completedAt: new Date(),
       },
     });
@@ -454,11 +606,14 @@ async function executeBackup(backupId: string): Promise<void> {
       };
     }
 
+    const duration = Math.round((Date.now() - startTime) / 1000);
+
     await prisma.databaseBackup.update({
       where: { id: backupId },
       data: {
         status: 'failed',
         error: JSON.stringify(backupError),
+        duration,
         completedAt: new Date(),
       },
     });
@@ -478,15 +633,26 @@ async function executeBackup(backupId: string): Promise<void> {
   }
 }
 
-export async function listBackups(databaseId: string) {
-  return prisma.databaseBackup.findMany({
-    where: { databaseId },
-    orderBy: { createdAt: 'desc' },
-    take: 50,
-    include: {
-      triggeredBy: { select: { id: true, email: true, name: true } },
-    },
-  });
+export interface BackupListOptions {
+  limit?: number;
+  offset?: number;
+}
+
+export async function listBackups(databaseId: string, options: BackupListOptions = {}) {
+  const { limit = 50, offset = 0 } = options;
+  const [backups, total] = await Promise.all([
+    prisma.databaseBackup.findMany({
+      where: { databaseId },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      skip: offset,
+      include: {
+        triggeredBy: { select: { id: true, email: true, name: true } },
+      },
+    }),
+    prisma.databaseBackup.count({ where: { databaseId } }),
+  ]);
+  return { backups, total };
 }
 
 export async function getBackup(id: string) {
@@ -579,6 +745,91 @@ export async function getBackupSchedule(databaseId: string) {
 
 export async function deleteBackupSchedule(databaseId: string) {
   await prisma.backupSchedule.delete({ where: { databaseId } }).catch(() => {});
+}
+
+/**
+ * Generate a download URL or stream for a backup.
+ * Returns either a presigned URL (for Spaces) or file content (for local).
+ */
+export async function getBackupDownload(
+  backupId: string
+): Promise<{ type: 'url'; url: string } | { type: 'stream'; filename: string; content: Buffer }> {
+  const backup = await prisma.databaseBackup.findUnique({
+    where: { id: backupId },
+    include: {
+      database: { include: { server: true, environment: true } },
+    },
+  });
+
+  if (!backup) throw new Error('Backup not found');
+  if (backup.status !== 'completed') throw new Error('Backup is not completed');
+
+  // Check if downloads are allowed
+  if (!backup.database.environment.allowBackupDownload) {
+    throw new Error('Backup downloads are not allowed for this environment');
+  }
+
+  if (backup.storageType === 'spaces') {
+    // Generate presigned URL for Spaces
+    const spacesConfig = await getEnvironmentSpacesConfig(backup.database.environmentId);
+    if (!spacesConfig) {
+      throw new Error('Spaces not configured for this environment');
+    }
+
+    if (!backup.database.backupSpacesBucket) {
+      throw new Error('No Spaces bucket configured for this database');
+    }
+
+    const s3Client = new S3Client({
+      endpoint: `https://${spacesConfig.endpoint}`,
+      region: spacesConfig.region,
+      credentials: {
+        accessKeyId: spacesConfig.accessKey,
+        secretAccessKey: spacesConfig.secretKey,
+      },
+    });
+
+    const command = new GetObjectCommand({
+      Bucket: backup.database.backupSpacesBucket,
+      Key: backup.storagePath,
+      ResponseContentDisposition: `attachment; filename="${backup.filename}"`,
+    });
+
+    // Generate presigned URL valid for 1 hour
+    const url = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+    return { type: 'url', url };
+  } else {
+    // Stream from local storage via SSH
+    if (!backup.database.server) {
+      throw new Error('Database server is not configured');
+    }
+
+    let client: CommandClient;
+    if (isLocalhost(backup.database.server.hostname)) {
+      client = new LocalClient();
+    } else {
+      const sshCreds = await getEnvironmentSshKey(backup.database.environmentId);
+      if (!sshCreds) {
+        throw new Error('SSH key not configured for this environment');
+      }
+      client = new SSHClient({
+        hostname: backup.database.server.hostname,
+        username: sshCreds.username,
+        privateKey: sshCreds.privateKey,
+      });
+    }
+
+    await client.connect();
+    const result = await client.exec(`cat "${backup.storagePath}" | base64`);
+    client.disconnect();
+
+    if (result.code !== 0) {
+      throw new Error(`Failed to read backup file: ${result.stderr}`);
+    }
+
+    const content = Buffer.from(result.stdout.trim(), 'base64');
+    return { type: 'stream', filename: backup.filename, content };
+  }
 }
 
 /**
