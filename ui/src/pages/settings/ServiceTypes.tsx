@@ -3,7 +3,6 @@ import { useAuthStore, isAdmin } from '../../lib/store';
 import {
   listServiceTypes,
   createServiceType,
-  updateServiceType,
   deleteServiceType,
   addServiceTypeCommand,
   updateServiceTypeCommand,

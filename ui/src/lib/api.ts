@@ -503,6 +503,7 @@ export interface ServiceUpdate {
   healthCheckUrl?: string | null;
   autoUpdate?: boolean;
   registryConnectionId?: string | null;
+  serviceTypeId?: string | null;
 }
 
 // Audit Logs

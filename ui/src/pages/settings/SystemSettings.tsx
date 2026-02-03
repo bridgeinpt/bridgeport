@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getSystemSettings, updateSystemSettings, resetSystemSettings, type SystemSettings as SystemSettingsType } from '../../lib/api';
+import { getSystemSettings, updateSystemSettings, resetSystemSettings } from '../../lib/api';
 
 interface FormData {
   sshCommandTimeoutSec: number;
