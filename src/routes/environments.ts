@@ -17,6 +17,7 @@ const updateSshSchema = z.object({
 
 const updateSettingsSchema = z.object({
   allowSecretReveal: z.boolean().optional(),
+  allowBackupDownload: z.boolean().optional(),
 });
 
 const updateSpacesSchema = z.object({
@@ -208,6 +209,46 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
     }
   );
 
+  // Get SSH key for CLI access (admin only)
+  // This endpoint returns the actual private key for CLI tools to use
+  fastify.get(
+    '/api/environments/:id/ssh-key',
+    { preHandler: [fastify.authenticate, requireAdmin] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      const environment = await prisma.environment.findUnique({
+        where: { id },
+        select: { id: true, name: true },
+      });
+
+      if (!environment) {
+        return reply.code(404).send({ error: 'Environment not found' });
+      }
+
+      const sshCreds = await getEnvironmentSshKey(id);
+      if (!sshCreds) {
+        return reply.code(404).send({ error: 'SSH key not configured for this environment' });
+      }
+
+      // Audit log the access
+      await logAudit({
+        action: 'ssh_key_access',
+        resourceType: 'environment',
+        resourceId: id,
+        resourceName: environment.name,
+        details: { method: 'cli' },
+        userId: request.authUser!.id,
+        environmentId: id,
+      });
+
+      return {
+        privateKey: sshCreds.privateKey,
+        username: sshCreds.username,
+      };
+    }
+  );
+
   // Get environment settings
   fastify.get(
     '/api/environments/:id/settings',
@@ -217,14 +258,19 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
 
       const environment = await prisma.environment.findUnique({
         where: { id },
-        select: { id: true, name: true, allowSecretReveal: true },
+        select: { id: true, name: true, allowSecretReveal: true, allowBackupDownload: true },
       });
 
       if (!environment) {
         return reply.code(404).send({ error: 'Environment not found' });
       }
 
-      return { settings: { allowSecretReveal: environment.allowSecretReveal } };
+      return {
+        settings: {
+          allowSecretReveal: environment.allowSecretReveal,
+          allowBackupDownload: environment.allowBackupDownload,
+        },
+      };
     }
   );
 
@@ -248,15 +294,18 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
         return reply.code(404).send({ error: 'Environment not found' });
       }
 
-      const updateData: { allowSecretReveal?: boolean } = {};
+      const updateData: { allowSecretReveal?: boolean; allowBackupDownload?: boolean } = {};
       if (body.data.allowSecretReveal !== undefined) {
         updateData.allowSecretReveal = body.data.allowSecretReveal;
+      }
+      if (body.data.allowBackupDownload !== undefined) {
+        updateData.allowBackupDownload = body.data.allowBackupDownload;
       }
 
       const updated = await prisma.environment.update({
         where: { id },
         data: updateData,
-        select: { id: true, name: true, allowSecretReveal: true },
+        select: { id: true, name: true, allowSecretReveal: true, allowBackupDownload: true },
       });
 
       await logAudit({
@@ -269,7 +318,12 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
         environmentId: id,
       });
 
-      return { settings: { allowSecretReveal: updated.allowSecretReveal } };
+      return {
+        settings: {
+          allowSecretReveal: updated.allowSecretReveal,
+          allowBackupDownload: updated.allowBackupDownload,
+        },
+      };
     }
   );
 

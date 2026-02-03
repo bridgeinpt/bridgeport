@@ -23,6 +23,7 @@ import {
   getServiceHistory,
   getServiceDependencies,
   getManagedImage,
+  listServiceTypes,
   type ServiceWithServer,
   type Deployment,
   type ServiceFile,
@@ -34,6 +35,7 @@ import {
   type ServiceHistoryEntry,
   type ServiceDependency,
   type ManagedImage,
+  type ServiceType,
 } from '../lib/api';
 import { DependencyEditor } from '../components/DependencyEditor';
 import { HealthConfigEditor } from '../components/HealthConfigEditor';
@@ -114,6 +116,8 @@ export default function ServiceDetail() {
 
   // Registry and auto-update state
   const [registries, setRegistries] = useState<RegistryConnection[]>([]);
+  const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
+  const [editServiceTypeId, setEditServiceTypeId] = useState<string>('');
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [updateCheckResult, setUpdateCheckResult] = useState<{
     hasUpdate: boolean;
@@ -186,6 +190,10 @@ export default function ServiceDetail() {
         setRegistries(registries)
       );
     }
+    // Load service types (global, not per-environment)
+    listServiceTypes().then(({ serviceTypes }) =>
+      setServiceTypes(serviceTypes)
+    );
   }, [selectedEnvironment?.id]);
 
   const handleCheckUpdates = async () => {
@@ -479,6 +487,7 @@ export default function ServiceDetail() {
     setEditImageName(service.imageName || '');
     setEditHealthCheckUrl(service.healthCheckUrl || '');
     setEditRegistryConnectionId(service.registryConnectionId || '');
+    setEditServiceTypeId(service.serviceTypeId || '');
     setShowConfig(true);
   };
 
@@ -492,6 +501,7 @@ export default function ServiceDetail() {
         imageName: editImageName || undefined,
         healthCheckUrl: editHealthCheckUrl || null,
         registryConnectionId: editRegistryConnectionId || null,
+        serviceTypeId: editServiceTypeId || null,
       });
       setService((prev) => (prev ? { ...prev, ...updated } : null));
       setShowConfig(false);
@@ -1927,6 +1937,26 @@ export default function ServiceDetail() {
                 </select>
                 <p className="text-xs text-slate-500 mt-1">
                   Registry to check for image updates
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">
+                  Service Type
+                </label>
+                <select
+                  value={editServiceTypeId}
+                  onChange={(e) => setEditServiceTypeId(e.target.value)}
+                  className="input"
+                >
+                  <option value="">None</option>
+                  {serviceTypes.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.displayName}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500 mt-1">
+                  Predefined commands for this service type (Django, Node.js, etc.)
                 </p>
               </div>
             </div>

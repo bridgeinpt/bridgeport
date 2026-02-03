@@ -177,6 +177,7 @@ export const createEnvironment = (name: string) =>
 // Environment settings
 export interface EnvironmentSettings {
   allowSecretReveal: boolean;
+  allowBackupDownload: boolean;
 }
 
 export const getEnvironmentSettings = (id: string) =>
@@ -419,6 +420,20 @@ export interface Service {
   healthWaitMs: number;
   healthRetries: number;
   healthIntervalMs: number;
+  // Service type for predefined commands
+  serviceTypeId: string | null;
+  serviceType?: {
+    id: string;
+    name: string;
+    displayName: string;
+    commands: Array<{
+      id: string;
+      name: string;
+      displayName: string;
+      command: string;
+      description: string | null;
+    }>;
+  } | null;
 }
 
 export interface ServiceWithServer extends Service {
@@ -914,6 +929,16 @@ export const regenerateAgentToken = (id: string) =>
 // Databases
 export type DatabaseType = 'postgres' | 'mysql' | 'sqlite';
 export type BackupStorageType = 'local' | 'spaces';
+export type BackupFormat = 'plain' | 'custom' | 'tar';
+export type BackupCompression = 'none' | 'gzip';
+
+export interface PgDumpOptions {
+  noOwner?: boolean;
+  clean?: boolean;
+  ifExists?: boolean;
+  schemaOnly?: boolean;
+  dataOnly?: boolean;
+}
 
 export interface LastBackupInfo {
   id: string;
@@ -945,6 +970,10 @@ export interface Database {
   backupLocalPath: string | null;
   backupSpacesBucket: string | null;
   backupSpacesPrefix: string | null;
+  backupFormat: BackupFormat;
+  backupCompression: BackupCompression;
+  backupCompressionLevel: number;
+  pgDumpOptions: PgDumpOptions | null;
   createdAt: string;
   updatedAt: string;
   environmentId: string;
@@ -967,6 +996,10 @@ export interface DatabaseInput {
   backupLocalPath?: string;
   backupSpacesBucket?: string;
   backupSpacesPrefix?: string;
+  backupFormat?: BackupFormat;
+  backupCompression?: BackupCompression;
+  backupCompressionLevel?: number;
+  pgDumpOptions?: PgDumpOptions;
 }
 
 export interface DatabaseBackup {
@@ -978,6 +1011,8 @@ export interface DatabaseBackup {
   error: string | null;
   storageType: BackupStorageType;
   storagePath: string;
+  progress: number;
+  duration: number | null;
   createdAt: string;
   completedAt: string | null;
   triggeredBy: { id: string; email: string; name: string | null } | null;
@@ -1010,14 +1045,24 @@ export const deleteDatabase = (id: string) =>
 export const createDatabaseBackup = (id: string) =>
   api.post<{ backupId: string; message: string }>(`/databases/${id}/backups`);
 
-export const listDatabaseBackups = (id: string) =>
-  api.get<{ backups: DatabaseBackup[] }>(`/databases/${id}/backups`);
+export const listDatabaseBackups = (id: string, limit?: number, offset?: number) => {
+  const params = new URLSearchParams();
+  if (limit) params.append('limit', limit.toString());
+  if (offset) params.append('offset', offset.toString());
+  const query = params.toString();
+  return api.get<{ backups: DatabaseBackup[]; total: number; allowDownload: boolean }>(
+    `/databases/${id}/backups${query ? `?${query}` : ''}`
+  );
+};
 
 export const getDatabaseBackup = (id: string) =>
-  api.get<{ backup: DatabaseBackup }>(`/backups/${id}`);
+  api.get<{ backup: DatabaseBackup; allowDownload: boolean }>(`/backups/${id}`);
 
 export const deleteDatabaseBackup = (id: string) =>
   api.delete<{ success: boolean }>(`/backups/${id}`);
+
+export const getBackupDownloadUrl = (id: string) =>
+  api.get<{ downloadUrl: string }>(`/backups/${id}/download`);
 
 export const getBackupSchedule = (databaseId: string) =>
   api.get<{ schedule: BackupSchedule | null }>(`/databases/${databaseId}/schedule`);
@@ -1417,3 +1462,115 @@ export interface ServiceHealthConfig {
 
 export const updateServiceHealthConfig = (serviceId: string, config: ServiceHealthConfig) =>
   api.patch<{ service: Service }>(`/services/${serviceId}`, config);
+
+// ==================== Global Settings ====================
+
+// Service Types
+export interface ServiceTypeCommand {
+  id: string;
+  name: string;
+  displayName: string;
+  command: string;
+  description: string | null;
+  sortOrder: number;
+  serviceTypeId: string;
+}
+
+export interface ServiceType {
+  id: string;
+  name: string;
+  displayName: string;
+  createdAt: string;
+  updatedAt: string;
+  commands: ServiceTypeCommand[];
+  _count?: { services: number };
+}
+
+export interface ServiceTypeInput {
+  name: string;
+  displayName: string;
+}
+
+export interface ServiceTypeCommandInput {
+  name: string;
+  displayName: string;
+  command: string;
+  description?: string;
+  sortOrder?: number;
+}
+
+export const listServiceTypes = () =>
+  api.get<{ serviceTypes: ServiceType[] }>('/settings/service-types');
+
+export const getServiceType = (id: string) =>
+  api.get<{ serviceType: ServiceType }>(`/settings/service-types/${id}`);
+
+export const createServiceType = (data: ServiceTypeInput) =>
+  api.post<{ serviceType: ServiceType }>('/settings/service-types', data);
+
+export const updateServiceType = (id: string, data: Partial<ServiceTypeInput>) =>
+  api.patch<{ serviceType: ServiceType }>(`/settings/service-types/${id}`, data);
+
+export const deleteServiceType = (id: string) =>
+  api.delete<{ success: boolean }>(`/settings/service-types/${id}`);
+
+export const addServiceTypeCommand = (typeId: string, data: ServiceTypeCommandInput) =>
+  api.post<{ command: ServiceTypeCommand }>(`/settings/service-types/${typeId}/commands`, data);
+
+export const updateServiceTypeCommand = (typeId: string, commandId: string, data: Partial<ServiceTypeCommandInput>) =>
+  api.patch<{ command: ServiceTypeCommand }>(`/settings/service-types/${typeId}/commands/${commandId}`, data);
+
+export const deleteServiceTypeCommand = (typeId: string, commandId: string) =>
+  api.delete<{ success: boolean }>(`/settings/service-types/${typeId}/commands/${commandId}`);
+
+export const reorderServiceTypeCommands = (typeId: string, commandIds: string[]) =>
+  api.put<{ commands: ServiceTypeCommand[] }>(`/settings/service-types/${typeId}/commands/reorder`, commandIds);
+
+// Global Spaces Configuration
+export interface GlobalSpacesConfig {
+  id: string;
+  accessKey: string;
+  region: string;
+  endpoint: string;
+  createdAt: string;
+  updatedAt: string;
+  enabledEnvironments: { id: string; environmentId: string; enabled: boolean }[];
+}
+
+export interface GlobalSpacesConfigInput {
+  accessKey: string;
+  secretKey: string;
+  region: string;
+  endpoint?: string;
+}
+
+export interface SpacesEnvironmentStatus {
+  id: string;
+  name: string;
+  spacesEnabled: boolean;
+}
+
+export const getGlobalSpacesConfig = () =>
+  api.get<{ configured: boolean; config: GlobalSpacesConfig | null }>('/settings/spaces');
+
+export const updateGlobalSpacesConfig = (data: GlobalSpacesConfigInput) =>
+  api.put<{ config: GlobalSpacesConfig }>('/settings/spaces', data);
+
+export const deleteGlobalSpacesConfig = () =>
+  api.delete<{ success: boolean }>('/settings/spaces');
+
+export const testGlobalSpacesConfig = () =>
+  api.post<{ success: boolean; message: string; buckets?: string[] }>('/settings/spaces/test');
+
+export const listGlobalSpacesBuckets = () =>
+  api.get<{ buckets: string[] }>('/settings/spaces/buckets');
+
+export const getSpacesEnvironments = () =>
+  api.get<{ environments: SpacesEnvironmentStatus[] }>('/settings/spaces/environments');
+
+export const setSpacesEnvironmentEnabled = (environmentId: string, enabled: boolean) =>
+  api.put<{ success: boolean; enabled: boolean }>(`/settings/spaces/environments/${environmentId}`, { enabled });
+
+// Run predefined command (for CLI integration)
+export const getRunCommand = (serviceId: string, commandName: string) =>
+  api.post<{ command: string }>(`/services/${serviceId}/run-command`, { commandName });

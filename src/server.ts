@@ -29,9 +29,12 @@ import { notificationRoutes } from './routes/notifications.js';
 import { smtpRoutes } from './routes/admin/smtp.js';
 import { webhookAdminRoutes } from './routes/admin/webhooks.js';
 import { initializeNotificationTypes } from './services/notifications.js';
+import { initializeServiceTypes } from './services/service-types.js';
 import { managedImageRoutes } from './routes/managed-images.js';
 import { serviceDependencyRoutes } from './routes/service-dependencies.js';
 import { deploymentPlanRoutes } from './routes/deployment-plans.js';
+import { settingsRoutes } from './routes/settings.js';
+import { spacesRoutes } from './routes/spaces.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -69,6 +72,9 @@ async function buildServer() {
 
   // Initialize notification types
   await initializeNotificationTypes();
+
+  // Initialize default service types
+  await initializeServiceTypes();
 
   // Ensure upload directory exists
   await mkdir(config.UPLOAD_DIR, { recursive: true });
@@ -129,6 +135,8 @@ async function buildServer() {
   await fastify.register(managedImageRoutes);
   await fastify.register(serviceDependencyRoutes);
   await fastify.register(deploymentPlanRoutes);
+  await fastify.register(settingsRoutes);
+  await fastify.register(spacesRoutes);
 
   // Health check
   fastify.get('/health', async () => {

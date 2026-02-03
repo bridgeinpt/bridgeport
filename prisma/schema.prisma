@@ -45,6 +45,7 @@ model Environment {
   sshPrivateKey    String?  // Encrypted SSH private key for this environment
   sshUser          String   @default("root") // SSH username
   allowSecretReveal Boolean @default(true)  // Whether secrets can be revealed in this environment
+  allowBackupDownload Boolean @default(false) // Whether backup downloads are allowed in this environment
 
   // DO Spaces credentials for backups (optional, encrypted)
   spacesAccessKey       String?
@@ -152,6 +153,10 @@ model Service {
 
   registryConnectionId String?
   registryConnection   RegistryConnection? @relation(fields: [registryConnectionId], references: [id], onDelete: SetNull)
+
+  // Service type for predefined commands
+  serviceTypeId String?
+  serviceType   ServiceType? @relation(fields: [serviceTypeId], references: [id], onDelete: SetNull)
 
   // Link to managed image (optional)
   managedImageId String?
@@ -356,6 +361,14 @@ model Database {
   backupSpacesBucket   String?  // Spaces bucket name
   backupSpacesPrefix   String?  // Key prefix (e.g., "backups/staging/")
 
+  // Backup format options
+  backupFormat           String   @default("plain")  // "plain" | "custom" | "tar"
+  backupCompression      String   @default("none")   // "none" | "gzip"
+  backupCompressionLevel Int      @default(6)        // 1-9 for gzip
+
+  // pg_dump options as JSON
+  pgDumpOptions          String?  // {"noOwner":true,"clean":true,...}
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -382,6 +395,8 @@ model DatabaseBackup {
   error       String?
   storageType String   // "local" | "spaces"
   storagePath String   // Local path or Spaces key
+  progress    Int      @default(0)   // 0-100
+  duration    Int?                   // seconds
   createdAt   DateTime @default(now())
   completedAt DateTime?
 
@@ -640,4 +655,62 @@ model DeploymentPlanStep {
   deployment       Deployment?    @relation(fields: [deploymentId], references: [id], onDelete: SetNull)
 
   @@index([deploymentPlanId, order])
+}
+
+// ==================== Global Settings ====================
+
+// Service Types for predefined commands (e.g., Django, Node.js)
+model ServiceType {
+  id          String   @id @default(cuid())
+  name        String   @unique // "django", "nodejs", "generic"
+  displayName String             // "Django", "Node.js", "Generic"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  commands ServiceTypeCommand[]
+  services Service[]
+}
+
+// Predefined commands for a service type
+model ServiceTypeCommand {
+  id            String      @id @default(cuid())
+  name          String                // "shell", "migrate"
+  displayName   String                // "Django Shell"
+  command       String                // "python manage.py shell"
+  description   String?
+  sortOrder     Int         @default(0)
+
+  serviceTypeId String
+  serviceType   ServiceType @relation(fields: [serviceTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([serviceTypeId, name])
+}
+
+// Global Spaces configuration (replaces per-environment Spaces config)
+model SpacesConfig {
+  id                    String   @id @default(cuid())
+  accessKey             String
+  encryptedSecretKey    String
+  secretKeyNonce        String
+  region                String   // "fra1"
+  endpoint              String   // "fra1.digitaloceanspaces.com"
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  // Environments where Spaces is enabled
+  enabledEnvironments   SpacesEnvironment[]
+}
+
+// Link global Spaces config to specific environments
+model SpacesEnvironment {
+  id              String       @id @default(cuid())
+  enabled         Boolean      @default(true)
+
+  spacesConfigId  String
+  spacesConfig    SpacesConfig @relation(fields: [spacesConfigId], references: [id], onDelete: Cascade)
+  environmentId   String
+  // Note: Can't add relation to Environment here without modifying Environment model
+  // This will be handled in the query layer
+
+  @@unique([spacesConfigId, environmentId])
 }

@@ -15,6 +15,7 @@ import About from './pages/About';
 import Registries from './pages/Registries';
 import Users from './pages/Users';
 import Databases from './pages/Databases';
+import DatabaseDetail from './pages/DatabaseDetail';
 import Monitoring from './pages/Monitoring';
 import Settings from './pages/Settings';
 import Notifications from './pages/Notifications';
@@ -22,6 +23,8 @@ import NotificationSettings from './pages/admin/NotificationSettings';
 import ManagedImages from './pages/ManagedImages';
 import DeploymentPlans from './pages/DeploymentPlans';
 import DeploymentPlanDetail from './pages/DeploymentPlanDetail';
+import ServiceTypes from './pages/settings/ServiceTypes';
+import GlobalSpaces from './pages/settings/GlobalSpaces';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { token } = useAuthStore();
@@ -59,10 +62,13 @@ export default function App() {
                 <Route path="/deployment-plans" element={<DeploymentPlans />} />
                 <Route path="/deployment-plans/:id" element={<DeploymentPlanDetail />} />
                 <Route path="/databases" element={<Databases />} />
+                <Route path="/databases/:id" element={<DatabaseDetail />} />
                 <Route path="/activity" element={<Activity />} />
                 <Route path="/notifications" element={<Notifications />} />
                 <Route path="/users" element={<Users />} />
                 <Route path="/settings" element={<Settings />} />
+                <Route path="/settings/service-types" element={<ServiceTypes />} />
+                <Route path="/settings/spaces" element={<GlobalSpaces />} />
                 <Route path="/admin/notifications" element={<NotificationSettings />} />
                 <Route path="/about" element={<About />} />
               </Routes>

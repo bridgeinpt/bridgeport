@@ -32,10 +32,15 @@ const updateServiceSchema = z.object({
   healthCheckUrl: z.string().nullable().optional(),
   autoUpdate: z.boolean().optional(),
   registryConnectionId: z.string().nullable().optional(),
+  serviceTypeId: z.string().nullable().optional(),
   // Health check configuration for deployment orchestration
   healthWaitMs: z.number().int().min(0).optional(),
   healthRetries: z.number().int().min(1).optional(),
   healthIntervalMs: z.number().int().min(0).optional(),
+});
+
+const runCommandSchema = z.object({
+  commandName: z.string().min(1),
 });
 
 const deploySchema = z.object({
@@ -73,6 +78,13 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         include: {
           server: {
             include: { environment: true },
+          },
+          serviceType: {
+            include: {
+              commands: {
+                orderBy: { sortOrder: 'asc' },
+              },
+            },
           },
         },
       });
@@ -699,6 +711,63 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         latestDigest: result.latestDigest,
         lastUpdateCheckAt: updatedService?.lastUpdateCheckAt,
       };
+    }
+  );
+
+  // Get command for a predefined command (for CLI)
+  fastify.post(
+    '/api/services/:id/run-command',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = runCommandSchema.safeParse(request.body);
+
+      if (!body.success) {
+        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
+      }
+
+      const service = await prisma.service.findUnique({
+        where: { id },
+        include: {
+          serviceType: {
+            include: {
+              commands: true,
+            },
+          },
+          server: true,
+        },
+      });
+
+      if (!service) {
+        return reply.code(404).send({ error: 'Service not found' });
+      }
+
+      if (!service.serviceType) {
+        return reply.code(400).send({ error: 'Service has no service type configured' });
+      }
+
+      const command = service.serviceType.commands.find(
+        (cmd) => cmd.name === body.data.commandName
+      );
+
+      if (!command) {
+        return reply.code(404).send({
+          error: `Command '${body.data.commandName}' not found`,
+          availableCommands: service.serviceType.commands.map((c) => c.name),
+        });
+      }
+
+      await logAudit({
+        action: 'run_command',
+        resourceType: 'service',
+        resourceId: id,
+        resourceName: service.name,
+        details: { commandName: body.data.commandName, command: command.command },
+        userId: request.authUser!.id,
+        environmentId: service.server.environmentId,
+      });
+
+      return { command: command.command };
     }
   );
 }
