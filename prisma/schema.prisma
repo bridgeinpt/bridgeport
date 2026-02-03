@@ -663,6 +663,31 @@ model DeploymentPlanStep {
 
 // ==================== Global Settings ====================
 
+// System-wide operational settings (singleton table)
+model SystemSettings {
+  id                    String   @id @default("singleton")
+
+  // SSH Timeouts (milliseconds)
+  sshCommandTimeoutMs   Int      @default(60000)
+  sshReadyTimeoutMs     Int      @default(10000)
+
+  // Webhook Settings
+  webhookMaxRetries     Int      @default(3)
+  webhookTimeoutMs      Int      @default(30000)
+  webhookRetryDelaysMs  String   @default("[1000,5000,15000]")  // JSON array
+
+  // Database Backup
+  pgDumpTimeoutMs       Int      @default(300000)
+
+  // Limits
+  maxUploadSizeMb       Int      @default(50)
+  activeUserWindowMin   Int      @default(15)
+  registryMaxTags       Int      @default(50)
+  defaultLogLines       Int      @default(50)
+
+  updatedAt             DateTime @updatedAt
+}
+
 // Service Types for predefined commands (e.g., Django, Node.js)
 model ServiceType {
   id          String   @id @default(cuid())

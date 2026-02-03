@@ -6,6 +6,7 @@ import { requireAdmin, requireAdminOrSelf } from '../plugins/authorize.js';
 import { logAudit } from '../services/audit.js';
 import type { UserRole } from '../services/auth.js';
 import { send, NOTIFICATION_TYPES } from '../services/notifications.js';
+import { getSystemSettings } from '../services/system-settings.js';
 
 const SALT_ROUNDS = 12;
 
@@ -49,15 +50,17 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
-  // Get active users (admin only) - users active in the last 15 minutes
+  // Get active users (admin only) - users active within configured window
   fastify.get(
     '/api/users/active',
     { preHandler: [fastify.authenticate, requireAdmin] },
     async () => {
-      const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
+      const settings = await getSystemSettings();
+      const activeWindowMs = settings.activeUserWindowMin * 60 * 1000;
+      const cutoffTime = new Date(Date.now() - activeWindowMs);
       const activeUsers = await prisma.user.findMany({
         where: {
-          lastActiveAt: { gte: fifteenMinutesAgo },
+          lastActiveAt: { gte: cutoffTime },
         },
         select: {
           id: true,

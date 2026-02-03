@@ -1571,6 +1571,57 @@ export const getSpacesEnvironments = () =>
 export const setSpacesEnvironmentEnabled = (environmentId: string, enabled: boolean) =>
   api.put<{ success: boolean; enabled: boolean }>(`/settings/spaces/environments/${environmentId}`, { enabled });
 
+// System Settings
+export interface SystemSettings {
+  id: string;
+  sshCommandTimeoutMs: number;
+  sshReadyTimeoutMs: number;
+  webhookMaxRetries: number;
+  webhookTimeoutMs: number;
+  webhookRetryDelaysMs: string;
+  pgDumpTimeoutMs: number;
+  maxUploadSizeMb: number;
+  activeUserWindowMin: number;
+  registryMaxTags: number;
+  defaultLogLines: number;
+  updatedAt: string;
+}
+
+export interface SystemSettingsDefaults {
+  sshCommandTimeoutMs: number;
+  sshReadyTimeoutMs: number;
+  webhookMaxRetries: number;
+  webhookTimeoutMs: number;
+  webhookRetryDelaysMs: string;
+  pgDumpTimeoutMs: number;
+  maxUploadSizeMb: number;
+  activeUserWindowMin: number;
+  registryMaxTags: number;
+  defaultLogLines: number;
+}
+
+export interface SystemSettingsInput {
+  sshCommandTimeoutMs?: number;
+  sshReadyTimeoutMs?: number;
+  webhookMaxRetries?: number;
+  webhookTimeoutMs?: number;
+  webhookRetryDelaysMs?: string;
+  pgDumpTimeoutMs?: number;
+  maxUploadSizeMb?: number;
+  activeUserWindowMin?: number;
+  registryMaxTags?: number;
+  defaultLogLines?: number;
+}
+
+export const getSystemSettings = () =>
+  api.get<{ settings: SystemSettings; defaults: SystemSettingsDefaults }>('/settings/system');
+
+export const updateSystemSettings = (data: SystemSettingsInput) =>
+  api.put<{ settings: SystemSettings }>('/settings/system', data);
+
+export const resetSystemSettings = () =>
+  api.post<{ settings: SystemSettings; message: string }>('/settings/system/reset');
+
 // Run predefined command (for CLI integration)
 export const getRunCommand = (serviceId: string, commandName: string) =>
   api.post<{ command: string }>(`/services/${serviceId}/run-command`, { commandName });

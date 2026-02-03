@@ -2,6 +2,7 @@ import { createHmac } from 'crypto';
 import { prisma } from '../lib/db.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
 import type { WebhookConfig } from '@prisma/client';
+import { getSystemSettings, parseWebhookRetryDelays } from './system-settings.js';
 
 interface WebhookConfigInput {
   name: string;
@@ -37,8 +38,9 @@ interface WebhookPayload {
   data: Record<string, unknown>;
 }
 
-const MAX_RETRIES = 3;
-const RETRY_DELAYS = [1000, 5000, 15000]; // ms
+// Default values - actual values come from system settings
+// const MAX_RETRIES = 3;
+// const RETRY_DELAYS = [1000, 5000, 15000]; // ms
 
 /**
  * Convert database record to output format
@@ -181,6 +183,12 @@ async function sendWebhookWithRetry(
   webhook: WebhookConfig,
   payload: WebhookPayload
 ): Promise<{ success: boolean; error?: string }> {
+  // Get settings for retry logic
+  const settings = await getSystemSettings();
+  const maxRetries = settings.webhookMaxRetries;
+  const timeoutMs = settings.webhookTimeoutMs;
+  const retryDelays = parseWebhookRetryDelays(settings);
+
   const payloadString = JSON.stringify(payload);
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -206,13 +214,13 @@ async function sendWebhookWithRetry(
 
   let lastError: string | undefined;
 
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       const response = await fetch(webhook.url, {
         method: 'POST',
         headers,
         body: payloadString,
-        signal: AbortSignal.timeout(30000), // 30 second timeout
+        signal: AbortSignal.timeout(timeoutMs),
       });
 
       if (response.ok) {
@@ -225,8 +233,9 @@ async function sendWebhookWithRetry(
     }
 
     // Wait before retry (except on last attempt)
-    if (attempt < MAX_RETRIES - 1) {
-      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAYS[attempt]));
+    if (attempt < maxRetries - 1) {
+      const delay = retryDelays[attempt] ?? retryDelays[retryDelays.length - 1] ?? 5000;
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
 

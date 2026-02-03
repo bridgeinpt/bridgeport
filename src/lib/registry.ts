@@ -1,4 +1,5 @@
 import { config } from './config.js';
+import { getSystemSettings } from '../services/system-settings.js';
 
 // Common types
 export interface RegistryTag {
@@ -325,10 +326,13 @@ export class GenericRegistryClient implements RegistryClient {
     const data = await this.fetch<{ tags: string[] | null }>(`/v2/${repo}/tags/list`);
     if (!data.tags) return [];
 
+    // Get max tags from system settings
+    const settings = await getSystemSettings();
+    const maxTags = settings.registryMaxTags;
+
     // Get manifest for each tag to get digest
     const tags: RegistryTag[] = [];
-    for (const tag of data.tags.slice(0, 50)) {
-      // Limit to 50 tags
+    for (const tag of data.tags.slice(0, maxTags)) {
       try {
         const digest = await this.getManifestDigest(repo, tag);
         tags.push({

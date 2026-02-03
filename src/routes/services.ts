@@ -14,6 +14,7 @@ import { logAudit } from '../services/audit.js';
 import { checkServiceUpdate } from '../lib/scheduler.js';
 import { stripRegistryPrefix } from '../lib/image-utils.js';
 import { determineHealthStatus, determineOverallStatus } from '../services/servers.js';
+import { getSystemSettings } from '../services/system-settings.js';
 
 const createServiceSchema = z.object({
   name: z.string().min(1),
@@ -353,9 +354,13 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
       try {
         await client.connect();
 
+        // Get default log lines from system settings
+        const settings = await getSystemSettings();
+        const defaultLogLines = settings.defaultLogLines;
+
         // Stream logs (add PATH for non-interactive SSH)
         await client.execStream(
-          `export PATH="/usr/local/bin:/usr/bin:$PATH" && docker logs -f --tail 50 ${service.containerName}`,
+          `export PATH="/usr/local/bin:/usr/bin:$PATH" && docker logs -f --tail ${defaultLogLines} ${service.containerName}`,
           (data, isStderr) => {
             const eventType = isStderr ? 'stderr' : 'stdout';
             reply.raw.write(`event: ${eventType}\n`);

@@ -36,6 +36,7 @@ import { deploymentPlanRoutes } from './routes/deployment-plans.js';
 import { settingsRoutes } from './routes/settings.js';
 import { spacesRoutes } from './routes/spaces.js';
 import { monitoringRoutes } from './routes/monitoring.js';
+import { systemSettingsRoutes } from './routes/system-settings.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -82,7 +83,11 @@ async function buildServer() {
 
   // Register plugins
   await fastify.register(cors, {
-    origin: config.NODE_ENV === 'development' ? true : ['https://deploy.bridgein.com'],
+    origin: config.NODE_ENV === 'development'
+      ? true
+      : config.CORS_ORIGIN
+        ? config.CORS_ORIGIN.split(',').map(s => s.trim())
+        : ['https://deploy.bridgein.com'],
     credentials: true,
   });
 
@@ -139,6 +144,7 @@ async function buildServer() {
   await fastify.register(settingsRoutes);
   await fastify.register(spacesRoutes);
   await fastify.register(monitoringRoutes);
+  await fastify.register(systemSettingsRoutes);
 
   // Health check
   fastify.get('/health', async () => {

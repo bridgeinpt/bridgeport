@@ -3,6 +3,7 @@ import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import { readFile, stat, writeFile as fsWriteFile } from 'fs/promises';
 import { config } from './config.js';
+import { getSystemSettings } from '../services/system-settings.js';
 
 const execAsync = promisify(exec);
 
@@ -45,10 +46,17 @@ export class LocalClient implements CommandClient {
   }
 
   async exec(command: string, options?: LocalExecOptions): Promise<SSHExecResult> {
+    // Get timeout from system settings if not provided
+    let timeout = options?.timeout;
+    if (!timeout) {
+      const settings = await getSystemSettings();
+      timeout = settings.sshCommandTimeoutMs;
+    }
+
     try {
       const { stdout, stderr } = await execAsync(command, {
         maxBuffer: 10 * 1024 * 1024, // 10MB buffer
-        timeout: options?.timeout || 60000, // 60 second timeout
+        timeout,
         env: options?.env ? { ...process.env, ...options.env } : undefined,
       });
       return { stdout, stderr, code: 0 };
@@ -143,12 +151,15 @@ export class SSHClient implements CommandClient {
       throw new Error('No SSH private key provided. Set the key in environment settings.');
     }
 
+    // Get readyTimeout from system settings
+    const settings = await getSystemSettings();
+
     const connectConfig: ConnectConfig = {
       host: this.options.hostname,
       port: this.options.port,
       username: this.options.username,
       privateKey,
-      readyTimeout: 10000,
+      readyTimeout: settings.sshReadyTimeoutMs,
     };
 
     return new Promise((resolve, reject) => {

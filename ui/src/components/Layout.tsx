@@ -19,6 +19,7 @@ import {
   ChartIcon,
   HeartPulseIcon,
   NetworkIcon,
+  CogIcon,
 } from './Icons';
 import TopBar from './TopBar';
 
@@ -46,6 +47,7 @@ interface NavItem {
 interface NavGroup {
   name: string;
   items: NavItem[];
+  isGlobal?: boolean; // Not dependent on selected environment
 }
 
 // Inline icons for orchestration features
@@ -147,13 +149,19 @@ const navigationGroups: NavGroup[] = [
   },
   {
     name: 'Global Settings',
+    isGlobal: true,
     items: [
+      { name: 'System', href: '/settings/system', icon: CogIcon, adminOnly: true },
       { name: 'Service Types', href: '/settings/service-types', icon: CommandIcon, adminOnly: true },
       { name: 'Spaces', href: '/settings/spaces', icon: CloudIcon, adminOnly: true },
       { name: 'Notifications', href: '/admin/notifications', icon: NavBellIcon, adminOnly: true },
     ],
   },
 ];
+
+// Separate environment-dependent and global navigation groups
+const envDependentGroups = navigationGroups.filter(g => !g.isGlobal);
+const globalGroups = navigationGroups.filter(g => g.isGlobal);
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
@@ -314,62 +322,131 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
         )}
 
-        <nav className="flex-1 p-2 space-y-3 overflow-y-auto min-h-0">
-          {navigationGroups.map((group) => {
-            const visibleItems = group.items.filter(
-              (item) => !item.adminOnly || isAdmin(user)
-            );
-            if (visibleItems.length === 0) return null;
+        <nav className="flex-1 p-2 overflow-y-auto min-h-0 flex flex-col">
+          {/* Environment-dependent navigation */}
+          <div className="space-y-3 flex-1">
+            {envDependentGroups.map((group) => {
+              const visibleItems = group.items.filter(
+                (item) => !item.adminOnly || isAdmin(user)
+              );
+              if (visibleItems.length === 0) return null;
 
-            const isGroupCollapsed = collapsedGroups.has(group.name);
+              const isGroupCollapsed = collapsedGroups.has(group.name);
 
-            return (
-              <div key={group.name}>
-                {/* Group header - hidden when sidebar collapsed */}
-                {!sidebarCollapsed && (
-                  <button
-                    onClick={() => toggleGroup(group.name)}
-                    className="flex items-center justify-between w-full text-[10px] text-slate-500 uppercase tracking-wider font-medium mb-1 px-2 hover:text-slate-400 transition-colors"
-                  >
-                    <span>{group.name}</span>
-                    {isGroupCollapsed ? (
-                      <ChevronRightIcon className="w-3 h-3" />
-                    ) : (
-                      <ChevronDownIcon className="w-3 h-3" />
-                    )}
-                  </button>
-                )}
-                {(!isGroupCollapsed || sidebarCollapsed) && (
-                  <div className="space-y-0.5">
-                    {visibleItems.map((item) => {
-                      const isActive = location.pathname === item.href;
-                      return (
-                        <Link
-                          key={item.name}
-                          to={item.href}
-                          className={`relative flex items-center gap-2 px-2 py-1.5 rounded transition-colors ${
-                            isActive
-                              ? 'bg-slate-800 text-white'
-                              : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-                          } ${sidebarCollapsed ? 'justify-center' : ''}`}
-                          title={sidebarCollapsed ? item.name : undefined}
+              return (
+                <div key={group.name}>
+                  {/* Group header - hidden when sidebar collapsed */}
+                  {!sidebarCollapsed && (
+                    <button
+                      onClick={() => toggleGroup(group.name)}
+                      className="flex items-center justify-between w-full text-[10px] text-slate-500 uppercase tracking-wider font-medium mb-1 px-2 hover:text-slate-400 transition-colors"
+                    >
+                      <span>{group.name}</span>
+                      {isGroupCollapsed ? (
+                        <ChevronRightIcon className="w-3 h-3" />
+                      ) : (
+                        <ChevronDownIcon className="w-3 h-3" />
+                      )}
+                    </button>
+                  )}
+                  {(!isGroupCollapsed || sidebarCollapsed) && (
+                    <div className="space-y-0.5">
+                      {visibleItems.map((item) => {
+                        const isActive = location.pathname === item.href;
+                        return (
+                          <Link
+                            key={item.name}
+                            to={item.href}
+                            className={`relative flex items-center gap-2 px-2 py-1.5 rounded transition-colors ${
+                              isActive
+                                ? 'bg-slate-800 text-white'
+                                : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                            } ${sidebarCollapsed ? 'justify-center' : ''}`}
+                            title={sidebarCollapsed ? item.name : undefined}
+                          >
+                            {/* Burgundy accent stripe for active items */}
+                            {isActive && (
+                              <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-brand-600 rounded-r" />
+                            )}
+                            <item.icon className="w-4 h-4 flex-shrink-0" />
+                            {!sidebarCollapsed && (
+                              <span className="text-sm">{item.name}</span>
+                            )}
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Visual separator for global settings */}
+          {globalGroups.some(g => g.items.some(item => !item.adminOnly || isAdmin(user))) && (
+            <>
+              <div className="my-3 border-t border-slate-700/50" />
+
+              {/* Global navigation (not environment-dependent) */}
+              <div className="space-y-3">
+                {globalGroups.map((group) => {
+                  const visibleItems = group.items.filter(
+                    (item) => !item.adminOnly || isAdmin(user)
+                  );
+                  if (visibleItems.length === 0) return null;
+
+                  const isGroupCollapsed = collapsedGroups.has(group.name);
+
+                  return (
+                    <div key={group.name}>
+                      {/* Group header - hidden when sidebar collapsed */}
+                      {!sidebarCollapsed && (
+                        <button
+                          onClick={() => toggleGroup(group.name)}
+                          className="flex items-center justify-between w-full text-[10px] text-slate-500 uppercase tracking-wider font-medium mb-1 px-2 hover:text-slate-400 transition-colors"
                         >
-                          {/* Burgundy accent stripe for active items */}
-                          {isActive && (
-                            <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-brand-600 rounded-r" />
+                          <span>{group.name}</span>
+                          {isGroupCollapsed ? (
+                            <ChevronRightIcon className="w-3 h-3" />
+                          ) : (
+                            <ChevronDownIcon className="w-3 h-3" />
                           )}
-                          <item.icon className="w-4 h-4 flex-shrink-0" />
-                          {!sidebarCollapsed && (
-                            <span className="text-sm">{item.name}</span>
-                          )}
-                        </Link>
-                      );
-                    })}
-                  </div>
-                )}
+                        </button>
+                      )}
+                      {(!isGroupCollapsed || sidebarCollapsed) && (
+                        <div className="space-y-0.5">
+                          {visibleItems.map((item) => {
+                            const isActive = location.pathname === item.href;
+                            return (
+                              <Link
+                                key={item.name}
+                                to={item.href}
+                                className={`relative flex items-center gap-2 px-2 py-1.5 rounded transition-colors ${
+                                  isActive
+                                    ? 'bg-slate-800 text-white'
+                                    : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                                } ${sidebarCollapsed ? 'justify-center' : ''}`}
+                                title={sidebarCollapsed ? item.name : undefined}
+                              >
+                                {/* Burgundy accent stripe for active items */}
+                                {isActive && (
+                                  <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-brand-600 rounded-r" />
+                                )}
+                                <item.icon className="w-4 h-4 flex-shrink-0" />
+                                {!sidebarCollapsed && (
+                                  <span className="text-sm">{item.name}</span>
+                                )}
+                              </Link>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
+            </>
+          )}
         </nav>
 
         {/* Collapse toggle at bottom */}

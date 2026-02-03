@@ -27,6 +27,8 @@ const envSchema = z.object({
   // Internal URL for agent to connect back to BridgePort
   // Should be the internal/VPC IP that monitored servers can reach
   AGENT_CALLBACK_URL: z.string().optional(), // e.g., "http://10.30.10.5:3000"
+  // CORS origin(s) - comma-separated list or single origin
+  CORS_ORIGIN: z.string().optional(), // e.g., "https://deploy.bridgein.com"
 });
 
 export type Config = z.infer<typeof envSchema>;

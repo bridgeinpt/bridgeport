@@ -8,6 +8,7 @@ import { readFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { sendSystemNotification, NOTIFICATION_TYPES } from './notifications.js';
+import { getSystemSettings } from './system-settings.js';
 
 export type BackupStep = 'connect' | 'dump' | 'upload';
 
@@ -441,7 +442,9 @@ async function executeBackup(backupId: string): Promise<void> {
 
       // Use 2>&1 to capture stderr in stdout so we get better error messages
       dumpCommand = cmdParts.join(' ') + ' 2>&1';
-      execOptions = { env: { PGPASSWORD: password, PGSSLMODE: 'require' }, timeout: 300000 };
+      // Get pg_dump timeout from system settings
+      const systemSettings = await getSystemSettings();
+      execOptions = { env: { PGPASSWORD: password, PGSSLMODE: 'require' }, timeout: systemSettings.pgDumpTimeoutMs };
     } else if (db.type === 'sqlite' && db.filePath) {
       if (!db.server) {
         throw new Error('SQLite databases require a server to be configured');
