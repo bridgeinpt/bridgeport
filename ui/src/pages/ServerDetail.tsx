@@ -17,6 +17,7 @@ import {
   deleteServer,
   getServerConfigFilesStatus,
   syncAllServerFiles,
+  listContainerImages,
   type ServerWithServices,
   type MetricsMode,
   type ServerMetrics,
@@ -26,6 +27,7 @@ import {
   type ServerConfigFileStatus,
   type ServerConfigFilesSyncTotals,
   type ServerSyncAllResult,
+  type ContainerImage,
 } from '../lib/api';
 import { useToast } from '../components/Toast';
 import { formatDistanceToNow } from 'date-fns';
@@ -106,10 +108,11 @@ export default function ServerDetail() {
   const [showCreateService, setShowCreateService] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [containerImages, setContainerImages] = useState<ContainerImage[]>([]);
   const [newService, setNewService] = useState<CreateServiceInput>({
     name: '',
     containerName: '',
-    imageName: '',
+    containerImageId: '',
     imageTag: 'latest',
     composePath: '',
     healthCheckUrl: '',
@@ -149,6 +152,12 @@ export default function ServerDetail() {
           setAgentStatus(statusRes);
           if (metricsRes.metrics.length > 0) {
             setLatestMetrics(metricsRes.metrics[0]);
+          }
+          // Load container images for the server's environment
+          if (serverRes.server.environmentId) {
+            listContainerImages(serverRes.server.environmentId)
+              .then(({ images }) => setContainerImages(images))
+              .catch(() => setContainerImages([]));
           }
         })
         .finally(() => setLoading(false));
@@ -344,7 +353,7 @@ export default function ServerDetail() {
       setNewService({
         name: '',
         containerName: '',
-        imageName: '',
+        containerImageId: '',
         imageTag: 'latest',
         composePath: '',
         healthCheckUrl: '',
@@ -1006,7 +1015,7 @@ export default function ServerDetail() {
                               {service.containerName}
                             </td>
                             <td className="py-3 font-mono text-sm">
-                              {service.imageName.split('/').pop()}:{service.imageTag}
+                              {service.containerImage?.imageName?.split('/').pop() || 'unknown'}:{service.imageTag}
                             </td>
                             <td className="py-3 font-mono text-sm text-slate-400">
                               {formatPorts(ports)}
@@ -1078,7 +1087,7 @@ export default function ServerDetail() {
                             {service.containerName}
                           </td>
                           <td className="py-3 font-mono text-sm">
-                            {service.imageName.split('/').pop()}:{service.imageTag}
+                            {service.containerImage?.imageName?.split('/').pop() || 'unknown'}:{service.imageTag}
                           </td>
                           <td className="py-3">
                             <span className={`badge ${getContainerStatusColor(service.containerStatus || 'not_found')}`}>
@@ -1147,15 +1156,25 @@ export default function ServerDetail() {
                 <p className="text-xs text-slate-500 mt-1">Docker container name to manage</p>
               </div>
               <div>
-                <label className="block text-sm text-slate-400 mb-1">Image Name *</label>
-                <input
-                  type="text"
-                  value={newService.imageName}
-                  onChange={(e) => setNewService({ ...newService, imageName: e.target.value })}
-                  placeholder="e.g., registry.digitalocean.com/my-registry/app-api"
+                <label className="block text-sm text-slate-400 mb-1">Container Image *</label>
+                <select
+                  value={newService.containerImageId}
+                  onChange={(e) => setNewService({ ...newService, containerImageId: e.target.value })}
                   className="input font-mono text-sm"
                   required
-                />
+                >
+                  <option value="">Select a container image...</option>
+                  {containerImages.map((img) => (
+                    <option key={img.id} value={img.id}>
+                      {img.name} ({img.imageName})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-500 mt-1">
+                  <Link to="/container-images" className="text-primary-400 hover:underline">
+                    Create a new container image
+                  </Link> if not listed
+                </p>
               </div>
               <div>
                 <label className="block text-sm text-slate-400 mb-1">Image Tag</label>

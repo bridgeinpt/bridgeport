@@ -18,7 +18,6 @@ import {
   updateServiceFile,
   syncServiceFiles,
   checkServiceUpdates,
-  listRegistryConnections,
   getAuditLogs,
   getServiceHistory,
   getServiceDependencies,
@@ -29,7 +28,6 @@ import {
   type ServiceFile,
   type ConfigFile,
   type SyncResult,
-  type RegistryConnection,
   type AuditLog,
   type ExposedPort,
   type ServiceHistoryEntry,
@@ -108,8 +106,7 @@ export default function ServiceDetail() {
   const [editMountPathValue, setEditMountPathValue] = useState('');
   const [savingMountPath, setSavingMountPath] = useState(false);
 
-  // Registry and auto-update state
-  const [registries, setRegistries] = useState<RegistryConnection[]>([]);
+  // Service types and auto-update state
   const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
   const [editServiceTypeId, setEditServiceTypeId] = useState<string>('');
   const [checkingUpdates, setCheckingUpdates] = useState(false);
@@ -179,9 +176,6 @@ export default function ServiceDetail() {
     if (selectedEnvironment?.id) {
       listConfigFiles(selectedEnvironment.id).then(({ configFiles }) =>
         setConfigFiles(configFiles)
-      );
-      listRegistryConnections(selectedEnvironment.id).then(({ registries }) =>
-        setRegistries(registries)
       );
     }
     // Load service types (global, not per-environment)

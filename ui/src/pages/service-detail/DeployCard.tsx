@@ -1,9 +1,8 @@
 import { formatDistanceToNow } from 'date-fns';
-import type { ServiceWithServer, RegistryConnection, UpdateCheckResult } from './types';
+import type { ServiceWithServer, UpdateCheckResult } from './types';
 
 interface DeployCardProps {
   service: ServiceWithServer;
-  registries: RegistryConnection[];
   imageTag: string;
   setImageTag: (tag: string) => void;
   deploying: boolean;
@@ -19,7 +18,6 @@ interface DeployCardProps {
 
 export function DeployCard({
   service,
-  registries,
   imageTag,
   setImageTag,
   deploying,
@@ -36,7 +34,7 @@ export function DeployCard({
     <div className="col-span-2 card">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-lg font-semibold text-white">Deploy</h3>
-        {service.registryConnectionId && (
+        {service.containerImage?.registryConnectionId && (
           <button
             onClick={onCheckUpdates}
             disabled={checkingUpdates}
@@ -52,7 +50,7 @@ export function DeployCard({
           <div>
             <dt className="text-xs text-slate-500 uppercase tracking-wide">Image Name</dt>
             <dd className="text-white font-mono text-sm mt-0.5">
-              {service.imageName || <span className="text-slate-500 italic">Not set</span>}
+              {service.containerImage?.imageName || <span className="text-slate-500 italic">Not set</span>}
             </dd>
           </div>
           <div>
@@ -64,21 +62,18 @@ export function DeployCard({
           <div>
             <dt className="text-xs text-slate-500 uppercase tracking-wide">Registry</dt>
             <dd className="text-white text-sm mt-0.5">
-              {(() => {
-                const registry = registries.find(r => r.id === service.registryConnectionId);
-                return registry ? (
-                  <span className="text-primary-400">{registry.name}</span>
-                ) : (
-                  <span className="text-slate-500 italic">Not linked</span>
-                );
-              })()}
+              {service.containerImage?.registryConnection ? (
+                <span className="text-primary-400">{service.containerImage.registryConnection.name}</span>
+              ) : (
+                <span className="text-slate-500 italic">Not linked</span>
+              )}
             </dd>
           </div>
           <div>
             <dt className="text-xs text-slate-500 uppercase tracking-wide">Current Image</dt>
             <dd className="text-primary-400 font-mono text-sm mt-0.5 break-all">
-              {service.imageName && service.imageTag ? (
-                `${service.imageName}:${service.imageTag}`
+              {service.containerImage?.imageName && service.imageTag ? (
+                `${service.containerImage?.imageName}:${service.imageTag}`
               ) : (
                 <span className="text-slate-500 italic">Not configured</span>
               )}
@@ -109,7 +104,7 @@ export function DeployCard({
         </div>
 
         {/* Auto-update toggle */}
-        {service.registryConnectionId && (
+        {service.containerImage?.registryConnectionId && (
           <div className="flex items-center justify-between pt-4 border-t border-slate-700">
             <div>
               <p className="text-white font-medium">Auto-update</p>

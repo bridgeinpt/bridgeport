@@ -249,7 +249,7 @@ export default function Dashboard() {
     setCheckingUpdates(true);
     try {
       const serviceIds = environment.servers.flatMap((s) =>
-        s.services.filter((svc) => svc.registryConnectionId).map((svc) => svc.id)
+        s.services.filter((svc) => svc.containerImage?.registryConnectionId).map((svc) => svc.id)
       );
       await Promise.all(serviceIds.map((id) => checkServiceUpdates(id)));
       // Refresh environment data

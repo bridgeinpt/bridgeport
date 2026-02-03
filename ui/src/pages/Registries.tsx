@@ -11,7 +11,6 @@ import {
   getRegistryServices,
   checkRegistryUpdates,
   deployService,
-  updateService,
   type RegistryConnection,
   type RegistryConnectionInput,
   type RegistryService,
@@ -40,7 +39,6 @@ export default function Registries() {
   const [loadingServices, setLoadingServices] = useState(false);
   const [checkingUpdates, setCheckingUpdates] = useState<string | null>(null);
   const [updatingService, setUpdatingService] = useState<string | null>(null);
-  const [unlinkingService, setUnlinkingService] = useState<string | null>(null);
 
   // Form state
   const [formData, setFormData] = useState<RegistryConnectionInput>({
@@ -240,21 +238,10 @@ export default function Registries() {
   };
 
   const handleUnlinkService = async (service: RegistryService) => {
-    if (!confirm(`Unlink "${service.name}" from this registry?`)) return;
-    setUnlinkingService(service.id);
-    try {
-      await updateService(service.id, { registryConnectionId: null });
-      toast.success(`Unlinked ${service.name}`);
-      // Refresh services list
-      if (viewingServices) {
-        const { services } = await getRegistryServices(viewingServices);
-        setLinkedServices(services);
-      }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Unlink failed');
-    } finally {
-      setUnlinkingService(null);
-    }
+    // Registry connection is now managed through ContainerImage, not Service directly
+    // To unlink, edit the ContainerImage's registry connection instead
+    toast.error('To change registry, edit the Container Image settings');
+    void service; // Suppress unused warning
   };
 
   // Pagination
@@ -436,7 +423,7 @@ export default function Registries() {
                                 )}
                               </div>
                               <p className="text-xs text-slate-400 font-mono mt-1 truncate">
-                                {service.imageName}
+                                {service.containerImage?.imageName}
                               </p>
                               <div className="flex items-center gap-4 mt-1 text-xs text-slate-500">
                                 <span className="font-mono">
@@ -468,11 +455,10 @@ export default function Registries() {
                               )}
                               <button
                                 onClick={() => handleUnlinkService(service)}
-                                disabled={unlinkingService === service.id}
                                 className="btn btn-sm btn-ghost text-slate-400 hover:text-red-400"
                                 title="Unlink from registry"
                               >
-                                {unlinkingService === service.id ? '...' : '×'}
+                                ×
                               </button>
                             </div>
                           </div>

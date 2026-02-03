@@ -363,7 +363,7 @@ export default function Services() {
                       </td>
                       <td className="py-4 font-mono text-sm">
                         <span className="text-slate-400">
-                          {service.imageName.split('/').pop()}
+                          {service.containerImage?.imageName?.split('/').pop() || 'unknown'}
                         </span>
                         :<span className="text-primary-400">{service.imageTag}</span>
                         {hasUpdate && (
