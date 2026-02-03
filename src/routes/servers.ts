@@ -345,6 +345,9 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
       return {
         metricsMode: server.metricsMode,
         hasToken: !!server.agentToken,
+        agentStatus: server.agentStatus,
+        agentVersion: server.agentVersion,
+        lastAgentPushAt: server.lastAgentPushAt,
         ...status,
       };
     }

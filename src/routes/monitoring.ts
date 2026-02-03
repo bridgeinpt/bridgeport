@@ -728,7 +728,10 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
           status: true,
           metricsMode: true,
           agentToken: true,
+          agentStatus: true,
+          agentVersion: true,
           lastCheckedAt: true,
+          lastAgentPushAt: true,
           metrics: {
             orderBy: { collectedAt: 'desc' },
             take: 1,
@@ -744,7 +747,10 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         sshStatus: server.status,
         metricsMode: server.metricsMode,
         hasAgentToken: !!server.agentToken,
+        agentStatus: server.agentStatus,
+        agentVersion: server.agentVersion,
         lastCheckedAt: server.lastCheckedAt,
+        lastAgentPushAt: server.lastAgentPushAt,
         lastMetricsPush: server.metrics[0]?.collectedAt || null,
         metricsSource: server.metrics[0]?.source || null,
       }));

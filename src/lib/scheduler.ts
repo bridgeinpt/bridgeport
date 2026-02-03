@@ -18,6 +18,7 @@ import { sendSystemNotification, NOTIFICATION_TYPES, cleanupOldNotifications } f
 import { recordFailure, recordSuccess } from '../services/bounce-tracker.js';
 import { buildDeploymentPlan, executePlan } from '../services/orchestration.js';
 import { logHealthCheck, cleanupHealthCheckLogs } from '../routes/monitoring.js';
+import { getSystemSettings } from '../services/system-settings.js';
 
 interface SchedulerConfig {
   serverHealthIntervalMs: number;
@@ -131,9 +132,7 @@ async function runServerHealthChecks(): Promise<void> {
 
 /**
  * Run health checks on all services that have a healthCheckUrl configured
- * (skips services on agent-mode servers since agents report container health directly)
- * Note: Services with healthCheckUrl on agent servers still need URL checks via SSH,
- * as the agent cannot perform HTTP health checks.
+ * Skips services on agent-mode servers since agents now perform URL health checks
  */
 async function runServiceHealthChecks(): Promise<void> {
   try {
@@ -141,13 +140,15 @@ async function runServiceHealthChecks(): Promise<void> {
       where: {
         healthCheckUrl: { not: null },
         discoveryStatus: 'found',
-        // For agent-mode servers, we still need to do URL checks since the agent
-        // cannot perform HTTP health checks. Include all services with healthCheckUrl.
+        // Skip agent-mode servers - agents now perform health checks
+        server: {
+          metricsMode: { not: 'agent' },
+        },
       },
       select: {
         id: true,
         name: true,
-        server: { select: { environmentId: true } },
+        server: { select: { environmentId: true, metricsMode: true } },
       },
     });
 
@@ -689,6 +690,73 @@ async function runBackupChecks(): Promise<void> {
 }
 
 /**
+ * Check for stale/offline agents and update their status
+ */
+async function runAgentStalenessCheck(): Promise<void> {
+  try {
+    const settings = await getSystemSettings();
+    const now = new Date();
+    const staleThreshold = new Date(now.getTime() - settings.agentStaleThresholdMs);
+    const offlineThreshold = new Date(now.getTime() - settings.agentOfflineThresholdMs);
+
+    // Find all agent-mode servers with lastAgentPushAt set
+    const agentServers = await prisma.server.findMany({
+      where: {
+        metricsMode: 'agent',
+        lastAgentPushAt: { not: null },
+        // Only check servers that are currently active or stale (not already offline)
+        agentStatus: { in: ['active', 'stale', 'waiting'] },
+      },
+      select: {
+        id: true,
+        name: true,
+        agentStatus: true,
+        lastAgentPushAt: true,
+        environmentId: true,
+      },
+    });
+
+    for (const server of agentServers) {
+      if (!server.lastAgentPushAt) continue;
+
+      const lastPush = new Date(server.lastAgentPushAt);
+      let newStatus: string | null = null;
+
+      if (lastPush < offlineThreshold) {
+        // Agent is offline (exceeds offline threshold)
+        if (server.agentStatus !== 'offline') {
+          newStatus = 'offline';
+          // Send notification for agent going offline
+          const bounce = await recordFailure('server', server.id, 'offline', NOTIFICATION_TYPES.SYSTEM_SERVER_OFFLINE);
+          if (bounce.shouldAlert) {
+            await sendSystemNotification(
+              NOTIFICATION_TYPES.SYSTEM_SERVER_OFFLINE,
+              server.environmentId,
+              { serverName: server.name, reason: 'Agent stopped reporting' }
+            );
+          }
+        }
+      } else if (lastPush < staleThreshold) {
+        // Agent is stale (exceeds stale threshold but not offline)
+        if (server.agentStatus === 'active') {
+          newStatus = 'stale';
+        }
+      }
+
+      if (newStatus) {
+        await prisma.server.update({
+          where: { id: server.id },
+          data: { agentStatus: newStatus },
+        });
+        console.log(`[Scheduler] Agent ${server.name} marked as ${newStatus}`);
+      }
+    }
+  } catch (error) {
+    console.error('[Scheduler] Agent staleness check failed:', error);
+  }
+}
+
+/**
  * Clean up old metrics data
  */
 async function runMetricsCleanup(retentionDays: number): Promise<void> {
@@ -764,6 +832,7 @@ export function startScheduler(config: Partial<SchedulerConfig> = {}): void {
   timers.set('updateCheck', setInterval(runUpdateChecks, cfg.updateCheckIntervalMs));
   timers.set('metrics', setInterval(runMetricsCollection, cfg.metricsIntervalMs));
   timers.set('backupCheck', setInterval(runBackupChecks, cfg.backupCheckIntervalMs));
+  timers.set('agentStaleness', setInterval(runAgentStalenessCheck, 30000)); // Every 30 seconds
   timers.set('cleanup', setInterval(() => runMetricsCleanup(cfg.metricsRetentionDays), 60 * 60 * 1000));
   timers.set('notificationCleanup', setInterval(() => runNotificationCleanup(cfg.notificationRetentionDays), 24 * 60 * 60 * 1000)); // Daily
   timers.set('healthLogCleanup', setInterval(() => runHealthLogCleanup(cfg.healthLogRetentionDays), 24 * 60 * 60 * 1000)); // Daily

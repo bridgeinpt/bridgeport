@@ -272,7 +272,16 @@ export const removeAgent = (id: string) =>
   api.post<{ success: boolean; message?: string }>(`/servers/${id}/agent/remove`);
 
 export const getAgentStatus = (id: string) =>
-  api.get<{ metricsMode: string; hasToken: boolean; installed: boolean; running: boolean; error?: string }>(`/servers/${id}/agent/status`);
+  api.get<{
+    metricsMode: string;
+    hasToken: boolean;
+    agentStatus: AgentStatus;
+    agentVersion: string | null;
+    lastAgentPushAt: string | null;
+    installed: boolean;
+    running: boolean;
+    error?: string;
+  }>(`/servers/${id}/agent/status`);
 
 export const setMetricsMode = (id: string, mode: 'ssh' | 'agent' | 'disabled') =>
   api.patch<{ metricsMode: string }>(`/servers/${id}/metrics-mode`, { mode });
@@ -1585,6 +1594,9 @@ export interface SystemSettings {
   activeUserWindowMin: number;
   registryMaxTags: number;
   defaultLogLines: number;
+  agentCallbackUrl: string | null;
+  agentStaleThresholdMs: number;
+  agentOfflineThresholdMs: number;
   updatedAt: string;
 }
 
@@ -1599,6 +1611,8 @@ export interface SystemSettingsDefaults {
   activeUserWindowMin: number;
   registryMaxTags: number;
   defaultLogLines: number;
+  agentStaleThresholdMs: number;
+  agentOfflineThresholdMs: number;
 }
 
 export interface SystemSettingsInput {
@@ -1612,6 +1626,9 @@ export interface SystemSettingsInput {
   activeUserWindowMin?: number;
   registryMaxTags?: number;
   defaultLogLines?: number;
+  agentCallbackUrl?: string | null;
+  agentStaleThresholdMs?: number;
+  agentOfflineThresholdMs?: number;
 }
 
 export const getSystemSettings = () =>
@@ -1772,6 +1789,9 @@ export interface MonitoringOverviewStats {
 export const getMonitoringOverview = (envId: string) =>
   api.get<{ stats: MonitoringOverviewStats }>(`/environments/${envId}/monitoring/overview`);
 
+// Agent status type
+export type AgentStatus = 'unknown' | 'deploying' | 'waiting' | 'active' | 'stale' | 'offline';
+
 // Agents Info
 export interface AgentInfo {
   id: string;
@@ -1780,7 +1800,10 @@ export interface AgentInfo {
   sshStatus: string;
   metricsMode: MetricsMode;
   hasAgentToken: boolean;
+  agentStatus: AgentStatus;
+  agentVersion: string | null;
   lastCheckedAt: string | null;
+  lastAgentPushAt: string | null;
   lastMetricsPush: string | null;
   metricsSource: string | null;
 }

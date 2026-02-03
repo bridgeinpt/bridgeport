@@ -18,6 +18,8 @@ export const SYSTEM_SETTINGS_DEFAULTS = {
   activeUserWindowMin: 15,
   registryMaxTags: 50,
   defaultLogLines: 50,
+  agentStaleThresholdMs: 180000,
+  agentOfflineThresholdMs: 300000,
 };
 
 /**
@@ -72,6 +74,9 @@ export async function resetSystemSettings(): Promise<SystemSettings> {
       activeUserWindowMin: SYSTEM_SETTINGS_DEFAULTS.activeUserWindowMin,
       registryMaxTags: SYSTEM_SETTINGS_DEFAULTS.registryMaxTags,
       defaultLogLines: SYSTEM_SETTINGS_DEFAULTS.defaultLogLines,
+      agentCallbackUrl: null,
+      agentStaleThresholdMs: SYSTEM_SETTINGS_DEFAULTS.agentStaleThresholdMs,
+      agentOfflineThresholdMs: SYSTEM_SETTINGS_DEFAULTS.agentOfflineThresholdMs,
     },
   });
   return cachedSettings;

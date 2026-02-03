@@ -1,8 +1,9 @@
 # Build stage for Go agent
 FROM golang:1.22-alpine AS agent-build
 WORKDIR /build
+ARG AGENT_VERSION=dev
 COPY bridgeport-agent/ ./
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bridgeport-agent .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.Version=${AGENT_VERSION}" -o bridgeport-agent .
 
 # Build stage for UI
 FROM node:22-alpine AS ui-build

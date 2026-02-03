@@ -87,6 +87,11 @@ model Server {
   metricsMode   String   @default("disabled") // "ssh" | "agent" | "disabled"
   agentToken    String?  // Token for agent authentication
 
+  // Agent status tracking
+  agentStatus     String    @default("unknown") // unknown|deploying|waiting|active|stale|offline
+  lastAgentPushAt DateTime? // When agent last pushed metrics (distinct from lastCheckedAt)
+  agentVersion    String?   // Agent version reported by agent
+
   environmentId String
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
 
@@ -147,6 +152,12 @@ model Service {
   healthWaitMs     Int @default(30000)  // Wait after deploy before checking (default 30s)
   healthRetries    Int @default(3)      // Number of health check attempts
   healthIntervalMs Int @default(5000)   // Interval between retries (default 5s)
+
+  // Agent-reported health check results (for services with healthCheckUrl)
+  agentHealthSuccess   Boolean?  // Last health check result from agent
+  agentHealthStatusCode Int?     // HTTP status code from agent health check
+  agentHealthDurationMs Int?     // Duration of agent health check
+  agentHealthCheckedAt DateTime? // When agent last performed health check
 
   serverId    String
   server      Server        @relation(fields: [serverId], references: [id], onDelete: Cascade)
@@ -684,6 +695,11 @@ model SystemSettings {
   activeUserWindowMin   Int      @default(15)
   registryMaxTags       Int      @default(50)
   defaultLogLines       Int      @default(50)
+
+  // Agent Configuration
+  agentCallbackUrl        String?  // Internal URL for agents to reach BridgePort (e.g., http://10.30.10.5:3000)
+  agentStaleThresholdMs   Int      @default(180000)  // 3 min - mark agent as "stale"
+  agentOfflineThresholdMs Int      @default(300000)  // 5 min - mark agent as "offline"
 
   updatedAt             DateTime @updatedAt
 }

@@ -12,6 +12,9 @@ interface FormData {
   activeUserWindowMin: number;
   registryMaxTags: number;
   defaultLogLines: number;
+  agentCallbackUrl: string;
+  agentStaleThresholdSec: number;
+  agentOfflineThresholdSec: number;
 }
 
 interface Defaults {
@@ -25,6 +28,8 @@ interface Defaults {
   activeUserWindowMin: number;
   registryMaxTags: number;
   defaultLogLines: number;
+  agentStaleThresholdMs: number;
+  agentOfflineThresholdMs: number;
 }
 
 function msToSec(ms: number): number {
@@ -70,6 +75,9 @@ export default function SystemSettings() {
     activeUserWindowMin: 15,
     registryMaxTags: 50,
     defaultLogLines: 50,
+    agentCallbackUrl: '',
+    agentStaleThresholdSec: 180,
+    agentOfflineThresholdSec: 300,
   });
 
   useEffect(() => {
@@ -93,6 +101,9 @@ export default function SystemSettings() {
         activeUserWindowMin: settings.activeUserWindowMin,
         registryMaxTags: settings.registryMaxTags,
         defaultLogLines: settings.defaultLogLines,
+        agentCallbackUrl: settings.agentCallbackUrl || '',
+        agentStaleThresholdSec: msToSec(settings.agentStaleThresholdMs),
+        agentOfflineThresholdSec: msToSec(settings.agentOfflineThresholdMs),
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load settings');
@@ -119,6 +130,9 @@ export default function SystemSettings() {
         activeUserWindowMin: formData.activeUserWindowMin,
         registryMaxTags: formData.registryMaxTags,
         defaultLogLines: formData.defaultLogLines,
+        agentCallbackUrl: formData.agentCallbackUrl || null,
+        agentStaleThresholdMs: secToMs(formData.agentStaleThresholdSec),
+        agentOfflineThresholdMs: secToMs(formData.agentOfflineThresholdSec),
       });
 
       setSuccess('Settings saved successfully');
@@ -151,6 +165,9 @@ export default function SystemSettings() {
         activeUserWindowMin: settings.activeUserWindowMin,
         registryMaxTags: settings.registryMaxTags,
         defaultLogLines: settings.defaultLogLines,
+        agentCallbackUrl: settings.agentCallbackUrl || '',
+        agentStaleThresholdSec: msToSec(settings.agentStaleThresholdMs),
+        agentOfflineThresholdSec: msToSec(settings.agentOfflineThresholdMs),
       });
 
       setSuccess('Settings reset to defaults');
@@ -286,6 +303,68 @@ export default function SystemSettings() {
               <p className="text-xs text-slate-500 mt-1">
                 Backoff delays between retries (default: {defaults ? parseDelaysMs(defaults.webhookRetryDelaysMs) : '1, 5, 15'})
               </p>
+            </div>
+          </div>
+        </section>
+
+        {/* Agent Configuration */}
+        <section className="card p-5">
+          <h2 className="text-lg font-semibold text-white mb-4">Agent Configuration</h2>
+          <p className="text-slate-400 text-sm mb-4">
+            Configure monitoring agents that push metrics from servers
+          </p>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">
+                Callback URL
+              </label>
+              <input
+                type="text"
+                value={formData.agentCallbackUrl}
+                onChange={(e) => updateField('agentCallbackUrl', e.target.value)}
+                placeholder="http://10.30.10.5:3000"
+                className="input w-full"
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                Internal URL for agents to reach BridgePort. Use the VPC IP of the BridgePort server.
+                If empty, falls back to AGENT_CALLBACK_URL env var or HOST:PORT.
+              </p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">
+                  Stale Threshold
+                  <span className="text-slate-500 ml-1">(seconds)</span>
+                </label>
+                <input
+                  type="number"
+                  min={60}
+                  max={600}
+                  value={formData.agentStaleThresholdSec}
+                  onChange={(e) => updateField('agentStaleThresholdSec', parseInt(e.target.value) || 180)}
+                  className="input w-full"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Mark agent as "stale" after no push for this time (default: {defaults ? msToSec(defaults.agentStaleThresholdMs) : 180}s)
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">
+                  Offline Threshold
+                  <span className="text-slate-500 ml-1">(seconds)</span>
+                </label>
+                <input
+                  type="number"
+                  min={120}
+                  max={900}
+                  value={formData.agentOfflineThresholdSec}
+                  onChange={(e) => updateField('agentOfflineThresholdSec', parseInt(e.target.value) || 300)}
+                  className="input w-full"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Mark agent as "offline" and alert after no push for this time (default: {defaults ? msToSec(defaults.agentOfflineThresholdMs) : 300}s)
+                </p>
+              </div>
             </div>
           </div>
         </section>

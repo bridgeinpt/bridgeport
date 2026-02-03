@@ -19,6 +19,16 @@ const metricsQuerySchema = z.object({
   limit: z.coerce.number().min(1).max(1000).optional(),
 });
 
+const serviceHealthCheckSchema = z.object({
+  containerName: z.string(),
+  healthCheckUrl: z.string(),
+  success: z.boolean(),
+  statusCode: z.number().optional(),
+  durationMs: z.number().optional(),
+  checkedAt: z.string().datetime().optional(),
+  error: z.string().optional(),
+});
+
 const serverMetricsIngestSchema = z.object({
   cpuPercent: z.number().optional(),
   memoryUsedMb: z.number().optional(),
@@ -30,6 +40,7 @@ const serverMetricsIngestSchema = z.object({
   loadAvg15: z.number().optional(),
   uptime: z.number().optional(),
   serverHealthy: z.boolean().optional(), // Agent confirms server is reachable
+  agentVersion: z.string().optional(),   // Agent reports its version
   services: z
     .array(
       z.object({
@@ -47,6 +58,7 @@ const serverMetricsIngestSchema = z.object({
       })
     )
     .optional(),
+  serviceHealthChecks: z.array(serviceHealthCheckSchema).optional(), // Agent-performed URL health checks
 });
 
 export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
@@ -197,19 +209,37 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
     }
 
     // Save server metrics (exclude health fields from metrics data)
-    const { services: serviceMetrics, serverHealthy, ...serverMetricsData } = body.data;
+    const { services: serviceMetrics, serverHealthy, agentVersion, serviceHealthChecks, ...serverMetricsData } = body.data;
     await saveServerMetrics(server.id, serverMetricsData, 'agent');
 
-    // Update server health status if provided
+    // Update server status: agent push means server is healthy and agent is active
+    const now = new Date();
+    const serverUpdateData: {
+      status?: string;
+      lastCheckedAt: Date;
+      agentStatus: string;
+      lastAgentPushAt: Date;
+      agentVersion?: string;
+    } = {
+      lastCheckedAt: now,
+      agentStatus: 'active',
+      lastAgentPushAt: now,
+    };
+
+    // Set server health status if provided
     if (serverHealthy !== undefined) {
-      await prisma.server.update({
-        where: { id: server.id },
-        data: {
-          status: serverHealthy ? 'healthy' : 'unhealthy',
-          lastCheckedAt: new Date(),
-        },
-      });
+      serverUpdateData.status = serverHealthy ? 'healthy' : 'unhealthy';
     }
+
+    // Store agent version if provided
+    if (agentVersion) {
+      serverUpdateData.agentVersion = agentVersion;
+    }
+
+    await prisma.server.update({
+      where: { id: server.id },
+      data: serverUpdateData,
+    });
 
     // Save service metrics and health if provided
     if (serviceMetrics && serviceMetrics.length > 0) {
@@ -261,7 +291,66 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
       }
     }
 
+    // Process agent-performed service health checks
+    if (serviceHealthChecks && serviceHealthChecks.length > 0) {
+      for (const hc of serviceHealthChecks) {
+        const service = server.services.find((s) => s.containerName === hc.containerName);
+        if (service) {
+          await prisma.service.update({
+            where: { id: service.id },
+            data: {
+              agentHealthSuccess: hc.success,
+              agentHealthStatusCode: hc.statusCode ?? null,
+              agentHealthDurationMs: hc.durationMs ?? null,
+              agentHealthCheckedAt: hc.checkedAt ? new Date(hc.checkedAt) : now,
+            },
+          });
+        }
+      }
+    }
+
     return { success: true };
+  });
+
+  // Get agent configuration (services with health check URLs for this server)
+  fastify.get('/api/agent/config', async (request, reply) => {
+    const authHeader = request.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) {
+      return reply.code(401).send({ error: 'Missing or invalid authorization header' });
+    }
+
+    const token = authHeader.slice(7);
+
+    // Find server by agent token
+    const server = await prisma.server.findFirst({
+      where: { agentToken: token, metricsMode: 'agent' },
+      include: {
+        services: {
+          where: {
+            healthCheckUrl: { not: null },
+            discoveryStatus: 'found',
+          },
+          select: {
+            id: true,
+            containerName: true,
+            healthCheckUrl: true,
+          },
+        },
+      },
+    });
+
+    if (!server) {
+      return reply.code(401).send({ error: 'Invalid agent token' });
+    }
+
+    return {
+      serverId: server.id,
+      serverName: server.name,
+      services: server.services.map((s) => ({
+        containerName: s.containerName,
+        healthCheckUrl: s.healthCheckUrl,
+      })),
+    };
   });
 
   // Regenerate agent token

@@ -20,6 +20,9 @@ const updateSettingsSchema = z.object({
   activeUserWindowMin: z.number().int().min(1).max(1440).optional(),
   registryMaxTags: z.number().int().min(10).max(500).optional(),
   defaultLogLines: z.number().int().min(10).max(10000).optional(),
+  agentCallbackUrl: z.string().url().nullable().optional().or(z.literal('')),
+  agentStaleThresholdMs: z.number().int().min(60000).max(600000).optional(),
+  agentOfflineThresholdMs: z.number().int().min(120000).max(900000).optional(),
 });
 
 export async function systemSettingsRoutes(fastify: FastifyInstance): Promise<void> {

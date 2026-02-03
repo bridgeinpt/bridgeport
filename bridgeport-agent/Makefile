@@ -3,14 +3,20 @@
 # Binary name
 BINARY=bridgeport-agent
 
+# Version (can be overridden: make build VERSION=1.2.3)
+VERSION ?= dev
+
+# Build flags
+LDFLAGS=-ldflags="-X main.Version=$(VERSION)"
+
 # Build for current platform
 build:
-	go build -o $(BINARY) .
+	go build $(LDFLAGS) -o $(BINARY) .
 
 # Build for Linux (for deployment to servers)
 build-linux:
-	GOOS=linux GOARCH=amd64 go build -o $(BINARY)-linux-amd64 .
-	GOOS=linux GOARCH=arm64 go build -o $(BINARY)-linux-arm64 .
+	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY)-linux-amd64 .
+	GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(BINARY)-linux-arm64 .
 
 # Clean build artifacts
 clean:

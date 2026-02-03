@@ -4,6 +4,7 @@ import { prisma } from '../lib/db.js';
 import { SSHClient, LocalClient, isLocalhost, type CommandClient } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 import { config } from '../lib/config.js';
+import { getSystemSettings } from './system-settings.js';
 import crypto from 'crypto';
 
 const AGENT_PATH = join(process.cwd(), 'agent', 'bridgeport-agent');
@@ -19,10 +20,16 @@ export function generateAgentToken(): string {
 
 /**
  * Get the BridgePort server URL for the agent to connect to.
- * Uses AGENT_CALLBACK_URL if configured, otherwise falls back to HOST:PORT.
+ * Priority: System settings agentCallbackUrl > env var AGENT_CALLBACK_URL > HOST:PORT fallback.
  */
-function getBridgePortUrl(): string {
-  // Use explicit callback URL if configured (recommended for production)
+async function getBridgePortUrl(): Promise<string> {
+  // First priority: check system settings
+  const settings = await getSystemSettings();
+  if (settings.agentCallbackUrl) {
+    return settings.agentCallbackUrl;
+  }
+
+  // Second priority: use explicit callback URL from env if configured
   if (config.AGENT_CALLBACK_URL) {
     return config.AGENT_CALLBACK_URL;
   }
@@ -34,7 +41,7 @@ function getBridgePortUrl(): string {
   }
 
   // Last resort - won't work for remote servers
-  console.warn('[Agent Deploy] AGENT_CALLBACK_URL not set. Agent deployment may fail for remote servers.');
+  console.warn('[Agent Deploy] agentCallbackUrl not set in system settings. Agent deployment may fail for remote servers.');
   return `http://127.0.0.1:${config.PORT}`;
 }
 
@@ -64,9 +71,15 @@ export async function deployAgent(
     });
   }
 
+  // Set agent status to deploying
+  await prisma.server.update({
+    where: { id: serverId },
+    data: { agentStatus: 'deploying' },
+  });
+
   // Determine the URL the agent should use to connect back
-  // Use provided URL, or auto-detect
-  const serverUrl = bridgeportUrl || getBridgePortUrl();
+  // Use provided URL, or auto-detect from system settings / env var
+  const serverUrl = bridgeportUrl || (await getBridgePortUrl());
 
   // Create appropriate client based on hostname
   let client: CommandClient;
@@ -169,15 +182,23 @@ WantedBy=multi-user.target
 
     client.disconnect();
 
-    // Update server to agent mode
+    // Update server to agent mode and set status to waiting (for first push)
     await prisma.server.update({
       where: { id: serverId },
-      data: { metricsMode: 'agent' },
+      data: {
+        metricsMode: 'agent',
+        agentStatus: 'waiting',
+      },
     });
 
     return { success: true };
   } catch (error) {
     client.disconnect();
+    // Reset agent status on failure
+    await prisma.server.update({
+      where: { id: serverId },
+      data: { agentStatus: 'unknown' },
+    });
     const message = error instanceof Error ? error.message : 'Unknown error';
     return { success: false, error: message };
   }

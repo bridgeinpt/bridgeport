@@ -53,12 +53,38 @@ function formatPorts(ports: ExposedPort[], maxDisplay = 3): string {
   return displayed.join(', ');
 }
 
+type AgentStatusType = 'unknown' | 'deploying' | 'waiting' | 'active' | 'stale' | 'offline';
+
 interface AgentStatus {
   metricsMode: string;
   hasToken: boolean;
+  agentStatus: AgentStatusType;
+  agentVersion: string | null;
+  lastAgentPushAt: string | null;
   installed: boolean;
   running: boolean;
   error?: string;
+}
+
+function getAgentStatusBadge(status: AgentStatusType) {
+  switch (status) {
+    case 'active':
+      return <span className="px-2 py-0.5 text-xs rounded-full bg-green-500/20 text-green-400">Active</span>;
+    case 'deploying':
+      return (
+        <span className="px-2 py-0.5 text-xs rounded-full bg-blue-500/20 text-blue-400 animate-pulse">
+          Deploying...
+        </span>
+      );
+    case 'waiting':
+      return <span className="px-2 py-0.5 text-xs rounded-full bg-yellow-500/20 text-yellow-400">Waiting for first push</span>;
+    case 'stale':
+      return <span className="px-2 py-0.5 text-xs rounded-full bg-orange-500/20 text-orange-400">Stale</span>;
+    case 'offline':
+      return <span className="px-2 py-0.5 text-xs rounded-full bg-red-500/20 text-red-400">Offline</span>;
+    default:
+      return <span className="px-2 py-0.5 text-xs rounded-full bg-slate-500/20 text-slate-400">Unknown</span>;
+  }
 }
 
 export default function ServerDetail() {
@@ -595,23 +621,18 @@ export default function ServerDetail() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-slate-400 text-sm">Agent Status</p>
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`w-2 h-2 rounded-full ${
-                      agentStatus.running
-                        ? 'bg-green-500'
-                        : agentStatus.installed
-                        ? 'bg-yellow-500'
-                        : 'bg-slate-500'
-                    }`}
-                  />
-                  <span className="text-white">
-                    {agentStatus.running
-                      ? 'Running'
-                      : agentStatus.installed
-                      ? 'Installed but not running'
-                      : 'Not installed'}
-                  </span>
+                <div className="flex items-center gap-3 mt-1">
+                  {getAgentStatusBadge(agentStatus.agentStatus)}
+                  {agentStatus.agentVersion && (
+                    <span className="text-slate-500 text-sm">
+                      v{agentStatus.agentVersion}
+                    </span>
+                  )}
+                  {agentStatus.lastAgentPushAt && (
+                    <span className="text-slate-500 text-sm">
+                      Last push: {formatDistanceToNow(new Date(agentStatus.lastAgentPushAt), { addSuffix: true })}
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="flex gap-2">

@@ -9,6 +9,7 @@ import {
   regenerateAgentToken,
   type AgentInfo,
   type MetricsMode,
+  type AgentStatus,
 } from '../lib/api';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -97,6 +98,27 @@ export default function MonitoringAgents() {
         return <span className="px-2 py-0.5 text-xs rounded-full bg-green-500/20 text-green-400">OK</span>;
       case 'unhealthy':
         return <span className="px-2 py-0.5 text-xs rounded-full bg-red-500/20 text-red-400">Failed</span>;
+      default:
+        return <span className="px-2 py-0.5 text-xs rounded-full bg-slate-500/20 text-slate-400">Unknown</span>;
+    }
+  };
+
+  const getAgentStatusBadge = (status: AgentStatus) => {
+    switch (status) {
+      case 'active':
+        return <span className="px-2 py-0.5 text-xs rounded-full bg-green-500/20 text-green-400">Active</span>;
+      case 'deploying':
+        return (
+          <span className="px-2 py-0.5 text-xs rounded-full bg-blue-500/20 text-blue-400 animate-pulse">
+            Deploying...
+          </span>
+        );
+      case 'waiting':
+        return <span className="px-2 py-0.5 text-xs rounded-full bg-yellow-500/20 text-yellow-400">Waiting</span>;
+      case 'stale':
+        return <span className="px-2 py-0.5 text-xs rounded-full bg-orange-500/20 text-orange-400">Stale</span>;
+      case 'offline':
+        return <span className="px-2 py-0.5 text-xs rounded-full bg-red-500/20 text-red-400">Offline</span>;
       default:
         return <span className="px-2 py-0.5 text-xs rounded-full bg-slate-500/20 text-slate-400">Unknown</span>;
     }
@@ -246,7 +268,8 @@ export default function MonitoringAgents() {
                 <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
                   <th className="pb-3 font-medium">Server</th>
                   <th className="pb-3 font-medium">Metrics Mode</th>
-                  <th className="pb-3 font-medium">Agent Status</th>
+                  <th className="pb-3 font-medium">Status</th>
+                  <th className="pb-3 font-medium">Version</th>
                   <th className="pb-3 font-medium">Last Push</th>
                   <th className="pb-3 font-medium">Actions</th>
                 </tr>
@@ -273,22 +296,19 @@ export default function MonitoringAgents() {
                     </td>
                     <td className="py-3">
                       {agent.metricsMode === 'agent' ? (
-                        agent.lastMetricsPush ? (
-                          <span className="px-2 py-0.5 text-xs rounded-full bg-green-500/20 text-green-400">
-                            Active
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 text-xs rounded-full bg-yellow-500/20 text-yellow-400">
-                            Waiting
-                          </span>
-                        )
+                        getAgentStatusBadge(agent.agentStatus)
                       ) : (
                         <span className="text-slate-500">--</span>
                       )}
                     </td>
+                    <td className="py-3 text-sm text-slate-500 font-mono">
+                      {agent.metricsMode === 'agent' && agent.agentVersion
+                        ? agent.agentVersion
+                        : '--'}
+                    </td>
                     <td className="py-3 text-sm text-slate-500">
-                      {agent.metricsMode === 'agent' && agent.lastMetricsPush
-                        ? formatDistanceToNow(new Date(agent.lastMetricsPush), { addSuffix: true })
+                      {agent.metricsMode === 'agent' && agent.lastAgentPushAt
+                        ? formatDistanceToNow(new Date(agent.lastAgentPushAt), { addSuffix: true })
                         : '--'}
                     </td>
                     <td className="py-3">
