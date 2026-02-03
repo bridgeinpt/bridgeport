@@ -106,6 +106,7 @@ COPY --from=ui-build /app/ui/dist ./ui/dist
 COPY --from=agent-build /build/bridgeport-agent ./agent/bridgeport-agent
 
 COPY package.json ./
+COPY docker/entrypoint.sh ./entrypoint.sh
 
 # Set environment
 ENV NODE_ENV=production
@@ -116,5 +117,5 @@ EXPOSE 3000
 # Run as non-root user
 USER node
 
-# Sync database schema and start
-CMD ["sh", "-c", "npx prisma db push --skip-generate && node dist/server.js"]
+# Entrypoint handles migrations automatically
+ENTRYPOINT ["sh", "/app/entrypoint.sh"]

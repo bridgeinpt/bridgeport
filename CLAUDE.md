@@ -4,100 +4,123 @@ A lightweight, self-hosted deployment management tool for Docker-based infrastru
 
 ---
 
-## ⛔ CRITICAL: DATABASE MIGRATION RULES ⛔
+## ⛔ CRITICAL: DATABASE SCHEMA CHANGES ⛔
 
-**THIS IS A PRODUCTION SYSTEM WITH LIVE DATA. BREAKING CHANGES WILL CAUSE DOWNTIME.**
+**BridgePort is a product used by multiple deployments. Schema changes MUST be automatic and safe.**
 
-### BEFORE ANY SCHEMA CHANGE, YOU MUST:
+### THE GOLDEN RULE
 
-1. **WARN THE USER** - Explicitly state: "This schema change will affect the production database. Here's the migration plan..."
+**Container updates must ALWAYS work automatically. Zero human intervention.**
 
-2. **CHECK FOR BREAKING CHANGES** - These are ALWAYS breaking:
-   - Adding a required (non-nullable) column without a default
-   - Removing a column that has data
-   - Renaming a column
-   - Changing column types
-   - Adding a new required foreign key relationship
+When someone pulls a new image and restarts the container, it MUST:
+1. Detect pending migrations
+2. Apply them safely
+3. Start the application
 
-3. **CREATE A MIGRATION SCRIPT** - Place in `scripts/migrations/` with format `YYYY-MM-DD-description.sql`:
-   - Script MUST be idempotent (safe to run multiple times)
-   - Script MUST work on SQLite directly (container may be crash-looping)
-   - Script MUST preserve all existing data
-   - Script MUST include verification queries
+If this fails, the deployment is broken. This is unacceptable.
 
-4. **PROVIDE ROLLBACK SCRIPT** - Always create a corresponding rollback script
+### HOW IT WORKS
 
-### SAFE MIGRATION PATTERN
+1. **Entrypoint script** (`docker/entrypoint.sh`) runs on every container start
+2. **Prisma Migrate** applies pending migrations automatically via `prisma migrate deploy`
+3. **Migrations are SQL files** in `prisma/migrations/` - they handle data transformations
 
-For ANY schema change that touches existing tables:
+### DEVELOPMENT WORKFLOW
 
+When making schema changes:
+
+```bash
+# 1. Edit prisma/schema.prisma
+
+# 2. Create a migration (this generates SQL and applies it to dev DB)
+npx prisma migrate dev --name descriptive_name
+
+# 3. Review the generated SQL in prisma/migrations/YYYYMMDD_descriptive_name/
+#    - Prisma auto-generates safe migrations
+#    - For complex changes, edit the SQL to add data transformations
+
+# 4. Test the migration
+npm run dev  # Verify app works
+
+# 5. Commit the migration files with your code changes
+git add prisma/migrations/ prisma/schema.prisma
+git commit -m "Add feature X with migration"
+```
+
+### HANDLING BREAKING CHANGES
+
+Prisma Migrate handles most cases automatically, but some require manual SQL:
+
+**Adding required columns:**
 ```sql
--- migrations/YYYY-MM-DD-add-feature.sql
--- Description: Add X feature
--- Breaking: YES/NO
--- Rollback: YYYY-MM-DD-add-feature-rollback.sql
-
-PRAGMA foreign_keys=OFF;
-BEGIN TRANSACTION;
-
--- 1. Create new tables first
-CREATE TABLE IF NOT EXISTS NewTable (...);
-
--- 2. Add nullable columns (NEVER required columns directly)
-ALTER TABLE ExistingTable ADD COLUMN newColumn TEXT;  -- nullable first!
-
--- 3. Migrate data
-UPDATE ExistingTable SET newColumn = 'default' WHERE newColumn IS NULL;
-
--- 4. If column must be required, recreate table with constraint
--- (SQLite doesn't support ALTER COLUMN)
-
-COMMIT;
-PRAGMA foreign_keys=ON;
-
--- 5. Verify
-SELECT COUNT(*) as should_be_zero FROM ExistingTable WHERE newColumn IS NULL;
+-- Prisma generates this automatically when you provide a default
+ALTER TABLE "Service" ADD COLUMN "newField" TEXT NOT NULL DEFAULT '';
 ```
 
-### NEVER DO THIS:
+**Adding required foreign keys:**
+```sql
+-- Step 1: Add nullable column
+ALTER TABLE "Service" ADD COLUMN "imageId" TEXT;
 
-```prisma
-// ❌ WRONG - Adding required field without migration
-model Service {
-  newRequiredField String  // This WILL break production!
-}
+-- Step 2: Create related records and populate
+INSERT INTO "ContainerImage" (id, name, ...)
+SELECT ... FROM "Service" WHERE "imageId" IS NULL;
+
+UPDATE "Service" SET "imageId" = (SELECT id FROM "ContainerImage" WHERE ...);
+
+-- Step 3: Recreate table with NOT NULL constraint (SQLite limitation)
+-- Prisma generates this automatically
 ```
 
-### ALWAYS DO THIS:
+**IMPORTANT:** If Prisma can't auto-generate a safe migration, it will prompt you.
+Edit the generated SQL file to add data transformation logic BEFORE committing.
 
-```prisma
-// ✅ CORRECT - Add as optional first
-model Service {
-  newRequiredField String?  // Nullable initially
-}
-// Then: create migration script, run it, THEN make required
+### WHAT TO NEVER DO
+
+```bash
+# ❌ NEVER use db push in production
+npx prisma db push  # This bypasses migrations!
+
+# ❌ NEVER commit schema changes without migrations
+git add prisma/schema.prisma  # Missing migrations!
+
+# ❌ NEVER manually edit production databases
+sqlite3 prod.db "ALTER TABLE..."  # Breaks migration state!
 ```
 
-### DEPLOYMENT CHECKLIST
+### WHAT TO ALWAYS DO
 
-Before deploying any schema change:
+```bash
+# ✅ ALWAYS use migrate dev for schema changes
+npx prisma migrate dev --name add_user_preferences
 
-- [ ] Migration script created and tested locally
-- [ ] Rollback script created
-- [ ] User warned about the change
-- [ ] Script can run while container is stopped (direct SQLite access)
-- [ ] Verification queries included
-- [ ] No data loss will occur
+# ✅ ALWAYS commit migrations with schema
+git add prisma/schema.prisma prisma/migrations/
 
-### EMERGENCY RECOVERY
+# ✅ ALWAYS test migrations on a copy of production data
+cp prod.db test.db && DATABASE_URL=file:./test.db npx prisma migrate deploy
+```
 
-If the container is crash-looping due to schema mismatch:
+### PRE-DEPLOYMENT CHECKLIST
 
-1. Access SQLite directly: `sqlite3 /path/to/bridgeport.db`
-2. Run the migration script manually
-3. Restart container: `docker restart bridgeport`
+Before merging any schema change:
 
-The migration scripts are in `scripts/migrations/` for this purpose.
+- [ ] `npx prisma migrate dev` succeeded
+- [ ] Migration SQL file reviewed for data safety
+- [ ] Tested with existing data (not just empty database)
+- [ ] Migration files committed to git
+- [ ] No `prisma db push` commands in the change
+
+### EMERGENCY: CONTAINER WON'T START
+
+If migrations fail on deployment:
+
+1. Check logs: `docker logs bridgeport`
+2. The issue is in the migration SQL - fix it in the codebase
+3. Rebuild and redeploy the image
+4. Migrations will retry automatically
+
+For legacy databases without migration history, the entrypoint auto-baselines them.
 
 ---
 
