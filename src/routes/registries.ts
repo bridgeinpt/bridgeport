@@ -260,7 +260,6 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
           id: true,
           name: true,
           imageTag: true,
-          autoUpdate: true,
           server: {
             select: { id: true, name: true },
           },
@@ -272,6 +271,7 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
               latestTag: true,
               latestDigest: true,
               lastCheckedAt: true,
+              autoUpdate: true,
             },
           },
         },

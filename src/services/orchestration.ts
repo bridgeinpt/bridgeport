@@ -14,6 +14,8 @@ export interface BuildPlanOptions {
   triggeredBy: string;
   userId?: string;
   autoRollback?: boolean;
+  parallelExecution?: boolean;
+  templateId?: string;
 }
 
 type ServiceWithDeps = Service & {
@@ -183,9 +185,11 @@ export async function buildDeploymentPlan(options: BuildPlanOptions): Promise<De
       triggerType: options.triggerType,
       triggeredBy: options.triggeredBy,
       autoRollback: options.autoRollback ?? true,
+      parallelExecution: options.parallelExecution ?? false,
       environmentId: options.environmentId,
       containerImageId: options.containerImageId,
       userId: options.userId,
+      templateId: options.templateId,
     },
   });
 
@@ -231,7 +235,26 @@ export async function buildDeploymentPlan(options: BuildPlanOptions): Promise<De
 }
 
 /**
- * Execute a deployment plan step by step
+ * Group steps by their order (dependency level) for parallel execution
+ */
+function groupStepsByLevel(
+  steps: (DeploymentPlanStep & { service: Service | null })[]
+): Map<number, (DeploymentPlanStep & { service: Service | null })[]> {
+  const levels = new Map<number, (DeploymentPlanStep & { service: Service | null })[]>();
+
+  for (const step of steps) {
+    const level = step.order;
+    if (!levels.has(level)) {
+      levels.set(level, []);
+    }
+    levels.get(level)!.push(step);
+  }
+
+  return levels;
+}
+
+/**
+ * Execute a deployment plan step by step (or in parallel if enabled)
  */
 export async function executePlan(planId: string): Promise<void> {
   const plan = await prisma.deploymentPlan.findUniqueOrThrow({
@@ -262,62 +285,136 @@ export async function executePlan(planId: string): Promise<void> {
     planLogs.push(`[${timestamp}] ${message}`);
   };
 
-  log(`Starting deployment plan: ${plan.name}`);
+  log(`Starting deployment plan: ${plan.name}${plan.parallelExecution ? ' (parallel mode)' : ''}`);
 
   try {
-    for (const step of plan.steps) {
-      if (!step.service) {
-        log(`Skipping step ${step.order}: no service associated`);
-        continue;
-      }
+    if (plan.parallelExecution) {
+      // Parallel execution: group steps by level and run each level in parallel
+      const levelGroups = groupStepsByLevel(plan.steps);
+      const sortedLevels = Array.from(levelGroups.keys()).sort((a, b) => a - b);
 
-      // Mark step as running
-      await prisma.deploymentPlanStep.update({
-        where: { id: step.id },
-        data: { status: 'running', startedAt: new Date() },
-      });
+      for (const level of sortedLevels) {
+        const levelSteps = levelGroups.get(level)!;
 
-      log(`Executing step ${step.order}: ${step.action} ${step.service.name}`);
+        // Filter out steps without services
+        const validSteps = levelSteps.filter((step) => step.service);
+        if (validSteps.length === 0) continue;
 
-      if (step.action === 'deploy') {
-        await executeDeployStep(step, plan, log);
-      } else if (step.action === 'health_check') {
-        await executeHealthCheckStep(step, plan, log);
-      }
+        log(`Executing level ${level}: ${validSteps.length} step(s) in parallel`);
 
-      // Check if step failed and we need to rollback
-      const updatedStep = await prisma.deploymentPlanStep.findUniqueOrThrow({
-        where: { id: step.id },
-      });
+        // Execute all steps in this level in parallel
+        const results = await Promise.all(
+          validSteps.map(async (step) => {
+            // Mark step as running
+            await prisma.deploymentPlanStep.update({
+              where: { id: step.id },
+              data: { status: 'running', startedAt: new Date() },
+            });
 
-      if (updatedStep.status === 'failed') {
-        if (plan.autoRollback) {
-          log(`Step ${step.order} failed, initiating rollback...`);
-          await rollbackPlan(planId, log);
-          return;
-        } else {
-          log(`Step ${step.order} failed, auto-rollback disabled`);
-          await prisma.deploymentPlan.update({
-            where: { id: planId },
-            data: {
-              status: 'failed',
-              completedAt: new Date(),
-              error: updatedStep.error,
-              logs: planLogs.join('\n'),
-            },
-          });
+            log(`  Starting ${step.action} ${step.service!.name}`);
 
-          // Send failure notification
-          await sendSystemNotification(
-            NOTIFICATION_TYPES.SYSTEM_DEPLOYMENT_FAILED,
-            plan.environmentId,
-            {
-              planName: plan.name,
-              serviceName: step.service.name,
-              error: updatedStep.error,
+            if (step.action === 'deploy') {
+              await executeDeployStep(step, plan, (msg) => log(`    [${step.service!.name}] ${msg}`));
+            } else if (step.action === 'health_check') {
+              await executeHealthCheckStep(step, plan, (msg) => log(`    [${step.service!.name}] ${msg}`));
             }
-          );
-          return;
+
+            // Return the step result
+            return prisma.deploymentPlanStep.findUniqueOrThrow({
+              where: { id: step.id },
+              include: { service: true },
+            });
+          })
+        );
+
+        // Check if any step in this level failed
+        const failedStep = results.find((s) => s.status === 'failed');
+        if (failedStep) {
+          if (plan.autoRollback) {
+            log(`Level ${level} failed (${failedStep.service?.name}), initiating rollback...`);
+            await rollbackPlan(planId, log);
+            return;
+          } else {
+            log(`Level ${level} failed (${failedStep.service?.name}), auto-rollback disabled`);
+            await prisma.deploymentPlan.update({
+              where: { id: planId },
+              data: {
+                status: 'failed',
+                completedAt: new Date(),
+                error: failedStep.error,
+                logs: planLogs.join('\n'),
+              },
+            });
+
+            await sendSystemNotification(
+              NOTIFICATION_TYPES.SYSTEM_DEPLOYMENT_FAILED,
+              plan.environmentId,
+              {
+                planName: plan.name,
+                serviceName: failedStep.service?.name,
+                error: failedStep.error,
+              }
+            );
+            return;
+          }
+        }
+      }
+    } else {
+      // Sequential execution (original behavior)
+      for (const step of plan.steps) {
+        if (!step.service) {
+          log(`Skipping step ${step.order}: no service associated`);
+          continue;
+        }
+
+        // Mark step as running
+        await prisma.deploymentPlanStep.update({
+          where: { id: step.id },
+          data: { status: 'running', startedAt: new Date() },
+        });
+
+        log(`Executing step ${step.order}: ${step.action} ${step.service.name}`);
+
+        if (step.action === 'deploy') {
+          await executeDeployStep(step, plan, log);
+        } else if (step.action === 'health_check') {
+          await executeHealthCheckStep(step, plan, log);
+        }
+
+        // Check if step failed and we need to rollback
+        const updatedStep = await prisma.deploymentPlanStep.findUniqueOrThrow({
+          where: { id: step.id },
+        });
+
+        if (updatedStep.status === 'failed') {
+          if (plan.autoRollback) {
+            log(`Step ${step.order} failed, initiating rollback...`);
+            await rollbackPlan(planId, log);
+            return;
+          } else {
+            log(`Step ${step.order} failed, auto-rollback disabled`);
+            await prisma.deploymentPlan.update({
+              where: { id: planId },
+              data: {
+                status: 'failed',
+                completedAt: new Date(),
+                error: updatedStep.error,
+                logs: planLogs.join('\n'),
+              },
+            });
+
+            // Send failure notification
+            await sendSystemNotification(
+              NOTIFICATION_TYPES.SYSTEM_DEPLOYMENT_FAILED,
+              plan.environmentId,
+              {
+                planName: plan.name,
+                serviceName: step.service.name,
+                error: updatedStep.error,
+              }
+            );
+            return;
+          }
         }
       }
     }

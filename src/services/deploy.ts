@@ -27,6 +27,8 @@ export async function deployService(
   userId: string | null,
   options: DeployOptions = {}
 ): Promise<DeployResult> {
+  const startTime = Date.now(); // Track deployment duration
+
   const service = await prisma.service.findUniqueOrThrow({
     where: { id: serviceId },
     include: {
@@ -203,12 +205,14 @@ export async function deployService(
     );
 
     // Mark deployment as successful and link to history entry
+    const durationMs = Date.now() - startTime;
     const finalDeployment = await prisma.deployment.update({
       where: { id: deployment.id },
       data: {
         status: 'success',
         logs: logs.join('\n'),
         completedAt: new Date(),
+        durationMs,
         containerImageHistoryId: historyEntry.id,
       },
     });
@@ -238,12 +242,14 @@ export async function deployService(
       'failed'
     );
 
+    const durationMs = Date.now() - startTime;
     const failedDeployment = await prisma.deployment.update({
       where: { id: deployment.id },
       data: {
         status: 'failed',
         logs: logs.join('\n'),
         completedAt: new Date(),
+        durationMs,
         containerImageHistoryId: historyEntry.id,
       },
     });

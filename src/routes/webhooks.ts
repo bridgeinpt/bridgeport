@@ -243,31 +243,46 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
     }
 
     // Find container image by imageName in the environment
+    // autoUpdate is now on ContainerImage, not Service
     const containerImage = await prisma.containerImage.findFirst({
       where: {
         imageName: body.data.imageName,
         environmentId: environment.id,
+        autoUpdate: true,  // Only deploy if autoUpdate is enabled on the image
       },
       include: {
-        services: {
-          where: { autoUpdate: true },  // Only autoUpdate services
-        },
+        services: true,
       },
     });
 
     if (!containerImage) {
+      // Check if the image exists but doesn't have autoUpdate enabled
+      const imageExists = await prisma.containerImage.findFirst({
+        where: {
+          imageName: body.data.imageName,
+          environmentId: environment.id,
+        },
+      });
+
+      if (imageExists) {
+        return reply.code(400).send({
+          error: 'Container image does not have autoUpdate enabled',
+          hint: 'Enable autoUpdate on the container image to deploy via this webhook',
+        });
+      }
+
       return reply.code(404).send({ error: 'Container image not found' });
     }
 
     if (containerImage.services.length === 0) {
       return reply.code(400).send({
-        error: 'No services with autoUpdate enabled for this image',
-        hint: 'Enable autoUpdate on services to deploy via this webhook',
+        error: 'No services linked to this container image',
+        hint: 'Link services to the container image before deploying',
       });
     }
 
     try {
-      // Build deployment plan for all autoUpdate services
+      // Build deployment plan for all linked services
       const plan = await buildDeploymentPlan({
         environmentId: environment.id,
         containerImageId: containerImage.id,
@@ -299,7 +314,7 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
         success: true,
         planId: plan.id,
         serviceCount: containerImage.services.length,
-        services: containerImage.services.map((s) => s.name),
+        services: containerImage.services.map((s: { name: string }) => s.name),
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Deployment failed';

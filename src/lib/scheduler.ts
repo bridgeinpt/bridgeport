@@ -302,181 +302,96 @@ async function checkServiceForUpdates(
 }
 
 /**
- * Check if a service should use orchestrated deployment
- * (has dependencies or has multiple services on same containerImage)
- */
-async function shouldUseOrchestration(serviceId: string): Promise<boolean> {
-  const service = await prisma.service.findUnique({
-    where: { id: serviceId },
-    select: {
-      containerImageId: true,
-      dependencies: { select: { id: true } },
-      dependents: { select: { id: true } },
-    },
-  });
-
-  if (!service) return false;
-
-  // Check if there are multiple services linked to the same container image
-  const siblingCount = await prisma.service.count({
-    where: { containerImageId: service.containerImageId },
-  });
-
-  // Use orchestration if service has multiple siblings on same image or has dependencies/dependents
-  return !!(
-    siblingCount > 1 ||
-    service.dependencies.length > 0 ||
-    service.dependents.length > 0
-  );
-}
-
-/**
- * Run update checks on all services with registry connections (via containerImage)
+ * Run update checks on all container images with registry connections
+ * Auto-update is now controlled at the ContainerImage level
  */
 async function runUpdateChecks(): Promise<void> {
   try {
-    // Get all services that have a container image with registry connection
-    const services = await prisma.service.findMany({
+    // Get all container images with registry connections
+    const containerImages = await prisma.containerImage.findMany({
       where: {
-        discoveryStatus: 'found',
-        containerImage: {
-          registryConnectionId: { not: null },
-        },
+        registryConnectionId: { not: null },
       },
       select: {
         id: true,
         name: true,
+        imageName: true,
+        currentTag: true,
+        latestDigest: true,
         autoUpdate: true,
-        imageTag: true,
-        containerImageId: true,
-        containerImage: {
+        registryConnectionId: true,
+        environmentId: true,
+        services: {
+          where: { discoveryStatus: 'found' },
           select: {
             id: true,
-            registryConnectionId: true,
-          },
-        },
-        server: {
-          select: {
-            environment: {
-              select: { id: true },
-            },
+            name: true,
+            imageTag: true,
           },
         },
       },
     });
 
-    if (services.length === 0) {
-      console.log('[Scheduler] No services with registry connections to check');
+    if (containerImages.length === 0) {
+      console.log('[Scheduler] No container images with registry connections to check');
       return;
     }
 
-    console.log(`[Scheduler] Running update checks on ${services.length} services`);
+    console.log(`[Scheduler] Running update checks on ${containerImages.length} container images`);
 
-    // Group services by registry connection to minimize API calls
-    const byRegistry = new Map<string, typeof services>();
-    for (const service of services) {
-      const key = service.containerImage?.registryConnectionId;
+    // Group by registry connection to minimize API calls
+    const byRegistry = new Map<string, typeof containerImages>();
+    for (const image of containerImages) {
+      const key = image.registryConnectionId;
       if (!key) continue;
       if (!byRegistry.has(key)) {
         byRegistry.set(key, []);
       }
-      byRegistry.get(key)!.push(service);
+      byRegistry.get(key)!.push(image);
     }
 
-    // Track services that need orchestrated deployment (by container image)
-    const orchestratedUpdates = new Map<string, { containerImageId: string; latestTag: string; environmentId: string }>();
-
     // Check updates for each registry
-    for (const [registryId, registryServices] of byRegistry) {
+    for (const [registryId, registryImages] of byRegistry) {
       const creds = await getRegistryCredentials(registryId);
       if (!creds) {
         console.warn(`[Scheduler] Could not get credentials for registry ${registryId}`);
         continue;
       }
 
-      for (const service of registryServices) {
+      for (const image of registryImages) {
+        // Skip images with no linked services
+        if (image.services.length === 0) continue;
+
         try {
-          const result = await checkServiceForUpdates(service.id, creds);
+          // Use the first service to check for updates (they all share the same image)
+          const result = await checkServiceForUpdates(image.services[0].id, creds);
 
           if (result.hasUpdate) {
             console.log(
-              `[Scheduler] Update available for ${service.name}: ${service.imageTag} -> ${result.latestTag}`
+              `[Scheduler] Update available for ${image.name}: ${image.currentTag} -> ${result.latestTag}`
             );
 
-            // Auto-deploy if enabled
-            if (service.autoUpdate && result.latestTag) {
-              // Check if this service should use orchestrated deployment
-              const useOrchestration = await shouldUseOrchestration(service.id);
-
-              if (useOrchestration && service.containerImageId) {
-                // For services with multiple siblings on same image, batch them together
-                // We'll deploy the container image which handles all linked services
-                if (!orchestratedUpdates.has(service.containerImageId)) {
-                  orchestratedUpdates.set(service.containerImageId, {
-                    containerImageId: service.containerImageId,
-                    latestTag: result.latestTag,
-                    environmentId: service.server.environment.id,
-                  });
-                }
-              } else if (useOrchestration) {
-                // Service has dependencies - create a deployment plan just for this service
-                console.log(`[Scheduler] Orchestrated auto-deploy for ${service.name} to ${result.latestTag}`);
-                try {
-                  const plan = await buildDeploymentPlan({
-                    environmentId: service.server.environment.id,
-                    serviceIds: [service.id],
-                    imageTag: result.latestTag,
-                    triggeredBy: 'scheduler',
-                    triggerType: 'auto_update',
-                  });
-                  await executePlan(plan.id);
-                  console.log(`[Scheduler] Orchestrated auto-deploy successful for ${service.name}`);
-                } catch (deployError) {
-                  console.error(`[Scheduler] Orchestrated auto-deploy failed for ${service.name}:`, deployError);
-                }
-              } else {
-                // Simple direct deployment for services without dependencies
-                console.log(`[Scheduler] Direct auto-deploying ${service.name} to ${result.latestTag}`);
-                try {
-                  await deployService(service.id, 'scheduler', null, {
-                    imageTag: result.latestTag,
-                    pullImage: true,
-                  });
-                  console.log(`[Scheduler] Auto-deploy successful for ${service.name}`);
-                } catch (deployError) {
-                  console.error(`[Scheduler] Auto-deploy failed for ${service.name}:`, deployError);
-                }
+            // Auto-deploy if enabled at the ContainerImage level
+            if (image.autoUpdate && result.latestTag) {
+              console.log(`[Scheduler] Auto-deploying container image "${image.name}" to ${result.latestTag}`);
+              try {
+                const plan = await buildDeploymentPlan({
+                  environmentId: image.environmentId,
+                  containerImageId: image.id,
+                  imageTag: result.latestTag,
+                  triggeredBy: 'scheduler',
+                  triggerType: 'auto_update',
+                });
+                await executePlan(plan.id);
+                console.log(`[Scheduler] Auto-deploy successful for container image "${image.name}"`);
+              } catch (deployError) {
+                console.error(`[Scheduler] Auto-deploy failed for container image "${image.name}":`, deployError);
               }
             }
           }
         } catch (error) {
-          console.error(`[Scheduler] Update check failed for ${service.name}:`, error);
+          console.error(`[Scheduler] Update check failed for container image ${image.name}:`, error);
         }
-      }
-    }
-
-    // Execute orchestrated deployments for container images
-    for (const [containerImageId, updateInfo] of orchestratedUpdates) {
-      try {
-        const containerImage = await prisma.containerImage.findUnique({
-          where: { id: containerImageId },
-          select: { name: true },
-        });
-        console.log(
-          `[Scheduler] Orchestrated deploy for container image "${containerImage?.name}" to ${updateInfo.latestTag}`
-        );
-
-        const plan = await buildDeploymentPlan({
-          environmentId: updateInfo.environmentId,
-          containerImageId: containerImageId,
-          imageTag: updateInfo.latestTag,
-          triggeredBy: 'scheduler',
-          triggerType: 'auto_update',
-        });
-        await executePlan(plan.id);
-        console.log(`[Scheduler] Orchestrated deploy successful for container image "${containerImage?.name}"`);
-      } catch (deployError) {
-        console.error(`[Scheduler] Orchestrated deploy failed for container image ${containerImageId}:`, deployError);
       }
     }
   } catch (error) {

@@ -16,6 +16,7 @@ export interface UpdateContainerImageInput {
   latestDigest?: string;
   lastCheckedAt?: Date;
   registryConnectionId?: string | null;
+  autoUpdate?: boolean;
 }
 
 /**
@@ -156,14 +157,42 @@ export async function recordTagDeployment(
   });
 }
 
+export interface EnhancedHistoryEntry extends ContainerImageHistory {
+  deployments: {
+    id: string;
+    status: string;
+    durationMs: number | null;
+    triggeredBy: string;
+    startedAt: Date;
+    completedAt: Date | null;
+    service: {
+      id: string;
+      name: string;
+      server: {
+        id: string;
+        name: string;
+      };
+    } | null;
+    user: {
+      id: string;
+      email: string;
+      name: string | null;
+    } | null;
+  }[];
+  // Computed fields
+  totalDurationMs: number;
+  deploymentCount: number;
+  services: { id: string; name: string; serverName: string }[];
+}
+
 /**
- * Get tag deployment history for a container image
+ * Get tag deployment history for a container image with enhanced details
  */
 export async function getTagHistory(
   containerImageId: string,
   limit: number = 20
-): Promise<ContainerImageHistory[]> {
-  return prisma.containerImageHistory.findMany({
+): Promise<EnhancedHistoryEntry[]> {
+  const history = await prisma.containerImageHistory.findMany({
     where: { containerImageId },
     orderBy: { deployedAt: 'desc' },
     take: limit,
@@ -172,12 +201,50 @@ export async function getTagHistory(
         select: {
           id: true,
           status: true,
+          durationMs: true,
+          triggeredBy: true,
+          startedAt: true,
+          completedAt: true,
           service: {
-            select: { id: true, name: true },
+            select: {
+              id: true,
+              name: true,
+              server: {
+                select: { id: true, name: true },
+              },
+            },
+          },
+          user: {
+            select: { id: true, email: true, name: true },
           },
         },
       },
     },
+  });
+
+  // Enhance each history entry with computed fields
+  return history.map((entry) => {
+    const totalDurationMs = entry.deployments.reduce(
+      (sum, d) => sum + (d.durationMs || 0),
+      0
+    );
+
+    const services = entry.deployments
+      .filter((d) => d.service)
+      .map((d) => ({
+        id: d.service!.id,
+        name: d.service!.name,
+        serverName: d.service!.server.name,
+      }))
+      // Remove duplicates
+      .filter((s, i, arr) => arr.findIndex((x) => x.id === s.id) === i);
+
+    return {
+      ...entry,
+      totalDurationMs,
+      deploymentCount: entry.deployments.length,
+      services,
+    };
   });
 }
 

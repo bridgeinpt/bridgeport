@@ -26,6 +26,7 @@ model User {
   notifications           Notification[]
   notificationPreferences NotificationPreference[]
   deploymentPlans         DeploymentPlan[]
+  deploymentTemplates     DeploymentTemplate[]
 }
 
 model ApiToken {
@@ -53,16 +54,17 @@ model Environment {
   // Scheduler configuration (JSON blob)
   schedulerConfig String?
 
-  servers             Server[]
-  secrets             Secret[]
-  configFiles         ConfigFile[]
-  auditLogs           AuditLog[]
-  registryConnections RegistryConnection[]
-  databases           Database[]
-  notifications       Notification[]
-  containerImages     ContainerImage[]
-  deploymentPlans     DeploymentPlan[]
-  healthCheckLogs     HealthCheckLog[]
+  servers              Server[]
+  secrets              Secret[]
+  configFiles          ConfigFile[]
+  auditLogs            AuditLog[]
+  registryConnections  RegistryConnection[]
+  databases            Database[]
+  notifications        Notification[]
+  containerImages      ContainerImage[]
+  deploymentPlans      DeploymentPlan[]
+  healthCheckLogs      HealthCheckLog[]
+  deploymentTemplates  DeploymentTemplate[]
 }
 
 model Server {
@@ -135,9 +137,6 @@ model Service {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  // Auto-update flag (per-service)
-  autoUpdate Boolean @default(false)
-
   // Per-service health check configuration for deployment orchestration
   healthWaitMs     Int @default(30000) // Wait after deploy before checking (default 30s)
   healthRetries    Int @default(3) // Number of health check attempts
@@ -202,6 +201,7 @@ model Deployment {
   triggeredBy String // user email or "webhook"
   startedAt   DateTime  @default(now())
   completedAt DateTime?
+  durationMs  Int? // Deployment duration in milliseconds
 
   serviceId String
   service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
@@ -561,6 +561,7 @@ model ContainerImage {
   latestTag     String? // Latest from registry (for update detection)
   latestDigest  String?
   lastCheckedAt DateTime?
+  autoUpdate    Boolean   @default(false) // Applies to all linked services
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -619,6 +620,9 @@ model DeploymentPlan {
   // Rollback config - always rolls back ALL services on failure
   autoRollback Boolean @default(true)
 
+  // Parallel execution - run same-level services in parallel
+  parallelExecution Boolean @default(false)
+
   startedAt   DateTime?
   completedAt DateTime?
   error       String?
@@ -632,6 +636,8 @@ model DeploymentPlan {
   containerImage   ContainerImage? @relation(fields: [containerImageId], references: [id], onDelete: SetNull)
   userId           String?
   user             User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  templateId       String?
+  template         DeploymentTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
 
   steps DeploymentPlanStep[]
 
@@ -664,6 +670,32 @@ model DeploymentPlanStep {
   deployment       Deployment?    @relation(fields: [deploymentId], references: [id], onDelete: SetNull)
 
   @@index([deploymentPlanId, order])
+}
+
+// Deployment plan template - reusable deployment configurations
+model DeploymentTemplate {
+  id          String  @id @default(cuid())
+  name        String
+  description String?
+
+  // Template definition as JSON
+  // Schema: { version: "1.0", parallelExecution: boolean, steps: TemplateStep[] }
+  definition String
+
+  // Metadata
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  lastUsedAt  DateTime?
+  useCount    Int       @default(0)
+
+  environmentId String
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  createdById   String
+  createdBy     User        @relation(fields: [createdById], references: [id], onDelete: Cascade)
+
+  deploymentPlans DeploymentPlan[]
+
+  @@unique([environmentId, name])
 }
 
 // ==================== Global Settings ====================

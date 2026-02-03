@@ -12,6 +12,9 @@ import {
 } from '../services/image-management.js';
 import { buildDeploymentPlan, executePlan } from '../services/orchestration.js';
 import { logAudit } from '../services/audit.js';
+import { RegistryFactory } from '../lib/registry.js';
+import { getRegistryCredentials } from '../services/registries.js';
+import { extractRepoName } from '../lib/image-utils.js';
 
 const createContainerImageSchema = z.object({
   name: z.string().min(1),
@@ -24,6 +27,7 @@ const updateContainerImageSchema = z.object({
   name: z.string().min(1).optional(),
   currentTag: z.string().min(1).optional(),
   registryConnectionId: z.string().nullable().optional(),
+  autoUpdate: z.boolean().optional(),
 });
 
 const deployImageSchema = z.object({
@@ -245,6 +249,85 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
 
       const history = await getTagHistory(id, limit ? parseInt(limit) : 20);
       return { history };
+    }
+  );
+
+  // Check for updates from registry
+  fastify.post(
+    '/api/container-images/:id/check-updates',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      const image = await prisma.containerImage.findUnique({
+        where: { id },
+        include: { registryConnection: true },
+      });
+
+      if (!image) {
+        return reply.code(404).send({ error: 'Container image not found' });
+      }
+
+      if (!image.registryConnectionId) {
+        return reply.code(400).send({ error: 'No registry connection configured for this image' });
+      }
+
+      const creds = await getRegistryCredentials(image.registryConnectionId);
+      if (!creds) {
+        return reply.code(400).send({ error: 'Could not get registry credentials' });
+      }
+
+      try {
+        const client = RegistryFactory.create(creds);
+        const repoName = extractRepoName(image.imageName, creds.repositoryPrefix);
+
+        // Get the latest tag from the registry
+        const latestTag = await client.getLatestTag(repoName);
+        if (!latestTag) {
+          return {
+            hasUpdate: false,
+            currentTag: image.currentTag,
+            latestTag: null,
+            message: 'Could not determine latest tag from registry',
+          };
+        }
+
+        // Also check the digest for the current tag (handles "latest" tag updates)
+        let currentDigest: string | null = null;
+        try {
+          currentDigest = await client.getManifestDigest(repoName, image.currentTag);
+        } catch {
+          // If we can't get current digest, we'll compare by tag only
+        }
+
+        // Update the containerImage with latest available info
+        await prisma.containerImage.update({
+          where: { id },
+          data: {
+            latestTag: latestTag.tag,
+            latestDigest: latestTag.digest,
+            lastCheckedAt: new Date(),
+          },
+        });
+
+        // Determine if there's an update available
+        const hasUpdate =
+          latestTag.tag !== image.currentTag ||
+          (currentDigest !== null &&
+            latestTag.digest !== image.latestDigest &&
+            currentDigest !== latestTag.digest);
+
+        return {
+          hasUpdate,
+          currentTag: image.currentTag,
+          latestTag: latestTag.tag,
+          latestDigest: latestTag.digest,
+          lastCheckedAt: new Date().toISOString(),
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to check for updates';
+        return reply.code(500).send({ error: message });
+      }
     }
   );
 

@@ -31,7 +31,6 @@ const updateServiceSchema = z.object({
   imageTag: z.string().optional(),
   composePath: z.string().nullable().optional(),
   healthCheckUrl: z.string().nullable().optional(),
-  autoUpdate: z.boolean().optional(),
   serviceTypeId: z.string().nullable().optional(),
   // Health check configuration for deployment orchestration
   healthWaitMs: z.number().int().min(0).optional(),
