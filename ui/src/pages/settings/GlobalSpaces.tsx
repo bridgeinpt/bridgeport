@@ -22,13 +22,21 @@ export default function GlobalSpaces() {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; message: string; buckets?: string[] } | null>(null);
+  const [testResult, setTestResult] = useState<{
+    success: boolean;
+    message: string;
+    buckets?: string[];
+    failedBuckets?: string[];
+    scopedKey?: boolean;
+  } | null>(null);
 
   const [form, setForm] = useState({
     accessKey: '',
     secretKey: '',
     region: 'fra1',
+    buckets: [] as string[],
   });
+  const [newBucket, setNewBucket] = useState('');
 
   useEffect(() => {
     loadData();
@@ -58,16 +66,34 @@ export default function GlobalSpaces() {
     }
     setSaving(true);
     try {
-      await updateGlobalSpacesConfig(form);
+      await updateGlobalSpacesConfig({
+        accessKey: form.accessKey,
+        secretKey: form.secretKey,
+        region: form.region,
+        buckets: form.buckets.length > 0 ? form.buckets : undefined,
+      });
       toast.success('Spaces configuration saved');
       setEditing(false);
-      setForm({ accessKey: '', secretKey: '', region: 'fra1' });
+      setForm({ accessKey: '', secretKey: '', region: 'fra1', buckets: [] });
+      setNewBucket('');
       loadData();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to save configuration');
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleAddBucket = () => {
+    const bucket = newBucket.trim();
+    if (bucket && !form.buckets.includes(bucket)) {
+      setForm({ ...form, buckets: [...form.buckets, bucket] });
+      setNewBucket('');
+    }
+  };
+
+  const handleRemoveBucket = (bucket: string) => {
+    setForm({ ...form, buckets: form.buckets.filter((b) => b !== bucket) });
   };
 
   const handleDelete = async () => {
@@ -186,11 +212,50 @@ export default function GlobalSpaces() {
                 <option value="syd1">SYD1 (Sydney)</option>
               </select>
             </div>
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">
+                Buckets <span className="text-slate-500">(optional - for scoped keys)</span>
+              </label>
+              <p className="text-xs text-slate-500 mb-2">
+                If your key only has access to specific buckets, add them here. Leave empty for keys with full API access.
+              </p>
+              <div className="flex gap-2 mb-2">
+                <input
+                  type="text"
+                  value={newBucket}
+                  onChange={(e) => setNewBucket(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddBucket())}
+                  placeholder="bucket-name"
+                  className="input flex-1"
+                />
+                <button type="button" onClick={handleAddBucket} className="btn btn-secondary">
+                  Add
+                </button>
+              </div>
+              {form.buckets.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {form.buckets.map((bucket) => (
+                    <span key={bucket} className="inline-flex items-center gap-1 px-2 py-1 bg-slate-700 rounded text-sm text-white font-mono">
+                      {bucket}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveBucket(bucket)}
+                        className="text-slate-400 hover:text-red-400"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="flex gap-2">
               <button onClick={handleSave} disabled={saving} className="btn btn-primary">
                 {saving ? 'Saving...' : 'Save Configuration'}
               </button>
-              <button onClick={() => { setEditing(false); setForm({ accessKey: '', secretKey: '', region: 'fra1' }); }} className="btn btn-ghost">
+              <button onClick={() => { setEditing(false); setForm({ accessKey: '', secretKey: '', region: 'fra1', buckets: [] }); setNewBucket(''); }} className="btn btn-ghost">
                 Cancel
               </button>
             </div>
@@ -215,6 +280,24 @@ export default function GlobalSpaces() {
                 <span>Endpoint:</span>
                 <span className="text-white font-mono text-xs">{config.endpoint}</span>
               </div>
+              {config.buckets && config.buckets.length > 0 && (
+                <div className="flex justify-between text-slate-400 mt-2">
+                  <span>Buckets:</span>
+                  <div className="flex flex-wrap gap-1 justify-end">
+                    {config.buckets.map((bucket) => (
+                      <span key={bucket} className="px-2 py-0.5 bg-slate-600 rounded text-xs text-white font-mono">
+                        {bucket}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {(!config.buckets || config.buckets.length === 0) && (
+                <div className="flex justify-between text-slate-400 mt-2">
+                  <span>Key Type:</span>
+                  <span className="text-white text-xs">Full API Access</span>
+                </div>
+              )}
             </div>
 
             {testResult && (
@@ -239,10 +322,24 @@ export default function GlobalSpaces() {
                 </div>
                 {testResult.success && testResult.buckets && testResult.buckets.length > 0 && (
                   <div className="mt-2 text-sm">
-                    <span className="text-slate-400">Available buckets:</span>
+                    <span className="text-slate-400">
+                      {testResult.scopedKey ? 'Accessible buckets:' : 'Available buckets:'}
+                    </span>
                     <div className="flex flex-wrap gap-1 mt-1">
                       {testResult.buckets.map((bucket) => (
                         <span key={bucket} className="px-2 py-0.5 bg-slate-700 rounded text-xs text-white font-mono">
+                          {bucket}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {testResult.success && testResult.failedBuckets && testResult.failedBuckets.length > 0 && (
+                  <div className="mt-2 text-sm">
+                    <span className="text-red-400">Inaccessible buckets:</span>
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {testResult.failedBuckets.map((bucket) => (
+                        <span key={bucket} className="px-2 py-0.5 bg-red-900/50 rounded text-xs text-red-300 font-mono">
                           {bucket}
                         </span>
                       ))}
@@ -259,7 +356,12 @@ export default function GlobalSpaces() {
               {isAdmin(user) && (
                 <button
                   onClick={() => {
-                    setForm({ accessKey: config.accessKey, secretKey: '', region: config.region });
+                    setForm({
+                      accessKey: config.accessKey,
+                      secretKey: '',
+                      region: config.region,
+                      buckets: config.buckets || [],
+                    });
                     setTestResult(null);
                     setEditing(true);
                   }}

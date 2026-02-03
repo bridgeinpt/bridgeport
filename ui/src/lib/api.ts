@@ -1540,6 +1540,7 @@ export interface GlobalSpacesConfig {
   accessKey: string;
   region: string;
   endpoint: string;
+  buckets?: string[];
   createdAt: string;
   updatedAt: string;
   enabledEnvironments: { id: string; environmentId: string; enabled: boolean }[];
@@ -1550,6 +1551,7 @@ export interface GlobalSpacesConfigInput {
   secretKey: string;
   region: string;
   endpoint?: string;
+  buckets?: string[];
 }
 
 export interface SpacesEnvironmentStatus {
@@ -1568,7 +1570,13 @@ export const deleteGlobalSpacesConfig = () =>
   api.delete<{ success: boolean }>('/settings/spaces');
 
 export const testGlobalSpacesConfig = () =>
-  api.post<{ success: boolean; message: string; buckets?: string[] }>('/settings/spaces/test');
+  api.post<{
+    success: boolean;
+    message: string;
+    buckets?: string[];
+    failedBuckets?: string[];
+    scopedKey?: boolean;
+  }>('/settings/spaces/test');
 
 export const listGlobalSpacesBuckets = () =>
   api.get<{ buckets: string[] }>('/settings/spaces/buckets');

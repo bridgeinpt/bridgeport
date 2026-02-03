@@ -743,6 +743,7 @@ model SpacesConfig {
   secretKeyNonce     String
   region             String // "fra1"
   endpoint           String // "fra1.digitaloceanspaces.com"
+  buckets            String?  // JSON array of bucket names (for scoped keys that can't list buckets)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 

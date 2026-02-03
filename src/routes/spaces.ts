@@ -4,13 +4,14 @@ import { prisma } from '../lib/db.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
 import { requireAdmin } from '../plugins/authorize.js';
 import { logAudit } from '../services/audit.js';
-import { S3Client, ListBucketsCommand } from '@aws-sdk/client-s3';
+import { S3Client, ListBucketsCommand, HeadBucketCommand } from '@aws-sdk/client-s3';
 
 const createSpacesConfigSchema = z.object({
   accessKey: z.string().min(1),
   secretKey: z.string().min(1),
   region: z.string().min(1).default('fra1'),
   endpoint: z.string().optional(),
+  buckets: z.array(z.string()).optional(), // Manual bucket list for scoped keys
 });
 
 const updateSpacesConfigSchema = z.object({
@@ -18,6 +19,7 @@ const updateSpacesConfigSchema = z.object({
   secretKey: z.string().min(1).optional(),
   region: z.string().min(1).optional(),
   endpoint: z.string().optional(),
+  buckets: z.array(z.string()).optional(), // Manual bucket list for scoped keys
 });
 
 const updateEnvironmentSpacesSchema = z.object({
@@ -40,6 +42,16 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
         return { configured: false, config: null };
       }
 
+      // Parse buckets from JSON
+      let buckets: string[] = [];
+      if (config.buckets) {
+        try {
+          buckets = JSON.parse(config.buckets);
+        } catch {
+          buckets = [];
+        }
+      }
+
       return {
         configured: true,
         config: {
@@ -47,6 +59,7 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
           accessKey: config.accessKey,
           region: config.region,
           endpoint: config.endpoint,
+          buckets,
           createdAt: config.createdAt,
           updatedAt: config.updatedAt,
           enabledEnvironments: config.enabledEnvironments,
@@ -68,6 +81,7 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
       // Encrypt the secret key
       const { ciphertext, nonce } = encrypt(body.data.secretKey);
       const endpoint = body.data.endpoint || `${body.data.region}.digitaloceanspaces.com`;
+      const bucketsJson = body.data.buckets ? JSON.stringify(body.data.buckets) : null;
 
       // Check if config already exists
       const existing = await prisma.spacesConfig.findFirst();
@@ -82,6 +96,7 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
             secretKeyNonce: nonce,
             region: body.data.region,
             endpoint,
+            buckets: bucketsJson,
           },
         });
 
@@ -100,6 +115,7 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
             secretKeyNonce: nonce,
             region: body.data.region,
             endpoint,
+            buckets: bucketsJson,
           },
         });
 
@@ -168,14 +184,72 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
           },
         });
 
-        const result = await s3Client.send(new ListBucketsCommand({}));
-        const buckets = result.Buckets?.map((b) => b.Name).filter((name): name is string => !!name) || [];
+        // Parse configured buckets
+        let configuredBuckets: string[] = [];
+        if (config.buckets) {
+          try {
+            configuredBuckets = JSON.parse(config.buckets);
+          } catch {
+            configuredBuckets = [];
+          }
+        }
 
-        return {
-          success: true,
-          message: 'Connection successful',
-          buckets,
-        };
+        // If buckets are manually configured, test access to the first one
+        if (configuredBuckets.length > 0) {
+          // Test access to each configured bucket
+          const accessibleBuckets: string[] = [];
+          const failedBuckets: string[] = [];
+
+          for (const bucket of configuredBuckets) {
+            try {
+              await s3Client.send(new HeadBucketCommand({ Bucket: bucket }));
+              accessibleBuckets.push(bucket);
+            } catch {
+              failedBuckets.push(bucket);
+            }
+          }
+
+          if (accessibleBuckets.length === 0) {
+            return reply.code(400).send({
+              success: false,
+              error: `Cannot access any configured buckets: ${failedBuckets.join(', ')}`,
+            });
+          }
+
+          return {
+            success: true,
+            message: failedBuckets.length > 0
+              ? `Connected. Access to ${accessibleBuckets.length}/${configuredBuckets.length} buckets.`
+              : 'Connection successful',
+            buckets: accessibleBuckets,
+            failedBuckets: failedBuckets.length > 0 ? failedBuckets : undefined,
+            scopedKey: true,
+          };
+        }
+
+        // No buckets configured - try to list buckets (requires full API access)
+        try {
+          const result = await s3Client.send(new ListBucketsCommand({}));
+          const buckets = result.Buckets?.map((b) => b.Name).filter((name): name is string => !!name) || [];
+
+          return {
+            success: true,
+            message: 'Connection successful (full API access)',
+            buckets,
+            scopedKey: false,
+          };
+        } catch (listError) {
+          // ListBuckets failed - likely a scoped key
+          const errMsg = listError instanceof Error ? listError.message : '';
+          if (errMsg.includes('AccessDenied') || errMsg.includes('403')) {
+            return reply.code(400).send({
+              success: false,
+              error: 'This appears to be a bucket-scoped key. Please add the bucket names manually.',
+              scopedKey: true,
+            });
+          }
+          throw listError;
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Connection test failed';
         return reply.code(400).send({ success: false, error: message });
@@ -193,6 +267,22 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: 'Spaces not configured' });
       }
 
+      // Parse configured buckets
+      let configuredBuckets: string[] = [];
+      if (config.buckets) {
+        try {
+          configuredBuckets = JSON.parse(config.buckets);
+        } catch {
+          configuredBuckets = [];
+        }
+      }
+
+      // If buckets are manually configured, return those
+      if (configuredBuckets.length > 0) {
+        return { buckets: configuredBuckets, source: 'configured' };
+      }
+
+      // Try to discover buckets via API (requires full access)
       try {
         const secretKey = decrypt(config.encryptedSecretKey, config.secretKeyNonce);
 
@@ -208,8 +298,15 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
         const result = await s3Client.send(new ListBucketsCommand({}));
         const buckets = result.Buckets?.map((b) => b.Name).filter((name): name is string => !!name) || [];
 
-        return { buckets };
+        return { buckets, source: 'discovered' };
       } catch (error) {
+        const errMsg = error instanceof Error ? error.message : '';
+        if (errMsg.includes('AccessDenied') || errMsg.includes('403')) {
+          return reply.code(400).send({
+            error: 'Cannot list buckets with this key. Add bucket names manually in Spaces settings.',
+            scopedKey: true,
+          });
+        }
         const message = error instanceof Error ? error.message : 'Failed to list buckets';
         return reply.code(400).send({ error: message });
       }
