@@ -61,14 +61,35 @@ func (c *Client) GetEnvironment(id string) (*Environment, error) {
 
 // ListServers returns all servers, optionally filtered by environment
 func (c *Client) ListServers(environmentID string) ([]Server, error) {
-	path := "/api/servers"
+	// If environment ID provided, get servers for that environment
 	if environmentID != "" {
-		path = fmt.Sprintf("/api/servers?environmentId=%s", environmentID)
+		return c.listServersForEnv(environmentID)
 	}
+
+	// Otherwise, get servers from all environments
+	envs, err := c.ListEnvironments()
+	if err != nil {
+		return nil, err
+	}
+
+	var allServers []Server
+	for _, env := range envs {
+		servers, err := c.listServersForEnv(env.ID)
+		if err != nil {
+			// Continue with other environments on error
+			continue
+		}
+		allServers = append(allServers, servers...)
+	}
+	return allServers, nil
+}
+
+// listServersForEnv returns servers for a specific environment
+func (c *Client) listServersForEnv(environmentID string) ([]Server, error) {
 	var response struct {
 		Servers []Server `json:"servers"`
 	}
-	if err := c.Get(path, &response); err != nil {
+	if err := c.Get(fmt.Sprintf("/api/environments/%s/servers", environmentID), &response); err != nil {
 		return nil, err
 	}
 	return response.Servers, nil
