@@ -463,6 +463,12 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
         });
       }
 
+      // If buckets are configured (scoped key), return those directly
+      if (spacesConfig.buckets && spacesConfig.buckets.length > 0) {
+        return { buckets: spacesConfig.buckets, source: 'configured' };
+      }
+
+      // Otherwise try to list via API (requires full access key)
       try {
         const s3Client = new S3Client({
           endpoint: `https://${spacesConfig.endpoint}`,
@@ -476,8 +482,15 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
         const result = await s3Client.send(new ListBucketsCommand({}));
         const buckets = result.Buckets?.map(b => b.Name).filter((name): name is string => !!name) || [];
 
-        return { buckets };
+        return { buckets, source: 'discovered' };
       } catch (error) {
+        const errMsg = error instanceof Error ? error.message : '';
+        if (errMsg.includes('AccessDenied') || errMsg.includes('403')) {
+          return reply.code(400).send({
+            error: 'Cannot list buckets with this key. Add bucket names in Global Spaces settings.',
+            scopedKey: true,
+          });
+        }
         const message = error instanceof Error ? error.message : 'Failed to list buckets';
         return reply.code(400).send({ error: message });
       }
@@ -499,17 +512,50 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
         });
       }
 
-      try {
-        const s3Client = new S3Client({
-          endpoint: `https://${spacesConfig.endpoint}`,
-          region: spacesConfig.region,
-          credentials: {
-            accessKeyId: spacesConfig.accessKey,
-            secretAccessKey: spacesConfig.secretKey,
-          },
-        });
+      const s3Client = new S3Client({
+        endpoint: `https://${spacesConfig.endpoint}`,
+        region: spacesConfig.region,
+        credentials: {
+          accessKeyId: spacesConfig.accessKey,
+          secretAccessKey: spacesConfig.secretKey,
+        },
+      });
 
-        // Try to list buckets - this verifies credentials are valid
+      // If buckets are configured, test access to them with HeadBucket
+      if (spacesConfig.buckets && spacesConfig.buckets.length > 0) {
+        const { HeadBucketCommand } = await import('@aws-sdk/client-s3');
+        const accessibleBuckets: string[] = [];
+        const failedBuckets: string[] = [];
+
+        for (const bucket of spacesConfig.buckets) {
+          try {
+            await s3Client.send(new HeadBucketCommand({ Bucket: bucket }));
+            accessibleBuckets.push(bucket);
+          } catch {
+            failedBuckets.push(bucket);
+          }
+        }
+
+        if (accessibleBuckets.length === 0) {
+          return reply.code(400).send({
+            success: false,
+            error: `Cannot access any configured buckets: ${failedBuckets.join(', ')}`,
+          });
+        }
+
+        return {
+          success: true,
+          message: failedBuckets.length > 0
+            ? `Connected. Access to ${accessibleBuckets.length}/${spacesConfig.buckets.length} buckets.`
+            : 'Connection successful',
+          buckets: accessibleBuckets,
+          failedBuckets: failedBuckets.length > 0 ? failedBuckets : undefined,
+          scopedKey: true,
+        };
+      }
+
+      // No buckets configured - try ListBuckets (requires full API access)
+      try {
         const result = await s3Client.send(new ListBucketsCommand({}));
         const bucketNames = result.Buckets?.map(b => b.Name) || [];
 
@@ -519,6 +565,14 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
           buckets: bucketNames,
         };
       } catch (error) {
+        const errMsg = error instanceof Error ? error.message : '';
+        if (errMsg.includes('AccessDenied') || errMsg.includes('403')) {
+          return reply.code(400).send({
+            success: false,
+            error: 'This appears to be a bucket-scoped key. Add bucket names in Global Spaces settings.',
+            scopedKey: true,
+          });
+        }
         const message = error instanceof Error ? error.message : 'Connection test failed';
         return reply.code(400).send({
           success: false,
@@ -553,12 +607,44 @@ export async function getEnvironmentSshKey(environmentId: string): Promise<{
 }
 
 // Helper to get Spaces credentials for an environment
+// First checks global Spaces config (if enabled for this environment), then falls back to per-environment config
 export async function getEnvironmentSpacesConfig(environmentId: string): Promise<{
   accessKey: string;
   secretKey: string;
   region: string;
   endpoint: string;
+  buckets?: string[];
 } | null> {
+  // First, check if global Spaces config exists and is enabled for this environment
+  const globalConfig = await prisma.spacesConfig.findFirst({
+    include: {
+      enabledEnvironments: {
+        where: { environmentId, enabled: true },
+      },
+    },
+  });
+
+  if (globalConfig && globalConfig.enabledEnvironments.length > 0) {
+    // Use global config
+    const secretKey = decrypt(globalConfig.encryptedSecretKey, globalConfig.secretKeyNonce);
+    let buckets: string[] | undefined;
+    if (globalConfig.buckets) {
+      try {
+        buckets = JSON.parse(globalConfig.buckets);
+      } catch {
+        buckets = undefined;
+      }
+    }
+    return {
+      accessKey: globalConfig.accessKey,
+      secretKey,
+      region: globalConfig.region,
+      endpoint: globalConfig.endpoint,
+      buckets,
+    };
+  }
+
+  // Fall back to per-environment config (legacy)
   const environment = await prisma.environment.findUnique({
     where: { id: environmentId },
     select: {
