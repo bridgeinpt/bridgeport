@@ -45,6 +45,35 @@ interface AppState {
   clearSelectedEnvironment: () => void;
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
+
+  // Menu group collapse state (persisted)
+  collapsedGroups: string[];
+  toggleGroup: (name: string) => void;
+
+  // Monitoring preferences (persisted)
+  monitoringTimeRange: number;
+  setMonitoringTimeRange: (hours: number) => void;
+  autoRefreshEnabled: boolean;
+  setAutoRefreshEnabled: (enabled: boolean) => void;
+
+  // Dashboard alert dismissals (session-only, not persisted)
+  dismissedAlerts: string[];
+  dismissAlert: (alertId: string) => void;
+  clearDismissedAlerts: () => void;
+
+  // Page filter preferences (persisted)
+  servicesShowUpdatesOnly: boolean;
+  setServicesShowUpdatesOnly: (value: boolean) => void;
+  configFilesAttachedFilter: boolean;
+  setConfigFilesAttachedFilter: (value: boolean) => void;
+  configFilesServiceFilter: string | null;
+  setConfigFilesServiceFilter: (serviceId: string | null) => void;
+  activityResourceTypeFilter: string;
+  setActivityResourceTypeFilter: (type: string) => void;
+  monitoringHealthType: string;
+  setMonitoringHealthType: (type: string) => void;
+  monitoringHealthStatus: string;
+  setMonitoringHealthStatus: (status: string) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -55,12 +84,59 @@ export const useAppStore = create<AppState>()(
       clearSelectedEnvironment: () => set({ selectedEnvironment: null }),
       sidebarCollapsed: false,
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
+
+      // Menu group collapse state
+      collapsedGroups: [],
+      toggleGroup: (name) =>
+        set((state) => ({
+          collapsedGroups: state.collapsedGroups.includes(name)
+            ? state.collapsedGroups.filter((g) => g !== name)
+            : [...state.collapsedGroups, name],
+        })),
+
+      // Monitoring preferences
+      monitoringTimeRange: 24,
+      setMonitoringTimeRange: (hours) => set({ monitoringTimeRange: hours }),
+      autoRefreshEnabled: true,
+      setAutoRefreshEnabled: (enabled) => set({ autoRefreshEnabled: enabled }),
+
+      // Dashboard alert dismissals (session-only)
+      dismissedAlerts: [],
+      dismissAlert: (alertId) =>
+        set((state) => ({
+          dismissedAlerts: [...state.dismissedAlerts, alertId],
+        })),
+      clearDismissedAlerts: () => set({ dismissedAlerts: [] }),
+
+      // Page filter preferences
+      servicesShowUpdatesOnly: false,
+      setServicesShowUpdatesOnly: (value) => set({ servicesShowUpdatesOnly: value }),
+      configFilesAttachedFilter: false,
+      setConfigFilesAttachedFilter: (value) => set({ configFilesAttachedFilter: value }),
+      configFilesServiceFilter: null,
+      setConfigFilesServiceFilter: (serviceId) => set({ configFilesServiceFilter: serviceId }),
+      activityResourceTypeFilter: '',
+      setActivityResourceTypeFilter: (type) => set({ activityResourceTypeFilter: type }),
+      monitoringHealthType: '',
+      setMonitoringHealthType: (type) => set({ monitoringHealthType: type }),
+      monitoringHealthStatus: '',
+      setMonitoringHealthStatus: (status) => set({ monitoringHealthStatus: status }),
     }),
     {
       name: 'app-storage',
       partialize: (state) => ({
         selectedEnvironment: state.selectedEnvironment,
         sidebarCollapsed: state.sidebarCollapsed,
+        collapsedGroups: state.collapsedGroups,
+        monitoringTimeRange: state.monitoringTimeRange,
+        autoRefreshEnabled: state.autoRefreshEnabled,
+        // Note: dismissedAlerts NOT persisted (session-only)
+        servicesShowUpdatesOnly: state.servicesShowUpdatesOnly,
+        configFilesAttachedFilter: state.configFilesAttachedFilter,
+        configFilesServiceFilter: state.configFilesServiceFilter,
+        activityResourceTypeFilter: state.activityResourceTypeFilter,
+        monitoringHealthType: state.monitoringHealthType,
+        monitoringHealthStatus: state.monitoringHealthStatus,
       }),
     }
   )

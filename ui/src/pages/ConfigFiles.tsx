@@ -29,7 +29,13 @@ interface ServiceOption {
 }
 
 export default function ConfigFiles() {
-  const { selectedEnvironment } = useAppStore();
+  const {
+    selectedEnvironment,
+    configFilesAttachedFilter,
+    setConfigFilesAttachedFilter,
+    configFilesServiceFilter,
+    setConfigFilesServiceFilter,
+  } = useAppStore();
   const [configFiles, setConfigFiles] = useState<ConfigFile[]>([]);
   const [allServices, setAllServices] = useState<ServiceOption[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,8 +53,6 @@ export default function ConfigFiles() {
   const [history, setHistory] = useState<FileHistoryEntry[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [selectedHistoryEntry, setSelectedHistoryEntry] = useState<FileHistoryEntry | null>(null);
-  const [attachedFilter, setAttachedFilter] = useState<boolean>(false);
-  const [serviceFilter, setServiceFilter] = useState<string>('');
   const [showUpload, setShowUpload] = useState(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadName, setUploadName] = useState('');
@@ -229,12 +233,12 @@ export default function ConfigFiles() {
   // Filter config files based on filters
   const filteredConfigFiles = configFiles.filter((f) => {
     // "Only attached" filter
-    if (attachedFilter && (!f._count || f._count.services === 0)) {
+    if (configFilesAttachedFilter && (!f._count || f._count.services === 0)) {
       return false;
     }
     // Service filter - check if this config file is attached to the selected service
-    if (serviceFilter) {
-      const isAttached = f.services?.some((sf) => sf.service.id === serviceFilter);
+    if (configFilesServiceFilter) {
+      const isAttached = f.services?.some((sf) => sf.service.id === configFilesServiceFilter);
       if (!isAttached) {
         return false;
       }
@@ -819,8 +823,8 @@ export default function ConfigFiles() {
         <label className="flex items-center gap-2 text-sm text-slate-400">
           <input
             type="checkbox"
-            checked={attachedFilter}
-            onChange={(e) => setAttachedFilter(e.target.checked)}
+            checked={configFilesAttachedFilter}
+            onChange={(e) => setConfigFilesAttachedFilter(e.target.checked)}
             className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-primary-600 focus:ring-primary-500"
           />
           Only show files attached to services
@@ -829,8 +833,8 @@ export default function ConfigFiles() {
           <div className="flex items-center gap-2">
             <span className="text-sm text-slate-400">Service:</span>
             <select
-              value={serviceFilter}
-              onChange={(e) => setServiceFilter(e.target.value)}
+              value={configFilesServiceFilter || ''}
+              onChange={(e) => setConfigFilesServiceFilter(e.target.value || null)}
               className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white"
             >
               <option value="">All Services</option>
@@ -937,8 +941,8 @@ export default function ConfigFiles() {
             <p className="text-slate-400">No config files match the filter</p>
             <button
               onClick={() => {
-                setAttachedFilter(false);
-                setServiceFilter('');
+                setConfigFilesAttachedFilter(false);
+                setConfigFilesServiceFilter(null);
               }}
               className="btn btn-ghost mt-4"
             >

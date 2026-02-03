@@ -31,14 +31,12 @@ const timeRanges = [
 const COLORS = ['#60a5fa', '#34d399', '#fbbf24', '#f472b6', '#a78bfa', '#f87171'];
 
 export default function Monitoring() {
-  const { selectedEnvironment } = useAppStore();
+  const { selectedEnvironment, monitoringTimeRange, setMonitoringTimeRange, autoRefreshEnabled, setAutoRefreshEnabled } = useAppStore();
   const [servers, setServers] = useState<MetricsSummaryServer[]>([]);
   const [metricsHistory, setMetricsHistory] = useState<MetricsHistoryServer[]>([]);
   const [stats, setStats] = useState<MonitoringOverviewStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedRange, setSelectedRange] = useState(24);
-  const [autoRefresh, setAutoRefresh] = useState(true);
 
   const fetchData = async (isRefresh = false) => {
     if (!selectedEnvironment?.id) return;
@@ -48,7 +46,7 @@ export default function Monitoring() {
     try {
       const [summaryRes, historyRes, overviewRes] = await Promise.all([
         getEnvironmentMetricsSummary(selectedEnvironment.id),
-        getMetricsHistory(selectedEnvironment.id, selectedRange),
+        getMetricsHistory(selectedEnvironment.id, monitoringTimeRange),
         getMonitoringOverview(selectedEnvironment.id),
       ]);
       setServers(summaryRes.servers);
@@ -62,14 +60,14 @@ export default function Monitoring() {
 
   useEffect(() => {
     fetchData();
-  }, [selectedEnvironment?.id, selectedRange]);
+  }, [selectedEnvironment?.id, monitoringTimeRange]);
 
   // Auto-refresh every 30 seconds if enabled
   useEffect(() => {
-    if (!autoRefresh) return;
+    if (!autoRefreshEnabled) return;
     const interval = setInterval(() => fetchData(true), 30000);
     return () => clearInterval(interval);
-  }, [selectedEnvironment?.id, selectedRange, autoRefresh]);
+  }, [selectedEnvironment?.id, monitoringTimeRange, autoRefreshEnabled]);
 
   // Prepare chart data - combine all servers into single timeline
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -96,9 +94,9 @@ export default function Monitoring() {
 
   const formatTime = (time: string) => {
     const date = new Date(time);
-    if (selectedRange <= 6) {
+    if (monitoringTimeRange <= 6) {
       return format(date, 'HH:mm');
-    } else if (selectedRange <= 24) {
+    } else if (monitoringTimeRange <= 24) {
       return format(date, 'HH:mm');
     } else {
       return format(date, 'MMM d HH:mm');
@@ -167,8 +165,8 @@ export default function Monitoring() {
           <label className="flex items-center gap-2 text-sm text-slate-400">
             <input
               type="checkbox"
-              checked={autoRefresh}
-              onChange={(e) => setAutoRefresh(e.target.checked)}
+              checked={autoRefreshEnabled}
+              onChange={(e) => setAutoRefreshEnabled(e.target.checked)}
               className="rounded bg-slate-700 border-slate-600"
             />
             Auto: 30s
@@ -216,9 +214,9 @@ export default function Monitoring() {
           {timeRanges.map((range) => (
             <button
               key={range.hours}
-              onClick={() => setSelectedRange(range.hours)}
+              onClick={() => setMonitoringTimeRange(range.hours)}
               className={`px-3 py-1.5 text-sm ${
-                selectedRange === range.hours
+                monitoringTimeRange === range.hours
                   ? 'bg-brand-600 text-white'
                   : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
               }`}

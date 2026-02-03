@@ -26,11 +26,10 @@ const ACTION_COLORS: Record<string, string> = {
 };
 
 export default function Activity() {
-  const { selectedEnvironment } = useAppStore();
+  const { selectedEnvironment, activityResourceTypeFilter, setActivityResourceTypeFilter } = useAppStore();
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [resourceTypeFilter, setResourceTypeFilter] = useState('');
   const [expandedLog, setExpandedLog] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const limit = 20;
@@ -39,7 +38,7 @@ export default function Activity() {
     setLoading(true);
     getAuditLogs({
       environmentId: selectedEnvironment?.id,
-      resourceType: resourceTypeFilter || undefined,
+      resourceType: activityResourceTypeFilter || undefined,
       limit,
       offset: page * limit,
     })
@@ -48,7 +47,7 @@ export default function Activity() {
         setTotal(total);
       })
       .finally(() => setLoading(false));
-  }, [selectedEnvironment?.id, resourceTypeFilter, page]);
+  }, [selectedEnvironment?.id, activityResourceTypeFilter, page]);
 
   const totalPages = Math.ceil(total / limit);
 
@@ -75,9 +74,9 @@ export default function Activity() {
         </p>
         <div className="flex items-center gap-4">
           <select
-            value={resourceTypeFilter}
+            value={activityResourceTypeFilter}
             onChange={(e) => {
-              setResourceTypeFilter(e.target.value);
+              setActivityResourceTypeFilter(e.target.value);
               setPage(0);
             }}
             className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white"

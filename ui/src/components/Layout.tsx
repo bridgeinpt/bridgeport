@@ -163,21 +163,8 @@ const globalGroups = navigationGroups.filter(g => g.isGlobal);
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const { user, setUser } = useAuthStore();
-  const { selectedEnvironment, setSelectedEnvironment, clearSelectedEnvironment, sidebarCollapsed, toggleSidebar } = useAppStore();
+  const { selectedEnvironment, setSelectedEnvironment, clearSelectedEnvironment, sidebarCollapsed, toggleSidebar, collapsedGroups, toggleGroup } = useAppStore();
   const [environments, setEnvironments] = useState<Environment[]>([]);
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-
-  const toggleGroup = (name: string) => {
-    setCollapsedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) {
-        next.delete(name);
-      } else {
-        next.add(name);
-      }
-      return next;
-    });
-  };
 
   // Account modal state
   const [showAccountModal, setShowAccountModal] = useState(false);
@@ -328,7 +315,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               );
               if (visibleItems.length === 0) return null;
 
-              const isGroupCollapsed = collapsedGroups.has(group.name);
+              const isGroupCollapsed = collapsedGroups.includes(group.name);
 
               return (
                 <div key={group.name}>
@@ -392,7 +379,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   );
                   if (visibleItems.length === 0) return null;
 
-                  const isGroupCollapsed = collapsedGroups.has(group.name);
+                  const isGroupCollapsed = collapsedGroups.includes(group.name);
 
                   return (
                     <div key={group.name}>

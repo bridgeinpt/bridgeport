@@ -15,28 +15,31 @@ const timeRanges = [
 ];
 
 export default function MonitoringHealth() {
-  const { selectedEnvironment } = useAppStore();
+  const {
+    selectedEnvironment,
+    monitoringTimeRange,
+    setMonitoringTimeRange,
+    monitoringHealthType,
+    setMonitoringHealthType,
+    monitoringHealthStatus,
+    setMonitoringHealthStatus,
+  } = useAppStore();
   const [data, setData] = useState<HealthLogsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
-  const [filters, setFilters] = useState({
-    type: '' as '' | 'server' | 'service' | 'container',
-    status: '' as '' | 'success' | 'failure' | 'timeout',
-    hours: 24,
-    page: 1,
-    limit: 50,
-  });
+  const [page, setPage] = useState(1);
+  const limit = 50;
 
   const fetchData = async () => {
     if (!selectedEnvironment?.id) return;
     setLoading(true);
     try {
       const response = await getHealthLogs(selectedEnvironment.id, {
-        ...(filters.type && { type: filters.type }),
-        ...(filters.status && { status: filters.status }),
-        hours: filters.hours,
-        page: filters.page,
-        limit: filters.limit,
+        ...(monitoringHealthType && { type: monitoringHealthType as 'server' | 'service' | 'container' }),
+        ...(monitoringHealthStatus && { status: monitoringHealthStatus as 'success' | 'failure' | 'timeout' }),
+        hours: monitoringTimeRange,
+        page,
+        limit,
       });
       setData(response);
     } finally {
@@ -46,7 +49,7 @@ export default function MonitoringHealth() {
 
   useEffect(() => {
     fetchData();
-  }, [selectedEnvironment?.id, filters]);
+  }, [selectedEnvironment?.id, monitoringHealthType, monitoringHealthStatus, monitoringTimeRange, page]);
 
   const handleRunAll = async () => {
     if (!selectedEnvironment?.id) return;
@@ -153,8 +156,11 @@ export default function MonitoringHealth() {
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-4 mb-4">
         <select
-          value={filters.type}
-          onChange={(e) => setFilters({ ...filters, type: e.target.value as typeof filters.type, page: 1 })}
+          value={monitoringHealthType}
+          onChange={(e) => {
+            setMonitoringHealthType(e.target.value);
+            setPage(1);
+          }}
           className="input w-40"
         >
           <option value="">All Types</option>
@@ -164,8 +170,11 @@ export default function MonitoringHealth() {
         </select>
 
         <select
-          value={filters.status}
-          onChange={(e) => setFilters({ ...filters, status: e.target.value as typeof filters.status, page: 1 })}
+          value={monitoringHealthStatus}
+          onChange={(e) => {
+            setMonitoringHealthStatus(e.target.value);
+            setPage(1);
+          }}
           className="input w-40"
         >
           <option value="">All Status</option>
@@ -178,9 +187,12 @@ export default function MonitoringHealth() {
           {timeRanges.map((range) => (
             <button
               key={range.hours}
-              onClick={() => setFilters({ ...filters, hours: range.hours, page: 1 })}
+              onClick={() => {
+                setMonitoringTimeRange(range.hours);
+                setPage(1);
+              }}
               className={`px-3 py-1.5 text-sm ${
-                filters.hours === range.hours
+                monitoringTimeRange === range.hours
                   ? 'bg-brand-600 text-white'
                   : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
               }`}
@@ -258,12 +270,12 @@ export default function MonitoringHealth() {
           {data.totalPages > 1 && (
             <div className="flex items-center justify-between border-t border-slate-700 pt-4 mt-4">
               <span className="text-sm text-slate-400">
-                Showing {(data.page - 1) * data.limit + 1} to {Math.min(data.page * data.limit, data.total)} of {data.total} results
+                Showing {(data.page - 1) * limit + 1} to {Math.min(data.page * limit, data.total)} of {data.total} results
               </span>
               <div className="flex gap-2">
                 <button
-                  onClick={() => setFilters({ ...filters, page: filters.page - 1 })}
-                  disabled={filters.page === 1}
+                  onClick={() => setPage(page - 1)}
+                  disabled={page === 1}
                   className="btn btn-secondary px-3 py-1"
                 >
                   Previous
@@ -272,8 +284,8 @@ export default function MonitoringHealth() {
                   Page {data.page} of {data.totalPages}
                 </span>
                 <button
-                  onClick={() => setFilters({ ...filters, page: filters.page + 1 })}
-                  disabled={filters.page >= data.totalPages}
+                  onClick={() => setPage(page + 1)}
+                  disabled={page >= data.totalPages}
                   className="btn btn-secondary px-3 py-1"
                 >
                   Next

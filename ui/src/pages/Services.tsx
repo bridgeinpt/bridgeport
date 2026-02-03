@@ -44,13 +44,10 @@ function formatPorts(ports: ExposedPort[], maxDisplay = 2): string {
 }
 
 export default function Services() {
-  const { selectedEnvironment } = useAppStore();
+  const { selectedEnvironment, servicesShowUpdatesOnly, setServicesShowUpdatesOnly } = useAppStore();
   const toast = useToast();
   const [services, setServices] = useState<ServiceWithServer[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // Filter state
-  const [showUpdatesOnly, setShowUpdatesOnly] = useState(false);
 
   // Bulk deploy state
   const [bulkDeploying, setBulkDeploying] = useState(false);
@@ -94,7 +91,7 @@ export default function Services() {
   );
 
   // Filtered services based on "show updates only" toggle
-  const filteredServices = showUpdatesOnly ? servicesWithUpdates : services;
+  const filteredServices = servicesShowUpdatesOnly ? servicesWithUpdates : services;
 
   const handleBulkDeployAll = async () => {
     if (servicesWithUpdates.length === 0) return;
@@ -192,8 +189,8 @@ export default function Services() {
               <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={showUpdatesOnly}
-                  onChange={(e) => setShowUpdatesOnly(e.target.checked)}
+                  checked={servicesShowUpdatesOnly}
+                  onChange={(e) => setServicesShowUpdatesOnly(e.target.checked)}
                   className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-primary-600 focus:ring-primary-500"
                 />
                 Show updates only ({servicesWithUpdates.length})

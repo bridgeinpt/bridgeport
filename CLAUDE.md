@@ -2,6 +2,105 @@
 
 A lightweight, self-hosted deployment management tool for Docker-based infrastructure.
 
+---
+
+## ⛔ CRITICAL: DATABASE MIGRATION RULES ⛔
+
+**THIS IS A PRODUCTION SYSTEM WITH LIVE DATA. BREAKING CHANGES WILL CAUSE DOWNTIME.**
+
+### BEFORE ANY SCHEMA CHANGE, YOU MUST:
+
+1. **WARN THE USER** - Explicitly state: "This schema change will affect the production database. Here's the migration plan..."
+
+2. **CHECK FOR BREAKING CHANGES** - These are ALWAYS breaking:
+   - Adding a required (non-nullable) column without a default
+   - Removing a column that has data
+   - Renaming a column
+   - Changing column types
+   - Adding a new required foreign key relationship
+
+3. **CREATE A MIGRATION SCRIPT** - Place in `scripts/migrations/` with format `YYYY-MM-DD-description.sql`:
+   - Script MUST be idempotent (safe to run multiple times)
+   - Script MUST work on SQLite directly (container may be crash-looping)
+   - Script MUST preserve all existing data
+   - Script MUST include verification queries
+
+4. **PROVIDE ROLLBACK SCRIPT** - Always create a corresponding rollback script
+
+### SAFE MIGRATION PATTERN
+
+For ANY schema change that touches existing tables:
+
+```sql
+-- migrations/YYYY-MM-DD-add-feature.sql
+-- Description: Add X feature
+-- Breaking: YES/NO
+-- Rollback: YYYY-MM-DD-add-feature-rollback.sql
+
+PRAGMA foreign_keys=OFF;
+BEGIN TRANSACTION;
+
+-- 1. Create new tables first
+CREATE TABLE IF NOT EXISTS NewTable (...);
+
+-- 2. Add nullable columns (NEVER required columns directly)
+ALTER TABLE ExistingTable ADD COLUMN newColumn TEXT;  -- nullable first!
+
+-- 3. Migrate data
+UPDATE ExistingTable SET newColumn = 'default' WHERE newColumn IS NULL;
+
+-- 4. If column must be required, recreate table with constraint
+-- (SQLite doesn't support ALTER COLUMN)
+
+COMMIT;
+PRAGMA foreign_keys=ON;
+
+-- 5. Verify
+SELECT COUNT(*) as should_be_zero FROM ExistingTable WHERE newColumn IS NULL;
+```
+
+### NEVER DO THIS:
+
+```prisma
+// ❌ WRONG - Adding required field without migration
+model Service {
+  newRequiredField String  // This WILL break production!
+}
+```
+
+### ALWAYS DO THIS:
+
+```prisma
+// ✅ CORRECT - Add as optional first
+model Service {
+  newRequiredField String?  // Nullable initially
+}
+// Then: create migration script, run it, THEN make required
+```
+
+### DEPLOYMENT CHECKLIST
+
+Before deploying any schema change:
+
+- [ ] Migration script created and tested locally
+- [ ] Rollback script created
+- [ ] User warned about the change
+- [ ] Script can run while container is stopped (direct SQLite access)
+- [ ] Verification queries included
+- [ ] No data loss will occur
+
+### EMERGENCY RECOVERY
+
+If the container is crash-looping due to schema mismatch:
+
+1. Access SQLite directly: `sqlite3 /path/to/bridgeport.db`
+2. Run the migration script manually
+3. Restart container: `docker restart bridgeport`
+
+The migration scripts are in `scripts/migrations/` for this purpose.
+
+---
+
 ## Tech Stack
 
 - **Backend**: Node.js, Fastify, TypeScript
@@ -282,3 +381,40 @@ SystemSettings     - System-wide operational settings (timeouts, limits, retries
 - Agent tokens are per-server, generated when enabling agent mode
 - System settings use a cached singleton pattern - call `getSystemSettings()` for current values
 - Health check logs are stored in `HealthCheckLog` with automatic cleanup based on retention settings
+
+## UI/UX Guidelines
+
+### 1. Persist User Preferences
+All user-configurable UI state should be persisted to localStorage via Zustand:
+
+**Must persist:**
+- Filter selections (toggles, dropdowns)
+- Time range selections
+- Collapse/expand states
+- Auto-refresh toggles
+- Sort preferences
+
+**Use existing patterns:**
+- Extend `useAppStore` in `ui/src/lib/store.ts`
+- Use Zustand's `persist` middleware with `partialize`
+- Key pattern: `{pageName}{PreferenceName}` (e.g., `servicesShowUpdatesOnly`)
+
+### 2. Information Hierarchy
+Dashboard and list pages should follow clear hierarchy:
+1. **Alerts/Actions first** - Things requiring attention
+2. **Summary cards** - High-level counts and status
+3. **Primary content** - Main data (services, health grid)
+4. **Secondary content** - Updates, activity, detailed tables
+
+Avoid overloading pages with redundant data - link to detail pages instead.
+
+### 3. Consistent Patterns
+- **Filters**: Use segmented buttons for time ranges, checkboxes for boolean filters
+- **Status colors**: Always use `ui/src/lib/status.ts` utilities
+- **Dismissible items**: Alerts/notifications should be dismissible (session-only)
+- **Loading states**: Use skeleton placeholders, not spinners
+
+### 4. State Management Rules
+- **Page-local state**: Only for truly ephemeral UI (modal open, hover states)
+- **Zustand store**: For anything that should survive navigation
+- **Session storage**: For dismissals that should reset on browser close

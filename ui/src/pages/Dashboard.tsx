@@ -52,7 +52,7 @@ interface DatabaseWithBackups extends Database {
 }
 
 export default function Dashboard() {
-  const { selectedEnvironment } = useAppStore();
+  const { selectedEnvironment, autoRefreshEnabled, setAutoRefreshEnabled, dismissedAlerts, dismissAlert, clearDismissedAlerts } = useAppStore();
   const toast = useToast();
   const [environment, setEnvironment] = useState<EnvironmentWithServers | null>(null);
   const [metrics, setMetrics] = useState<MetricsSummaryServer[]>([]);
@@ -67,44 +67,57 @@ export default function Dashboard() {
   const [deployAllResults, setDeployAllResults] = useState<DeployAllResult[] | null>(null);
   const [showDeployAllResults, setShowDeployAllResults] = useState(false);
 
-  useEffect(() => {
-    if (selectedEnvironment?.id) {
-      setLoading(true);
-      Promise.all([
+  const fetchData = async (isRefresh = false) => {
+    if (!selectedEnvironment?.id) return;
+    if (!isRefresh) setLoading(true);
+
+    try {
+      const [envRes, metricsRes, logsRes, dbRes] = await Promise.all([
         getEnvironment(selectedEnvironment.id),
         getEnvironmentMetricsSummary(selectedEnvironment.id),
         getAuditLogs({ environmentId: selectedEnvironment.id, limit: 15 }),
         listDatabases(selectedEnvironment.id),
-      ])
-        .then(async ([envRes, metricsRes, logsRes, dbRes]) => {
-          setEnvironment(envRes.environment);
-          setMetrics(metricsRes.servers);
-          setAuditLogs(logsRes.logs);
+      ]);
 
-          // Fetch backup info for each database
-          const dbsWithBackups = await Promise.all(
-            dbRes.databases.map(async (db) => {
-              try {
-                const [backupsRes, scheduleRes] = await Promise.all([
-                  listDatabaseBackups(db.id),
-                  getBackupSchedule(db.id),
-                ]);
-                const completedBackups = backupsRes.backups.filter(b => b.status === 'completed');
-                return {
-                  ...db,
-                  lastBackup: completedBackups[0] || null,
-                  schedule: scheduleRes.schedule,
-                };
-              } catch {
-                return { ...db, lastBackup: null, schedule: null };
-              }
-            })
-          );
-          setDatabases(dbsWithBackups);
+      setEnvironment(envRes.environment);
+      setMetrics(metricsRes.servers);
+      setAuditLogs(logsRes.logs);
+
+      // Fetch backup info for each database
+      const dbsWithBackups = await Promise.all(
+        dbRes.databases.map(async (db) => {
+          try {
+            const [backupsRes, scheduleRes] = await Promise.all([
+              listDatabaseBackups(db.id),
+              getBackupSchedule(db.id),
+            ]);
+            const completedBackups = backupsRes.backups.filter(b => b.status === 'completed');
+            return {
+              ...db,
+              lastBackup: completedBackups[0] || null,
+              schedule: scheduleRes.schedule,
+            };
+          } catch {
+            return { ...db, lastBackup: null, schedule: null };
+          }
         })
-        .finally(() => setLoading(false));
+      );
+      setDatabases(dbsWithBackups);
+    } finally {
+      setLoading(false);
     }
+  };
+
+  useEffect(() => {
+    fetchData();
   }, [selectedEnvironment?.id]);
+
+  // Auto-refresh every 30 seconds if enabled
+  useEffect(() => {
+    if (!autoRefreshEnabled) return;
+    const interval = setInterval(() => fetchData(true), 30000);
+    return () => clearInterval(interval);
+  }, [selectedEnvironment?.id, autoRefreshEnabled]);
 
   // Compute alerts from metrics and environment data
   const alerts = useMemo<Alert[]>(() => {
@@ -202,8 +215,9 @@ export default function Dashboard() {
         });
       });
 
-    return result;
-  }, [metrics, environment, auditLogs]);
+    // Filter out dismissed alerts
+    return result.filter((alert) => !dismissedAlerts.includes(alert.id));
+  }, [metrics, environment, auditLogs, dismissedAlerts]);
 
   // Services with available updates
   const servicesWithUpdates = useMemo<ServiceWithUpdate[]>(() => {
@@ -224,9 +238,38 @@ export default function Dashboard() {
       .slice(0, 5);
   }, [auditLogs]);
 
-  // Helper to get metrics for a server
-  const getServerMetrics = (serverId: string) =>
-    metrics.find((m) => m.id === serverId)?.latestMetrics;
+  // All services with server info for health grid
+  const allServices = useMemo(() => {
+    return (
+      environment?.servers.flatMap((server) =>
+        server.services.map((s) => ({ ...s, serverName: server.name }))
+      ) || []
+    );
+  }, [environment]);
+
+  // Service health counts
+  const serviceHealthCounts = useMemo(() => {
+    const healthy = allServices.filter(
+      (s) => s.healthStatus === 'healthy' || s.status === 'running' || s.status === 'healthy'
+    ).length;
+    return { healthy, total: allServices.length };
+  }, [allServices]);
+
+  // Database backup status
+  const databaseBackupStatus = useMemo(() => {
+    const withBackup = databases.filter((db) => db.lastBackup !== null).length;
+    // Find next scheduled backup
+    const nextBackup = databases
+      .filter((db) => db.schedule?.enabled && db.schedule?.nextRunAt)
+      .map((db) => new Date(db.schedule!.nextRunAt!))
+      .sort((a, b) => a.getTime() - b.getTime())[0];
+    return { withBackup, total: databases.length, nextBackup };
+  }, [databases]);
+
+  // Unhealthy servers
+  const unhealthyServers = useMemo(() => {
+    return environment?.servers.filter((s) => s.status !== 'healthy') || [];
+  }, [environment]);
 
   const handleDeploy = async (serviceId: string, imageTag: string) => {
     setDeploying(serviceId);
@@ -354,65 +397,97 @@ export default function Dashboard() {
     <div className="p-6">
       <div className="flex items-center justify-between mb-5">
         <p className="text-slate-400">Overview of {environment.name} environment infrastructure</p>
+        <label className="flex items-center gap-2 text-sm text-slate-400">
+          <input
+            type="checkbox"
+            checked={autoRefreshEnabled}
+            onChange={(e) => setAutoRefreshEnabled(e.target.checked)}
+            className="rounded bg-slate-700 border-slate-600"
+          />
+          Auto-refresh: 30s
+        </label>
       </div>
 
       {/* Alerts & Warnings - Moved to top */}
-      {alerts.length > 0 && (
+      {(alerts.length > 0 || dismissedAlerts.length > 0) && (
         <div className="panel mb-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-white">
               Alerts & Warnings
               <span className="ml-2 text-sm font-normal text-slate-400">({alerts.length})</span>
             </h2>
-          </div>
-          <div className="space-y-3">
-            {alerts.map((alert) => (
-              <div
-                key={alert.id}
-                className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg border border-slate-700"
+            {dismissedAlerts.length > 0 && (
+              <button
+                onClick={clearDismissedAlerts}
+                className="text-sm text-slate-400 hover:text-white"
               >
-                <div className="flex items-center gap-3">
-                  <div
-                    className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                      alert.severity === 'error'
-                        ? 'bg-red-900/50 text-red-400'
-                        : 'bg-yellow-900/50 text-yellow-400'
-                    }`}
-                  >
-                    {alert.type === 'failed_deploy' ? (
+                Show {dismissedAlerts.length} dismissed
+              </button>
+            )}
+          </div>
+          {alerts.length > 0 ? (
+            <div className="space-y-3">
+              {alerts.map((alert) => (
+                <div
+                  key={alert.id}
+                  className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg border border-slate-700"
+                >
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                        alert.severity === 'error'
+                          ? 'bg-red-900/50 text-red-400'
+                          : 'bg-yellow-900/50 text-yellow-400'
+                      }`}
+                    >
+                      {alert.type === 'failed_deploy' ? (
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      ) : alert.type === 'unhealthy' ? (
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                          <circle cx="12" cy="12" r="5" />
+                        </svg>
+                      ) : (
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-white">{alert.title}</p>
+                      <p className="text-xs text-slate-400">{alert.description}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Link
+                      to={alert.link}
+                      className="btn btn-sm btn-secondary"
+                    >
+                      View
+                    </Link>
+                    <button
+                      onClick={() => dismissAlert(alert.id)}
+                      className="p-1 text-slate-400 hover:text-white"
+                      title="Dismiss"
+                    >
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                       </svg>
-                    ) : alert.type === 'unhealthy' ? (
-                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                        <circle cx="12" cy="12" r="5" />
-                      </svg>
-                    ) : (
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                      </svg>
-                    )}
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-white">{alert.title}</p>
-                    <p className="text-xs text-slate-400">{alert.description}</p>
+                    </button>
                   </div>
                 </div>
-                <Link
-                  to={alert.link}
-                  className="btn btn-sm btn-secondary"
-                >
-                  View
-                </Link>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-slate-400 text-sm">All alerts dismissed. <button onClick={clearDismissedAlerts} className="text-primary-400 hover:text-primary-300">Show again</button></p>
+          )}
         </div>
       )}
 
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
-        <div className="panel">
+        <Link to="/servers" className="panel hover:border-slate-600 transition-colors">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-slate-400 text-sm">Servers</p>
@@ -424,14 +499,22 @@ export default function Dashboard() {
               </svg>
             </div>
           </div>
-          <div className="mt-4">
-            <span className="badge badge-success">
-              {healthyServers} healthy
-            </span>
+          <div className="mt-3">
+            {unhealthyServers.length > 0 ? (
+              <div>
+                <span className="badge badge-error">{unhealthyServers.length} unhealthy</span>
+                <p className="text-xs text-slate-500 mt-1">
+                  {unhealthyServers.slice(0, 2).map((s) => s.name).join(', ')}
+                  {unhealthyServers.length > 2 && ` +${unhealthyServers.length - 2} more`}
+                </p>
+              </div>
+            ) : (
+              <span className="badge badge-success">{healthyServers} healthy</span>
+            )}
           </div>
-        </div>
+        </Link>
 
-        <div className="panel">
+        <Link to="/services" className="panel hover:border-slate-600 transition-colors">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-slate-400 text-sm">Services</p>
@@ -443,29 +526,42 @@ export default function Dashboard() {
               </svg>
             </div>
           </div>
-          <div className="mt-4">
-            <span className="badge badge-info">Running</span>
+          <div className="mt-3">
+            <span className={`badge ${serviceHealthCounts.healthy === serviceHealthCounts.total ? 'badge-success' : 'badge-warning'}`}>
+              {serviceHealthCounts.healthy}/{serviceHealthCounts.total} healthy
+            </span>
           </div>
-        </div>
+        </Link>
 
-        <div className="panel">
+        <Link to="/databases" className="panel hover:border-slate-600 transition-colors">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-slate-400 text-sm">Secrets</p>
-              <p className="text-2xl font-bold text-white mt-1">
-                {environment._count.secrets}
-              </p>
+              <p className="text-slate-400 text-sm">Databases</p>
+              <p className="text-2xl font-bold text-white mt-1">{databases.length}</p>
             </div>
-            <div className="w-12 h-12 bg-yellow-900/50 rounded-lg flex items-center justify-center">
-              <svg className="w-6 h-6 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+            <div className="w-12 h-12 bg-purple-900/50 rounded-lg flex items-center justify-center">
+              <svg className="w-6 h-6 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
               </svg>
             </div>
           </div>
-          <div className="mt-4">
-            <span className="badge badge-success">Encrypted</span>
+          <div className="mt-3 space-y-1">
+            {databases.length > 0 ? (
+              <>
+                <span className={`badge ${databaseBackupStatus.withBackup === databaseBackupStatus.total ? 'badge-success' : 'badge-warning'}`}>
+                  {databaseBackupStatus.withBackup}/{databaseBackupStatus.total} backed up
+                </span>
+                {databaseBackupStatus.nextBackup && (
+                  <p className="text-xs text-slate-500">
+                    Next: {formatDistanceToNow(databaseBackupStatus.nextBackup, { addSuffix: true })}
+                  </p>
+                )}
+              </>
+            ) : (
+              <span className="badge badge-info">No databases</span>
+            )}
           </div>
-        </div>
+        </Link>
       </div>
 
       {/* Deploy All Results Modal */}
@@ -654,128 +750,37 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Server Metrics Cards */}
-      {metrics.some((m) => m.latestMetrics) && (
-        <div className="mb-5">
-          <h2 className="text-lg font-semibold text-white mb-4">Server Resources</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {metrics
-              .filter((m) => m.latestMetrics)
-              .map((server) => (
-                <div key={server.id} className="panel">
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="font-medium text-white">{server.name}</h3>
-                    <span className="text-xs text-slate-500">
-                      {server.latestMetrics &&
-                        formatDistanceToNow(new Date(server.latestMetrics.collectedAt), {
-                          addSuffix: true,
-                        })}
-                    </span>
-                  </div>
-
-                  {server.latestMetrics && (
-                    <div className="space-y-3">
-                      {/* CPU */}
-                      <div>
-                        <div className="flex justify-between text-xs mb-1">
-                          <span className="text-slate-400">CPU</span>
-                          <span className="text-white">
-                            {server.latestMetrics.cpuPercent?.toFixed(1)}%
-                          </span>
-                        </div>
-                        <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
-                          <div
-                            className={`h-full rounded-full transition-all ${
-                              (server.latestMetrics.cpuPercent || 0) > 80
-                                ? 'bg-red-500'
-                                : 'bg-primary-500'
-                            }`}
-                            style={{ width: `${Math.min(server.latestMetrics.cpuPercent || 0, 100)}%` }}
-                          />
-                        </div>
-                      </div>
-
-                      {/* Memory */}
-                      {server.latestMetrics.memoryTotalMb && (
-                        <div>
-                          <div className="flex justify-between text-xs mb-1">
-                            <span className="text-slate-400">Memory</span>
-                            <span className="text-white">
-                              {((server.latestMetrics.memoryUsedMb || 0) / 1024).toFixed(1)} /{' '}
-                              {(server.latestMetrics.memoryTotalMb / 1024).toFixed(1)} GB
-                            </span>
-                          </div>
-                          <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
-                            <div
-                              className={`h-full rounded-full transition-all ${
-                                ((server.latestMetrics.memoryUsedMb || 0) /
-                                  server.latestMetrics.memoryTotalMb) *
-                                  100 >
-                                80
-                                  ? 'bg-red-500'
-                                  : 'bg-green-500'
-                              }`}
-                              style={{
-                                width: `${Math.min(
-                                  ((server.latestMetrics.memoryUsedMb || 0) /
-                                    server.latestMetrics.memoryTotalMb) *
-                                    100,
-                                  100
-                                )}%`,
-                              }}
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Disk */}
-                      {server.latestMetrics.diskTotalGb && (
-                        <div>
-                          <div className="flex justify-between text-xs mb-1">
-                            <span className="text-slate-400">Disk</span>
-                            <span className="text-white">
-                              {server.latestMetrics.diskUsedGb?.toFixed(0)} /{' '}
-                              {server.latestMetrics.diskTotalGb.toFixed(0)} GB
-                            </span>
-                          </div>
-                          <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
-                            <div
-                              className={`h-full rounded-full transition-all ${
-                                ((server.latestMetrics.diskUsedGb || 0) /
-                                  server.latestMetrics.diskTotalGb) *
-                                  100 >
-                                90
-                                  ? 'bg-red-500'
-                                  : 'bg-yellow-500'
-                              }`}
-                              style={{
-                                width: `${Math.min(
-                                  ((server.latestMetrics.diskUsedGb || 0) /
-                                    server.latestMetrics.diskTotalGb) *
-                                    100,
-                                  100
-                                )}%`,
-                              }}
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Load Average */}
-                      {server.latestMetrics.loadAvg1 !== null && (
-                        <div className="flex justify-between text-xs">
-                          <span className="text-slate-400">Load Avg</span>
-                          <span className="text-white font-mono">
-                            {server.latestMetrics.loadAvg1?.toFixed(2)}{' '}
-                            {server.latestMetrics.loadAvg5?.toFixed(2)}{' '}
-                            {server.latestMetrics.loadAvg15?.toFixed(2)}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
+      {/* Services Health Grid */}
+      {allServices.length > 0 && (
+        <div className="panel mb-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-white">
+              Services Health
+              <span className="ml-2 text-sm font-normal text-slate-400">
+                ({serviceHealthCounts.healthy}/{serviceHealthCounts.total} healthy)
+              </span>
+            </h2>
+            <Link to="/services" className="text-sm text-primary-400 hover:text-primary-300">
+              View All
+            </Link>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {allServices.map((service) => {
+              const isHealthy = service.healthStatus === 'healthy' || service.status === 'running' || service.status === 'healthy';
+              const isWarning = service.healthStatus === 'degraded' || service.status === 'unknown';
+              const statusColor = isHealthy ? 'bg-green-500' : isWarning ? 'bg-yellow-500' : 'bg-red-500';
+              return (
+                <Link
+                  key={service.id}
+                  to={`/services/${service.id}`}
+                  className="flex items-center gap-2 px-3 py-2 bg-slate-800/50 rounded-lg border border-slate-700 hover:border-slate-600 transition-colors"
+                  title={`${service.name} on ${service.serverName} - ${service.healthStatus || service.status}`}
+                >
+                  <span className={`w-2 h-2 rounded-full ${statusColor}`} />
+                  <span className="text-sm text-white">{service.name}</span>
+                </Link>
+              );
+            })}
           </div>
         </div>
       )}
@@ -887,96 +892,8 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Servers List */}
-      <div className="panel">
-        <h2 className="text-lg font-semibold text-white mb-4">Servers</h2>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
-                <th className="pb-3 font-medium">Name</th>
-                <th className="pb-3 font-medium">IP Address</th>
-                <th className="pb-3 font-medium">Services</th>
-                <th className="pb-3 font-medium">CPU</th>
-                <th className="pb-3 font-medium">Memory</th>
-                <th className="pb-3 font-medium">Status</th>
-                <th className="pb-3 font-medium">Last Checked</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-700">
-              {environment.servers.map((server) => {
-                const serverMetrics = getServerMetrics(server.id);
-                return (
-                  <tr key={server.id} className="text-slate-300">
-                    <td className="py-3">
-                      <Link
-                        to={`/servers/${server.id}`}
-                        className="text-white hover:text-primary-400"
-                      >
-                        {server.name}
-                      </Link>
-                    </td>
-                    <td className="py-3 font-mono text-sm">{server.hostname}</td>
-                    <td className="py-3">{server.services.length}</td>
-                    <td className="py-3 text-sm">
-                      {serverMetrics?.cpuPercent != null ? (
-                        <span className={serverMetrics.cpuPercent > 80 ? 'text-red-400' : ''}>
-                          {serverMetrics.cpuPercent.toFixed(1)}%
-                        </span>
-                      ) : (
-                        <span className="text-slate-500">-</span>
-                      )}
-                    </td>
-                    <td className="py-3 text-sm">
-                      {serverMetrics?.memoryTotalMb ? (
-                        <span
-                          className={
-                            ((serverMetrics.memoryUsedMb || 0) / serverMetrics.memoryTotalMb) * 100 > 80
-                              ? 'text-red-400'
-                              : ''
-                          }
-                        >
-                          {(
-                            ((serverMetrics.memoryUsedMb || 0) / serverMetrics.memoryTotalMb) *
-                            100
-                          ).toFixed(0)}
-                          %
-                        </span>
-                      ) : (
-                        <span className="text-slate-500">-</span>
-                      )}
-                    </td>
-                    <td className="py-3">
-                      <StatusBadge status={server.status} />
-                    </td>
-                    <td className="py-3 text-sm text-slate-400">
-                      {server.lastCheckedAt
-                        ? formatDistanceToNow(new Date(server.lastCheckedAt), {
-                            addSuffix: true,
-                          })
-                        : 'Never'}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
     </div>
   );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const styles: Record<string, string> = {
-    healthy: 'badge-success',
-    unhealthy: 'badge-error',
-    running: 'badge-success',
-    stopped: 'badge-error',
-    unknown: 'badge-warning',
-  };
-
-  return <span className={`badge ${styles[status] || 'badge-info'}`}>{status}</span>;
 }
 
 function ActivityIcon({ action, success }: { action: string; success: boolean }) {
