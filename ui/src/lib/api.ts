@@ -1548,7 +1548,7 @@ export interface GlobalSpacesConfig {
 
 export interface GlobalSpacesConfigInput {
   accessKey: string;
-  secretKey: string;
+  secretKey?: string; // Optional for updates - will keep existing if not provided
   region: string;
   endpoint?: string;
   buckets?: string[];

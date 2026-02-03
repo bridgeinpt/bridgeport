@@ -60,15 +60,20 @@ export default function GlobalSpaces() {
   };
 
   const handleSave = async () => {
-    if (!form.accessKey || !form.secretKey || !form.region) {
+    // Secret key is only required for new configs
+    if (!form.accessKey || !form.region) {
       toast.error('Please fill in all required fields');
+      return;
+    }
+    if (!configured && !form.secretKey) {
+      toast.error('Secret key is required for new configuration');
       return;
     }
     setSaving(true);
     try {
       await updateGlobalSpacesConfig({
         accessKey: form.accessKey,
-        secretKey: form.secretKey,
+        secretKey: form.secretKey || undefined, // Only send if provided
         region: form.region,
         buckets: form.buckets.length > 0 ? form.buckets : undefined,
       });
@@ -187,12 +192,14 @@ export default function GlobalSpaces() {
                 />
               </div>
               <div>
-                <label className="block text-sm text-slate-400 mb-1">Secret Key</label>
+                <label className="block text-sm text-slate-400 mb-1">
+                  Secret Key {configured && <span className="text-slate-500">(leave empty to keep current)</span>}
+                </label>
                 <input
                   type="password"
                   value={form.secretKey}
                   onChange={(e) => setForm({ ...form, secretKey: e.target.value })}
-                  placeholder="Enter secret key"
+                  placeholder={configured ? 'Leave empty to keep current' : 'Enter secret key'}
                   className="input"
                 />
               </div>
@@ -367,7 +374,7 @@ export default function GlobalSpaces() {
                   }}
                   className="btn btn-ghost text-sm"
                 >
-                  Update
+                  Edit
                 </button>
               )}
             </div>

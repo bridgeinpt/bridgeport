@@ -387,6 +387,8 @@ async function executeBackup(backupId: string): Promise<void> {
 
   // For Spaces, dump to temp file first; for local, dump to final path
   const tempPath = useSpaces ? join(tmpdir(), `backup-${backupId}${tempExtension}`) : null;
+  // For SQLite + Spaces, we dump on server then download; track server temp path
+  let sqliteServerTempPath: string | null = null;
   const targetPath = tempPath || backup.storagePath;
 
   let currentStep: BackupStep = 'connect';
@@ -450,12 +452,6 @@ async function executeBackup(backupId: string): Promise<void> {
         throw new Error('SQLite databases require a server to be configured');
       }
 
-      // For SQLite with Spaces, we need to dump on the server then transfer
-      // For simplicity, SQLite + Spaces is not supported yet (would need SFTP download)
-      if (useSpaces) {
-        throw new Error('SQLite backups to Spaces are not yet supported. Use local storage or switch to Postgres.');
-      }
-
       if (isLocalhost(db.server.hostname)) {
         client = new LocalClient();
       } else {
@@ -470,11 +466,20 @@ async function executeBackup(backupId: string): Promise<void> {
         });
       }
 
+      // For SQLite with Spaces, dump to temp on server, then we'll download and upload
+      let sqliteDumpPath: string;
+      if (useSpaces) {
+        sqliteServerTempPath = `/tmp/backup-${backupId}${tempExtension}`;
+        sqliteDumpPath = sqliteServerTempPath;
+      } else {
+        sqliteDumpPath = targetPath;
+      }
+
       // SQLite compression support
       if (db.backupCompression === 'gzip') {
-        dumpCommand = `sqlite3 "${db.filePath}" ".dump" | gzip -${db.backupCompressionLevel} > "${targetPath}"`;
+        dumpCommand = `sqlite3 "${db.filePath}" ".dump" | gzip -${db.backupCompressionLevel} > "${sqliteDumpPath}"`;
       } else {
-        dumpCommand = `sqlite3 "${db.filePath}" ".dump" > "${targetPath}"`;
+        dumpCommand = `sqlite3 "${db.filePath}" ".dump" > "${sqliteDumpPath}"`;
       }
     } else {
       throw new Error(`Unsupported database type or missing configuration: ${db.type}`);
@@ -514,9 +519,23 @@ async function executeBackup(backupId: string): Promise<void> {
       data: { progress: 70 },
     });
 
-    // Get file size
-    const sizeResult = await client.exec(`stat -c %s "${targetPath}" 2>/dev/null || stat -f %z "${targetPath}"`);
+    // Get file size (use server temp path for SQLite + Spaces)
+    const sizeCheckPath = sqliteServerTempPath || targetPath;
+    const sizeResult = await client.exec(`stat -c %s "${sizeCheckPath}" 2>/dev/null || stat -f %z "${sizeCheckPath}"`);
     const size = parseInt(sizeResult.stdout.trim()) || 0;
+
+    // For SQLite + Spaces, download the dump from server before disconnecting
+    if (sqliteServerTempPath && tempPath) {
+      const downloadResult = await client.exec(`cat "${sqliteServerTempPath}" | base64`);
+      if (downloadResult.code !== 0) {
+        throw new Error(`Failed to download backup from server: ${downloadResult.stderr}`);
+      }
+      const fileContent = Buffer.from(downloadResult.stdout.trim(), 'base64');
+      const { writeFile } = await import('fs/promises');
+      await writeFile(tempPath, fileContent);
+      // Clean up server temp file
+      await client.exec(`rm -f "${sqliteServerTempPath}"`);
+    }
 
     client.disconnect();
 

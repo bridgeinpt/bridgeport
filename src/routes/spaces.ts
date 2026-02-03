@@ -6,18 +6,10 @@ import { requireAdmin } from '../plugins/authorize.js';
 import { logAudit } from '../services/audit.js';
 import { S3Client, ListBucketsCommand, HeadBucketCommand } from '@aws-sdk/client-s3';
 
-const createSpacesConfigSchema = z.object({
+const spacesConfigSchema = z.object({
   accessKey: z.string().min(1),
-  secretKey: z.string().min(1),
+  secretKey: z.string().optional(), // Optional for updates - will keep existing if not provided
   region: z.string().min(1).default('fra1'),
-  endpoint: z.string().optional(),
-  buckets: z.array(z.string()).optional(), // Manual bucket list for scoped keys
-});
-
-const updateSpacesConfigSchema = z.object({
-  accessKey: z.string().min(1).optional(),
-  secretKey: z.string().min(1).optional(),
-  region: z.string().min(1).optional(),
   endpoint: z.string().optional(),
   buckets: z.array(z.string()).optional(), // Manual bucket list for scoped keys
 });
@@ -73,31 +65,41 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
     '/api/settings/spaces',
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
-      const body = createSpacesConfigSchema.safeParse(request.body);
+      const body = spacesConfigSchema.safeParse(request.body);
       if (!body.success) {
         return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
       }
 
-      // Encrypt the secret key
-      const { ciphertext, nonce } = encrypt(body.data.secretKey);
-      const endpoint = body.data.endpoint || `${body.data.region}.digitaloceanspaces.com`;
-      const bucketsJson = body.data.buckets ? JSON.stringify(body.data.buckets) : null;
-
       // Check if config already exists
       const existing = await prisma.spacesConfig.findFirst();
 
+      // For new configs, secretKey is required
+      if (!existing && !body.data.secretKey) {
+        return reply.code(400).send({ error: 'Secret key is required for new configuration' });
+      }
+
+      const endpoint = body.data.endpoint || `${body.data.region}.digitaloceanspaces.com`;
+      const bucketsJson = body.data.buckets ? JSON.stringify(body.data.buckets) : null;
+
       let config;
       if (existing) {
+        // For updates, only encrypt new secret if provided
+        const updateData: Record<string, unknown> = {
+          accessKey: body.data.accessKey,
+          region: body.data.region,
+          endpoint,
+          buckets: bucketsJson,
+        };
+
+        if (body.data.secretKey) {
+          const { ciphertext, nonce } = encrypt(body.data.secretKey);
+          updateData.encryptedSecretKey = ciphertext;
+          updateData.secretKeyNonce = nonce;
+        }
+
         config = await prisma.spacesConfig.update({
           where: { id: existing.id },
-          data: {
-            accessKey: body.data.accessKey,
-            encryptedSecretKey: ciphertext,
-            secretKeyNonce: nonce,
-            region: body.data.region,
-            endpoint,
-            buckets: bucketsJson,
-          },
+          data: updateData,
         });
 
         await logAudit({
@@ -108,6 +110,8 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
           userId: request.authUser!.id,
         });
       } else {
+        // For new config, secretKey is guaranteed to be present (validated above)
+        const { ciphertext, nonce } = encrypt(body.data.secretKey!);
         config = await prisma.spacesConfig.create({
           data: {
             accessKey: body.data.accessKey,
