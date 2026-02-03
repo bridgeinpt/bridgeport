@@ -24,11 +24,11 @@ Examples:
 	RunE: runRun,
 }
 
-var runList bool
+var showCommands bool
 
 func init() {
 	rootCmd.AddCommand(runCmd)
-	runCmd.Flags().BoolVar(&runList, "list", false, "List available commands for the service")
+	runCmd.Flags().BoolVar(&showCommands, "list", false, "List available commands for the service")
 }
 
 func runRun(cmd *cobra.Command, args []string) error {
@@ -51,7 +51,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	}
 
 	// If --list, show available commands
-	if runList {
+	if showCommands {
 		return listCommands(service)
 	}
 
