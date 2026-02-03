@@ -57,6 +57,9 @@ model Environment {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
+  // Scheduler configuration (JSON blob)
+  schedulerConfig      String?
+
   servers              Server[]
   secrets              Secret[]
   configFiles          ConfigFile[]
@@ -66,6 +69,7 @@ model Environment {
   notifications        Notification[]
   managedImages        ManagedImage[]
   deploymentPlans      DeploymentPlan[]
+  healthCheckLogs      HealthCheckLog[]
 }
 
 model Server {
@@ -713,4 +717,33 @@ model SpacesEnvironment {
   // This will be handled in the query layer
 
   @@unique([spacesConfigId, environmentId])
+}
+
+// ==================== Health Check Logging ====================
+
+// Logs for all health checks (server SSH, service URL, container health)
+model HealthCheckLog {
+  id            String   @id @default(cuid())
+  environmentId String
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+
+  // What was checked
+  resourceType  String   // "server" | "service" | "container"
+  resourceId    String   // Server or Service ID
+  resourceName  String   // Denormalized for faster queries
+
+  // Check details
+  checkType     String   // "ssh" | "url" | "container_health" | "discovery"
+  status        String   // "success" | "failure" | "timeout"
+
+  // Results
+  durationMs    Int?     // How long the check took
+  httpStatus    Int?     // HTTP status code for URL checks
+  errorMessage  String?  // Error details if failed
+
+  createdAt     DateTime @default(now())
+
+  @@index([environmentId, createdAt(sort: Desc)])
+  @@index([resourceId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
 }

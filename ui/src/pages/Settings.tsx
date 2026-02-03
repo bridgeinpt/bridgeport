@@ -10,9 +10,12 @@ import {
   testSpacesConfig,
   listServers,
   listDatabases,
+  getSchedulerConfig,
+  updateSchedulerConfig,
   type Server,
   type Database,
   type SpacesConfig,
+  type SchedulerConfig,
 } from '../lib/api';
 import { useToast } from '../components/Toast';
 
@@ -56,6 +59,9 @@ export default function Settings() {
     spacesSecretKey: '',
     spacesRegion: 'fra1',
   });
+  const [schedulerConfig, setSchedulerConfig] = useState<SchedulerConfig | null>(null);
+  const [monitoringExpanded, setMonitoringExpanded] = useState(false);
+  const [savingScheduler, setSavingScheduler] = useState(false);
 
   useEffect(() => {
     if (selectedEnvironment?.id) {
@@ -67,15 +73,17 @@ export default function Settings() {
     if (!selectedEnvironment?.id) return;
     setLoading(true);
     try {
-      const [settingsRes, serversRes, databasesRes, spacesRes] = await Promise.all([
+      const [settingsRes, serversRes, databasesRes, spacesRes, schedulerRes] = await Promise.all([
         getEnvironmentSettings(selectedEnvironment.id),
         listServers(selectedEnvironment.id),
         listDatabases(selectedEnvironment.id),
         getSpacesConfig(selectedEnvironment.id),
+        getSchedulerConfig(selectedEnvironment.id),
       ]);
 
       setSettings(settingsRes.settings);
       setSpacesConfig(spacesRes);
+      setSchedulerConfig(schedulerRes.config);
 
       // Calculate module status
       const servers = serversRes.servers as Array<Server & { metricsMode?: string }>;
@@ -167,6 +175,46 @@ export default function Settings() {
       toast.error(message);
     } finally {
       setTestingSpaces(false);
+    }
+  };
+
+  const handleSchedulerConfigChange = async (key: keyof SchedulerConfig, value: number) => {
+    if (!selectedEnvironment?.id || !isAdmin(user) || !schedulerConfig) return;
+    setSavingScheduler(true);
+    try {
+      const result = await updateSchedulerConfig(selectedEnvironment.id, { [key]: value });
+      setSchedulerConfig(result.config);
+      toast.success('Scheduler config updated');
+    } catch (error) {
+      toast.error('Failed to update scheduler config');
+    } finally {
+      setSavingScheduler(false);
+    }
+  };
+
+  const handleResetSchedulerConfig = async () => {
+    if (!selectedEnvironment?.id || !isAdmin(user)) return;
+    if (!confirm('Reset all scheduler settings to defaults?')) return;
+    setSavingScheduler(true);
+    try {
+      const result = await updateSchedulerConfig(selectedEnvironment.id, {
+        serverHealthIntervalMs: 60000,
+        serviceHealthIntervalMs: 60000,
+        discoveryIntervalMs: 300000,
+        metricsIntervalMs: 300000,
+        updateCheckIntervalMs: 1800000,
+        backupCheckIntervalMs: 60000,
+        metricsRetentionDays: 7,
+        healthLogRetentionDays: 30,
+        bounceThreshold: 3,
+        bounceCooldownMs: 900000,
+      });
+      setSchedulerConfig(result.config);
+      toast.success('Scheduler config reset to defaults');
+    } catch (error) {
+      toast.error('Failed to reset scheduler config');
+    } finally {
+      setSavingScheduler(false);
     }
   };
 
@@ -494,6 +542,224 @@ export default function Settings() {
               <button onClick={() => setEditingSpaces(true)} className="btn btn-primary">
                 Configure Spaces
               </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Monitoring Settings */}
+      <div className="card mb-6">
+        <button
+          onClick={() => setMonitoringExpanded(!monitoringExpanded)}
+          className="w-full flex items-center justify-between"
+        >
+          <h3 className="text-lg font-semibold text-white">Monitoring Settings</h3>
+          <svg
+            className={`w-5 h-5 text-slate-400 transition-transform ${monitoringExpanded ? 'rotate-180' : ''}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+
+        {monitoringExpanded && schedulerConfig && (
+          <div className="mt-6 space-y-6">
+            {/* Health Check Intervals */}
+            <div>
+              <h4 className="text-sm font-medium text-slate-300 mb-3">Health Check Intervals</h4>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Server Health (SSH)</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      value={schedulerConfig.serverHealthIntervalMs / 1000}
+                      onChange={(e) => handleSchedulerConfigChange('serverHealthIntervalMs', parseInt(e.target.value) * 1000)}
+                      min={10}
+                      max={3600}
+                      disabled={savingScheduler || !isAdmin(user)}
+                      className="input w-24"
+                    />
+                    <span className="text-slate-500 text-sm">sec</span>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Service Health</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      value={schedulerConfig.serviceHealthIntervalMs / 1000}
+                      onChange={(e) => handleSchedulerConfigChange('serviceHealthIntervalMs', parseInt(e.target.value) * 1000)}
+                      min={10}
+                      max={3600}
+                      disabled={savingScheduler || !isAdmin(user)}
+                      className="input w-24"
+                    />
+                    <span className="text-slate-500 text-sm">sec</span>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Container Discovery</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      value={schedulerConfig.discoveryIntervalMs / 1000}
+                      onChange={(e) => handleSchedulerConfigChange('discoveryIntervalMs', parseInt(e.target.value) * 1000)}
+                      min={60}
+                      max={86400}
+                      disabled={savingScheduler || !isAdmin(user)}
+                      className="input w-24"
+                    />
+                    <span className="text-slate-500 text-sm">sec</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Metrics Collection */}
+            <div>
+              <h4 className="text-sm font-medium text-slate-300 mb-3">Metrics Collection</h4>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Collection Interval</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      value={schedulerConfig.metricsIntervalMs / 1000}
+                      onChange={(e) => handleSchedulerConfigChange('metricsIntervalMs', parseInt(e.target.value) * 1000)}
+                      min={60}
+                      max={3600}
+                      disabled={savingScheduler || !isAdmin(user)}
+                      className="input w-24"
+                    />
+                    <span className="text-slate-500 text-sm">sec</span>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Metrics Retention</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      value={schedulerConfig.metricsRetentionDays}
+                      onChange={(e) => handleSchedulerConfigChange('metricsRetentionDays', parseInt(e.target.value))}
+                      min={1}
+                      max={365}
+                      disabled={savingScheduler || !isAdmin(user)}
+                      className="input w-24"
+                    />
+                    <span className="text-slate-500 text-sm">days</span>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Health Log Retention</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      value={schedulerConfig.healthLogRetentionDays}
+                      onChange={(e) => handleSchedulerConfigChange('healthLogRetentionDays', parseInt(e.target.value))}
+                      min={1}
+                      max={365}
+                      disabled={savingScheduler || !isAdmin(user)}
+                      className="input w-24"
+                    />
+                    <span className="text-slate-500 text-sm">days</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Other Schedules */}
+            <div>
+              <h4 className="text-sm font-medium text-slate-300 mb-3">Other Schedules</h4>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Registry Update Check</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      value={schedulerConfig.updateCheckIntervalMs / 1000}
+                      onChange={(e) => handleSchedulerConfigChange('updateCheckIntervalMs', parseInt(e.target.value) * 1000)}
+                      min={60}
+                      max={86400}
+                      disabled={savingScheduler || !isAdmin(user)}
+                      className="input w-24"
+                    />
+                    <span className="text-slate-500 text-sm">sec</span>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Backup Check</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      value={schedulerConfig.backupCheckIntervalMs / 1000}
+                      onChange={(e) => handleSchedulerConfigChange('backupCheckIntervalMs', parseInt(e.target.value) * 1000)}
+                      min={10}
+                      max={3600}
+                      disabled={savingScheduler || !isAdmin(user)}
+                      className="input w-24"
+                    />
+                    <span className="text-slate-500 text-sm">sec</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Alert Configuration */}
+            <div>
+              <h4 className="text-sm font-medium text-slate-300 mb-3">Alert Configuration</h4>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Failure Threshold</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      value={schedulerConfig.bounceThreshold}
+                      onChange={(e) => handleSchedulerConfigChange('bounceThreshold', parseInt(e.target.value))}
+                      min={1}
+                      max={10}
+                      disabled={savingScheduler || !isAdmin(user)}
+                      className="input w-24"
+                    />
+                    <span className="text-slate-500 text-sm">failures</span>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Cooldown</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      value={schedulerConfig.bounceCooldownMs / 1000}
+                      onChange={(e) => handleSchedulerConfigChange('bounceCooldownMs', parseInt(e.target.value) * 1000)}
+                      min={60}
+                      max={86400}
+                      disabled={savingScheduler || !isAdmin(user)}
+                      className="input w-24"
+                    />
+                    <span className="text-slate-500 text-sm">sec</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {isAdmin(user) && (
+              <div className="pt-4 border-t border-slate-700">
+                <button
+                  onClick={handleResetSchedulerConfig}
+                  disabled={savingScheduler}
+                  className="btn btn-ghost text-sm"
+                >
+                  Reset to Defaults
+                </button>
+              </div>
+            )}
+
+            {!isAdmin(user) && (
+              <p className="text-sm text-slate-500 pt-2">
+                Only administrators can modify scheduler settings.
+              </p>
             )}
           </div>
         )}

@@ -1574,3 +1574,164 @@ export const setSpacesEnvironmentEnabled = (environmentId: string, enabled: bool
 // Run predefined command (for CLI integration)
 export const getRunCommand = (serviceId: string, commandName: string) =>
   api.post<{ command: string }>(`/services/${serviceId}/run-command`, { commandName });
+
+// ==================== Monitoring ====================
+
+// Health Check Logs
+export interface HealthCheckLog {
+  id: string;
+  environmentId: string;
+  resourceType: 'server' | 'service' | 'container';
+  resourceId: string;
+  resourceName: string;
+  checkType: 'ssh' | 'url' | 'container_health' | 'discovery';
+  status: 'success' | 'failure' | 'timeout';
+  durationMs: number | null;
+  httpStatus: number | null;
+  errorMessage: string | null;
+  createdAt: string;
+}
+
+export interface HealthLogSummary {
+  success: number;
+  failure: number;
+  timeout: number;
+}
+
+export interface HealthLogsResponse {
+  logs: HealthCheckLog[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  summary: {
+    server: HealthLogSummary;
+    service: HealthLogSummary;
+    container: HealthLogSummary;
+  };
+}
+
+export interface HealthLogFilters {
+  type?: 'server' | 'service' | 'container';
+  checkType?: 'ssh' | 'url' | 'container_health' | 'discovery';
+  status?: 'success' | 'failure' | 'timeout';
+  resourceId?: string;
+  hours?: number;
+  page?: number;
+  limit?: number;
+}
+
+export const getHealthLogs = (envId: string, filters: HealthLogFilters = {}) => {
+  const params = new URLSearchParams();
+  if (filters.type) params.append('type', filters.type);
+  if (filters.checkType) params.append('checkType', filters.checkType);
+  if (filters.status) params.append('status', filters.status);
+  if (filters.resourceId) params.append('resourceId', filters.resourceId);
+  if (filters.hours) params.append('hours', filters.hours.toString());
+  if (filters.page) params.append('page', filters.page.toString());
+  if (filters.limit) params.append('limit', filters.limit.toString());
+  const query = params.toString();
+  return api.get<HealthLogsResponse>(`/environments/${envId}/health-logs${query ? `?${query}` : ''}`);
+};
+
+export interface HealthCheckRunResult {
+  servers: Array<{ id: string; name: string; status: string; durationMs: number; error?: string }>;
+  services: Array<{ id: string; name: string; status: string; durationMs: number; error?: string }>;
+}
+
+export const runHealthChecks = (envId: string, type?: 'all' | 'servers' | 'services') =>
+  api.post<{ results: HealthCheckRunResult }>(`/environments/${envId}/health-checks/run`, { type });
+
+// Metrics History
+export interface MetricsHistoryDataPoint {
+  time: string;
+  cpu?: number | null;
+  memory?: number | null;
+  memoryUsedMb?: number | null;
+  disk?: number | null;
+  diskUsedGb?: number | null;
+  load1?: number | null;
+  load5?: number | null;
+  load15?: number | null;
+}
+
+export interface MetricsHistoryServer {
+  id: string;
+  name: string;
+  data: MetricsHistoryDataPoint[];
+}
+
+export const getMetricsHistory = (envId: string, hours: number = 24, metric?: 'cpu' | 'memory' | 'disk' | 'load') => {
+  const params = new URLSearchParams();
+  params.append('hours', hours.toString());
+  if (metric) params.append('metric', metric);
+  return api.get<{ servers: MetricsHistoryServer[] }>(`/environments/${envId}/metrics/history?${params.toString()}`);
+};
+
+// SSH Testing
+export interface SSHTestResult {
+  success: boolean;
+  durationMs: number;
+  error?: string;
+}
+
+export const testServerSSH = (serverId: string) =>
+  api.post<SSHTestResult>(`/servers/${serverId}/test-ssh`);
+
+export interface SSHTestAllResult {
+  serverId: string;
+  serverName: string;
+  hostname: string;
+  success: boolean;
+  durationMs: number;
+  error?: string;
+}
+
+export const testAllSSH = (envId: string) =>
+  api.post<{ results: SSHTestAllResult[] }>(`/environments/${envId}/test-all-ssh`);
+
+// Scheduler Config
+export interface SchedulerConfig {
+  serverHealthIntervalMs: number;
+  serviceHealthIntervalMs: number;
+  discoveryIntervalMs: number;
+  metricsIntervalMs: number;
+  updateCheckIntervalMs: number;
+  backupCheckIntervalMs: number;
+  metricsRetentionDays: number;
+  healthLogRetentionDays: number;
+  bounceThreshold: number;
+  bounceCooldownMs: number;
+}
+
+export const getSchedulerConfig = (envId: string) =>
+  api.get<{ config: SchedulerConfig }>(`/environments/${envId}/scheduler-config`);
+
+export const updateSchedulerConfig = (envId: string, config: Partial<SchedulerConfig>) =>
+  api.patch<{ config: SchedulerConfig }>(`/environments/${envId}/scheduler-config`, config);
+
+// Monitoring Overview
+export interface MonitoringOverviewStats {
+  servers: { total: number; healthy: number; unhealthy: number };
+  services: { total: number; healthy: number; unhealthy: number };
+  alerts: number;
+}
+
+export const getMonitoringOverview = (envId: string) =>
+  api.get<{ stats: MonitoringOverviewStats }>(`/environments/${envId}/monitoring/overview`);
+
+// Agents Info
+export interface AgentInfo {
+  id: string;
+  name: string;
+  hostname: string;
+  sshStatus: string;
+  metricsMode: MetricsMode;
+  hasAgentToken: boolean;
+  lastCheckedAt: string | null;
+  lastMetricsPush: string | null;
+  metricsSource: string | null;
+}
+
+export const getAgents = (envId: string) =>
+  api.get<{ sshUser: string; agents: AgentInfo[] }>(`/environments/${envId}/agents`);

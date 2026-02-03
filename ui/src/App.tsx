@@ -17,6 +17,8 @@ import Users from './pages/Users';
 import Databases from './pages/Databases';
 import DatabaseDetail from './pages/DatabaseDetail';
 import Monitoring from './pages/Monitoring';
+import MonitoringHealth from './pages/MonitoringHealth';
+import MonitoringAgents from './pages/MonitoringAgents';
 import Settings from './pages/Settings';
 import Notifications from './pages/Notifications';
 import NotificationSettings from './pages/admin/NotificationSettings';
@@ -51,6 +53,8 @@ export default function App() {
               <Routes>
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/monitoring" element={<Monitoring />} />
+                <Route path="/monitoring/health" element={<MonitoringHealth />} />
+                <Route path="/monitoring/agents" element={<MonitoringAgents />} />
                 <Route path="/servers" element={<Servers />} />
                 <Route path="/servers/:id" element={<ServerDetail />} />
                 <Route path="/services" element={<Services />} />

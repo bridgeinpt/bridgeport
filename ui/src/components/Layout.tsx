@@ -16,6 +16,9 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   ChevronLeftIcon,
+  ChartIcon,
+  HeartPulseIcon,
+  NetworkIcon,
 } from './Icons';
 import TopBar from './TopBar';
 
@@ -105,6 +108,14 @@ const navigationGroups: NavGroup[] = [
       { name: 'Dashboard', href: '/', icon: HomeIcon },
       { name: 'Services', href: '/services', icon: CubeIcon },
       { name: 'Servers', href: '/servers', icon: ServerIcon },
+    ],
+  },
+  {
+    name: 'Monitoring',
+    items: [
+      { name: 'Overview', href: '/monitoring', icon: ChartIcon },
+      { name: 'Health Checks', href: '/monitoring/health', icon: HeartPulseIcon },
+      { name: 'Agents & SSH', href: '/monitoring/agents', icon: NetworkIcon },
     ],
   },
   {

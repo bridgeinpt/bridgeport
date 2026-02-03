@@ -17,6 +17,7 @@ import { checkDueBackups } from '../services/database-backup.js';
 import { sendSystemNotification, NOTIFICATION_TYPES, cleanupOldNotifications } from '../services/notifications.js';
 import { recordFailure, recordSuccess } from '../services/bounce-tracker.js';
 import { buildDeploymentPlan, executePlan } from '../services/orchestration.js';
+import { logHealthCheck, cleanupHealthCheckLogs } from '../routes/monitoring.js';
 
 interface SchedulerConfig {
   serverHealthIntervalMs: number;
@@ -27,6 +28,7 @@ interface SchedulerConfig {
   backupCheckIntervalMs: number;
   metricsRetentionDays: number;
   notificationRetentionDays: number;
+  healthLogRetentionDays: number;
 }
 
 const DEFAULT_CONFIG: SchedulerConfig = {
@@ -38,6 +40,7 @@ const DEFAULT_CONFIG: SchedulerConfig = {
   backupCheckIntervalMs: 60 * 1000, // 1 minute
   metricsRetentionDays: 7,
   notificationRetentionDays: 30,
+  healthLogRetentionDays: 30,
 };
 
 const timers = new Map<string, NodeJS.Timeout>();
@@ -56,14 +59,27 @@ async function runServerHealthChecks(): Promise<void> {
     console.log(`[Scheduler] Running health checks on ${servers.length} servers (excluding agent-mode)`);
 
     for (const server of servers) {
+      const start = Date.now();
       try {
         const prevStatus = server.status;
         await checkServerHealth(server.id);
+        const durationMs = Date.now() - start;
 
         // Get updated status
         const updated = await prisma.server.findUnique({
           where: { id: server.id },
           select: { status: true },
+        });
+
+        // Log health check result
+        await logHealthCheck({
+          environmentId: server.environmentId,
+          resourceType: 'server',
+          resourceId: server.id,
+          resourceName: server.name,
+          checkType: 'ssh',
+          status: updated?.status === 'healthy' ? 'success' : 'failure',
+          durationMs,
         });
 
         if (updated) {
@@ -90,6 +106,21 @@ async function runServerHealthChecks(): Promise<void> {
           }
         }
       } catch (error) {
+        const durationMs = Date.now() - start;
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+        // Log failed health check
+        await logHealthCheck({
+          environmentId: server.environmentId,
+          resourceType: 'server',
+          resourceId: server.id,
+          resourceName: server.name,
+          checkType: 'ssh',
+          status: 'failure',
+          durationMs,
+          errorMessage,
+        });
+
         console.error(`[Scheduler] Health check failed for server ${server.name}:`, error);
       }
     }
@@ -113,15 +144,52 @@ async function runServiceHealthChecks(): Promise<void> {
         // For agent-mode servers, we still need to do URL checks since the agent
         // cannot perform HTTP health checks. Include all services with healthCheckUrl.
       },
-      select: { id: true, name: true },
+      select: {
+        id: true,
+        name: true,
+        server: { select: { environmentId: true } },
+      },
     });
 
     console.log(`[Scheduler] Running health checks on ${services.length} services`);
 
     for (const service of services) {
+      const start = Date.now();
       try {
-        await checkServiceHealth(service.id);
+        const result = await checkServiceHealth(service.id);
+        const durationMs = Date.now() - start;
+
+        // Determine if health check was successful
+        const isHealthy = result.container.running && (result.url === null || result.url.success);
+
+        // Log health check result
+        await logHealthCheck({
+          environmentId: service.server.environmentId,
+          resourceType: 'service',
+          resourceId: service.id,
+          resourceName: service.name,
+          checkType: 'url',
+          status: isHealthy ? 'success' : 'failure',
+          durationMs,
+          httpStatus: result.url?.statusCode,
+          errorMessage: result.url?.error,
+        });
       } catch (error) {
+        const durationMs = Date.now() - start;
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+        // Log failed health check
+        await logHealthCheck({
+          environmentId: service.server.environmentId,
+          resourceType: 'service',
+          resourceId: service.id,
+          resourceName: service.name,
+          checkType: 'url',
+          status: 'failure',
+          durationMs,
+          errorMessage,
+        });
+
         console.error(`[Scheduler] Health check failed for service ${service.name}:`, error);
       }
     }
@@ -634,6 +702,20 @@ async function runNotificationCleanup(retentionDays: number): Promise<void> {
 }
 
 /**
+ * Clean up old health check logs
+ */
+async function runHealthLogCleanup(retentionDays: number): Promise<void> {
+  try {
+    const deleted = await cleanupHealthCheckLogs(retentionDays);
+    if (deleted > 0) {
+      console.log(`[Scheduler] Cleaned up ${deleted} old health check log records`);
+    }
+  } catch (error) {
+    console.error('[Scheduler] Health log cleanup failed:', error);
+  }
+}
+
+/**
  * Start the scheduler with periodic health checks and discovery
  */
 export function startScheduler(config: Partial<SchedulerConfig> = {}): void {
@@ -653,6 +735,7 @@ export function startScheduler(config: Partial<SchedulerConfig> = {}): void {
   console.log(`  - Metrics collection: ${cfg.metricsIntervalMs / 1000}s`);
   console.log(`  - Backup checks: ${cfg.backupCheckIntervalMs / 1000}s`);
   console.log(`  - Metrics retention: ${cfg.metricsRetentionDays} days`);
+  console.log(`  - Health log retention: ${cfg.healthLogRetentionDays} days`);
 
   // Run initial checks after a short delay
   setTimeout(() => {
@@ -668,6 +751,7 @@ export function startScheduler(config: Partial<SchedulerConfig> = {}): void {
   timers.set('backupCheck', setInterval(runBackupChecks, cfg.backupCheckIntervalMs));
   timers.set('cleanup', setInterval(() => runMetricsCleanup(cfg.metricsRetentionDays), 60 * 60 * 1000));
   timers.set('notificationCleanup', setInterval(() => runNotificationCleanup(cfg.notificationRetentionDays), 24 * 60 * 60 * 1000)); // Daily
+  timers.set('healthLogCleanup', setInterval(() => runHealthLogCleanup(cfg.healthLogRetentionDays), 24 * 60 * 60 * 1000)); // Daily
 }
 
 /**

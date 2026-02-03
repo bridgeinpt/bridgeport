@@ -3,16 +3,42 @@ import { Link } from 'react-router-dom';
 import { useAppStore } from '../lib/store';
 import {
   getEnvironmentMetricsSummary,
+  getMetricsHistory,
+  getMonitoringOverview,
   type MetricsSummaryServer,
   type ServiceMetrics,
+  type MetricsHistoryServer,
+  type MonitoringOverviewStats,
 } from '../lib/api';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow, format } from 'date-fns';
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from 'recharts';
+
+const timeRanges = [
+  { label: '1h', hours: 1 },
+  { label: '6h', hours: 6 },
+  { label: '24h', hours: 24 },
+  { label: '7d', hours: 168 },
+];
+
+const COLORS = ['#60a5fa', '#34d399', '#fbbf24', '#f472b6', '#a78bfa', '#f87171'];
 
 export default function Monitoring() {
   const { selectedEnvironment } = useAppStore();
   const [servers, setServers] = useState<MetricsSummaryServer[]>([]);
+  const [metricsHistory, setMetricsHistory] = useState<MetricsHistoryServer[]>([]);
+  const [stats, setStats] = useState<MonitoringOverviewStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [selectedRange, setSelectedRange] = useState(24);
+  const [autoRefresh, setAutoRefresh] = useState(true);
 
   const fetchData = async (isRefresh = false) => {
     if (!selectedEnvironment?.id) return;
@@ -20,8 +46,14 @@ export default function Monitoring() {
     else setLoading(true);
 
     try {
-      const { servers } = await getEnvironmentMetricsSummary(selectedEnvironment.id);
-      setServers(servers);
+      const [summaryRes, historyRes, overviewRes] = await Promise.all([
+        getEnvironmentMetricsSummary(selectedEnvironment.id),
+        getMetricsHistory(selectedEnvironment.id, selectedRange),
+        getMonitoringOverview(selectedEnvironment.id),
+      ]);
+      setServers(summaryRes.servers);
+      setMetricsHistory(historyRes.servers);
+      setStats(overviewRes.stats);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -30,13 +62,48 @@ export default function Monitoring() {
 
   useEffect(() => {
     fetchData();
-  }, [selectedEnvironment?.id]);
+  }, [selectedEnvironment?.id, selectedRange]);
 
-  // Auto-refresh every 30 seconds
+  // Auto-refresh every 30 seconds if enabled
   useEffect(() => {
+    if (!autoRefresh) return;
     const interval = setInterval(() => fetchData(true), 30000);
     return () => clearInterval(interval);
-  }, [selectedEnvironment?.id]);
+  }, [selectedEnvironment?.id, selectedRange, autoRefresh]);
+
+  // Prepare chart data - combine all servers into single timeline
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const prepareChartData = (metric: 'cpu' | 'memory' | 'disk' | 'load'): any[] => {
+    const timeMap = new Map<string, { time: string; [key: string]: string | number | null }>();
+
+    metricsHistory.forEach((server) => {
+      server.data.forEach((point) => {
+        if (!timeMap.has(point.time)) {
+          timeMap.set(point.time, { time: point.time });
+        }
+        const entry = timeMap.get(point.time)!;
+        if (metric === 'cpu') entry[server.name] = point.cpu ?? null;
+        else if (metric === 'memory') entry[server.name] = point.memory ?? null;
+        else if (metric === 'disk') entry[server.name] = point.disk ?? null;
+        else if (metric === 'load') entry[server.name] = point.load1 ?? null;
+      });
+    });
+
+    return Array.from(timeMap.values()).sort((a, b) =>
+      a.time.localeCompare(b.time)
+    );
+  };
+
+  const formatTime = (time: string) => {
+    const date = new Date(time);
+    if (selectedRange <= 6) {
+      return format(date, 'HH:mm');
+    } else if (selectedRange <= 24) {
+      return format(date, 'HH:mm');
+    } else {
+      return format(date, 'MMM d HH:mm');
+    }
+  };
 
   // Collect all services with metrics for the table
   const servicesWithMetrics: Array<{
@@ -69,9 +136,14 @@ export default function Monitoring() {
       <div className="p-8">
         <div className="animate-pulse">
           <div className="h-8 w-48 bg-slate-700 rounded mb-8"></div>
+          <div className="grid grid-cols-4 gap-4 mb-8">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-20 bg-slate-800 rounded-xl"></div>
+            ))}
+          </div>
           <div className="grid grid-cols-2 gap-6">
-            {[1, 2].map((i) => (
-              <div key={i} className="h-48 bg-slate-800 rounded-xl"></div>
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-64 bg-slate-800 rounded-xl"></div>
             ))}
           </div>
         </div>
@@ -80,24 +152,182 @@ export default function Monitoring() {
   }
 
   const serversWithMetrics = servers.filter((s) => s.latestMetrics);
+  const serverNames = metricsHistory.map((s) => s.name);
 
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-5">
-        <p className="text-slate-400">
-          Resource usage across {selectedEnvironment?.name || 'environment'}
-        </p>
-        <button
-          onClick={() => fetchData(true)}
-          disabled={refreshing}
-          className="btn btn-secondary"
-        >
-          {refreshing ? 'Refreshing...' : 'Refresh'}
-        </button>
+        <div>
+          <h1 className="text-xl font-semibold text-white">Monitoring Overview</h1>
+          <p className="text-slate-400 text-sm mt-1">
+            Resource usage across {selectedEnvironment?.name || 'environment'}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-sm text-slate-400">
+            <input
+              type="checkbox"
+              checked={autoRefresh}
+              onChange={(e) => setAutoRefresh(e.target.checked)}
+              className="rounded bg-slate-700 border-slate-600"
+            />
+            Auto: 30s
+          </label>
+          <button
+            onClick={() => fetchData(true)}
+            disabled={refreshing}
+            className="btn btn-secondary"
+          >
+            {refreshing ? 'Refreshing...' : 'Refresh'}
+          </button>
+        </div>
       </div>
 
+      {/* Quick Stats */}
+      {stats && (
+        <div className="grid grid-cols-4 gap-4 mb-6">
+          <StatCard
+            label="Servers"
+            value={stats.servers.total}
+            color="blue"
+          />
+          <StatCard
+            label="Services"
+            value={stats.services.total}
+            color="green"
+          />
+          <StatCard
+            label="Healthy"
+            value={`${stats.servers.healthy + stats.services.healthy}/${stats.servers.total + stats.services.total}`}
+            color="emerald"
+          />
+          <StatCard
+            label="Alerts"
+            value={stats.alerts}
+            color={stats.alerts > 0 ? 'red' : 'slate'}
+          />
+        </div>
+      )}
+
+      {/* Time Range Selector */}
+      <div className="flex items-center gap-4 mb-6">
+        <span className="text-sm text-slate-400">Time Range:</span>
+        <div className="flex rounded-lg overflow-hidden border border-slate-600">
+          {timeRanges.map((range) => (
+            <button
+              key={range.hours}
+              onClick={() => setSelectedRange(range.hours)}
+              className={`px-3 py-1.5 text-sm ${
+                selectedRange === range.hours
+                  ? 'bg-brand-600 text-white'
+                  : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+              }`}
+            >
+              {range.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Charts */}
+      {metricsHistory.length > 0 && metricsHistory.some((s) => s.data.length > 0) ? (
+        <div className="grid grid-cols-2 gap-6 mb-8">
+          <ChartCard title="CPU Usage" data={prepareChartData('cpu')} serverNames={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
+          <ChartCard title="Memory Usage" data={prepareChartData('memory')} serverNames={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
+          <ChartCard title="Disk Usage" data={prepareChartData('disk')} serverNames={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
+          <ChartCard title="Load Average" data={prepareChartData('load')} serverNames={serverNames} formatTime={formatTime} domain={[0, 'auto']} />
+        </div>
+      ) : (
+        <div className="card text-center py-8 mb-8">
+          <p className="text-slate-400">No historical metrics data available</p>
+          <p className="text-slate-500 text-sm mt-1">
+            Metrics will appear here as they are collected
+          </p>
+        </div>
+      )}
+
+      {/* Current Server Metrics */}
+      {serversWithMetrics.length > 0 && (
+        <div className="mb-8">
+          <h2 className="text-lg font-semibold text-white mb-4">Current Server Metrics</h2>
+          <div className="space-y-4">
+            {serversWithMetrics.map((server) => (
+              <div key={server.id} className="card">
+                <div className="flex items-center justify-between mb-4">
+                  <Link
+                    to={`/servers/${server.id}`}
+                    className="text-lg font-semibold text-white hover:text-brand-400"
+                  >
+                    {server.name}
+                  </Link>
+                  <span className="text-xs text-slate-500">
+                    {server.latestMetrics &&
+                      formatDistanceToNow(new Date(server.latestMetrics.collectedAt), {
+                        addSuffix: true,
+                      })}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-4 gap-4">
+                  <MetricGauge
+                    label="CPU"
+                    value={server.latestMetrics?.cpuPercent ?? undefined}
+                    max={100}
+                    unit="%"
+                    color="primary"
+                  />
+                  <MetricGauge
+                    label="Memory"
+                    value={
+                      server.latestMetrics?.memoryTotalMb
+                        ? ((server.latestMetrics.memoryUsedMb ?? 0) /
+                            server.latestMetrics.memoryTotalMb) *
+                          100
+                        : undefined
+                    }
+                    displayValue={
+                      server.latestMetrics?.memoryUsedMb != null && server.latestMetrics?.memoryTotalMb
+                        ? `${(server.latestMetrics.memoryUsedMb / 1024).toFixed(1)}/${(server.latestMetrics.memoryTotalMb / 1024).toFixed(0)}GB`
+                        : undefined
+                    }
+                    max={100}
+                    unit="%"
+                    color="green"
+                  />
+                  <MetricGauge
+                    label="Disk"
+                    value={
+                      server.latestMetrics?.diskTotalGb
+                        ? ((server.latestMetrics.diskUsedGb ?? 0) /
+                            server.latestMetrics.diskTotalGb) *
+                          100
+                        : undefined
+                    }
+                    displayValue={
+                      server.latestMetrics?.diskUsedGb != null && server.latestMetrics?.diskTotalGb
+                        ? `${server.latestMetrics.diskUsedGb.toFixed(0)}/${server.latestMetrics.diskTotalGb.toFixed(0)}GB`
+                        : undefined
+                    }
+                    max={100}
+                    unit="%"
+                    color="yellow"
+                  />
+                  <MetricGauge
+                    label="Load"
+                    value={server.latestMetrics?.loadAvg1 ?? undefined}
+                    max={4}
+                    displayValue={server.latestMetrics?.loadAvg1?.toFixed(2) ?? undefined}
+                    color="purple"
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {serversWithMetrics.length === 0 && (
-        <div className="card text-center py-12">
+        <div className="card text-center py-12 mb-8">
           <p className="text-slate-400 mb-2">No metrics available</p>
           <p className="text-slate-500 text-sm">
             Enable monitoring on your servers to see resource usage.
@@ -105,90 +335,6 @@ export default function Monitoring() {
           <Link to="/servers" className="btn btn-primary mt-4">
             Configure Servers
           </Link>
-        </div>
-      )}
-
-      {/* Server Metrics */}
-      {serversWithMetrics.length > 0 && (
-        <div className="space-y-6 mb-8">
-          {serversWithMetrics.map((server) => (
-            <div key={server.id} className="card">
-              <div className="flex items-center justify-between mb-4">
-                <Link
-                  to={`/servers/${server.id}`}
-                  className="text-lg font-semibold text-white hover:text-primary-400"
-                >
-                  {server.name}
-                </Link>
-                <span className="text-xs text-slate-500">
-                  {server.latestMetrics &&
-                    formatDistanceToNow(new Date(server.latestMetrics.collectedAt), {
-                      addSuffix: true,
-                    })}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-4 gap-4">
-                {/* CPU Gauge */}
-                <MetricGauge
-                  label="CPU"
-                  value={server.latestMetrics?.cpuPercent ?? undefined}
-                  max={100}
-                  unit="%"
-                  color="primary"
-                />
-
-                {/* Memory Gauge */}
-                <MetricGauge
-                  label="Memory"
-                  value={
-                    server.latestMetrics?.memoryTotalMb
-                      ? ((server.latestMetrics.memoryUsedMb ?? 0) /
-                          server.latestMetrics.memoryTotalMb) *
-                        100
-                      : undefined
-                  }
-                  displayValue={
-                    server.latestMetrics?.memoryUsedMb != null && server.latestMetrics?.memoryTotalMb
-                      ? `${(server.latestMetrics.memoryUsedMb / 1024).toFixed(1)}/${(server.latestMetrics.memoryTotalMb / 1024).toFixed(0)}GB`
-                      : undefined
-                  }
-                  max={100}
-                  unit="%"
-                  color="green"
-                />
-
-                {/* Disk Gauge */}
-                <MetricGauge
-                  label="Disk"
-                  value={
-                    server.latestMetrics?.diskTotalGb
-                      ? ((server.latestMetrics.diskUsedGb ?? 0) /
-                          server.latestMetrics.diskTotalGb) *
-                        100
-                      : undefined
-                  }
-                  displayValue={
-                    server.latestMetrics?.diskUsedGb != null && server.latestMetrics?.diskTotalGb
-                      ? `${server.latestMetrics.diskUsedGb.toFixed(0)}/${server.latestMetrics.diskTotalGb.toFixed(0)}GB`
-                      : undefined
-                  }
-                  max={100}
-                  unit="%"
-                  color="yellow"
-                />
-
-                {/* Load Average */}
-                <MetricGauge
-                  label="Load"
-                  value={server.latestMetrics?.loadAvg1 ?? undefined}
-                  max={4}
-                  displayValue={server.latestMetrics?.loadAvg1?.toFixed(2) ?? undefined}
-                  color="purple"
-                />
-              </div>
-            </div>
-          ))}
         </div>
       )}
 
@@ -216,7 +362,7 @@ export default function Monitoring() {
                     <td className="py-3">
                       <Link
                         to={`/services/${service.id}`}
-                        className="text-white hover:text-primary-400"
+                        className="text-white hover:text-brand-400"
                       >
                         {service.name}
                       </Link>
@@ -224,7 +370,7 @@ export default function Monitoring() {
                     <td className="py-3">
                       <Link
                         to={`/servers/${service.serverId}`}
-                        className="hover:text-primary-400"
+                        className="hover:text-brand-400"
                       >
                         {service.serverName}
                       </Link>
@@ -287,6 +433,106 @@ export default function Monitoring() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+interface StatCardProps {
+  label: string;
+  value: string | number;
+  color: 'blue' | 'green' | 'emerald' | 'red' | 'slate';
+}
+
+function StatCard({ label, value, color }: StatCardProps) {
+  const colorClasses = {
+    blue: 'bg-blue-500/10 border-blue-500/30',
+    green: 'bg-green-500/10 border-green-500/30',
+    emerald: 'bg-emerald-500/10 border-emerald-500/30',
+    red: 'bg-red-500/10 border-red-500/30',
+    slate: 'bg-slate-500/10 border-slate-500/30',
+  };
+
+  const textColors = {
+    blue: 'text-blue-400',
+    green: 'text-green-400',
+    emerald: 'text-emerald-400',
+    red: 'text-red-400',
+    slate: 'text-slate-400',
+  };
+
+  return (
+    <div className={`rounded-xl border p-4 ${colorClasses[color]}`}>
+      <p className="text-slate-400 text-xs mb-1">{label}</p>
+      <p className={`text-2xl font-bold ${textColors[color]}`}>{value}</p>
+    </div>
+  );
+}
+
+interface ChartCardProps {
+  title: string;
+  data: Record<string, unknown>[];
+  serverNames: string[];
+  formatTime: (time: string) => string;
+  unit?: string;
+  domain?: [number | 'auto', number | 'auto'];
+}
+
+function ChartCard({ title, data, serverNames, formatTime, unit, domain }: ChartCardProps) {
+  if (data.length === 0) {
+    return (
+      <div className="card">
+        <h3 className="text-sm font-medium text-white mb-4">{title}</h3>
+        <div className="h-56 flex items-center justify-center text-slate-500">
+          No data available
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card">
+      <h3 className="text-sm font-medium text-white mb-4">{title}</h3>
+      <ResponsiveContainer width="100%" height={220}>
+        <LineChart data={data} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+          <XAxis
+            dataKey="time"
+            tickFormatter={formatTime}
+            tick={{ fill: '#64748b', fontSize: 11 }}
+            axisLine={{ stroke: '#334155' }}
+            tickLine={{ stroke: '#334155' }}
+          />
+          <YAxis
+            domain={domain}
+            tick={{ fill: '#64748b', fontSize: 11 }}
+            axisLine={{ stroke: '#334155' }}
+            tickLine={{ stroke: '#334155' }}
+            tickFormatter={(v) => `${v}${unit || ''}`}
+            width={50}
+          />
+          <Tooltip
+            contentStyle={{
+              backgroundColor: '#1e293b',
+              border: '1px solid #334155',
+              borderRadius: '8px',
+            }}
+            labelFormatter={formatTime}
+            formatter={(value: number) => [`${value?.toFixed(1)}${unit || ''}`, '']}
+          />
+          <Legend wrapperStyle={{ fontSize: 12 }} />
+          {serverNames.map((name, i) => (
+            <Line
+              key={name}
+              type="monotone"
+              dataKey={name}
+              name={name}
+              stroke={COLORS[i % COLORS.length]}
+              dot={false}
+              strokeWidth={2}
+              connectNulls
+            />
+          ))}
+        </LineChart>
+      </ResponsiveContainer>
     </div>
   );
 }

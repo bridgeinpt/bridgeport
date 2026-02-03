@@ -35,6 +35,7 @@ import { serviceDependencyRoutes } from './routes/service-dependencies.js';
 import { deploymentPlanRoutes } from './routes/deployment-plans.js';
 import { settingsRoutes } from './routes/settings.js';
 import { spacesRoutes } from './routes/spaces.js';
+import { monitoringRoutes } from './routes/monitoring.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -137,6 +138,7 @@ async function buildServer() {
   await fastify.register(deploymentPlanRoutes);
   await fastify.register(settingsRoutes);
   await fastify.register(spacesRoutes);
+  await fastify.register(monitoringRoutes);
 
   // Health check
   fastify.get('/health', async () => {
