@@ -125,6 +125,14 @@ const navigationGroups: NavGroup[] = [
     items: [
       { name: 'Managed Images', href: '/managed-images', icon: ImageIcon },
       { name: 'Deployment Plans', href: '/deployment-plans', icon: PlanIcon },
+      { name: 'Registries', href: '/registries', icon: RegistryIcon },
+    ],
+  },
+  {
+    name: 'Data',
+    items: [
+      { name: 'Databases', href: '/databases', icon: DatabaseIcon },
+      { name: 'Audit Logs', href: '/activity', icon: ActivityIcon },
     ],
   },
   {
@@ -132,19 +140,7 @@ const navigationGroups: NavGroup[] = [
     items: [
       { name: 'Secrets', href: '/secrets', icon: KeyIcon },
       { name: 'Config Files', href: '/config-files', icon: FileIcon },
-      { name: 'Registries', href: '/registries', icon: RegistryIcon },
-    ],
-  },
-  {
-    name: 'Data',
-    items: [{ name: 'Databases', href: '/databases', icon: DatabaseIcon }],
-  },
-  {
-    name: 'System',
-    items: [
-      { name: 'Audit Logs', href: '/activity', icon: ActivityIcon },
-      { name: 'Users', href: '/users', icon: UsersIcon, adminOnly: true },
-      { name: 'Environment Config', href: '/settings', icon: SettingsIcon },
+      { name: 'Environment', href: '/settings', icon: SettingsIcon },
     ],
   },
   {
@@ -154,6 +150,7 @@ const navigationGroups: NavGroup[] = [
       { name: 'System', href: '/settings/system', icon: CogIcon, adminOnly: true },
       { name: 'Service Types', href: '/settings/service-types', icon: CommandIcon, adminOnly: true },
       { name: 'Spaces', href: '/settings/spaces', icon: CloudIcon, adminOnly: true },
+      { name: 'Users', href: '/users', icon: UsersIcon, adminOnly: true },
       { name: 'Notifications', href: '/admin/notifications', icon: NavBellIcon, adminOnly: true },
     ],
   },

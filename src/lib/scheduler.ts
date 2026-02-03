@@ -600,6 +600,21 @@ async function runMetricsCollection(): Promise<void> {
             },
           });
 
+          // Log container health check result
+          const containerHealthy = serviceData.containerStatus === 'running' &&
+            serviceData.healthStatus !== 'unhealthy';
+          await logHealthCheck({
+            environmentId: server.environmentId,
+            resourceType: 'container',
+            resourceId: service.id,
+            resourceName: service.containerName,
+            checkType: 'container_health',
+            status: containerHealthy ? 'success' : 'failure',
+            errorMessage: !containerHealthy
+              ? `Container status: ${serviceData.containerStatus}, health: ${serviceData.healthStatus}`
+              : undefined,
+          });
+
           // Handle container status changes (crash detection)
           const crashStates = ['exited', 'dead'];
           const wasCrashed = prevService && crashStates.includes(prevService.containerStatus);

@@ -403,7 +403,27 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
           const data = metrics.map((m) => {
             const base = { time: m.collectedAt.toISOString() };
 
-            if (!metric || metric === 'cpu') {
+            // If no specific metric requested, return all metrics
+            if (!metric) {
+              const memPercent =
+                m.memoryUsedMb && m.memoryTotalMb
+                  ? (m.memoryUsedMb / m.memoryTotalMb) * 100
+                  : null;
+              const diskPercent =
+                m.diskUsedGb && m.diskTotalGb ? (m.diskUsedGb / m.diskTotalGb) * 100 : null;
+              return {
+                ...base,
+                cpu: m.cpuPercent,
+                memory: memPercent,
+                memoryUsedMb: m.memoryUsedMb,
+                disk: diskPercent,
+                diskUsedGb: m.diskUsedGb,
+                load1: m.loadAvg1,
+                load5: m.loadAvg5,
+                load15: m.loadAvg15,
+              };
+            }
+            if (metric === 'cpu') {
               return { ...base, cpu: m.cpuPercent };
             }
             if (metric === 'memory') {

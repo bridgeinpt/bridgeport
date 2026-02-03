@@ -330,17 +330,6 @@ export default function MonitoringAgents() {
             )}
           </div>
 
-          {/* Agent Deployment Info */}
-          <div className="card mt-6">
-            <h3 className="text-sm font-medium text-slate-400 mb-2">Agent Deployment</h3>
-            <p className="text-slate-500 text-sm mb-4">
-              To deploy the monitoring agent to servers, go to the individual server page and enable agent mode.
-              The agent will be automatically deployed via SSH.
-            </p>
-            <Link to="/servers" className="btn btn-secondary">
-              Go to Servers
-            </Link>
-          </div>
         </>
       )}
     </div>
