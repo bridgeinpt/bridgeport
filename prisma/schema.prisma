@@ -47,13 +47,6 @@ model Environment {
   allowSecretReveal   Boolean @default(true) // Whether secrets can be revealed in this environment
   allowBackupDownload Boolean @default(false) // Whether backup downloads are allowed in this environment
 
-  // DO Spaces credentials for backups (optional, encrypted)
-  spacesAccessKey       String?
-  encryptedSpacesSecret String?
-  spacesSecretNonce     String?
-  spacesRegion          String? // e.g., "fra1"
-  spacesEndpoint        String? // e.g., "fra1.digitaloceanspaces.com"
-
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

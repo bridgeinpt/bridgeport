@@ -4,17 +4,12 @@ import { useAuthStore } from '../lib/store';
 import {
   getEnvironmentSettings,
   updateEnvironmentSettings,
-  getSpacesConfig,
-  updateSpacesConfig,
-  deleteSpacesConfig,
-  testSpacesConfig,
   listServers,
   listDatabases,
   getSchedulerConfig,
   updateSchedulerConfig,
   type Server,
   type Database,
-  type SpacesConfig,
   type SchedulerConfig,
 } from '../lib/api';
 import { useToast } from '../components/Toast';
@@ -44,21 +39,8 @@ export default function Settings() {
   const toast = useToast();
   const [settings, setSettings] = useState<EnvironmentSettings | null>(null);
   const [moduleStatus, setModuleStatus] = useState<ModuleStatus | null>(null);
-  const [spacesConfig, setSpacesConfig] = useState<SpacesConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [editingSpaces, setEditingSpaces] = useState(false);
-  const [testingSpaces, setTestingSpaces] = useState(false);
-  const [spacesTestResult, setSpacesTestResult] = useState<{
-    success: boolean;
-    message: string;
-    buckets?: string[];
-  } | null>(null);
-  const [spacesForm, setSpacesForm] = useState({
-    spacesAccessKey: '',
-    spacesSecretKey: '',
-    spacesRegion: 'fra1',
-  });
   const [schedulerConfig, setSchedulerConfig] = useState<SchedulerConfig | null>(null);
   const [monitoringExpanded, setMonitoringExpanded] = useState(false);
   const [savingScheduler, setSavingScheduler] = useState(false);
@@ -73,16 +55,14 @@ export default function Settings() {
     if (!selectedEnvironment?.id) return;
     setLoading(true);
     try {
-      const [settingsRes, serversRes, databasesRes, spacesRes, schedulerRes] = await Promise.all([
+      const [settingsRes, serversRes, databasesRes, schedulerRes] = await Promise.all([
         getEnvironmentSettings(selectedEnvironment.id),
         listServers(selectedEnvironment.id),
         listDatabases(selectedEnvironment.id),
-        getSpacesConfig(selectedEnvironment.id),
         getSchedulerConfig(selectedEnvironment.id),
       ]);
 
       setSettings(settingsRes.settings);
-      setSpacesConfig(spacesRes);
       setSchedulerConfig(schedulerRes.config);
 
       // Calculate module status
@@ -120,61 +100,6 @@ export default function Settings() {
       toast.error('Failed to update settings');
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleSaveSpaces = async () => {
-    if (!selectedEnvironment?.id || !isAdmin(user)) return;
-    if (!spacesForm.spacesAccessKey || !spacesForm.spacesSecretKey || !spacesForm.spacesRegion) {
-      toast.error('Please fill in all required fields');
-      return;
-    }
-    setSaving(true);
-    try {
-      await updateSpacesConfig(selectedEnvironment.id, spacesForm);
-      const spacesRes = await getSpacesConfig(selectedEnvironment.id);
-      setSpacesConfig(spacesRes);
-      setEditingSpaces(false);
-      setSpacesForm({ spacesAccessKey: '', spacesSecretKey: '', spacesRegion: 'fra1' });
-      toast.success('Spaces configuration saved');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to save Spaces configuration');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDeleteSpaces = async () => {
-    if (!selectedEnvironment?.id || !isAdmin(user)) return;
-    if (!confirm('Remove Spaces configuration? Existing backups stored in Spaces will not be deleted.')) return;
-    setSaving(true);
-    try {
-      await deleteSpacesConfig(selectedEnvironment.id);
-      setSpacesConfig({ configured: false, spacesAccessKey: null, spacesRegion: null, spacesEndpoint: null });
-      toast.success('Spaces configuration removed');
-    } catch (error) {
-      toast.error('Failed to remove Spaces configuration');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleTestSpaces = async () => {
-    if (!selectedEnvironment?.id) return;
-    setTestingSpaces(true);
-    setSpacesTestResult(null);
-    try {
-      const result = await testSpacesConfig(selectedEnvironment.id);
-      setSpacesTestResult(result);
-      if (result.success) {
-        toast.success('Connection successful');
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Connection test failed';
-      setSpacesTestResult({ success: false, message });
-      toast.error(message);
-    } finally {
-      setTestingSpaces(false);
     }
   };
 
@@ -375,176 +300,6 @@ export default function Settings() {
             </p>
           )}
         </div>
-      </div>
-
-      {/* Spaces Configuration */}
-      <div className="card mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h3 className="text-lg font-semibold text-white">DO Spaces Configuration</h3>
-            <p className="text-sm text-slate-400">Configure DigitalOcean Spaces for database backups</p>
-          </div>
-          {spacesConfig?.configured && !editingSpaces && isAdmin(user) && (
-            <button
-              onClick={handleDeleteSpaces}
-              disabled={saving}
-              className="btn btn-ghost text-red-400 hover:text-red-300 text-sm"
-            >
-              Remove
-            </button>
-          )}
-        </div>
-
-        {editingSpaces ? (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Access Key</label>
-                <input
-                  type="text"
-                  value={spacesForm.spacesAccessKey}
-                  onChange={(e) => setSpacesForm({ ...spacesForm, spacesAccessKey: e.target.value })}
-                  placeholder="DO00..."
-                  className="input"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Secret Key</label>
-                <input
-                  type="password"
-                  value={spacesForm.spacesSecretKey}
-                  onChange={(e) => setSpacesForm({ ...spacesForm, spacesSecretKey: e.target.value })}
-                  placeholder="••••••••"
-                  className="input"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">Region</label>
-              <select
-                value={spacesForm.spacesRegion}
-                onChange={(e) => setSpacesForm({ ...spacesForm, spacesRegion: e.target.value })}
-                className="input"
-              >
-                <option value="nyc3">NYC3 (New York)</option>
-                <option value="sfo3">SFO3 (San Francisco)</option>
-                <option value="ams3">AMS3 (Amsterdam)</option>
-                <option value="sgp1">SGP1 (Singapore)</option>
-                <option value="fra1">FRA1 (Frankfurt)</option>
-                <option value="syd1">SYD1 (Sydney)</option>
-              </select>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={handleSaveSpaces} disabled={saving} className="btn btn-primary">
-                {saving ? 'Saving...' : 'Save Configuration'}
-              </button>
-              <button
-                onClick={() => {
-                  setEditingSpaces(false);
-                  setSpacesForm({ spacesAccessKey: '', spacesSecretKey: '', spacesRegion: 'fra1' });
-                }}
-                className="btn btn-ghost"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        ) : spacesConfig?.configured ? (
-          <div className="p-4 bg-slate-800 rounded-lg">
-            <div className="flex items-center gap-2 mb-3">
-              <span className="px-2 py-1 rounded text-xs font-medium bg-green-500/20 text-green-400">
-                Configured
-              </span>
-            </div>
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between text-slate-400">
-                <span>Access Key:</span>
-                <span className="text-white font-mono">{spacesConfig.spacesAccessKey}</span>
-              </div>
-              <div className="flex justify-between text-slate-400">
-                <span>Region:</span>
-                <span className="text-white">{spacesConfig.spacesRegion}</span>
-              </div>
-              <div className="flex justify-between text-slate-400">
-                <span>Endpoint:</span>
-                <span className="text-white font-mono text-xs">{spacesConfig.spacesEndpoint}</span>
-              </div>
-            </div>
-
-            {/* Test Result */}
-            {spacesTestResult && (
-              <div className={`mt-4 p-3 rounded-lg ${
-                spacesTestResult.success
-                  ? 'bg-green-500/10 border border-green-500/30'
-                  : 'bg-red-500/10 border border-red-500/30'
-              }`}>
-                <div className="flex items-center gap-2 mb-1">
-                  {spacesTestResult.success ? (
-                    <svg className="w-4 h-4 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                  ) : (
-                    <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  )}
-                  <span className={spacesTestResult.success ? 'text-green-400' : 'text-red-400'}>
-                    {spacesTestResult.message}
-                  </span>
-                </div>
-                {spacesTestResult.success && spacesTestResult.buckets && spacesTestResult.buckets.length > 0 && (
-                  <div className="mt-2 text-sm">
-                    <span className="text-slate-400">Available buckets:</span>
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {spacesTestResult.buckets.map((bucket) => (
-                        <span key={bucket} className="px-2 py-0.5 bg-slate-700 rounded text-xs text-white font-mono">
-                          {bucket}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="flex gap-2 mt-4">
-              <button
-                onClick={handleTestSpaces}
-                disabled={testingSpaces}
-                className="btn btn-secondary text-sm"
-              >
-                {testingSpaces ? 'Testing...' : 'Test Connection'}
-              </button>
-              {isAdmin(user) && (
-                <button
-                  onClick={() => {
-                    setSpacesForm({
-                      spacesAccessKey: spacesConfig.spacesAccessKey || '',
-                      spacesSecretKey: '',
-                      spacesRegion: spacesConfig.spacesRegion || 'fra1',
-                    });
-                    setSpacesTestResult(null);
-                    setEditingSpaces(true);
-                  }}
-                  className="btn btn-ghost text-sm"
-                >
-                  Update
-                </button>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="p-4 bg-slate-800 rounded-lg text-center">
-            <p className="text-slate-400 mb-4">
-              Spaces is not configured. Configure it to enable cloud backups for databases.
-            </p>
-            {isAdmin(user) && (
-              <button onClick={() => setEditingSpaces(true)} className="btn btn-primary">
-                Configure Spaces
-              </button>
-            )}
-          </div>
-        )}
       </div>
 
       {/* Monitoring Settings */}

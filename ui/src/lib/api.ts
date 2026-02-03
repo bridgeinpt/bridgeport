@@ -186,33 +186,7 @@ export const getEnvironmentSettings = (id: string) =>
 export const updateEnvironmentSettings = (id: string, settings: Partial<EnvironmentSettings>) =>
   api.patch<{ settings: EnvironmentSettings }>(`/environments/${id}/settings`, settings);
 
-// Spaces configuration
-export interface SpacesConfig {
-  configured: boolean;
-  spacesAccessKey: string | null;
-  spacesRegion: string | null;
-  spacesEndpoint: string | null;
-}
-
-export interface SpacesConfigInput {
-  spacesAccessKey: string;
-  spacesSecretKey: string;
-  spacesRegion: string;
-  spacesEndpoint?: string;
-}
-
-export const getSpacesConfig = (id: string) =>
-  api.get<SpacesConfig>(`/environments/${id}/spaces`);
-
-export const updateSpacesConfig = (id: string, config: SpacesConfigInput) =>
-  api.put<{ success: boolean; message: string }>(`/environments/${id}/spaces`, config);
-
-export const deleteSpacesConfig = (id: string) =>
-  api.delete<{ success: boolean; message: string }>(`/environments/${id}/spaces`);
-
-export const testSpacesConfig = (id: string) =>
-  api.post<{ success: boolean; message: string; buckets?: string[] }>(`/environments/${id}/spaces/test`);
-
+// Spaces buckets (uses global Spaces config)
 export const listSpacesBuckets = (id: string) =>
   api.get<{ buckets: string[] }>(`/environments/${id}/spaces/buckets`);
 
