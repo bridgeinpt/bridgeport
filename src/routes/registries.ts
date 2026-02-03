@@ -151,9 +151,9 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.code(404).send({ error: 'Registry connection not found' });
       }
 
-      if (existing._count && existing._count.services > 0) {
+      if (existing._count && existing._count.containerImages > 0) {
         return reply.code(400).send({
-          error: `Cannot delete registry connection with ${existing._count.services} service(s) attached`,
+          error: `Cannot delete registry connection with ${existing._count.containerImages} container image(s) attached`,
         });
       }
 
@@ -255,18 +255,24 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       const services = await prisma.service.findMany({
-        where: { registryConnectionId: id },
+        where: { containerImage: { registryConnectionId: id } },
         select: {
           id: true,
           name: true,
-          imageName: true,
           imageTag: true,
           autoUpdate: true,
-          latestAvailableTag: true,
-          latestAvailableDigest: true,
-          lastUpdateCheckAt: true,
           server: {
             select: { id: true, name: true },
+          },
+          containerImage: {
+            select: {
+              id: true,
+              name: true,
+              imageName: true,
+              latestTag: true,
+              latestDigest: true,
+              lastCheckedAt: true,
+            },
           },
         },
         orderBy: { name: 'asc' },
@@ -294,7 +300,7 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       const services = await prisma.service.findMany({
-        where: { registryConnectionId: id, discoveryStatus: 'found' },
+        where: { containerImage: { registryConnectionId: id }, discoveryStatus: 'found' },
         select: { id: true, name: true },
       });
 

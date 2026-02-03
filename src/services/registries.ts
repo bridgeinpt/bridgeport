@@ -30,7 +30,7 @@ export interface RegistryConnectionOutput {
   createdAt: Date;
   updatedAt: Date;
   environmentId: string;
-  _count?: { services: number };
+  _count?: { containerImages: number };
 }
 
 function toOutput(conn: {
@@ -49,7 +49,7 @@ function toOutput(conn: {
   createdAt: Date;
   updatedAt: Date;
   environmentId: string;
-  _count?: { services: number };
+  _count?: { containerImages: number };
 }): RegistryConnectionOutput {
   return {
     id: conn.id,
@@ -126,7 +126,7 @@ export async function createRegistryConnection(
 
   const conn = await prisma.registryConnection.create({
     data,
-    include: { _count: { select: { services: true } } },
+    include: { _count: { select: { containerImages: true } } },
   });
 
   return toOutput(conn);
@@ -204,7 +204,7 @@ export async function updateRegistryConnection(
   const conn = await prisma.registryConnection.update({
     where: { id },
     data,
-    include: { _count: { select: { services: true } } },
+    include: { _count: { select: { containerImages: true } } },
   });
 
   return toOutput(conn);
@@ -213,7 +213,7 @@ export async function updateRegistryConnection(
 export async function getRegistryConnection(id: string): Promise<RegistryConnectionOutput | null> {
   const conn = await prisma.registryConnection.findUnique({
     where: { id },
-    include: { _count: { select: { services: true } } },
+    include: { _count: { select: { containerImages: true } } },
   });
 
   return conn ? toOutput(conn) : null;
@@ -223,7 +223,7 @@ export async function listRegistryConnections(environmentId: string): Promise<Re
   const conns = await prisma.registryConnection.findMany({
     where: { environmentId },
     orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
-    include: { _count: { select: { services: true } } },
+    include: { _count: { select: { containerImages: true } } },
   });
 
   return conns.map(toOutput);
@@ -238,7 +238,7 @@ export async function deleteRegistryConnection(id: string): Promise<void> {
 export async function getDefaultRegistryConnection(environmentId: string): Promise<RegistryConnectionOutput | null> {
   const conn = await prisma.registryConnection.findFirst({
     where: { environmentId, isDefault: true },
-    include: { _count: { select: { services: true } } },
+    include: { _count: { select: { containerImages: true } } },
   });
 
   return conn ? toOutput(conn) : null;

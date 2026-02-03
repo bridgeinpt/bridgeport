@@ -159,8 +159,10 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
       // Find matching services and deploy
       const services = await prisma.service.findMany({
         where: {
-          imageName: {
-            contains: packageData.name,
+          containerImage: {
+            imageName: {
+              contains: packageData.name,
+            },
           },
         },
       });

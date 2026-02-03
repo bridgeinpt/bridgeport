@@ -460,6 +460,36 @@ export async function importFromTerraform(
     // Import services for this server
     if (serverData.services) {
       for (const serviceData of serverData.services) {
+        // Find or create ContainerImage for this service's image
+        let containerImage = await prisma.containerImage.findUnique({
+          where: {
+            environmentId_imageName: {
+              environmentId,
+              imageName: serviceData.image_name,
+            },
+          },
+        });
+
+        if (!containerImage) {
+          // Extract display name from image name (last part after /)
+          const parts = serviceData.image_name.split('/');
+          const lastPart = parts[parts.length - 1];
+          const [displayName] = lastPart.split(':');
+          const name = displayName
+            .split('-')
+            .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(' ');
+
+          containerImage = await prisma.containerImage.create({
+            data: {
+              name,
+              imageName: serviceData.image_name,
+              currentTag: serviceData.image_tag ?? 'latest',
+              environmentId,
+            },
+          });
+        }
+
         const existingService = await prisma.service.findFirst({
           where: {
             serverId: server.id,
@@ -472,7 +502,7 @@ export async function importFromTerraform(
             where: { id: existingService.id },
             data: {
               containerName: serviceData.container_name,
-              imageName: serviceData.image_name,
+              containerImageId: containerImage.id,
               imageTag: serviceData.image_tag ?? 'latest',
               composePath: serviceData.compose_path,
               healthCheckUrl: serviceData.health_check_url,
@@ -483,7 +513,7 @@ export async function importFromTerraform(
             data: {
               name: serviceData.name,
               containerName: serviceData.container_name,
-              imageName: serviceData.image_name,
+              containerImageId: containerImage.id,
               imageTag: serviceData.image_tag ?? 'latest',
               composePath: serviceData.compose_path,
               healthCheckUrl: serviceData.health_check_url,
