@@ -251,7 +251,7 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
               },
             },
           },
-          managedImage: {
+          containerImage: {
             select: { id: true, name: true },
           },
         },
@@ -262,7 +262,7 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
         id: service.id,
         name: service.name,
         server: service.server.name,
-        managedImage: service.managedImage,
+        containerImage: service.containerImage,
         status: service.status,
         healthStatus: service.healthStatus,
         dependencyCount: service.dependencies.length,

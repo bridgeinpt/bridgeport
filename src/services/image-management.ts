@@ -1,7 +1,7 @@
 import { prisma } from '../lib/db.js';
-import type { ManagedImage, ImageTagHistory, Service } from '@prisma/client';
+import type { ContainerImage, ContainerImageHistory, Service } from '@prisma/client';
 
-export interface CreateManagedImageInput {
+export interface CreateContainerImageInput {
   name: string;
   imageName: string;
   currentTag: string;
@@ -9,7 +9,7 @@ export interface CreateManagedImageInput {
   registryConnectionId?: string | null;
 }
 
-export interface UpdateManagedImageInput {
+export interface UpdateContainerImageInput {
   name?: string;
   currentTag?: string;
   latestTag?: string;
@@ -19,12 +19,12 @@ export interface UpdateManagedImageInput {
 }
 
 /**
- * Create a new managed image
+ * Create a new container image
  */
-export async function createManagedImage(
-  input: CreateManagedImageInput
-): Promise<ManagedImage> {
-  return prisma.managedImage.create({
+export async function createContainerImage(
+  input: CreateContainerImageInput
+): Promise<ContainerImage> {
+  return prisma.containerImage.create({
     data: {
       name: input.name,
       imageName: input.imageName,
@@ -36,38 +36,44 @@ export async function createManagedImage(
 }
 
 /**
- * Update a managed image
+ * Update a container image
  */
-export async function updateManagedImage(
+export async function updateContainerImage(
   id: string,
-  input: UpdateManagedImageInput
-): Promise<ManagedImage> {
-  return prisma.managedImage.update({
+  input: UpdateContainerImageInput
+): Promise<ContainerImage> {
+  return prisma.containerImage.update({
     where: { id },
     data: input,
   });
 }
 
 /**
- * Delete a managed image
+ * Delete a container image (will fail if services are linked due to onDelete: Restrict)
  */
-export async function deleteManagedImage(id: string): Promise<void> {
-  // First unlink all services
-  await prisma.service.updateMany({
-    where: { managedImageId: id },
-    data: { managedImageId: null },
+export async function deleteContainerImage(id: string): Promise<void> {
+  // Check if any services are linked
+  const linkedServices = await prisma.service.count({
+    where: { containerImageId: id },
   });
 
-  await prisma.managedImage.delete({
+  if (linkedServices > 0) {
+    throw new Error(
+      `Cannot delete container image: ${linkedServices} service(s) are still linked to it. ` +
+      `Please reassign or delete those services first.`
+    );
+  }
+
+  await prisma.containerImage.delete({
     where: { id },
   });
 }
 
 /**
- * Get a managed image with its services
+ * Get a container image with its services
  */
-export async function getManagedImage(id: string): Promise<ManagedImage & { services: Service[] } | null> {
-  return prisma.managedImage.findUnique({
+export async function getContainerImage(id: string): Promise<ContainerImage & { services: Service[] } | null> {
+  return prisma.containerImage.findUnique({
     where: { id },
     include: {
       services: {
@@ -81,10 +87,10 @@ export async function getManagedImage(id: string): Promise<ManagedImage & { serv
 }
 
 /**
- * List managed images for an environment
+ * List container images for an environment
  */
-export async function listManagedImages(environmentId: string): Promise<(ManagedImage & { services: Service[] })[]> {
-  return prisma.managedImage.findMany({
+export async function listContainerImages(environmentId: string): Promise<(ContainerImage & { services: Service[] })[]> {
+  return prisma.containerImage.findMany({
     where: { environmentId },
     include: {
       services: {
@@ -99,34 +105,24 @@ export async function listManagedImages(environmentId: string): Promise<(Managed
 }
 
 /**
- * Link a service to a managed image
+ * Link a service to a container image
+ * Only updates the containerImageId and syncs the imageTag
  */
-export async function linkServiceToManagedImage(
-  managedImageId: string,
+export async function linkServiceToContainerImage(
+  containerImageId: string,
   serviceId: string
 ): Promise<Service> {
-  const managedImage = await prisma.managedImage.findUniqueOrThrow({
-    where: { id: managedImageId },
+  const containerImage = await prisma.containerImage.findUniqueOrThrow({
+    where: { id: containerImageId },
   });
 
-  // Update the service's imageName and imageTag to match the managed image
+  // Update the service's containerImageId and sync imageTag
   return prisma.service.update({
     where: { id: serviceId },
     data: {
-      managedImageId,
-      imageName: managedImage.imageName,
-      imageTag: managedImage.currentTag,
+      containerImageId,
+      imageTag: containerImage.currentTag,
     },
-  });
-}
-
-/**
- * Unlink a service from its managed image
- */
-export async function unlinkServiceFromManagedImage(serviceId: string): Promise<Service> {
-  return prisma.service.update({
-    where: { id: serviceId },
-    data: { managedImageId: null },
   });
 }
 
@@ -134,65 +130,80 @@ export async function unlinkServiceFromManagedImage(serviceId: string): Promise<
  * Record a tag deployment in history
  */
 export async function recordTagDeployment(
-  managedImageId: string,
+  containerImageId: string,
   tag: string,
   digest?: string,
-  deployedBy?: string
-): Promise<ImageTagHistory> {
-  // Update the managed image's current tag
-  await prisma.managedImage.update({
-    where: { id: managedImageId },
-    data: { currentTag: tag },
-  });
+  deployedBy?: string,
+  status: 'success' | 'failed' | 'rolled_back' = 'success'
+): Promise<ContainerImageHistory> {
+  // Only update the container image's current tag on success
+  if (status === 'success') {
+    await prisma.containerImage.update({
+      where: { id: containerImageId },
+      data: { currentTag: tag },
+    });
+  }
 
   // Create history record
-  return prisma.imageTagHistory.create({
+  return prisma.containerImageHistory.create({
     data: {
-      managedImageId,
+      containerImageId,
       tag,
       digest,
       deployedBy,
+      status,
     },
   });
 }
 
 /**
- * Get tag deployment history for a managed image
+ * Get tag deployment history for a container image
  */
 export async function getTagHistory(
-  managedImageId: string,
+  containerImageId: string,
   limit: number = 20
-): Promise<ImageTagHistory[]> {
-  return prisma.imageTagHistory.findMany({
-    where: { managedImageId },
+): Promise<ContainerImageHistory[]> {
+  return prisma.containerImageHistory.findMany({
+    where: { containerImageId },
     orderBy: { deployedAt: 'desc' },
     take: limit,
+    include: {
+      deployments: {
+        select: {
+          id: true,
+          status: true,
+          service: {
+            select: { id: true, name: true },
+          },
+        },
+      },
+    },
   });
 }
 
 /**
  * Get the previous tag for rollback
  */
-export async function getPreviousTag(managedImageId: string): Promise<string | null> {
-  const history = await prisma.imageTagHistory.findMany({
-    where: { managedImageId },
+export async function getPreviousTag(containerImageId: string): Promise<string | null> {
+  const history = await prisma.containerImageHistory.findMany({
+    where: { containerImageId, status: 'success' },
     orderBy: { deployedAt: 'desc' },
     take: 2,
   });
 
-  // Return the second most recent tag (the one before current)
+  // Return the second most recent successful tag (the one before current)
   return history.length > 1 ? history[1].tag : null;
 }
 
 /**
- * Get services linked to a managed image, ordered by dependencies
+ * Get services linked to a container image, ordered by dependencies
  * Returns services grouped by their dependency level for orchestration
  */
 export async function getLinkedServicesWithDependencies(
-  managedImageId: string
+  containerImageId: string
 ): Promise<Service[]> {
   return prisma.service.findMany({
-    where: { managedImageId },
+    where: { containerImageId },
     include: {
       server: true,
       dependencies: {
@@ -210,13 +221,13 @@ export async function getLinkedServicesWithDependencies(
 }
 
 /**
- * Check if a managed image exists for an image name in an environment
+ * Check if a container image exists for an image name in an environment
  */
-export async function findManagedImageByImageName(
+export async function findContainerImageByImageName(
   environmentId: string,
   imageName: string
-): Promise<ManagedImage | null> {
-  return prisma.managedImage.findUnique({
+): Promise<ContainerImage | null> {
+  return prisma.containerImage.findUnique({
     where: {
       environmentId_imageName: {
         environmentId,
@@ -227,22 +238,34 @@ export async function findManagedImageByImageName(
 }
 
 /**
- * Get all services using a specific image name that are not linked to a managed image
+ * Find or create a container image for an image name
+ * Used during container discovery to ensure every service has a ContainerImage
  */
-export async function findUnlinkedServicesByImageName(
+export async function findOrCreateContainerImage(
   environmentId: string,
-  imageName: string
-): Promise<Service[]> {
-  return prisma.service.findMany({
-    where: {
+  imageName: string,
+  imageTag: string,
+  registryConnectionId?: string | null
+): Promise<ContainerImage> {
+  // Try to find existing
+  const existing = await findContainerImageByImageName(environmentId, imageName);
+  if (existing) {
+    return existing;
+  }
+
+  // Extract display name from image path
+  // e.g., "registry.digitalocean.com/bios-registry/bios-backend" -> "bios-backend"
+  const parts = imageName.split('/');
+  const displayName = parts[parts.length - 1] || imageName;
+
+  // Create new container image
+  return prisma.containerImage.create({
+    data: {
+      name: displayName,
       imageName,
-      managedImageId: null,
-      server: {
-        environmentId,
-      },
-    },
-    include: {
-      server: true,
+      currentTag: imageTag,
+      environmentId,
+      registryConnectionId,
     },
   });
 }

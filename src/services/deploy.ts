@@ -6,6 +6,7 @@ import { generateDeploymentArtifacts, saveDeploymentArtifacts } from './compose.
 import { getEnvironmentSshKey } from '../routes/environments.js';
 import { checkServiceUpdate } from '../lib/scheduler.js';
 import { sendSystemNotification, NOTIFICATION_TYPES } from './notifications.js';
+import { recordTagDeployment } from './image-management.js';
 import type { Deployment, Service } from '@prisma/client';
 
 export interface DeployOptions {
@@ -32,6 +33,7 @@ export async function deployService(
       server: {
         include: { environment: true },
       },
+      containerImage: true,
     },
   });
 
@@ -143,9 +145,10 @@ export async function deployService(
       }
     }
 
-    // Pull new image
+    // Pull new image (get imageName from containerImage)
     if (options.pullImage !== false) {
-      const fullImage = `${service.imageName}:${imageTag}`;
+      const imageName = service.containerImage.imageName;
+      const fullImage = `${imageName}:${imageTag}`;
       log(`Pulling image: ${fullImage}`);
       await docker.pullImage(fullImage);
       log('Image pulled successfully');
@@ -190,13 +193,23 @@ export async function deployService(
       console.error(`[Deploy] Failed to check updates for service ${serviceId}:`, err);
     });
 
-    // Mark deployment as successful
+    // Record successful deployment in container image history
+    const historyEntry = await recordTagDeployment(
+      service.containerImage.id,
+      imageTag,
+      undefined,
+      triggeredBy,
+      'success'
+    );
+
+    // Mark deployment as successful and link to history entry
     const finalDeployment = await prisma.deployment.update({
       where: { id: deployment.id },
       data: {
         status: 'success',
         logs: logs.join('\n'),
         completedAt: new Date(),
+        containerImageHistoryId: historyEntry.id,
       },
     });
 
@@ -216,12 +229,22 @@ export async function deployService(
     const errorMessage = error instanceof Error ? error.message : String(error);
     log(`ERROR: ${errorMessage}`);
 
+    // Record failed deployment in container image history
+    const historyEntry = await recordTagDeployment(
+      service.containerImage.id,
+      imageTag,
+      undefined,
+      triggeredBy,
+      'failed'
+    );
+
     const failedDeployment = await prisma.deployment.update({
       where: { id: deployment.id },
       data: {
         status: 'failed',
         logs: logs.join('\n'),
         completedAt: new Date(),
+        containerImageHistoryId: historyEntry.id,
       },
     });
 

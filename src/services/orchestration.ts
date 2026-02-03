@@ -7,7 +7,7 @@ import type { DeploymentPlan, DeploymentPlanStep, Service, ServiceDependency } f
 
 export interface BuildPlanOptions {
   environmentId: string;
-  managedImageId?: string;
+  containerImageId?: string;
   serviceIds?: string[];
   imageTag: string;
   triggerType: 'manual' | 'webhook' | 'auto_update';
@@ -137,10 +137,10 @@ export function resolveDependencyOrder(services: ServiceWithDeps[]): ServiceWith
 export async function buildDeploymentPlan(options: BuildPlanOptions): Promise<DeploymentPlan> {
   let services: ServiceWithDeps[];
 
-  if (options.managedImageId) {
-    // Get all services linked to this managed image
+  if (options.containerImageId) {
+    // Get all services linked to this container image
     services = await prisma.service.findMany({
-      where: { managedImageId: options.managedImageId },
+      where: { containerImageId: options.containerImageId },
       include: {
         server: { select: { name: true, hostname: true } },
         dependencies: { include: { dependsOn: true } },
@@ -158,7 +158,7 @@ export async function buildDeploymentPlan(options: BuildPlanOptions): Promise<De
       },
     });
   } else {
-    throw new Error('Either managedImageId or serviceIds must be provided');
+    throw new Error('Either containerImageId or serviceIds must be provided');
   }
 
   if (services.length === 0) {
@@ -170,7 +170,7 @@ export async function buildDeploymentPlan(options: BuildPlanOptions): Promise<De
 
   // Generate plan name
   const serviceNames = services.map((s) => s.name).slice(0, 3);
-  const planName = options.managedImageId
+  const planName = options.containerImageId
     ? `Deploy ${options.imageTag}`
     : `Deploy ${serviceNames.join(', ')}${services.length > 3 ? '...' : ''}`;
 
@@ -184,7 +184,7 @@ export async function buildDeploymentPlan(options: BuildPlanOptions): Promise<De
       triggeredBy: options.triggeredBy,
       autoRollback: options.autoRollback ?? true,
       environmentId: options.environmentId,
-      managedImageId: options.managedImageId,
+      containerImageId: options.containerImageId,
       userId: options.userId,
     },
   });
@@ -241,7 +241,7 @@ export async function executePlan(planId: string): Promise<void> {
         orderBy: { order: 'asc' },
         include: { service: true },
       },
-      managedImage: true,
+      containerImage: true,
       environment: true,
     },
   });
@@ -325,15 +325,8 @@ export async function executePlan(planId: string): Promise<void> {
     // All steps completed successfully
     log('Deployment plan completed successfully');
 
-    // Record tag in history if using managed image
-    if (plan.managedImageId && plan.imageTag) {
-      await recordTagDeployment(
-        plan.managedImageId,
-        plan.imageTag,
-        undefined,
-        plan.triggeredBy || 'system'
-      );
-    }
+    // Note: Individual deployService calls now record history entries,
+    // so we don't need to record here for containerImage
 
     await prisma.deploymentPlan.update({
       where: { id: planId },
@@ -643,7 +636,7 @@ export async function getDeploymentPlan(planId: string) {
           deployment: true,
         },
       },
-      managedImage: true,
+      containerImage: true,
       user: { select: { id: true, email: true, name: true } },
       environment: { select: { id: true, name: true } },
     },
@@ -670,7 +663,7 @@ export async function listDeploymentPlans(
           service: { select: { id: true, name: true } },
         },
       },
-      managedImage: { select: { id: true, name: true } },
+      containerImage: { select: { id: true, name: true } },
       user: { select: { id: true, email: true, name: true } },
     },
     orderBy: { createdAt: 'desc' },

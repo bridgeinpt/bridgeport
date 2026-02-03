@@ -224,7 +224,7 @@ async function runDiscovery(): Promise<void> {
 }
 
 /**
- * Check for updates on a single service
+ * Check for updates on a single service (uses containerImage for registry info)
  */
 async function checkServiceForUpdates(
   serviceId: string,
@@ -235,19 +235,26 @@ async function checkServiceForUpdates(
     select: {
       id: true,
       name: true,
-      imageName: true,
       imageTag: true,
-      latestAvailableDigest: true,
+      containerImage: {
+        select: {
+          id: true,
+          imageName: true,
+          latestDigest: true,
+        },
+      },
     },
   });
 
-  if (!service) {
+  if (!service || !service.containerImage) {
     return { hasUpdate: false };
   }
 
+  const imageName = service.containerImage.imageName;
+
   try {
     const client = RegistryFactory.create(creds);
-    const repoName = extractRepoName(service.imageName, creds.repositoryPrefix);
+    const repoName = extractRepoName(imageName, creds.repositoryPrefix);
 
     // Get the latest tag from the registry
     const latestTag = await client.getLatestTag(repoName);
@@ -263,13 +270,13 @@ async function checkServiceForUpdates(
       // If we can't get current digest, we'll compare by tag only
     }
 
-    // Update the service with latest available info
-    await prisma.service.update({
-      where: { id: serviceId },
+    // Update the containerImage with latest available info
+    await prisma.containerImage.update({
+      where: { id: service.containerImage.id },
       data: {
-        latestAvailableTag: latestTag.tag,
-        latestAvailableDigest: latestTag.digest,
-        lastUpdateCheckAt: new Date(),
+        latestTag: latestTag.tag,
+        latestDigest: latestTag.digest,
+        lastCheckedAt: new Date(),
       },
     });
 
@@ -280,7 +287,7 @@ async function checkServiceForUpdates(
     const hasUpdate =
       latestTag.tag !== service.imageTag ||
       (currentDigest !== null &&
-        latestTag.digest !== service.latestAvailableDigest &&
+        latestTag.digest !== service.containerImage.latestDigest &&
         currentDigest !== latestTag.digest);
 
     return {
@@ -296,13 +303,13 @@ async function checkServiceForUpdates(
 
 /**
  * Check if a service should use orchestrated deployment
- * (has dependencies or is linked to a managed image)
+ * (has dependencies or has multiple services on same containerImage)
  */
 async function shouldUseOrchestration(serviceId: string): Promise<boolean> {
   const service = await prisma.service.findUnique({
     where: { id: serviceId },
     select: {
-      managedImageId: true,
+      containerImageId: true,
       dependencies: { select: { id: true } },
       dependents: { select: { id: true } },
     },
@@ -310,32 +317,44 @@ async function shouldUseOrchestration(serviceId: string): Promise<boolean> {
 
   if (!service) return false;
 
-  // Use orchestration if service has a managed image or has dependencies/dependents
+  // Check if there are multiple services linked to the same container image
+  const siblingCount = await prisma.service.count({
+    where: { containerImageId: service.containerImageId },
+  });
+
+  // Use orchestration if service has multiple siblings on same image or has dependencies/dependents
   return !!(
-    service.managedImageId ||
+    siblingCount > 1 ||
     service.dependencies.length > 0 ||
     service.dependents.length > 0
   );
 }
 
 /**
- * Run update checks on all services with registry connections
+ * Run update checks on all services with registry connections (via containerImage)
  */
 async function runUpdateChecks(): Promise<void> {
   try {
-    // Get all services that have a registry connection
+    // Get all services that have a container image with registry connection
     const services = await prisma.service.findMany({
       where: {
-        registryConnectionId: { not: null },
         discoveryStatus: 'found',
+        containerImage: {
+          registryConnectionId: { not: null },
+        },
       },
       select: {
         id: true,
         name: true,
         autoUpdate: true,
-        registryConnectionId: true,
         imageTag: true,
-        managedImageId: true,
+        containerImageId: true,
+        containerImage: {
+          select: {
+            id: true,
+            registryConnectionId: true,
+          },
+        },
         server: {
           select: {
             environment: {
@@ -356,15 +375,16 @@ async function runUpdateChecks(): Promise<void> {
     // Group services by registry connection to minimize API calls
     const byRegistry = new Map<string, typeof services>();
     for (const service of services) {
-      const key = service.registryConnectionId!;
+      const key = service.containerImage?.registryConnectionId;
+      if (!key) continue;
       if (!byRegistry.has(key)) {
         byRegistry.set(key, []);
       }
       byRegistry.get(key)!.push(service);
     }
 
-    // Track services that need orchestrated deployment (by managed image)
-    const orchestratedUpdates = new Map<string, { managedImageId: string; latestTag: string; environmentId: string }>();
+    // Track services that need orchestrated deployment (by container image)
+    const orchestratedUpdates = new Map<string, { containerImageId: string; latestTag: string; environmentId: string }>();
 
     // Check updates for each registry
     for (const [registryId, registryServices] of byRegistry) {
@@ -388,18 +408,18 @@ async function runUpdateChecks(): Promise<void> {
               // Check if this service should use orchestrated deployment
               const useOrchestration = await shouldUseOrchestration(service.id);
 
-              if (useOrchestration && service.managedImageId) {
-                // For services linked to managed images, batch them together
-                // We'll deploy the managed image which handles all linked services
-                if (!orchestratedUpdates.has(service.managedImageId)) {
-                  orchestratedUpdates.set(service.managedImageId, {
-                    managedImageId: service.managedImageId,
+              if (useOrchestration && service.containerImageId) {
+                // For services with multiple siblings on same image, batch them together
+                // We'll deploy the container image which handles all linked services
+                if (!orchestratedUpdates.has(service.containerImageId)) {
+                  orchestratedUpdates.set(service.containerImageId, {
+                    containerImageId: service.containerImageId,
                     latestTag: result.latestTag,
                     environmentId: service.server.environment.id,
                   });
                 }
               } else if (useOrchestration) {
-                // Service has dependencies but no managed image - create a deployment plan just for this service
+                // Service has dependencies - create a deployment plan just for this service
                 console.log(`[Scheduler] Orchestrated auto-deploy for ${service.name} to ${result.latestTag}`);
                 try {
                   const plan = await buildDeploymentPlan({
@@ -435,28 +455,28 @@ async function runUpdateChecks(): Promise<void> {
       }
     }
 
-    // Execute orchestrated deployments for managed images
-    for (const [managedImageId, updateInfo] of orchestratedUpdates) {
+    // Execute orchestrated deployments for container images
+    for (const [containerImageId, updateInfo] of orchestratedUpdates) {
       try {
-        const managedImage = await prisma.managedImage.findUnique({
-          where: { id: managedImageId },
+        const containerImage = await prisma.containerImage.findUnique({
+          where: { id: containerImageId },
           select: { name: true },
         });
         console.log(
-          `[Scheduler] Orchestrated deploy for managed image "${managedImage?.name}" to ${updateInfo.latestTag}`
+          `[Scheduler] Orchestrated deploy for container image "${containerImage?.name}" to ${updateInfo.latestTag}`
         );
 
         const plan = await buildDeploymentPlan({
           environmentId: updateInfo.environmentId,
-          managedImageId: managedImageId,
+          containerImageId: containerImageId,
           imageTag: updateInfo.latestTag,
           triggeredBy: 'scheduler',
           triggerType: 'auto_update',
         });
         await executePlan(plan.id);
-        console.log(`[Scheduler] Orchestrated deploy successful for managed image "${managedImage?.name}"`);
+        console.log(`[Scheduler] Orchestrated deploy successful for container image "${containerImage?.name}"`);
       } catch (deployError) {
-        console.error(`[Scheduler] Orchestrated deploy failed for managed image ${managedImageId}:`, deployError);
+        console.error(`[Scheduler] Orchestrated deploy failed for container image ${containerImageId}:`, deployError);
       }
     }
   } catch (error) {
@@ -477,7 +497,11 @@ export async function checkServiceUpdate(serviceId: string): Promise<{
     where: { id: serviceId },
     select: {
       id: true,
-      registryConnectionId: true,
+      containerImage: {
+        select: {
+          registryConnectionId: true,
+        },
+      },
     },
   });
 
@@ -485,11 +509,11 @@ export async function checkServiceUpdate(serviceId: string): Promise<{
     return { hasUpdate: false, error: 'Service not found' };
   }
 
-  if (!service.registryConnectionId) {
+  if (!service.containerImage?.registryConnectionId) {
     return { hasUpdate: false, error: 'No registry connection configured' };
   }
 
-  const creds = await getRegistryCredentials(service.registryConnectionId);
+  const creds = await getRegistryCredentials(service.containerImage.registryConnectionId);
   if (!creds) {
     return { hasUpdate: false, error: 'Could not get registry credentials' };
   }

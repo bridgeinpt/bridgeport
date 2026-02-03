@@ -19,7 +19,7 @@ import { getSystemSettings } from '../services/system-settings.js';
 const createServiceSchema = z.object({
   name: z.string().min(1),
   containerName: z.string().min(1),
-  imageName: z.string().min(1),
+  containerImageId: z.string().min(1),  // Required - links to ContainerImage
   imageTag: z.string().default('latest'),
   composePath: z.string().optional(),
 });
@@ -27,12 +27,11 @@ const createServiceSchema = z.object({
 const updateServiceSchema = z.object({
   name: z.string().min(1).optional(),
   containerName: z.string().min(1).optional(),
-  imageName: z.string().min(1).optional(),
+  containerImageId: z.string().min(1).optional(),  // Can change container image
   imageTag: z.string().optional(),
   composePath: z.string().nullable().optional(),
   healthCheckUrl: z.string().nullable().optional(),
   autoUpdate: z.boolean().optional(),
-  registryConnectionId: z.string().nullable().optional(),
   serviceTypeId: z.string().nullable().optional(),
   // Health check configuration for deployment orchestration
   healthWaitMs: z.number().int().min(0).optional(),
@@ -87,6 +86,11 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
               },
             },
           },
+          containerImage: {
+            include: {
+              registryConnection: true,
+            },
+          },
         },
       });
 
@@ -112,6 +116,18 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
 
       try {
         const server = await prisma.server.findUnique({ where: { id: serverId } });
+
+        // Verify containerImage exists and is in the same environment
+        const containerImage = await prisma.containerImage.findUnique({
+          where: { id: body.data.containerImageId },
+        });
+        if (!containerImage) {
+          return reply.code(400).send({ error: 'Container image not found' });
+        }
+        if (containerImage.environmentId !== server?.environmentId) {
+          return reply.code(400).send({ error: 'Container image must be in the same environment' });
+        }
+
         const service = await prisma.service.create({
           data: {
             ...body.data,
@@ -124,7 +140,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           resourceType: 'service',
           resourceId: service.id,
           resourceName: service.name,
-          details: { containerName: service.containerName, imageName: service.imageName },
+          details: { containerName: service.containerName, containerImageId: service.containerImageId },
           userId: request.authUser!.id,
           environmentId: server?.environmentId,
         });
@@ -387,14 +403,15 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
 
       const service = await prisma.service.findUnique({
         where: { id },
+        include: { containerImage: true },
       });
 
       if (!service) {
         return reply.code(404).send({ error: 'Service not found' });
       }
 
-      // Extract repository name from full image name
-      const repoName = stripRegistryPrefix(service.imageName);
+      // Extract repository name from full image name (from containerImage)
+      const repoName = stripRegistryPrefix(service.containerImage.imageName);
 
       try {
         const tags = await getLatestImageTags(repoName);
@@ -558,18 +575,18 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           running: containerInfo.running,
         };
 
-        // Check for available image updates if registry is linked
+        // Check for available image updates (uses containerImage.registryConnectionId)
         let updateInfo: { hasUpdate: boolean; latestTag?: string } | null = null;
-        if (service.registryConnectionId) {
-          try {
-            const updateResult = await checkServiceUpdate(id);
+        try {
+          const updateResult = await checkServiceUpdate(id);
+          if (!updateResult.error) {
             updateInfo = {
               hasUpdate: updateResult.hasUpdate,
               latestTag: updateResult.latestTag,
             };
-          } catch (err) {
-            console.error(`[HealthCheck] Failed to check updates for ${service.name}:`, err);
           }
+        } catch (err) {
+          console.error(`[HealthCheck] Failed to check updates for ${service.name}:`, err);
         }
 
         await logAudit({
@@ -686,7 +703,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
 
       const service = await prisma.service.findUnique({
         where: { id },
-        include: { server: true },
+        include: { server: true, containerImage: true },
       });
 
       if (!service) {
@@ -699,13 +716,13 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: result.error });
       }
 
-      // Fetch updated service data
-      const updatedService = await prisma.service.findUnique({
-        where: { id },
+      // Fetch updated container image data
+      const updatedContainerImage = await prisma.containerImage.findUnique({
+        where: { id: service.containerImageId },
         select: {
-          latestAvailableTag: true,
-          latestAvailableDigest: true,
-          lastUpdateCheckAt: true,
+          latestTag: true,
+          latestDigest: true,
+          lastCheckedAt: true,
         },
       });
 
@@ -714,7 +731,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         currentTag: service.imageTag,
         latestTag: result.latestTag,
         latestDigest: result.latestDigest,
-        lastUpdateCheckAt: updatedService?.lastUpdateCheckAt,
+        lastUpdateCheckAt: updatedContainerImage?.lastCheckedAt,
       };
     }
   );

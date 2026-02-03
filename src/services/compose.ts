@@ -48,6 +48,7 @@ export async function generateDeploymentArtifacts(
       files: {
         include: { configFile: true },
       },
+      containerImage: true,
     },
   });
 
@@ -87,6 +88,9 @@ export async function generateDeploymentArtifacts(
   // Generate compose file
   let composeContent: string;
 
+  // Get imageName from containerImage
+  const imageName = service.containerImage.imageName;
+
   if (service.composeTemplate) {
     // Use custom compose template with variable substitution
     composeContent = service.composeTemplate;
@@ -95,9 +99,9 @@ export async function generateDeploymentArtifacts(
     const vars: Record<string, string> = {
       SERVICE_NAME: service.name,
       CONTAINER_NAME: service.containerName,
-      IMAGE_NAME: service.imageName,
+      IMAGE_NAME: imageName,
       IMAGE_TAG: service.imageTag,
-      FULL_IMAGE: `${service.imageName}:${service.imageTag}`,
+      FULL_IMAGE: `${imageName}:${service.imageTag}`,
     };
 
     // Add config file mount paths
@@ -114,7 +118,7 @@ export async function generateDeploymentArtifacts(
     const composeConfig: ComposeConfig = {
       services: {
         [service.name]: {
-          image: `${service.imageName}:${service.imageTag}`,
+          image: `${imageName}:${service.imageTag}`,
           container_name: service.containerName,
           restart: 'unless-stopped',
         },

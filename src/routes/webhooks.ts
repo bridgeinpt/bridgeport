@@ -3,6 +3,7 @@ import { z } from 'zod';
 import crypto from 'crypto';
 import { prisma } from '../lib/db.js';
 import { deployService } from '../services/deploy.js';
+import { buildDeploymentPlan, executePlan } from '../services/orchestration.js';
 import { logAudit } from '../services/audit.js';
 
 const deployWebhookSchema = z.object({
@@ -10,6 +11,12 @@ const deployWebhookSchema = z.object({
   environment: z.string().min(1), // Environment name
   imageTag: z.string().optional(),
   generateArtifacts: z.boolean().default(false),
+});
+
+const deployImageWebhookSchema = z.object({
+  imageName: z.string().min(1), // Full image name
+  environment: z.string().min(1), // Environment name
+  imageTag: z.string().min(1),
 });
 
 // Simple webhook secret verification
@@ -200,5 +207,113 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
     }
 
     return { message: 'Event ignored' };
+  });
+
+  // Deploy all services for a ContainerImage (respects autoUpdate flag)
+  fastify.post('/api/webhooks/deploy-image', async (request, reply) => {
+    const signature = request.headers['x-webhook-signature'] as string;
+    const webhookSecret = process.env.WEBHOOK_SECRET;
+
+    // Verify signature if secret is configured
+    if (webhookSecret) {
+      if (!signature) {
+        return reply.code(401).send({ error: 'Missing signature' });
+      }
+
+      const rawBody = JSON.stringify(request.body);
+      if (!verifyWebhookSignature(rawBody, signature, webhookSecret)) {
+        return reply.code(401).send({ error: 'Invalid signature' });
+      }
+    }
+
+    const body = deployImageWebhookSchema.safeParse(request.body);
+    if (!body.success) {
+      return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
+    }
+
+    // Find environment
+    const environment = await prisma.environment.findUnique({
+      where: { name: body.data.environment },
+    });
+
+    if (!environment) {
+      return reply.code(404).send({ error: 'Environment not found' });
+    }
+
+    // Find container image by imageName in the environment
+    const containerImage = await prisma.containerImage.findFirst({
+      where: {
+        imageName: body.data.imageName,
+        environmentId: environment.id,
+      },
+      include: {
+        services: {
+          where: { autoUpdate: true },  // Only autoUpdate services
+        },
+      },
+    });
+
+    if (!containerImage) {
+      return reply.code(404).send({ error: 'Container image not found' });
+    }
+
+    if (containerImage.services.length === 0) {
+      return reply.code(400).send({
+        error: 'No services with autoUpdate enabled for this image',
+        hint: 'Enable autoUpdate on services to deploy via this webhook',
+      });
+    }
+
+    try {
+      // Build deployment plan for all autoUpdate services
+      const plan = await buildDeploymentPlan({
+        environmentId: environment.id,
+        containerImageId: containerImage.id,
+        imageTag: body.data.imageTag,
+        triggerType: 'webhook',
+        triggeredBy: 'webhook',
+      });
+
+      await logAudit({
+        action: 'webhook_deploy',
+        resourceType: 'container_image',
+        resourceId: containerImage.id,
+        resourceName: containerImage.name,
+        details: {
+          source: 'deploy-image-webhook',
+          imageTag: body.data.imageTag,
+          planId: plan.id,
+          serviceCount: containerImage.services.length,
+        },
+        environmentId: environment.id,
+      });
+
+      // Execute plan asynchronously
+      executePlan(plan.id).catch((err) => {
+        console.error(`[Webhook] Plan ${plan.id} execution failed:`, err);
+      });
+
+      return {
+        success: true,
+        planId: plan.id,
+        serviceCount: containerImage.services.length,
+        services: containerImage.services.map((s) => s.name),
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Deployment failed';
+
+      await logAudit({
+        action: 'webhook_deploy',
+        resourceType: 'container_image',
+        resourceId: containerImage.id,
+        resourceName: containerImage.name,
+        details: { source: 'deploy-image-webhook', imageTag: body.data.imageTag },
+        success: false,
+        error: message,
+        environmentId: environment.id,
+      });
+
+      return reply.code(500).send({ error: message });
+    }
   });
 }

@@ -22,7 +22,7 @@ import MonitoringAgents from './pages/MonitoringAgents';
 import Settings from './pages/Settings';
 import Notifications from './pages/Notifications';
 import NotificationSettings from './pages/admin/NotificationSettings';
-import ManagedImages from './pages/ManagedImages';
+import ContainerImages from './pages/ContainerImages';
 import DeploymentPlans from './pages/DeploymentPlans';
 import DeploymentPlanDetail from './pages/DeploymentPlanDetail';
 import ServiceTypes from './pages/settings/ServiceTypes';
@@ -63,7 +63,7 @@ export default function App() {
                 <Route path="/secrets" element={<Secrets />} />
                 <Route path="/config-files" element={<ConfigFiles />} />
                 <Route path="/registries" element={<Registries />} />
-                <Route path="/managed-images" element={<ManagedImages />} />
+                <Route path="/container-images" element={<ContainerImages />} />
                 <Route path="/deployment-plans" element={<DeploymentPlans />} />
                 <Route path="/deployment-plans/:id" element={<DeploymentPlanDetail />} />
                 <Route path="/databases" element={<Databases />} />

@@ -187,12 +187,12 @@ export default function DeploymentPlanDetail() {
               Created {formatDistanceToNow(new Date(plan.createdAt), { addSuffix: true })}
             </span>
           </div>
-          {plan.managedImage && (
+          {plan.containerImage && (
             <Link
-              to="/managed-images"
+              to="/container-images"
               className="text-primary-400 text-sm mt-1 inline-block hover:underline"
             >
-              Image: {plan.managedImage.name}
+              Image: {plan.containerImage.name}
             </Link>
           )}
         </div>

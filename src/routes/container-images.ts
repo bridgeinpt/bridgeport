@@ -2,27 +2,25 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma, isPrismaNotFoundError } from '../lib/db.js';
 import {
-  createManagedImage,
-  updateManagedImage,
-  deleteManagedImage,
-  getManagedImage,
-  listManagedImages,
-  linkServiceToManagedImage,
-  unlinkServiceFromManagedImage,
+  createContainerImage,
+  updateContainerImage,
+  deleteContainerImage,
+  getContainerImage,
+  listContainerImages,
+  linkServiceToContainerImage,
   getTagHistory,
-  findUnlinkedServicesByImageName,
 } from '../services/image-management.js';
 import { buildDeploymentPlan, executePlan } from '../services/orchestration.js';
 import { logAudit } from '../services/audit.js';
 
-const createManagedImageSchema = z.object({
+const createContainerImageSchema = z.object({
   name: z.string().min(1),
   imageName: z.string().min(1),
   currentTag: z.string().min(1),
   registryConnectionId: z.string().nullable().optional(),
 });
 
-const updateManagedImageSchema = z.object({
+const updateContainerImageSchema = z.object({
   name: z.string().min(1).optional(),
   currentTag: z.string().min(1).optional(),
   registryConnectionId: z.string().nullable().optional(),
@@ -33,32 +31,32 @@ const deployImageSchema = z.object({
   autoRollback: z.boolean().default(true),
 });
 
-export async function managedImageRoutes(fastify: FastifyInstance): Promise<void> {
-  // List managed images for environment
+export async function containerImageRoutes(fastify: FastifyInstance): Promise<void> {
+  // List container images for environment
   fastify.get(
-    '/api/environments/:envId/managed-images',
+    '/api/environments/:envId/container-images',
     { preHandler: [fastify.authenticate] },
     async (request) => {
       const { envId } = request.params as { envId: string };
-      const images = await listManagedImages(envId);
+      const images = await listContainerImages(envId);
       return { images };
     }
   );
 
-  // Create managed image
+  // Create container image
   fastify.post(
-    '/api/environments/:envId/managed-images',
+    '/api/environments/:envId/container-images',
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
-      const body = createManagedImageSchema.safeParse(request.body);
+      const body = createContainerImageSchema.safeParse(request.body);
 
       if (!body.success) {
         return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
       }
 
       try {
-        const image = await createManagedImage({
+        const image = await createContainerImage({
           ...body.data,
           environmentId: envId,
           registryConnectionId: body.data.registryConnectionId ?? undefined,
@@ -66,7 +64,7 @@ export async function managedImageRoutes(fastify: FastifyInstance): Promise<void
 
         await logAudit({
           action: 'create',
-          resourceType: 'managed_image',
+          resourceType: 'container_image',
           resourceId: image.id,
           resourceName: image.name,
           details: { imageName: image.imageName, currentTag: image.currentTag },
@@ -77,48 +75,48 @@ export async function managedImageRoutes(fastify: FastifyInstance): Promise<void
         return { image };
       } catch (error) {
         if (error instanceof Error && error.message.includes('Unique constraint')) {
-          return reply.code(409).send({ error: 'A managed image for this image name already exists' });
+          return reply.code(409).send({ error: 'A container image for this image name already exists' });
         }
         throw error;
       }
     }
   );
 
-  // Get managed image
+  // Get container image
   fastify.get(
-    '/api/managed-images/:id',
+    '/api/container-images/:id',
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const image = await getManagedImage(id);
+      const image = await getContainerImage(id);
 
       if (!image) {
-        return reply.code(404).send({ error: 'Managed image not found' });
+        return reply.code(404).send({ error: 'Container image not found' });
       }
 
       return { image };
     }
   );
 
-  // Update managed image
+  // Update container image
   fastify.patch(
-    '/api/managed-images/:id',
+    '/api/container-images/:id',
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = updateManagedImageSchema.safeParse(request.body);
+      const body = updateContainerImageSchema.safeParse(request.body);
 
       if (!body.success) {
         return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
       }
 
       try {
-        const existing = await prisma.managedImage.findUnique({ where: { id } });
-        const image = await updateManagedImage(id, body.data);
+        const existing = await prisma.containerImage.findUnique({ where: { id } });
+        const image = await updateContainerImage(id, body.data);
 
         await logAudit({
           action: 'update',
-          resourceType: 'managed_image',
+          resourceType: 'container_image',
           resourceId: image.id,
           resourceName: image.name,
           details: { changes: body.data },
@@ -129,28 +127,28 @@ export async function managedImageRoutes(fastify: FastifyInstance): Promise<void
         return { image };
       } catch (error) {
         if (isPrismaNotFoundError(error)) {
-          return reply.code(404).send({ error: 'Managed image not found' });
+          return reply.code(404).send({ error: 'Container image not found' });
         }
         throw error;
       }
     }
   );
 
-  // Delete managed image
+  // Delete container image
   fastify.delete(
-    '/api/managed-images/:id',
+    '/api/container-images/:id',
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
       try {
-        const image = await prisma.managedImage.findUnique({ where: { id } });
-        await deleteManagedImage(id);
+        const image = await prisma.containerImage.findUnique({ where: { id } });
+        await deleteContainerImage(id);
 
         if (image) {
           await logAudit({
             action: 'delete',
-            resourceType: 'managed_image',
+            resourceType: 'container_image',
             resourceId: id,
             resourceName: image.name,
             userId: request.authUser!.id,
@@ -161,16 +159,20 @@ export async function managedImageRoutes(fastify: FastifyInstance): Promise<void
         return { success: true };
       } catch (error) {
         if (isPrismaNotFoundError(error)) {
-          return reply.code(404).send({ error: 'Managed image not found' });
+          return reply.code(404).send({ error: 'Container image not found' });
+        }
+        // Handle delete restriction error
+        if (error instanceof Error && error.message.includes('Cannot delete container image')) {
+          return reply.code(400).send({ error: error.message });
         }
         throw error;
       }
     }
   );
 
-  // Deploy managed image to all linked services
+  // Deploy container image to all linked services
   fastify.post(
-    '/api/managed-images/:id/deploy',
+    '/api/container-images/:id/deploy',
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
@@ -180,9 +182,9 @@ export async function managedImageRoutes(fastify: FastifyInstance): Promise<void
         return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
       }
 
-      const image = await getManagedImage(id);
+      const image = await getContainerImage(id);
       if (!image) {
-        return reply.code(404).send({ error: 'Managed image not found' });
+        return reply.code(404).send({ error: 'Container image not found' });
       }
 
       if (image.services.length === 0) {
@@ -193,7 +195,7 @@ export async function managedImageRoutes(fastify: FastifyInstance): Promise<void
         // Build and start the deployment plan
         const plan = await buildDeploymentPlan({
           environmentId: image.environmentId,
-          managedImageId: id,
+          containerImageId: id,
           imageTag: body.data.imageTag,
           triggerType: 'manual',
           triggeredBy: request.authUser!.email,
@@ -203,7 +205,7 @@ export async function managedImageRoutes(fastify: FastifyInstance): Promise<void
 
         await logAudit({
           action: 'deploy',
-          resourceType: 'managed_image',
+          resourceType: 'container_image',
           resourceId: id,
           resourceName: image.name,
           details: {
@@ -217,7 +219,7 @@ export async function managedImageRoutes(fastify: FastifyInstance): Promise<void
 
         // Execute plan asynchronously
         executePlan(plan.id).catch((err) => {
-          console.error(`[ManagedImage] Plan ${plan.id} execution failed:`, err);
+          console.error(`[ContainerImage] Plan ${plan.id} execution failed:`, err);
         });
 
         return { plan };
@@ -228,17 +230,17 @@ export async function managedImageRoutes(fastify: FastifyInstance): Promise<void
     }
   );
 
-  // Get tag history for managed image
+  // Get tag history for container image
   fastify.get(
-    '/api/managed-images/:id/history',
+    '/api/container-images/:id/history',
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const { limit } = request.query as { limit?: string };
 
-      const image = await prisma.managedImage.findUnique({ where: { id } });
+      const image = await prisma.containerImage.findUnique({ where: { id } });
       if (!image) {
-        return reply.code(404).send({ error: 'Managed image not found' });
+        return reply.code(404).send({ error: 'Container image not found' });
       }
 
       const history = await getTagHistory(id, limit ? parseInt(limit) : 20);
@@ -246,16 +248,16 @@ export async function managedImageRoutes(fastify: FastifyInstance): Promise<void
     }
   );
 
-  // Link service to managed image
+  // Link service to container image
   fastify.post(
-    '/api/managed-images/:id/link/:serviceId',
+    '/api/container-images/:id/link/:serviceId',
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id, serviceId } = request.params as { id: string; serviceId: string };
 
-      const image = await prisma.managedImage.findUnique({ where: { id } });
+      const image = await prisma.containerImage.findUnique({ where: { id } });
       if (!image) {
-        return reply.code(404).send({ error: 'Managed image not found' });
+        return reply.code(404).send({ error: 'Container image not found' });
       }
 
       const service = await prisma.service.findUnique({
@@ -268,14 +270,14 @@ export async function managedImageRoutes(fastify: FastifyInstance): Promise<void
 
       // Verify service is in same environment
       if (service.server.environmentId !== image.environmentId) {
-        return reply.code(400).send({ error: 'Service must be in the same environment as the managed image' });
+        return reply.code(400).send({ error: 'Service must be in the same environment as the container image' });
       }
 
-      const updatedService = await linkServiceToManagedImage(id, serviceId);
+      const updatedService = await linkServiceToContainerImage(id, serviceId);
 
       await logAudit({
         action: 'update',
-        resourceType: 'managed_image',
+        resourceType: 'container_image',
         resourceId: id,
         resourceName: image.name,
         details: { linkedService: service.name, serviceId },
@@ -287,56 +289,36 @@ export async function managedImageRoutes(fastify: FastifyInstance): Promise<void
     }
   );
 
-  // Unlink service from managed image
-  fastify.delete(
-    '/api/managed-images/:id/link/:serviceId',
-    { preHandler: [fastify.authenticate] },
-    async (request, reply) => {
-      const { id, serviceId } = request.params as { id: string; serviceId: string };
-
-      const image = await prisma.managedImage.findUnique({ where: { id } });
-      if (!image) {
-        return reply.code(404).send({ error: 'Managed image not found' });
-      }
-
-      const service = await prisma.service.findUnique({ where: { id: serviceId } });
-      if (!service) {
-        return reply.code(404).send({ error: 'Service not found' });
-      }
-
-      if (service.managedImageId !== id) {
-        return reply.code(400).send({ error: 'Service is not linked to this managed image' });
-      }
-
-      const updatedService = await unlinkServiceFromManagedImage(serviceId);
-
-      await logAudit({
-        action: 'update',
-        resourceType: 'managed_image',
-        resourceId: id,
-        resourceName: image.name,
-        details: { unlinkedService: service.name, serviceId },
-        userId: request.authUser!.id,
-        environmentId: image.environmentId,
-      });
-
-      return { service: updatedService };
-    }
-  );
-
-  // Get services that could be linked (same image name, not already linked)
+  // Get services that could be re-linked (different containerImageId)
   fastify.get(
-    '/api/managed-images/:id/linkable-services',
+    '/api/container-images/:id/linkable-services',
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const image = await prisma.managedImage.findUnique({ where: { id } });
+      const image = await prisma.containerImage.findUnique({ where: { id } });
       if (!image) {
-        return reply.code(404).send({ error: 'Managed image not found' });
+        return reply.code(404).send({ error: 'Container image not found' });
       }
 
-      const services = await findUnlinkedServicesByImageName(image.environmentId, image.imageName);
+      // Find services in same environment that are linked to a different container image
+      const services = await prisma.service.findMany({
+        where: {
+          server: {
+            environmentId: image.environmentId,
+          },
+          containerImageId: {
+            not: id,
+          },
+        },
+        include: {
+          server: true,
+          containerImage: {
+            select: { id: true, name: true, imageName: true },
+          },
+        },
+      });
+
       return { services };
     }
   );

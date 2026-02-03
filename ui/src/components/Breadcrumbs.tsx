@@ -14,7 +14,7 @@ const routeNames: Record<string, string> = {
   'users': 'Users',
   'settings': 'Environment Config',
   'about': 'About',
-  'managed-images': 'Managed Images',
+  'container-images': 'Container Images',
   'deployment-plans': 'Deployment Plans',
   'admin': 'Admin',
   'notifications': 'Notifications Config',

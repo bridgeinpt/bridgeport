@@ -3,6 +3,7 @@ import { SSHClient, LocalClient, DockerSSH, isLocalhost, createClientForServer }
 import { getEnvironmentSshKey } from '../routes/environments.js';
 import { parseRegistryFromImage } from '../lib/image-utils.js';
 import { checkServiceUpdate } from '../lib/scheduler.js';
+import { findOrCreateContainerImage } from './image-management.js';
 import type { Server, Service, RegistryConnection } from '@prisma/client';
 
 /**
@@ -320,8 +321,16 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
         currentRegistries
       );
 
+      // Find or create ContainerImage for this image
+      const containerImage = await findOrCreateContainerImage(
+        server.environmentId,
+        fullImageName,
+        imageTag,
+        registryConnectionId
+      );
+
       if (existing) {
-        // Update status, ports, mark as found, and link to registry if not already linked
+        // Update status, ports, mark as found
         const updated = await prisma.service.update({
           where: { id: existing.id },
           data: {
@@ -333,8 +342,8 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
             discoveryStatus: 'found',
             lastCheckedAt: new Date(),
             lastDiscoveredAt: new Date(),
-            // Only update registry if not already set
-            ...(existing.registryConnectionId ? {} : { registryConnectionId }),
+            // Update containerImageId if changed or not set
+            containerImageId: containerImage.id,
           },
         });
         services.push(updated);
@@ -343,7 +352,6 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
           data: {
             name: container.name,
             containerName: container.name,
-            imageName: fullImageName,
             imageTag,
             status: containerStatus, // Keep for backwards compatibility
             containerStatus,
@@ -353,7 +361,7 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
             lastCheckedAt: new Date(),
             lastDiscoveredAt: new Date(),
             serverId,
-            registryConnectionId,
+            containerImageId: containerImage.id,
           },
         });
         services.push(created);
@@ -378,14 +386,13 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
       }
     }
 
-    // Check for available image updates for discovered services with registry connections
+    // Check for available image updates for discovered services
+    // The containerImage now has the registry connection
     for (const service of services) {
-      if (service.registryConnectionId) {
-        // Run in background, don't block discovery
-        checkServiceUpdate(service.id).catch((err) => {
-          console.error(`[Discovery] Failed to check updates for ${service.name}:`, err);
-        });
-      }
+      // Run in background, don't block discovery
+      checkServiceUpdate(service.id).catch((err) => {
+        console.error(`[Discovery] Failed to check updates for ${service.name}:`, err);
+      });
     }
 
     return { services, missing };

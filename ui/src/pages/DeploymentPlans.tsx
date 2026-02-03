@@ -67,8 +67,8 @@ export default function DeploymentPlans() {
         <p className="text-slate-400">
           Orchestrated multi-service deployments for {selectedEnvironment.name}
         </p>
-        <Link to="/managed-images" className="btn btn-primary">
-          Deploy via Managed Images
+        <Link to="/container-images" className="btn btn-primary">
+          Deploy via Container Images
         </Link>
       </div>
 
@@ -86,8 +86,8 @@ export default function DeploymentPlans() {
           <p className="text-slate-500 text-sm mb-4">
             Deployment plans are created when you deploy managed images or services with dependencies
           </p>
-          <Link to="/managed-images" className="btn btn-primary">
-            Go to Managed Images
+          <Link to="/container-images" className="btn btn-primary">
+            Go to Container Images
           </Link>
         </div>
       ) : (
@@ -145,9 +145,9 @@ export default function DeploymentPlans() {
                         )}
                       </div>
 
-                      {plan.managedImage && (
+                      {plan.containerImage && (
                         <p className="text-primary-400 text-xs mt-2">
-                          Image: {plan.managedImage.name}
+                          Image: {plan.containerImage.name}
                         </p>
                       )}
 

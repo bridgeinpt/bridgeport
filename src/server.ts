@@ -30,7 +30,7 @@ import { smtpRoutes } from './routes/admin/smtp.js';
 import { webhookAdminRoutes } from './routes/admin/webhooks.js';
 import { initializeNotificationTypes } from './services/notifications.js';
 import { initializeServiceTypes } from './services/service-types.js';
-import { managedImageRoutes } from './routes/managed-images.js';
+import { containerImageRoutes } from './routes/container-images.js';
 import { serviceDependencyRoutes } from './routes/service-dependencies.js';
 import { deploymentPlanRoutes } from './routes/deployment-plans.js';
 import { settingsRoutes } from './routes/settings.js';
@@ -138,7 +138,7 @@ async function buildServer() {
   await fastify.register(notificationRoutes);
   await fastify.register(smtpRoutes);
   await fastify.register(webhookAdminRoutes);
-  await fastify.register(managedImageRoutes);
+  await fastify.register(containerImageRoutes);
   await fastify.register(serviceDependencyRoutes);
   await fastify.register(deploymentPlanRoutes);
   await fastify.register(settingsRoutes);

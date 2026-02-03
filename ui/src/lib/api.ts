@@ -255,7 +255,7 @@ export const discoverContainers = (id: string) =>
 export interface CreateServiceInput {
   name: string;
   containerName: string;
-  imageName: string;
+  containerImageId: string;  // Required - links to ContainerImage
   imageTag?: string;
   composePath?: string;
   healthCheckUrl?: string;
@@ -406,7 +406,6 @@ export interface Service {
   id: string;
   name: string;
   containerName: string;
-  imageName: string;
   imageTag: string;
   composePath: string | null;
   healthCheckUrl: string | null;
@@ -423,9 +422,10 @@ export interface Service {
   latestAvailableTag: string | null;
   latestAvailableDigest: string | null;
   lastUpdateCheckAt: string | null;
-  registryConnectionId: string | null;
+  // Container image (central entity for image management)
+  containerImageId: string;
+  containerImage?: ContainerImage | null;
   // Orchestration fields
-  managedImageId: string | null;
   healthWaitMs: number;
   healthRetries: number;
   healthIntervalMs: number;
@@ -506,12 +506,11 @@ export const updateService = (id: string, data: Partial<ServiceUpdate>) =>
 export interface ServiceUpdate {
   name?: string;
   containerName?: string;
-  imageName?: string;
   imageTag?: string;
   composePath?: string | null;
   healthCheckUrl?: string | null;
   autoUpdate?: boolean;
-  registryConnectionId?: string | null;
+  containerImageId?: string;
   serviceTypeId?: string | null;
 }
 
@@ -807,13 +806,13 @@ export const testRegistryConnection = (id: string) =>
 export interface RegistryService {
   id: string;
   name: string;
-  imageName: string;
   imageTag: string;
   autoUpdate: boolean;
   latestAvailableTag: string | null;
   latestAvailableDigest: string | null;
   lastUpdateCheckAt: string | null;
   server: { id: string; name: string };
+  containerImage?: { id: string; name: string; imageName: string } | null;
 }
 
 export const getRegistryServices = (id: string) =>
@@ -1268,8 +1267,8 @@ export const testWebhook = (id: string) =>
 
 // ==================== Deployment Orchestration ====================
 
-// Managed Images
-export interface ManagedImage {
+// Container Images (central entity for image management)
+export interface ContainerImage {
   id: string;
   name: string;
   imageName: string;
@@ -1285,51 +1284,50 @@ export interface ManagedImage {
   services: Service[];
 }
 
-export interface ManagedImageInput {
+export interface ContainerImageInput {
   name: string;
   imageName: string;
   currentTag: string;
   registryConnectionId?: string | null;
 }
 
-export interface ImageTagHistory {
+export interface ContainerImageHistory {
   id: string;
   tag: string;
   digest: string | null;
+  status: string;  // 'success' | 'failed' | 'rolled_back'
   deployedAt: string;
   deployedBy: string | null;
-  managedImageId: string;
+  containerImageId: string;
+  deployments?: Deployment[];
 }
 
-export const listManagedImages = (envId: string) =>
-  api.get<{ images: ManagedImage[] }>(`/environments/${envId}/managed-images`);
+export const listContainerImages = (envId: string) =>
+  api.get<{ images: ContainerImage[] }>(`/environments/${envId}/container-images`);
 
-export const createManagedImage = (envId: string, data: ManagedImageInput) =>
-  api.post<{ image: ManagedImage }>(`/environments/${envId}/managed-images`, data);
+export const createContainerImage = (envId: string, data: ContainerImageInput) =>
+  api.post<{ image: ContainerImage }>(`/environments/${envId}/container-images`, data);
 
-export const getManagedImage = (id: string) =>
-  api.get<{ image: ManagedImage }>(`/managed-images/${id}`);
+export const getContainerImage = (id: string) =>
+  api.get<{ image: ContainerImage }>(`/container-images/${id}`);
 
-export const updateManagedImage = (id: string, data: Partial<ManagedImageInput>) =>
-  api.patch<{ image: ManagedImage }>(`/managed-images/${id}`, data);
+export const updateContainerImage = (id: string, data: Partial<ContainerImageInput>) =>
+  api.patch<{ image: ContainerImage }>(`/container-images/${id}`, data);
 
-export const deleteManagedImage = (id: string) =>
-  api.delete<{ success: boolean }>(`/managed-images/${id}`);
+export const deleteContainerImage = (id: string) =>
+  api.delete<{ success: boolean }>(`/container-images/${id}`);
 
-export const deployManagedImage = (id: string, imageTag: string, autoRollback = true) =>
-  api.post<{ plan: DeploymentPlan }>(`/managed-images/${id}/deploy`, { imageTag, autoRollback });
+export const deployContainerImage = (id: string, imageTag: string, autoRollback = true) =>
+  api.post<{ plan: DeploymentPlan }>(`/container-images/${id}/deploy`, { imageTag, autoRollback });
 
-export const getManagedImageHistory = (id: string, limit?: number) =>
-  api.get<{ history: ImageTagHistory[] }>(`/managed-images/${id}/history${limit ? `?limit=${limit}` : ''}`);
+export const getContainerImageHistory = (id: string, limit?: number) =>
+  api.get<{ history: ContainerImageHistory[] }>(`/container-images/${id}/history${limit ? `?limit=${limit}` : ''}`);
 
-export const linkServiceToManagedImage = (imageId: string, serviceId: string) =>
-  api.post<{ service: Service }>(`/managed-images/${imageId}/link/${serviceId}`);
-
-export const unlinkServiceFromManagedImage = (imageId: string, serviceId: string) =>
-  api.delete<{ service: Service }>(`/managed-images/${imageId}/link/${serviceId}`);
+export const linkServiceToContainerImage = (imageId: string, serviceId: string) =>
+  api.post<{ service: Service }>(`/container-images/${imageId}/link/${serviceId}`);
 
 export const getLinkableServices = (imageId: string) =>
-  api.get<{ services: Service[] }>(`/managed-images/${imageId}/linkable-services`);
+  api.get<{ services: Service[] }>(`/container-images/${imageId}/linkable-services`);
 
 // Service Dependencies
 export type DependencyType = 'health_before' | 'deploy_after';
@@ -1373,7 +1371,7 @@ export interface DependencyGraphNode {
   id: string;
   name: string;
   server: string;
-  managedImage: { id: string; name: string } | null;
+  containerImage: { id: string; name: string } | null;
   status: string;
   healthStatus: string;
   dependencyCount: number;
@@ -1431,10 +1429,10 @@ export interface DeploymentPlan {
   logs: string | null;
   createdAt: string;
   environmentId: string;
-  managedImageId: string | null;
+  containerImageId: string | null;
   userId: string | null;
   steps: DeploymentPlanStep[];
-  managedImage?: { id: string; name: string } | null;
+  containerImage?: { id: string; name: string } | null;
   user?: { id: string; email: string; name: string | null } | null;
   environment?: { id: string; name: string } | null;
 }

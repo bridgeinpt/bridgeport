@@ -22,7 +22,7 @@ import {
   getAuditLogs,
   getServiceHistory,
   getServiceDependencies,
-  getManagedImage,
+  getContainerImage,
   listServiceTypes,
   type ServiceWithServer,
   type Deployment,
@@ -34,7 +34,7 @@ import {
   type ExposedPort,
   type ServiceHistoryEntry,
   type ServiceDependency,
-  type ManagedImage,
+  type ContainerImage,
   type ServiceType,
 } from '../lib/api';
 import { DependencyEditor } from '../components/DependencyEditor';
@@ -79,20 +79,14 @@ export default function ServiceDetail() {
   const [imageTag, setImageTag] = useState('');
 
   // Inline deploy card editing state
-  const [editingImageName, setEditingImageName] = useState(false);
   const [editingCurrentTag, setEditingCurrentTag] = useState(false);
-  const [editingRegistry, setEditingRegistry] = useState(false);
-  const [inlineImageName, setInlineImageName] = useState('');
   const [inlineCurrentTag, setInlineCurrentTag] = useState('');
-  const [inlineRegistryId, setInlineRegistryId] = useState('');
   const [savingInline, setSavingInline] = useState(false);
 
   // Config edit state
   const [editComposePath, setEditComposePath] = useState<string>('');
   const [editContainerName, setEditContainerName] = useState<string>('');
-  const [editImageName, setEditImageName] = useState<string>('');
   const [editHealthCheckUrl, setEditHealthCheckUrl] = useState<string>('');
-  const [editRegistryConnectionId, setEditRegistryConnectionId] = useState<string>('');
 
   // Attached files state
   const [attachedFiles, setAttachedFiles] = useState<ServiceFile[]>([]);
@@ -151,7 +145,7 @@ export default function ServiceDetail() {
 
   // Orchestration state
   const [dependencies, setDependencies] = useState<ServiceDependency[]>([]);
-  const [managedImage, setManagedImage] = useState<ManagedImage | null>(null);
+  const [containerImage, setContainerImage] = useState<ContainerImage | null>(null);
 
   // Pagination hooks (must be at top level)
   const deploymentPagination = usePagination({ data: deployments, defaultPageSize: 10 });
@@ -164,11 +158,11 @@ export default function ServiceDetail() {
         getService(id).then(({ service }) => {
           setService(service);
           setImageTag(service.imageTag);
-          // Load managed image if linked
-          if (service.managedImageId) {
-            getManagedImage(service.managedImageId)
-              .then(({ image }) => setManagedImage(image))
-              .catch(() => setManagedImage(null));
+          // Load container image if linked
+          if (service.containerImageId) {
+            getContainerImage(service.containerImageId)
+              .then(({ image }) => setContainerImage(image))
+              .catch(() => setContainerImage(null));
           }
         }),
         getDeploymentHistory(id).then(({ deployments }) => setDeployments(deployments)),
@@ -281,13 +275,6 @@ export default function ServiceDetail() {
   };
 
   // Inline deploy card editing handlers
-  const startEditImageName = () => {
-    if (service) {
-      setInlineImageName(service.imageName || '');
-      setEditingImageName(true);
-    }
-  };
-
   const startEditCurrentTag = () => {
     if (service) {
       setInlineCurrentTag(service.imageTag || '');
@@ -295,35 +282,8 @@ export default function ServiceDetail() {
     }
   };
 
-  const startEditRegistry = () => {
-    if (service) {
-      setInlineRegistryId(service.registryConnectionId || '');
-      setEditingRegistry(true);
-    }
-  };
-
   const cancelInlineEdit = () => {
-    setEditingImageName(false);
     setEditingCurrentTag(false);
-    setEditingRegistry(false);
-  };
-
-  const saveInlineImageName = async () => {
-    if (!id || !service || inlineImageName === service.imageName) {
-      cancelInlineEdit();
-      return;
-    }
-    setSavingInline(true);
-    try {
-      const { service: updated } = await updateService(id, { imageName: inlineImageName });
-      setService((prev) => (prev ? { ...prev, imageName: updated.imageName } : null));
-      setEditingImageName(false);
-      toast.success('Image name updated');
-    } catch {
-      toast.error('Failed to update image name');
-    } finally {
-      setSavingInline(false);
-    }
   };
 
   const saveInlineCurrentTag = async () => {
@@ -340,26 +300,6 @@ export default function ServiceDetail() {
       toast.success('Image tag updated');
     } catch {
       toast.error('Failed to update image tag');
-    } finally {
-      setSavingInline(false);
-    }
-  };
-
-  const saveInlineRegistry = async () => {
-    if (!id || !service || inlineRegistryId === (service.registryConnectionId || '')) {
-      cancelInlineEdit();
-      return;
-    }
-    setSavingInline(true);
-    try {
-      const { service: updated } = await updateService(id, {
-        registryConnectionId: inlineRegistryId || null,
-      });
-      setService((prev) => (prev ? { ...prev, registryConnectionId: updated.registryConnectionId } : null));
-      setEditingRegistry(false);
-      toast.success('Registry updated');
-    } catch {
-      toast.error('Failed to update registry');
     } finally {
       setSavingInline(false);
     }
@@ -484,9 +424,7 @@ export default function ServiceDetail() {
     if (!service) return;
     setEditComposePath(service.composePath || '');
     setEditContainerName(service.containerName || '');
-    setEditImageName(service.imageName || '');
     setEditHealthCheckUrl(service.healthCheckUrl || '');
-    setEditRegistryConnectionId(service.registryConnectionId || '');
     setEditServiceTypeId(service.serviceTypeId || '');
     setShowConfig(true);
   };
@@ -498,9 +436,7 @@ export default function ServiceDetail() {
       const { service: updated } = await updateService(id, {
         composePath: editComposePath || null,
         containerName: editContainerName || undefined,
-        imageName: editImageName || undefined,
         healthCheckUrl: editHealthCheckUrl || null,
-        registryConnectionId: editRegistryConnectionId || null,
         serviceTypeId: editServiceTypeId || null,
       });
       setService((prev) => (prev ? { ...prev, ...updated } : null));
@@ -801,7 +737,7 @@ export default function ServiceDetail() {
         <div className="col-span-2 panel">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-white">Deploy</h3>
-            {service.registryConnectionId && (
+            {containerImage?.registryConnectionId && (
               <button
                 onClick={handleCheckUpdates}
                 disabled={checkingUpdates}
@@ -812,35 +748,13 @@ export default function ServiceDetail() {
             )}
           </div>
           <div className="space-y-4">
-            {/* Image info - editable */}
+            {/* Image info - read from containerImage */}
             <div className="grid grid-cols-2 gap-4 p-3 bg-slate-800/50 rounded-lg">
               <div>
                 <dt className="text-xs text-slate-500 uppercase tracking-wide">Image Name</dt>
-                {editingImageName ? (
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <input
-                      type="text"
-                      value={inlineImageName}
-                      onChange={(e) => setInlineImageName(e.target.value)}
-                      onKeyDown={(e) => handleInlineKeyDown(e, saveInlineImageName)}
-                      onBlur={saveInlineImageName}
-                      disabled={savingInline}
-                      autoFocus
-                      className="flex-1 bg-slate-900 border border-primary-500 rounded px-2 py-0.5 text-white font-mono text-sm focus:outline-none focus:ring-1 focus:ring-primary-500"
-                    />
-                  </div>
-                ) : (
-                  <dd
-                    className="text-white font-mono text-sm mt-0.5 cursor-pointer hover:text-primary-400 group flex items-center gap-1"
-                    onClick={startEditImageName}
-                    title="Click to edit"
-                  >
-                    {service.imageName || <span className="text-slate-500 italic">Not set</span>}
-                    <svg className="w-3 h-3 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                    </svg>
-                  </dd>
-                )}
+                <dd className="text-white font-mono text-sm mt-0.5">
+                  {containerImage?.imageName || <span className="text-slate-500 italic">Not linked to container image</span>}
+                </dd>
               </div>
               <div>
                 <dt className="text-xs text-slate-500 uppercase tracking-wide">Image Tag</dt>
@@ -872,49 +786,19 @@ export default function ServiceDetail() {
               </div>
               <div>
                 <dt className="text-xs text-slate-500 uppercase tracking-wide">Registry</dt>
-                {editingRegistry ? (
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <select
-                      value={inlineRegistryId}
-                      onChange={(e) => setInlineRegistryId(e.target.value)}
-                      onBlur={saveInlineRegistry}
-                      disabled={savingInline}
-                      autoFocus
-                      className="flex-1 bg-slate-900 border border-primary-500 rounded px-2 py-0.5 text-white text-sm focus:outline-none focus:ring-1 focus:ring-primary-500"
-                    >
-                      <option value="">None</option>
-                      {registries.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.name} {r.isDefault ? '(default)' : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ) : (
-                  <dd
-                    className="text-white text-sm mt-0.5 cursor-pointer hover:text-primary-400 group flex items-center gap-1"
-                    onClick={startEditRegistry}
-                    title="Click to edit"
-                  >
-                    {(() => {
-                      const registry = registries.find(r => r.id === service.registryConnectionId);
-                      return registry ? (
-                        <span className="text-primary-400">{registry.name}</span>
-                      ) : (
-                        <span className="text-slate-500 italic">Not linked</span>
-                      );
-                    })()}
-                    <svg className="w-3 h-3 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                    </svg>
-                  </dd>
-                )}
+                <dd className="text-white text-sm mt-0.5">
+                  {containerImage?.registryConnection ? (
+                    <span className="text-primary-400">{containerImage.registryConnection.name}</span>
+                  ) : (
+                    <span className="text-slate-500 italic">Not linked</span>
+                  )}
+                </dd>
               </div>
               <div>
                 <dt className="text-xs text-slate-500 uppercase tracking-wide">Current Image</dt>
                 <dd className="text-primary-400 font-mono text-sm mt-0.5 break-all">
-                  {service.imageName && service.imageTag ? (
-                    `${service.imageName}:${service.imageTag}`
+                  {containerImage?.imageName && service.imageTag ? (
+                    `${containerImage.imageName}:${service.imageTag}`
                   ) : (
                     <span className="text-slate-500 italic">Not configured</span>
                   )}
@@ -945,7 +829,7 @@ export default function ServiceDetail() {
             </div>
 
             {/* Auto-update toggle */}
-            {service.registryConnectionId && (
+            {containerImage?.registryConnectionId && (
               <div className="flex items-center justify-between pt-4 border-t border-slate-700">
                 <div>
                   <p className="text-white font-medium">Auto-update</p>
@@ -1116,19 +1000,19 @@ export default function ServiceDetail() {
               </div>
             </div>
           )}
-          {managedImage && (
+          {containerImage && (
             <div className="mt-4 pt-4 border-t border-slate-700">
-              <p className="text-xs text-slate-500 mb-2">Managed Image</p>
+              <p className="text-xs text-slate-500 mb-2">Container Image</p>
               <Link
-                to="/managed-images"
+                to="/container-images"
                 className="flex items-center gap-2 p-2 bg-primary-500/10 border border-primary-500/30 rounded hover:bg-primary-500/20"
               >
                 <svg className="w-4 h-4 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                 </svg>
-                <span className="text-white font-medium">{managedImage.name}</span>
+                <span className="text-white font-medium">{containerImage.name}</span>
                 <span className="text-xs text-primary-400 font-mono ml-auto">
-                  :{managedImage.currentTag}
+                  :{containerImage.currentTag}
                 </span>
               </Link>
             </div>
@@ -1891,21 +1775,6 @@ export default function ServiceDetail() {
               </div>
               <div>
                 <label className="block text-sm text-slate-400 mb-1">
-                  Image Name
-                </label>
-                <input
-                  type="text"
-                  value={editImageName}
-                  onChange={(e) => setEditImageName(e.target.value)}
-                  placeholder="registry.example.com/my-image"
-                  className="input font-mono text-sm"
-                />
-                <p className="text-xs text-slate-500 mt-1">
-                  Docker image name (without tag)
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">
                   Health Check URL
                 </label>
                 <input
@@ -1919,26 +1788,22 @@ export default function ServiceDetail() {
                   URL to check during health checks (from the server)
                 </p>
               </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">
-                  Registry Connection
-                </label>
-                <select
-                  value={editRegistryConnectionId}
-                  onChange={(e) => setEditRegistryConnectionId(e.target.value)}
-                  className="input"
-                >
-                  <option value="">None</option>
-                  {registries.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.name} {r.isDefault ? '(default)' : ''}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-slate-500 mt-1">
-                  Registry to check for image updates
-                </p>
-              </div>
+              {containerImage && (
+                <div className="p-3 bg-slate-800/50 rounded-lg">
+                  <label className="block text-sm text-slate-400 mb-1">
+                    Container Image
+                  </label>
+                  <Link
+                    to="/container-images"
+                    className="text-primary-400 hover:underline"
+                  >
+                    {containerImage.name} ({containerImage.imageName})
+                  </Link>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Image name and registry are managed via Container Images
+                  </p>
+                </div>
+              )}
               <div>
                 <label className="block text-sm text-slate-400 mb-1">
                   Service Type

@@ -318,7 +318,7 @@ export default function Services() {
                   const hasUpdate = service.latestAvailableTag && service.latestAvailableTag !== service.imageTag;
                   const depNode = dependencyNodes.get(service.id);
                   const hasDependencies = depNode && (depNode.dependencyCount > 0 || depNode.dependentCount > 0);
-                  const hasManagedImage = depNode?.managedImage;
+                  const hasContainerImage = depNode?.containerImage;
                   return (
                     <tr key={service.id} className={`text-slate-300 ${hasUpdate ? 'bg-primary-900/10' : ''}`}>
                       <td className="py-4">
@@ -329,10 +329,10 @@ export default function Services() {
                           >
                             {service.name}
                           </Link>
-                          {hasManagedImage && (
+                          {hasContainerImage && (
                             <span
                               className="w-2 h-2 bg-primary-400 rounded-full"
-                              title="Linked to managed image"
+                              title="Linked to container image"
                             />
                           )}
                           {hasDependencies && (

@@ -123,7 +123,7 @@ const navigationGroups: NavGroup[] = [
   {
     name: 'Orchestration',
     items: [
-      { name: 'Managed Images', href: '/managed-images', icon: ImageIcon },
+      { name: 'Container Images', href: '/container-images', icon: ImageIcon },
       { name: 'Deployment Plans', href: '/deployment-plans', icon: PlanIcon },
       { name: 'Registries', href: '/registries', icon: RegistryIcon },
     ],

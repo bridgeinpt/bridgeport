@@ -166,8 +166,8 @@ function NodeCard({
     >
       <div className="flex items-center gap-2">
         <span className="text-white font-medium text-sm">{node.name}</span>
-        {node.managedImage && (
-          <span className="w-2 h-2 bg-primary-400 rounded-full" title="Managed Image" />
+        {node.containerImage && (
+          <span className="w-2 h-2 bg-primary-400 rounded-full" title="Container Image" />
         )}
       </div>
       {!compact && (

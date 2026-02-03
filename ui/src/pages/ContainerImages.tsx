@@ -3,28 +3,27 @@ import { Link } from 'react-router-dom';
 import { useAppStore } from '../lib/store';
 import { useToast } from '../components/Toast';
 import {
-  listManagedImages,
-  createManagedImage,
-  updateManagedImage,
-  deleteManagedImage,
-  deployManagedImage,
-  getManagedImageHistory,
-  linkServiceToManagedImage,
-  unlinkServiceFromManagedImage,
+  listContainerImages,
+  createContainerImage,
+  updateContainerImage,
+  deleteContainerImage,
+  deployContainerImage,
+  getContainerImageHistory,
+  linkServiceToContainerImage,
   getLinkableServices,
   listRegistryConnections,
-  type ManagedImage,
-  type ManagedImageInput,
-  type ImageTagHistory,
+  type ContainerImage,
+  type ContainerImageInput,
+  type ContainerImageHistory,
   type Service,
   type RegistryConnection,
 } from '../lib/api';
 import { formatDistanceToNow } from 'date-fns';
 
-export default function ManagedImages() {
+export default function ContainerImages() {
   const { selectedEnvironment } = useAppStore();
   const toast = useToast();
-  const [images, setImages] = useState<ManagedImage[]>([]);
+  const [images, setImages] = useState<ContainerImage[]>([]);
   const [registries, setRegistries] = useState<RegistryConnection[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -32,23 +31,23 @@ export default function ManagedImages() {
   const [saving, setSaving] = useState(false);
 
   // Deploy modal
-  const [deployingImage, setDeployingImage] = useState<ManagedImage | null>(null);
+  const [deployingImage, setDeployingImage] = useState<ContainerImage | null>(null);
   const [deployTag, setDeployTag] = useState('');
   const [deployAutoRollback, setDeployAutoRollback] = useState(true);
   const [deploying, setDeploying] = useState(false);
 
   // History modal
   const [viewingHistory, setViewingHistory] = useState<string | null>(null);
-  const [history, setHistory] = useState<ImageTagHistory[]>([]);
+  const [history, setHistory] = useState<ContainerImageHistory[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
   // Link services
-  const [linkingImage, setLinkingImage] = useState<ManagedImage | null>(null);
+  const [linkingImage, setLinkingImage] = useState<ContainerImage | null>(null);
   const [linkableServices, setLinkableServices] = useState<Service[]>([]);
   const [loadingLinkable, setLoadingLinkable] = useState(false);
 
   // Form state
-  const [formData, setFormData] = useState<ManagedImageInput>({
+  const [formData, setFormData] = useState<ContainerImageInput>({
     name: '',
     imageName: '',
     currentTag: 'latest',
@@ -59,7 +58,7 @@ export default function ManagedImages() {
     if (selectedEnvironment?.id) {
       setLoading(true);
       Promise.all([
-        listManagedImages(selectedEnvironment.id),
+        listContainerImages(selectedEnvironment.id),
         listRegistryConnections(selectedEnvironment.id),
       ])
         .then(([imagesRes, registriesRes]) => {
@@ -85,7 +84,7 @@ export default function ManagedImages() {
     setShowCreate(true);
   };
 
-  const openEdit = (image: ManagedImage) => {
+  const openEdit = (image: ContainerImage) => {
     setFormData({
       name: image.name,
       imageName: image.imageName,
@@ -103,11 +102,11 @@ export default function ManagedImages() {
     setSaving(true);
     try {
       if (editingId) {
-        const { image } = await updateManagedImage(editingId, formData);
+        const { image } = await updateContainerImage(editingId, formData);
         setImages((prev) => prev.map((i) => (i.id === editingId ? image : i)));
         toast.success('Image updated');
       } else {
-        const { image } = await createManagedImage(selectedEnvironment.id, formData);
+        const { image } = await createContainerImage(selectedEnvironment.id, formData);
         setImages((prev) => [...prev, image]);
         toast.success('Image created');
       }
@@ -123,10 +122,10 @@ export default function ManagedImages() {
   const handleDelete = async (id: string) => {
     const image = images.find((i) => i.id === id);
     if (!image) return;
-    if (!confirm(`Delete managed image "${image.name}"? This will unlink all services.`)) return;
+    if (!confirm(`Delete container image "${image.name}"? Services linked to this image cannot be deleted.`)) return;
 
     try {
-      await deleteManagedImage(id);
+      await deleteContainerImage(id);
       setImages((prev) => prev.filter((i) => i.id !== id));
       toast.success('Image deleted');
     } catch (error) {
@@ -134,7 +133,7 @@ export default function ManagedImages() {
     }
   };
 
-  const openDeployModal = (image: ManagedImage) => {
+  const openDeployModal = (image: ContainerImage) => {
     setDeployingImage(image);
     setDeployTag(image.latestTag || image.currentTag);
     setDeployAutoRollback(true);
@@ -145,12 +144,12 @@ export default function ManagedImages() {
 
     setDeploying(true);
     try {
-      const { plan } = await deployManagedImage(deployingImage.id, deployTag, deployAutoRollback);
+      const { plan } = await deployContainerImage(deployingImage.id, deployTag, deployAutoRollback);
       toast.success(`Deployment plan created: ${plan.name}`);
       setDeployingImage(null);
       // Refresh images to get updated currentTag
       if (selectedEnvironment?.id) {
-        const { images: updated } = await listManagedImages(selectedEnvironment.id);
+        const { images: updated } = await listContainerImages(selectedEnvironment.id);
         setImages(updated);
       }
     } catch (error) {
@@ -169,7 +168,7 @@ export default function ManagedImages() {
     setViewingHistory(imageId);
     setLoadingHistory(true);
     try {
-      const { history } = await getManagedImageHistory(imageId);
+      const { history } = await getContainerImageHistory(imageId);
       setHistory(history);
     } catch (error) {
       toast.error('Failed to load history');
@@ -178,7 +177,7 @@ export default function ManagedImages() {
     }
   };
 
-  const openLinkModal = async (image: ManagedImage) => {
+  const openLinkModal = async (image: ContainerImage) => {
     setLinkingImage(image);
     setLoadingLinkable(true);
     try {
@@ -194,11 +193,11 @@ export default function ManagedImages() {
   const handleLinkService = async (serviceId: string) => {
     if (!linkingImage) return;
     try {
-      await linkServiceToManagedImage(linkingImage.id, serviceId);
+      await linkServiceToContainerImage(linkingImage.id, serviceId);
       toast.success('Service linked');
       // Refresh
       if (selectedEnvironment?.id) {
-        const { images: updated } = await listManagedImages(selectedEnvironment.id);
+        const { images: updated } = await listContainerImages(selectedEnvironment.id);
         setImages(updated);
         const { services } = await getLinkableServices(linkingImage.id);
         setLinkableServices(services);
@@ -208,16 +207,17 @@ export default function ManagedImages() {
     }
   };
 
-  const handleUnlinkService = async (imageId: string, serviceId: string) => {
-    try {
-      await unlinkServiceFromManagedImage(imageId, serviceId);
-      toast.success('Service unlinked');
-      if (selectedEnvironment?.id) {
-        const { images: updated } = await listManagedImages(selectedEnvironment.id);
-        setImages(updated);
-      }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to unlink');
+  // Helper function to get status badge color
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'success':
+        return 'bg-green-500/20 text-green-400';
+      case 'failed':
+        return 'bg-red-500/20 text-red-400';
+      case 'rolled_back':
+        return 'bg-yellow-500/20 text-yellow-400';
+      default:
+        return 'bg-slate-700 text-slate-300';
     }
   };
 
@@ -225,7 +225,7 @@ export default function ManagedImages() {
     return (
       <div className="p-6">
         <div className="panel text-center py-12">
-          <p className="text-slate-400">Select an environment to view managed images</p>
+          <p className="text-slate-400">Select an environment to view container images</p>
         </div>
       </div>
     );
@@ -238,7 +238,7 @@ export default function ManagedImages() {
           Central image management for orchestrated deployments
         </p>
         <button onClick={openCreate} className="btn btn-primary">
-          Add Managed Image
+          Add Container Image
         </button>
       </div>
 
@@ -252,12 +252,12 @@ export default function ManagedImages() {
       ) : images.length === 0 ? (
         <div className="panel text-center py-12">
           <ImageIcon className="w-12 h-12 text-slate-500 mx-auto mb-4" />
-          <p className="text-slate-400 mb-4">No managed images configured</p>
+          <p className="text-slate-400 mb-4">No container images configured</p>
           <p className="text-slate-500 text-sm mb-4">
-            Create managed images to deploy the same image to multiple services with orchestration
+            Create container images to deploy the same image to multiple services with orchestration
           </p>
           <button onClick={openCreate} className="btn btn-primary">
-            Add Your First Managed Image
+            Add Your First Container Image
           </button>
         </div>
       ) : (
@@ -310,13 +310,6 @@ export default function ManagedImages() {
                             >
                               {service.name}
                             </Link>
-                            <button
-                              onClick={() => handleUnlinkService(image.id, service.id)}
-                              className="text-slate-500 hover:text-red-400 ml-1"
-                              title="Unlink service"
-                            >
-                              ×
-                            </button>
                           </div>
                         ))}
                       </div>
@@ -378,6 +371,9 @@ export default function ManagedImages() {
                         >
                           <div className="flex items-center gap-4">
                             <span className="font-mono text-white">{entry.tag}</span>
+                            <span className={`badge text-xs ${getStatusBadge(entry.status)}`}>
+                              {entry.status}
+                            </span>
                             <span className="text-slate-500">
                               {formatDistanceToNow(new Date(entry.deployedAt), { addSuffix: true })}
                             </span>
@@ -399,7 +395,7 @@ export default function ManagedImages() {
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-lg p-6">
             <h3 className="text-lg font-semibold text-white mb-4">
-              {editingId ? 'Edit Managed Image' : 'Add Managed Image'}
+              {editingId ? 'Edit Container Image' : 'Add Container Image'}
             </h3>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
@@ -557,7 +553,7 @@ export default function ManagedImages() {
               Link Services to {linkingImage.name}
             </h3>
             <p className="text-slate-400 text-sm mb-4">
-              Services using image <code className="text-primary-400">{linkingImage.imageName}</code>
+              Services that can be linked to this container image
             </p>
 
             {loadingLinkable ? (
@@ -566,7 +562,7 @@ export default function ManagedImages() {
               </div>
             ) : linkableServices.length === 0 ? (
               <p className="text-slate-500 text-sm">
-                No unlinked services found with matching image name.
+                No services available to link.
               </p>
             ) : (
               <div className="space-y-2 max-h-64 overflow-y-auto">

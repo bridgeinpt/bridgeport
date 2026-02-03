@@ -9,14 +9,14 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
+  id           String    @id @default(cuid())
+  email        String    @unique
   passwordHash String
   name         String?
-  role         String   @default("viewer") // "admin" | "operator" | "viewer"
+  role         String    @default("viewer") // "admin" | "operator" | "viewer"
   lastActiveAt DateTime? // Updated on each authenticated request
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   apiTokens               ApiToken[]
   deployments             Deployment[]
@@ -29,68 +29,68 @@ model User {
 }
 
 model ApiToken {
-  id          String    @id @default(cuid())
-  name        String
-  tokenHash   String    @unique
-  lastUsedAt  DateTime?
-  expiresAt   DateTime?
-  createdAt   DateTime  @default(now())
-  userId      String
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id         String    @id @default(cuid())
+  name       String
+  tokenHash  String    @unique
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  createdAt  DateTime  @default(now())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Environment {
-  id               String   @id @default(cuid())
-  name             String   @unique // staging, production
-  sshPrivateKey    String?  // Encrypted SSH private key for this environment
-  sshUser          String   @default("root") // SSH username
-  allowSecretReveal Boolean @default(true)  // Whether secrets can be revealed in this environment
+  id                  String  @id @default(cuid())
+  name                String  @unique // staging, production
+  sshPrivateKey       String? // Encrypted SSH private key for this environment
+  sshUser             String  @default("root") // SSH username
+  allowSecretReveal   Boolean @default(true) // Whether secrets can be revealed in this environment
   allowBackupDownload Boolean @default(false) // Whether backup downloads are allowed in this environment
 
   // DO Spaces credentials for backups (optional, encrypted)
   spacesAccessKey       String?
   encryptedSpacesSecret String?
   spacesSecretNonce     String?
-  spacesRegion          String?  // e.g., "fra1"
-  spacesEndpoint        String?  // e.g., "fra1.digitaloceanspaces.com"
+  spacesRegion          String? // e.g., "fra1"
+  spacesEndpoint        String? // e.g., "fra1.digitaloceanspaces.com"
 
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Scheduler configuration (JSON blob)
-  schedulerConfig      String?
+  schedulerConfig String?
 
-  servers              Server[]
-  secrets              Secret[]
-  configFiles          ConfigFile[]
-  auditLogs            AuditLog[]
-  registryConnections  RegistryConnection[]
-  databases            Database[]
-  notifications        Notification[]
-  managedImages        ManagedImage[]
-  deploymentPlans      DeploymentPlan[]
-  healthCheckLogs      HealthCheckLog[]
+  servers             Server[]
+  secrets             Secret[]
+  configFiles         ConfigFile[]
+  auditLogs           AuditLog[]
+  registryConnections RegistryConnection[]
+  databases           Database[]
+  notifications       Notification[]
+  containerImages     ContainerImage[]
+  deploymentPlans     DeploymentPlan[]
+  healthCheckLogs     HealthCheckLog[]
 }
 
 model Server {
-  id            String   @id @default(cuid())
-  name          String   // e.g., app-api-staging
-  hostname      String   // e.g., 10.20.10.3
-  publicIp      String?  // Reserved IP if applicable
-  tags          String   // JSON array of tags
-  status        String   @default("unknown") // healthy, unhealthy, unknown
+  id            String    @id @default(cuid())
+  name          String // e.g., app-api-staging
+  hostname      String // e.g., 10.20.10.3
+  publicIp      String? // Reserved IP if applicable
+  tags          String // JSON array of tags
+  status        String    @default("unknown") // healthy, unhealthy, unknown
   lastCheckedAt DateTime?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   // Metrics collection settings
-  metricsMode   String   @default("disabled") // "ssh" | "agent" | "disabled"
-  agentToken    String?  // Token for agent authentication
+  metricsMode String  @default("disabled") // "ssh" | "agent" | "disabled"
+  agentToken  String? // Token for agent authentication
 
   // Agent status tracking
   agentStatus     String    @default("unknown") // unknown|deploying|waiting|active|stale|offline
   lastAgentPushAt DateTime? // When agent last pushed metrics (distinct from lastCheckedAt)
-  agentVersion    String?   // Agent version reported by agent
+  agentVersion    String? // Agent version reported by agent
 
   environmentId String
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
@@ -113,8 +113,8 @@ model ServerMetrics {
   loadAvg1      Float?
   loadAvg5      Float?
   loadAvg15     Float?
-  uptime        Int?     // seconds
-  source        String   // "ssh" | "agent"
+  uptime        Int? // seconds
+  source        String // "ssh" | "agent"
   collectedAt   DateTime @default(now())
 
   serverId String
@@ -124,58 +124,51 @@ model ServerMetrics {
 }
 
 model Service {
-  id              String   @id @default(cuid())
-  name            String   // e.g., traefik, app-api
-  containerName   String   // Docker container name
-  imageName       String   // e.g., registry.digitalocean.com/bios-registry/app-api
-  imageTag        String   @default("latest")
-  composePath     String?  // Path to docker-compose.yml on server
-  composeTemplate String?  // Docker compose template with placeholders
-  healthCheckUrl  String?  // Optional URL to check for health (e.g., http://localhost:8000/health)
-  status          String   @default("unknown") // running, stopped, unhealthy, healthy, unknown (kept for backwards compatibility)
-  containerStatus String   @default("unknown") // running, stopped, exited, created, restarting, paused, dead, not_found
-  healthStatus    String   @default("unknown") // healthy, unhealthy, unknown, none
-  exposedPorts    String?  // JSON array: [{"host": 8080, "container": 80, "protocol": "tcp"}]
-  discoveryStatus String   @default("found") // found, missing (container not found during last discovery)
-  lastCheckedAt   DateTime?
+  id               String    @id @default(cuid())
+  name             String // e.g., traefik, app-api
+  containerName    String // Docker container name
+  imageTag         String    @default("latest") // What's actually running on THIS service
+  composePath      String? // Path to docker-compose.yml on server
+  composeTemplate  String? // Docker compose template with placeholders
+  healthCheckUrl   String? // Optional URL to check for health (e.g., http://localhost:8000/health)
+  status           String    @default("unknown") // running, stopped, unhealthy, healthy, unknown (kept for backwards compatibility)
+  containerStatus  String    @default("unknown") // running, stopped, exited, created, restarting, paused, dead, not_found
+  healthStatus     String    @default("unknown") // healthy, unhealthy, unknown, none
+  exposedPorts     String? // JSON array: [{"host": 8080, "container": 80, "protocol": "tcp"}]
+  discoveryStatus  String    @default("found") // found, missing (container not found during last discovery)
+  lastCheckedAt    DateTime?
   lastDiscoveredAt DateTime? // When service was last seen during discovery
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  // Auto-update fields
-  autoUpdate            Boolean   @default(false)
-  latestAvailableTag    String?   // Latest tag found in registry
-  latestAvailableDigest String?   // Digest of latest tag (for comparing even if tag is "latest")
-  lastUpdateCheckAt     DateTime?
+  // Auto-update flag (per-service)
+  autoUpdate Boolean @default(false)
 
   // Per-service health check configuration for deployment orchestration
-  healthWaitMs     Int @default(30000)  // Wait after deploy before checking (default 30s)
-  healthRetries    Int @default(3)      // Number of health check attempts
-  healthIntervalMs Int @default(5000)   // Interval between retries (default 5s)
+  healthWaitMs     Int @default(30000) // Wait after deploy before checking (default 30s)
+  healthRetries    Int @default(3) // Number of health check attempts
+  healthIntervalMs Int @default(5000) // Interval between retries (default 5s)
 
   // Agent-reported health check results (for services with healthCheckUrl)
-  agentHealthSuccess   Boolean?  // Last health check result from agent
-  agentHealthStatusCode Int?     // HTTP status code from agent health check
-  agentHealthDurationMs Int?     // Duration of agent health check
-  agentHealthCheckedAt DateTime? // When agent last performed health check
+  agentHealthSuccess    Boolean? // Last health check result from agent
+  agentHealthStatusCode Int? // HTTP status code from agent health check
+  agentHealthDurationMs Int? // Duration of agent health check
+  agentHealthCheckedAt  DateTime? // When agent last performed health check
 
   serverId    String
-  server      Server        @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  server      Server            @relation(fields: [serverId], references: [id], onDelete: Cascade)
   deployments Deployment[]
   files       ServiceFile[]
   metrics     ServiceMetrics[]
   databases   ServiceDatabase[]
 
-  registryConnectionId String?
-  registryConnection   RegistryConnection? @relation(fields: [registryConnectionId], references: [id], onDelete: SetNull)
-
   // Service type for predefined commands
   serviceTypeId String?
   serviceType   ServiceType? @relation(fields: [serviceTypeId], references: [id], onDelete: SetNull)
 
-  // Link to managed image (optional)
-  managedImageId String?
-  managedImage   ManagedImage? @relation(fields: [managedImageId], references: [id], onDelete: SetNull)
+  // Link to container image (required - central entity for image management)
+  containerImageId String
+  containerImage   ContainerImage @relation(fields: [containerImageId], references: [id], onDelete: Restrict)
 
   // Dependencies
   dependencies ServiceDependency[] @relation("ServiceDependencies")
@@ -207,14 +200,14 @@ model ServiceMetrics {
 }
 
 model Deployment {
-  id           String   @id @default(cuid())
-  imageTag     String
-  previousTag  String?  // Tag before this deployment (for rollback)
-  status       String   // pending, deploying, success, failed
-  logs         String?  // Deployment logs
-  triggeredBy  String   // user email or "webhook"
-  startedAt    DateTime @default(now())
-  completedAt  DateTime?
+  id          String    @id @default(cuid())
+  imageTag    String
+  previousTag String? // Tag before this deployment (for rollback)
+  status      String // pending, deploying, success, failed
+  logs        String? // Deployment logs
+  triggeredBy String // user email or "webhook"
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
 
   serviceId String
   service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
@@ -222,6 +215,10 @@ model Deployment {
   userId    String?
   user      User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
   artifacts DeploymentArtifact[]
+
+  // Link to container image history entry
+  containerImageHistoryId String?
+  containerImageHistory   ContainerImageHistory? @relation(fields: [containerImageHistoryId], references: [id], onDelete: SetNull)
 
   // Link to deployment plan step if part of orchestrated deployment
   planSteps DeploymentPlanStep[]
@@ -231,9 +228,9 @@ model Deployment {
 
 model Secret {
   id             String   @id @default(cuid())
-  key            String   // e.g., DATABASE_URL, DJANGO_SECRET_KEY
-  encryptedValue String   // XChaCha20-Poly1305 encrypted
-  nonce          String   // Encryption nonce (base64)
+  key            String // e.g., DATABASE_URL, DJANGO_SECRET_KEY
+  encryptedValue String // XChaCha20-Poly1305 encrypted
+  nonce          String // Encryption nonce (base64)
   description    String?
   neverReveal    Boolean  @default(false) // Write-only secret, cannot be revealed
   createdAt      DateTime @default(now())
@@ -248,18 +245,18 @@ model Secret {
 // Config files (compose files, Caddyfile, certificates, etc.)
 model ConfigFile {
   id          String   @id @default(cuid())
-  name        String   // Display name (e.g., "gateway-compose", "cloudflare-cert")
-  filename    String   // Target filename on server (e.g., "docker-compose.yml", "cloudflare-origin.pem")
-  content     String   // File content (stored in DB for simplicity, base64-encoded for binary)
+  name        String // Display name (e.g., "gateway-compose", "cloudflare-cert")
+  filename    String // Target filename on server (e.g., "docker-compose.yml", "cloudflare-origin.pem")
+  content     String // File content (stored in DB for simplicity, base64-encoded for binary)
   description String?
   isBinary    Boolean  @default(false) // Whether this is a binary/asset file
-  mimeType    String?  // MIME type for binary files (e.g., "application/x-x509-ca-cert")
-  fileSize    Int?     // Size in bytes for display
+  mimeType    String? // MIME type for binary files (e.g., "application/x-x509-ca-cert")
+  fileSize    Int? // Size in bytes for display
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   environmentId String
-  environment   Environment  @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  environment   Environment   @relation(fields: [environmentId], references: [id], onDelete: Cascade)
   services      ServiceFile[]
   history       FileHistory[]
 
@@ -269,7 +266,7 @@ model ConfigFile {
 // Links config files to services with target path on server
 model ServiceFile {
   id           String    @id @default(cuid())
-  targetPath   String    // Full path on server (e.g., /opt/caddy/docker-compose.yml)
+  targetPath   String // Full path on server (e.g., /opt/caddy/docker-compose.yml)
   lastSyncedAt DateTime? // Last time this file was successfully synced to the server
 
   serviceId    String
@@ -283,10 +280,10 @@ model ServiceFile {
 // Generated deployment artifacts (compose files, env files)
 model DeploymentArtifact {
   id        String   @id @default(cuid())
-  type      String   // compose, env, config
-  name      String   // Filename
-  content   String   // File content
-  checksum  String   // SHA-256 hash
+  type      String // compose, env, config
+  name      String // Filename
+  content   String // File content
+  checksum  String // SHA-256 hash
   createdAt DateTime @default(now())
 
   deploymentId String
@@ -296,13 +293,13 @@ model DeploymentArtifact {
 // Audit log for tracking all actions
 model AuditLog {
   id           String   @id @default(cuid())
-  action       String   // deploy, restart, health_check, create, update, delete, access
-  resourceType String   // service, server, secret, environment, config_file, env_template
-  resourceId   String?  // ID of affected resource (nullable for deleted resources)
-  resourceName String?  // Human-readable name for display
-  details      String?  // JSON string with additional details
+  action       String // deploy, restart, health_check, create, update, delete, access
+  resourceType String // service, server, secret, environment, config_file, env_template
+  resourceId   String? // ID of affected resource (nullable for deleted resources)
+  resourceName String? // Human-readable name for display
+  details      String? // JSON string with additional details
   success      Boolean  @default(true)
-  error        String?  // Error message if failed
+  error        String? // Error message if failed
   createdAt    DateTime @default(now())
 
   userId        String?
@@ -318,71 +315,70 @@ model AuditLog {
 
 // Edit history for config files
 model FileHistory {
-  id        String   @id @default(cuid())
-  content   String   // Previous content
-  editedAt  DateTime @default(now())
+  id       String   @id @default(cuid())
+  content  String // Previous content
+  editedAt DateTime @default(now())
 
   editedById String?
   editedBy   User?   @relation(fields: [editedById], references: [id], onDelete: SetNull)
 
-  configFileId  String?
-  configFile    ConfigFile?  @relation(fields: [configFileId], references: [id], onDelete: Cascade)
+  configFileId String?
+  configFile   ConfigFile? @relation(fields: [configFileId], references: [id], onDelete: Cascade)
 
   @@index([configFileId, editedAt(sort: Desc)])
 }
 
 // Registry connection for image update checking
 model RegistryConnection {
-  id                String   @id @default(cuid())
-  name              String   // "DigitalOcean", "Docker Hub", etc.
-  type              String   // "digitalocean", "dockerhub", "gcr", "ecr", "generic"
-  registryUrl       String   // API URL or registry domain
-  repositoryPrefix  String?  // e.g., "bios-registry" for DO
-  encryptedToken    String?  // Encrypted API token
-  tokenNonce        String?
-  username          String?  // For basic auth registries
-  encryptedPassword String?
-  passwordNonce     String?
-  isDefault         Boolean  @default(false)
-  refreshIntervalMinutes Int @default(30)  // How often to check for updates
-  autoLinkPattern   String?  // Pattern for auto-linking services (e.g., "bios-*")
-  lastRefreshAt     DateTime?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id                     String    @id @default(cuid())
+  name                   String // "DigitalOcean", "Docker Hub", etc.
+  type                   String // "digitalocean", "dockerhub", "gcr", "ecr", "generic"
+  registryUrl            String // API URL or registry domain
+  repositoryPrefix       String? // e.g., "bios-registry" for DO
+  encryptedToken         String? // Encrypted API token
+  tokenNonce             String?
+  username               String? // For basic auth registries
+  encryptedPassword      String?
+  passwordNonce          String?
+  isDefault              Boolean   @default(false)
+  refreshIntervalMinutes Int       @default(30) // How often to check for updates
+  autoLinkPattern        String? // Pattern for auto-linking services (e.g., "bios-*")
+  lastRefreshAt          DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
-  environmentId String
-  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
-  services      Service[]
-  managedImages ManagedImage[]
+  environmentId   String
+  environment     Environment      @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  containerImages ContainerImage[]
 
   @@unique([environmentId, name])
 }
 
 // Database for backup management
 model Database {
-  id                   String   @id @default(cuid())
-  name                 String   // Display name (e.g., "bios-postgres-staging")
-  type                 String   // "postgres" | "mysql" | "sqlite"
-  host                 String?  // Database host (for remote DBs)
-  port                 Int?     // Database port
-  databaseName         String?  // Actual database name
-  encryptedCredentials String?  // Encrypted username:password
+  id                   String  @id @default(cuid())
+  name                 String // Display name (e.g., "bios-postgres-staging")
+  type                 String // "postgres" | "mysql" | "sqlite"
+  host                 String? // Database host (for remote DBs)
+  port                 Int? // Database port
+  databaseName         String? // Actual database name
+  encryptedCredentials String? // Encrypted username:password
   credentialsNonce     String?
-  filePath             String?  // For SQLite: path on server
+  filePath             String? // For SQLite: path on server
 
   // Backup storage configuration
-  backupStorageType    String   @default("local")  // "local" | "spaces"
-  backupLocalPath      String?  // Local path on server (e.g., /var/backups)
-  backupSpacesBucket   String?  // Spaces bucket name
-  backupSpacesPrefix   String?  // Key prefix (e.g., "backups/staging/")
+  backupStorageType  String  @default("local") // "local" | "spaces"
+  backupLocalPath    String? // Local path on server (e.g., /var/backups)
+  backupSpacesBucket String? // Spaces bucket name
+  backupSpacesPrefix String? // Key prefix (e.g., "backups/staging/")
 
   // Backup format options
-  backupFormat           String   @default("plain")  // "plain" | "custom" | "tar"
-  backupCompression      String   @default("none")   // "none" | "gzip"
-  backupCompressionLevel Int      @default(6)        // 1-9 for gzip
+  backupFormat           String @default("plain") // "plain" | "custom" | "tar"
+  backupCompression      String @default("none") // "none" | "gzip"
+  backupCompressionLevel Int    @default(6) // 1-9 for gzip
 
   // pg_dump options as JSON
-  pgDumpOptions          String?  // {"noOwner":true,"clean":true,...}
+  pgDumpOptions String? // {"noOwner":true,"clean":true,...}
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -391,7 +387,7 @@ model Database {
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
 
   serverId String?
-  server   Server?  @relation(fields: [serverId], references: [id], onDelete: SetNull)
+  server   Server? @relation(fields: [serverId], references: [id], onDelete: SetNull)
 
   backups  DatabaseBackup[]
   schedule BackupSchedule?
@@ -402,17 +398,17 @@ model Database {
 
 // Database backup record
 model DatabaseBackup {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   filename    String
   size        BigInt
-  type        String   // "manual" | "scheduled"
-  status      String   // "pending" | "in_progress" | "completed" | "failed"
+  type        String // "manual" | "scheduled"
+  status      String // "pending" | "in_progress" | "completed" | "failed"
   error       String?
-  storageType String   // "local" | "spaces"
-  storagePath String   // Local path or Spaces key
-  progress    Int      @default(0)   // 0-100
-  duration    Int?                   // seconds
-  createdAt   DateTime @default(now())
+  storageType String // "local" | "spaces"
+  storagePath String // Local path or Spaces key
+  progress    Int       @default(0) // 0-100
+  duration    Int? // seconds
+  createdAt   DateTime  @default(now())
   completedAt DateTime?
 
   databaseId String
@@ -426,10 +422,10 @@ model DatabaseBackup {
 
 // Backup schedule configuration
 model BackupSchedule {
-  id             String   @id @default(cuid())
-  cronExpression String   // e.g., "0 2 * * *" (daily 2am)
-  retentionDays  Int      @default(7)
-  enabled        Boolean  @default(true)
+  id             String    @id @default(cuid())
+  cronExpression String // e.g., "0 2 * * *" (daily 2am)
+  retentionDays  Int       @default(7)
+  enabled        Boolean   @default(true)
   lastRunAt      DateTime?
   nextRunAt      DateTime?
 
@@ -452,21 +448,21 @@ model ServiceDatabase {
 
 // Notification types (user and system events)
 model NotificationType {
-  id              String   @id @default(cuid())
-  category        String   // "user" | "system"
-  code            String   @unique // e.g., "user.account_created", "system.backup_failed"
+  id              String  @id @default(cuid())
+  category        String // "user" | "system"
+  code            String  @unique // e.g., "user.account_created", "system.backup_failed"
   name            String
   description     String?
-  template        String   // Message template with {{placeholders}}
-  defaultChannels String   @default("[\"in_app\"]") // JSON array: ["in_app", "email", "webhook"]
-  severity        String   @default("info") // "info" | "warning" | "critical"
+  template        String // Message template with {{placeholders}}
+  defaultChannels String  @default("[\"in_app\"]") // JSON array: ["in_app", "email", "webhook"]
+  severity        String  @default("info") // "info" | "warning" | "critical"
 
   // Bounce settings (for system notifications with repeated failures)
-  bounceEnabled   Boolean  @default(false) // Whether this type uses bounce logic
-  bounceThreshold Int      @default(3)     // Consecutive failures before alerting
-  bounceCooldown  Int      @default(900)   // Seconds before allowing another alert (default 15 min)
+  bounceEnabled   Boolean @default(false) // Whether this type uses bounce logic
+  bounceThreshold Int     @default(3) // Consecutive failures before alerting
+  bounceCooldown  Int     @default(900) // Seconds before allowing another alert (default 15 min)
 
-  createdAt       DateTime @default(now())
+  createdAt DateTime @default(now())
 
   notifications Notification[]
   preferences   NotificationPreference[]
@@ -474,22 +470,22 @@ model NotificationType {
 
 // Individual notifications sent to users
 model Notification {
-  id            String    @id @default(cuid())
+  id            String           @id @default(cuid())
   typeId        String
   type          NotificationType @relation(fields: [typeId], references: [id], onDelete: Cascade)
   userId        String
-  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user          User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   title         String
   message       String
-  data          String?   // JSON context for additional data
+  data          String? // JSON context for additional data
   environmentId String?
-  environment   Environment? @relation(fields: [environmentId], references: [id], onDelete: SetNull)
+  environment   Environment?     @relation(fields: [environmentId], references: [id], onDelete: SetNull)
 
   inAppReadAt   DateTime?
   emailSentAt   DateTime?
   webhookSentAt DateTime?
 
-  createdAt     DateTime  @default(now())
+  createdAt DateTime @default(now())
 
   @@index([userId, createdAt(sort: Desc)])
   @@index([userId, inAppReadAt])
@@ -497,17 +493,17 @@ model Notification {
 
 // User preferences for notification types
 model NotificationPreference {
-  id             String   @id @default(cuid())
+  id             String           @id @default(cuid())
   userId         String
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   typeId         String
   type           NotificationType @relation(fields: [typeId], references: [id], onDelete: Cascade)
-  inAppEnabled   Boolean  @default(true)
-  emailEnabled   Boolean  @default(false)
-  webhookEnabled Boolean  @default(true)
-  environmentIds String?  // JSON array of environment IDs, null = all environments
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  inAppEnabled   Boolean          @default(true)
+  emailEnabled   Boolean          @default(false)
+  webhookEnabled Boolean          @default(true)
+  environmentIds String? // JSON array of environment IDs, null = all environments
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
   @@unique([userId, typeId])
 }
@@ -535,10 +531,10 @@ model WebhookConfig {
   url             String
   encryptedSecret String?
   secretNonce     String?
-  headers         String?   // JSON custom headers
+  headers         String? // JSON custom headers
   enabled         Boolean   @default(true)
-  typeFilter      String?   // JSON array of type codes to filter
-  environmentIds  String?   // JSON array of environment IDs
+  typeFilter      String? // JSON array of type codes to filter
+  environmentIds  String? // JSON array of environment IDs
   lastTriggeredAt DateTime?
   successCount    Int       @default(0)
   failureCount    Int       @default(0)
@@ -549,9 +545,9 @@ model WebhookConfig {
 // Tracks consecutive failures for bounce logic
 model BounceTracker {
   id                  String    @id @default(cuid())
-  resourceType        String    // "server" | "service" | "database"
+  resourceType        String // "server" | "service" | "database"
   resourceId          String
-  eventType           String    // "health_check" | "offline" | "crash" | "backup"
+  eventType           String // "health_check" | "offline" | "crash" | "backup"
   consecutiveFailures Int       @default(0)
   lastFailedAt        DateTime?
   lastSuccessAt       DateTime?
@@ -563,41 +559,45 @@ model BounceTracker {
 // ==================== Deployment Orchestration ====================
 
 // Central image management - one image can be linked to multiple services
-model ManagedImage {
-  id           String   @id @default(cuid())
-  name         String   // Display name: "BIOS Backend"
-  imageName    String   // Full path: registry.digitalocean.com/bios-registry/bios-backend
-  currentTag   String   // Currently deployed tag
-  latestTag    String?  // Latest from registry
-  latestDigest String?
+model ContainerImage {
+  id            String    @id @default(cuid())
+  name          String // Display name: "BIOS Backend"
+  imageName     String // Full path: registry.digitalocean.com/bios-registry/bios-backend
+  currentTag    String // Last deployed tag (to any service)
+  latestTag     String? // Latest from registry (for update detection)
+  latestDigest  String?
   lastCheckedAt DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   environmentId        String
   environment          Environment         @relation(fields: [environmentId], references: [id], onDelete: Cascade)
   registryConnectionId String?
   registryConnection   RegistryConnection? @relation(fields: [registryConnectionId], references: [id], onDelete: SetNull)
 
-  tagHistory      ImageTagHistory[]
+  tagHistory      ContainerImageHistory[]
   services        Service[]
   deploymentPlans DeploymentPlan[]
 
   @@unique([environmentId, imageName])
 }
 
-// History of deployed tags for a managed image
-model ImageTagHistory {
+// History of deployed tags for a container image
+model ContainerImageHistory {
   id         String   @id @default(cuid())
   tag        String
   digest     String?
+  status     String   @default("success") // "success" | "failed" | "rolled_back"
   deployedAt DateTime @default(now())
-  deployedBy String?  // user email or "scheduler"
+  deployedBy String? // user email, "webhook", "auto-update"
 
-  managedImageId String
-  managedImage   ManagedImage @relation(fields: [managedImageId], references: [id], onDelete: Cascade)
+  containerImageId String
+  containerImage   ContainerImage @relation(fields: [containerImageId], references: [id], onDelete: Cascade)
 
-  @@index([managedImageId, deployedAt(sort: Desc)])
+  // Link to deployments that used this history entry
+  deployments Deployment[]
+
+  @@index([containerImageId, deployedAt(sort: Desc)])
 }
 
 // Service dependencies - control deployment order
@@ -605,9 +605,9 @@ model ServiceDependency {
   id   String @id @default(cuid())
   type String // "health_before" | "deploy_after"
 
-  dependentId String  // Service that waits
+  dependentId String // Service that waits
   dependent   Service @relation("ServiceDependencies", fields: [dependentId], references: [id], onDelete: Cascade)
-  dependsOnId String  // Service that must be ready first
+  dependsOnId String // Service that must be ready first
   dependsOn   Service @relation("ServiceDependents", fields: [dependsOnId], references: [id], onDelete: Cascade)
 
   @@unique([dependentId, dependsOnId])
@@ -615,11 +615,11 @@ model ServiceDependency {
 
 // Orchestrated deployment tracking
 model DeploymentPlan {
-  id          String    @id @default(cuid())
+  id          String  @id @default(cuid())
   name        String
-  status      String    @default("pending") // pending|running|completed|failed|cancelled|rolled_back
-  imageTag    String?   // Target tag
-  triggerType String    // manual|webhook|auto_update
+  status      String  @default("pending") // pending|running|completed|failed|cancelled|rolled_back
+  imageTag    String? // Target tag
+  triggerType String // manual|webhook|auto_update
   triggeredBy String?
 
   // Rollback config - always rolls back ALL services on failure
@@ -632,12 +632,12 @@ model DeploymentPlan {
 
   createdAt DateTime @default(now())
 
-  environmentId  String
-  environment    Environment   @relation(fields: [environmentId], references: [id], onDelete: Cascade)
-  managedImageId String?
-  managedImage   ManagedImage? @relation(fields: [managedImageId], references: [id], onDelete: SetNull)
-  userId         String?
-  user           User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  environmentId    String
+  environment      Environment     @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  containerImageId String?
+  containerImage   ContainerImage? @relation(fields: [containerImageId], references: [id], onDelete: SetNull)
+  userId           String?
+  user             User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   steps DeploymentPlanStep[]
 
@@ -676,39 +676,39 @@ model DeploymentPlanStep {
 
 // System-wide operational settings (singleton table)
 model SystemSettings {
-  id                    String   @id @default("singleton")
+  id String @id @default("singleton")
 
   // SSH Timeouts (milliseconds)
-  sshCommandTimeoutMs   Int      @default(60000)
-  sshReadyTimeoutMs     Int      @default(10000)
+  sshCommandTimeoutMs Int @default(60000)
+  sshReadyTimeoutMs   Int @default(10000)
 
   // Webhook Settings
-  webhookMaxRetries     Int      @default(3)
-  webhookTimeoutMs      Int      @default(30000)
-  webhookRetryDelaysMs  String   @default("[1000,5000,15000]")  // JSON array
+  webhookMaxRetries    Int    @default(3)
+  webhookTimeoutMs     Int    @default(30000)
+  webhookRetryDelaysMs String @default("[1000,5000,15000]") // JSON array
 
   // Database Backup
-  pgDumpTimeoutMs       Int      @default(300000)
+  pgDumpTimeoutMs Int @default(300000)
 
   // Limits
-  maxUploadSizeMb       Int      @default(50)
-  activeUserWindowMin   Int      @default(15)
-  registryMaxTags       Int      @default(50)
-  defaultLogLines       Int      @default(50)
+  maxUploadSizeMb     Int @default(50)
+  activeUserWindowMin Int @default(15)
+  registryMaxTags     Int @default(50)
+  defaultLogLines     Int @default(50)
 
   // Agent Configuration
-  agentCallbackUrl        String?  // Internal URL for agents to reach BridgePort (e.g., http://10.30.10.5:3000)
-  agentStaleThresholdMs   Int      @default(180000)  // 3 min - mark agent as "stale"
-  agentOfflineThresholdMs Int      @default(300000)  // 5 min - mark agent as "offline"
+  agentCallbackUrl        String? // Internal URL for agents to reach BridgePort (e.g., http://10.30.10.5:3000)
+  agentStaleThresholdMs   Int     @default(180000) // 3 min - mark agent as "stale"
+  agentOfflineThresholdMs Int     @default(300000) // 5 min - mark agent as "offline"
 
-  updatedAt             DateTime @updatedAt
+  updatedAt DateTime @updatedAt
 }
 
 // Service Types for predefined commands (e.g., Django, Node.js)
 model ServiceType {
   id          String   @id @default(cuid())
   name        String   @unique // "django", "nodejs", "generic"
-  displayName String             // "Django", "Node.js", "Generic"
+  displayName String // "Django", "Node.js", "Generic"
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -718,12 +718,12 @@ model ServiceType {
 
 // Predefined commands for a service type
 model ServiceTypeCommand {
-  id            String      @id @default(cuid())
-  name          String                // "shell", "migrate"
-  displayName   String                // "Django Shell"
-  command       String                // "python manage.py shell"
-  description   String?
-  sortOrder     Int         @default(0)
+  id          String  @id @default(cuid())
+  name        String // "shell", "migrate"
+  displayName String // "Django Shell"
+  command     String // "python manage.py shell"
+  description String?
+  sortOrder   Int     @default(0)
 
   serviceTypeId String
   serviceType   ServiceType @relation(fields: [serviceTypeId], references: [id], onDelete: Cascade)
@@ -733,27 +733,27 @@ model ServiceTypeCommand {
 
 // Global Spaces configuration (replaces per-environment Spaces config)
 model SpacesConfig {
-  id                    String   @id @default(cuid())
-  accessKey             String
-  encryptedSecretKey    String
-  secretKeyNonce        String
-  region                String   // "fra1"
-  endpoint              String   // "fra1.digitaloceanspaces.com"
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  id                 String   @id @default(cuid())
+  accessKey          String
+  encryptedSecretKey String
+  secretKeyNonce     String
+  region             String // "fra1"
+  endpoint           String // "fra1.digitaloceanspaces.com"
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
   // Environments where Spaces is enabled
-  enabledEnvironments   SpacesEnvironment[]
+  enabledEnvironments SpacesEnvironment[]
 }
 
 // Link global Spaces config to specific environments
 model SpacesEnvironment {
-  id              String       @id @default(cuid())
-  enabled         Boolean      @default(true)
+  id      String  @id @default(cuid())
+  enabled Boolean @default(true)
 
-  spacesConfigId  String
-  spacesConfig    SpacesConfig @relation(fields: [spacesConfigId], references: [id], onDelete: Cascade)
-  environmentId   String
+  spacesConfigId String
+  spacesConfig   SpacesConfig @relation(fields: [spacesConfigId], references: [id], onDelete: Cascade)
+  environmentId  String
   // Note: Can't add relation to Environment here without modifying Environment model
   // This will be handled in the query layer
 
@@ -764,25 +764,25 @@ model SpacesEnvironment {
 
 // Logs for all health checks (server SSH, service URL, container health)
 model HealthCheckLog {
-  id            String   @id @default(cuid())
+  id            String      @id @default(cuid())
   environmentId String
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
 
   // What was checked
-  resourceType  String   // "server" | "service" | "container"
-  resourceId    String   // Server or Service ID
-  resourceName  String   // Denormalized for faster queries
+  resourceType String // "server" | "service" | "container"
+  resourceId   String // Server or Service ID
+  resourceName String // Denormalized for faster queries
 
   // Check details
-  checkType     String   // "ssh" | "url" | "container_health" | "discovery"
-  status        String   // "success" | "failure" | "timeout"
+  checkType String // "ssh" | "url" | "container_health" | "discovery"
+  status    String // "success" | "failure" | "timeout"
 
   // Results
-  durationMs    Int?     // How long the check took
-  httpStatus    Int?     // HTTP status code for URL checks
-  errorMessage  String?  // Error details if failed
+  durationMs   Int? // How long the check took
+  httpStatus   Int? // HTTP status code for URL checks
+  errorMessage String? // Error details if failed
 
-  createdAt     DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@index([environmentId, createdAt(sort: Desc)])
   @@index([resourceId, createdAt(sort: Desc)])
