@@ -33,8 +33,8 @@ export default function MonitoringAgents() {
   const [testingAll, setTestingAll] = useState(false);
   const [testingServer, setTestingServer] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, { success: boolean; durationMs: number; error?: string }>>({});
-  const [expandedToken, setExpandedToken] = useState<string | null>(null);
   const [changingMode, setChangingMode] = useState<string | null>(null);
+  const [regenerating, setRegenerating] = useState<string | null>(null);
 
   const activeTab = getTabFromHash();
 
@@ -102,11 +102,17 @@ export default function MonitoringAgents() {
   };
 
   const handleRegenerateToken = async (serverId: string) => {
+    if (!confirm('This will regenerate the agent token and redeploy the agent. Continue?')) {
+      return;
+    }
+    setRegenerating(serverId);
     try {
       await regenerateAgentToken(serverId);
       await fetchData();
     } catch (e) {
-      // Handle error
+      // Error is handled by API client
+    } finally {
+      setRegenerating(null);
     }
   };
 
@@ -352,20 +358,14 @@ export default function MonitoringAgents() {
                     </td>
                     <td className="py-3">
                       {agent.metricsMode === 'agent' && (
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => setExpandedToken(expandedToken === agent.id ? null : agent.id)}
-                            className="btn btn-secondary px-2 py-1 text-xs"
-                          >
-                            Token
-                          </button>
-                          <button
-                            onClick={() => handleRegenerateToken(agent.id)}
-                            className="btn btn-secondary px-2 py-1 text-xs"
-                          >
-                            Regenerate
-                          </button>
-                        </div>
+                        <button
+                          onClick={() => handleRegenerateToken(agent.id)}
+                          disabled={regenerating === agent.id}
+                          className="btn btn-secondary px-2 py-1 text-xs"
+                          title="Regenerate token and redeploy agent"
+                        >
+                          {regenerating === agent.id ? 'Regenerating...' : 'Regenerate Token'}
+                        </button>
                       )}
                     </td>
                   </tr>
@@ -373,20 +373,6 @@ export default function MonitoringAgents() {
               </tbody>
             </table>
 
-            {/* Token Display */}
-            {expandedToken && (
-              <div className="border-t border-slate-700 p-4 mt-4">
-                <h4 className="text-sm font-medium text-slate-400 mb-2">Agent Token</h4>
-                <p className="text-slate-500 text-xs mb-2">
-                  Use this token to configure the monitoring agent on the server.
-                </p>
-                <div className="bg-slate-800 p-3 rounded font-mono text-sm text-white break-all">
-                  {agents.find((a) => a.id === expandedToken)?.hasAgentToken
-                    ? 'Token is set. Use "Regenerate" to create a new one.'
-                    : 'No token set. Enable agent mode to generate a token.'}
-                </div>
-              </div>
-            )}
           </div>
 
         </>

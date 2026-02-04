@@ -12,6 +12,7 @@ import {
 } from '../services/metrics.js';
 import { logAudit } from '../services/audit.js';
 import { getSchedulerConfig } from './monitoring.js';
+import { deployAgent } from '../services/agent-deploy.js';
 import crypto from 'crypto';
 
 const metricsQuerySchema = z.object({
@@ -552,7 +553,7 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
     };
   });
 
-  // Regenerate agent token
+  // Regenerate agent token and redeploy the agent
   fastify.post(
     '/api/servers/:id/regenerate-agent-token',
     { preHandler: [fastify.authenticate] },
@@ -564,6 +565,12 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.code(404).send({ error: 'Server not found' });
       }
 
+      // Only allow regeneration if agent mode is enabled
+      if (server.metricsMode !== 'agent') {
+        return reply.code(400).send({ error: 'Server is not in agent mode' });
+      }
+
+      // Generate new token
       const newToken = crypto.randomBytes(32).toString('hex');
 
       await prisma.server.update({
@@ -581,7 +588,16 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
         environmentId: server.environmentId,
       });
 
-      return { agentToken: newToken };
+      // Redeploy the agent with the new token so it keeps working
+      const deployResult = await deployAgent(id);
+      if (!deployResult.success) {
+        return reply.code(500).send({
+          error: `Token regenerated but agent redeploy failed: ${deployResult.error}`,
+          tokenRegenerated: true,
+        });
+      }
+
+      return { success: true };
     }
   );
 }
