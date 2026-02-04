@@ -476,10 +476,12 @@ async function executeBackup(backupId: string): Promise<void> {
       }
 
       // SQLite compression support
+      // IMPORTANT: sqlite3 silently creates an empty database if the file doesn't exist,
+      // so we must verify the file exists first to avoid creating empty backups
       if (db.backupCompression === 'gzip') {
-        dumpCommand = `sqlite3 "${db.filePath}" ".dump" | gzip -${db.backupCompressionLevel} > "${sqliteDumpPath}"`;
+        dumpCommand = `test -f "${db.filePath}" && sqlite3 "${db.filePath}" ".dump" | gzip -${db.backupCompressionLevel} > "${sqliteDumpPath}" || (echo "Database file not found: ${db.filePath}" >&2 && exit 1)`;
       } else {
-        dumpCommand = `sqlite3 "${db.filePath}" ".dump" > "${sqliteDumpPath}"`;
+        dumpCommand = `test -f "${db.filePath}" && sqlite3 "${db.filePath}" ".dump" > "${sqliteDumpPath}" || (echo "Database file not found: ${db.filePath}" >&2 && exit 1)`;
       }
     } else {
       throw new Error(`Unsupported database type or missing configuration: ${db.type}`);

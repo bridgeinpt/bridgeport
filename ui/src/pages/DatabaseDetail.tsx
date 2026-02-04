@@ -13,11 +13,13 @@ import {
   deleteBackupSchedule,
   listSpacesBuckets,
   getBackupDownloadUrl,
+  listServers,
   type Database,
   type DatabaseInput,
   type DatabaseBackup,
   type BackupSchedule,
   type PgDumpOptions,
+  type Server,
 } from '../lib/api';
 import { formatDistanceToNow, format } from 'date-fns';
 import Pagination from '../components/Pagination';
@@ -84,10 +86,19 @@ export default function DatabaseDetail() {
   const pageSize = 10;
 
   // Edit states
+  const [editingConnection, setEditingConnection] = useState(false);
   const [editingConfig, setEditingConfig] = useState(false);
   const [editingSchedule, setEditingSchedule] = useState(false);
 
+  // Servers list for SQLite database selection
+  const [servers, setServers] = useState<Server[]>([]);
+
   // Form states
+  const [connectionForm, setConnectionForm] = useState({
+    serverId: '' as string | null,
+    filePath: '',
+  });
+
   const [configForm, setConfigForm] = useState({
     backupFormat: 'plain' as 'plain' | 'custom' | 'tar',
     backupCompression: 'none' as 'none' | 'gzip',
@@ -116,6 +127,10 @@ export default function DatabaseDetail() {
     try {
       const { database: db } = await getDatabase(id);
       setDatabase(db);
+      setConnectionForm({
+        serverId: db.serverId,
+        filePath: db.filePath || '',
+      });
       setConfigForm({
         backupFormat: db.backupFormat || 'plain',
         backupCompression: db.backupCompression || 'none',
@@ -131,6 +146,16 @@ export default function DatabaseDetail() {
       navigate('/databases');
     }
   }, [id, navigate, toast]);
+
+  const loadServers = useCallback(async () => {
+    if (!selectedEnvironment?.id) return;
+    try {
+      const { servers: serverList } = await listServers(selectedEnvironment.id);
+      setServers(serverList);
+    } catch {
+      setServers([]);
+    }
+  }, [selectedEnvironment?.id]);
 
   const loadBackups = useCallback(async (page = 1) => {
     if (!id) return;
@@ -187,11 +212,11 @@ export default function DatabaseDetail() {
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
-      await Promise.all([loadDatabase(), loadBackups(1), loadSchedule()]);
+      await Promise.all([loadDatabase(), loadBackups(1), loadSchedule(), loadServers()]);
       setLoading(false);
     };
     loadData();
-  }, [loadDatabase, loadBackups, loadSchedule]);
+  }, [loadDatabase, loadBackups, loadSchedule, loadServers]);
 
   // Poll for backup progress
   useEffect(() => {
@@ -237,6 +262,27 @@ export default function DatabaseDetail() {
       window.open(downloadUrl, '_blank');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Download failed');
+    }
+  };
+
+  const handleSaveConnection = async () => {
+    if (!id || !database) return;
+    setSaving(true);
+    try {
+      const data: Partial<DatabaseInput> = {};
+      if (database.type === 'sqlite') {
+        data.serverId = connectionForm.serverId || undefined;
+        data.filePath = connectionForm.filePath;
+      }
+
+      const { database: updated } = await updateDatabase(id, data);
+      setDatabase(updated);
+      setEditingConnection(false);
+      toast.success('Connection info saved');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Save failed');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -393,40 +439,102 @@ export default function DatabaseDetail() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         {/* Connection Info */}
         <div className="card">
-          <h3 className="text-lg font-semibold text-white mb-4">Connection Info</h3>
-          <dl className="space-y-3 text-sm">
-            {database.type !== 'sqlite' ? (
-              <>
-                <div className="flex justify-between">
-                  <dt className="text-slate-400">Host</dt>
-                  <dd className="text-white font-mono">{database.host || '--'}</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-slate-400">Port</dt>
-                  <dd className="text-white">{database.port || '--'}</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-slate-400">Database</dt>
-                  <dd className="text-white font-mono">{database.databaseName || '--'}</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-slate-400">Credentials</dt>
-                  <dd className="text-white">{database.hasCredentials ? 'Configured' : 'Not set'}</dd>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="flex justify-between">
-                  <dt className="text-slate-400">File Path</dt>
-                  <dd className="text-white font-mono text-xs">{database.filePath || '--'}</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-slate-400">Server</dt>
-                  <dd className="text-white">{database.serverId ? 'Configured' : 'Not set'}</dd>
-                </div>
-              </>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-white">Connection Info</h3>
+            {database.type === 'sqlite' && !editingConnection && (
+              <button
+                onClick={() => setEditingConnection(true)}
+                className="btn btn-ghost text-sm"
+              >
+                Edit
+              </button>
             )}
-          </dl>
+          </div>
+
+          {editingConnection && database.type === 'sqlite' ? (
+            <div className="space-y-4">
+              <div>
+                <label className="label">Server</label>
+                <select
+                  value={connectionForm.serverId || ''}
+                  onChange={e => setConnectionForm({ ...connectionForm, serverId: e.target.value || null })}
+                  className="input"
+                >
+                  <option value="">Select server...</option>
+                  {servers.map(server => (
+                    <option key={server.id} value={server.id}>{server.name}</option>
+                  ))}
+                </select>
+                <p className="help-text">Server to SSH into for SQLite backups</p>
+              </div>
+              <div>
+                <label className="label">File Path</label>
+                <input
+                  type="text"
+                  value={connectionForm.filePath}
+                  onChange={e => setConnectionForm({ ...connectionForm, filePath: e.target.value })}
+                  placeholder="/path/to/database.db"
+                  className="input font-mono text-sm"
+                />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button onClick={handleSaveConnection} disabled={saving} className="btn btn-primary">
+                  {saving ? 'Saving...' : 'Save'}
+                </button>
+                <button
+                  onClick={() => {
+                    setEditingConnection(false);
+                    setConnectionForm({ serverId: database.serverId, filePath: database.filePath || '' });
+                  }}
+                  className="btn btn-ghost"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <dl className="space-y-3 text-sm">
+              {database.type !== 'sqlite' ? (
+                <>
+                  <div className="flex justify-between">
+                    <dt className="text-slate-400">Host</dt>
+                    <dd className="text-white font-mono">{database.host || '--'}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-slate-400">Port</dt>
+                    <dd className="text-white">{database.port || '--'}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-slate-400">Database</dt>
+                    <dd className="text-white font-mono">{database.databaseName || '--'}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-slate-400">Credentials</dt>
+                    <dd className="text-white">{database.hasCredentials ? 'Configured' : 'Not set'}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-slate-400">Server</dt>
+                    <dd className="text-slate-500">None (direct connection)</dd>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex justify-between">
+                    <dt className="text-slate-400">File Path</dt>
+                    <dd className="text-white font-mono text-xs">{database.filePath || '--'}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt className="text-slate-400">Server</dt>
+                    <dd className="text-white">
+                      {database.serverId
+                        ? servers.find(s => s.id === database.serverId)?.name || 'Unknown'
+                        : <span className="text-yellow-400">Not configured</span>}
+                    </dd>
+                  </div>
+                </>
+              )}
+            </dl>
+          )}
         </div>
 
         {/* Backup Configuration */}
