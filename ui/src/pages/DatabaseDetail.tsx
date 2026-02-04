@@ -104,6 +104,7 @@ export default function DatabaseDetail() {
     backupCompression: 'none' as 'none' | 'gzip',
     backupCompressionLevel: 6,
     pgDumpOptions: {} as PgDumpOptions,
+    pgDumpTimeoutSec: 300,
     backupStorageType: 'local' as 'local' | 'spaces',
     backupLocalPath: '/var/backups',
     backupSpacesBucket: '',
@@ -136,6 +137,7 @@ export default function DatabaseDetail() {
         backupCompression: db.backupCompression || 'none',
         backupCompressionLevel: db.backupCompressionLevel || 6,
         pgDumpOptions: db.pgDumpOptions || {},
+        pgDumpTimeoutSec: Math.round((db.pgDumpTimeoutMs || 300000) / 1000),
         backupStorageType: db.backupStorageType || 'local',
         backupLocalPath: db.backupLocalPath || '/var/backups',
         backupSpacesBucket: db.backupSpacesBucket || '',
@@ -295,6 +297,7 @@ export default function DatabaseDetail() {
         backupCompression: configForm.backupCompression,
         backupCompressionLevel: configForm.backupCompressionLevel,
         pgDumpOptions: configForm.pgDumpOptions,
+        pgDumpTimeoutMs: configForm.pgDumpTimeoutSec * 1000,
         backupStorageType: configForm.backupStorageType,
       };
       if (configForm.backupStorageType === 'local') {
@@ -686,6 +689,26 @@ export default function DatabaseDetail() {
                 </div>
               )}
 
+              {/* Backup Timeout (Postgres only) */}
+              {database.type === 'postgres' && (
+                <div>
+                  <label className="block text-sm text-slate-400 mb-1">
+                    Backup Timeout <span className="text-slate-500">(seconds)</span>
+                  </label>
+                  <input
+                    type="number"
+                    min={30}
+                    max={3600}
+                    value={configForm.pgDumpTimeoutSec}
+                    onChange={e => setConfigForm({ ...configForm, pgDumpTimeoutSec: parseInt(e.target.value) || 300 })}
+                    className="input w-32"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    Max time for pg_dump execution (default: 300s / 5 min)
+                  </p>
+                </div>
+              )}
+
               <div className="flex gap-2 pt-2">
                 <button onClick={handleSaveConfig} disabled={saving} className="btn btn-primary">
                   {saving ? 'Saving...' : 'Save'}
@@ -744,6 +767,12 @@ export default function DatabaseDetail() {
                       </span>
                     ))}
                   </dd>
+                </div>
+              )}
+              {database.type === 'postgres' && (
+                <div className="flex justify-between">
+                  <dt className="text-slate-400">Backup Timeout</dt>
+                  <dd className="text-white">{Math.round(database.pgDumpTimeoutMs / 1000)}s</dd>
                 </div>
               )}
             </dl>

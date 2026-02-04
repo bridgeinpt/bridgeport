@@ -8,7 +8,9 @@ import { readFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { sendSystemNotification, NOTIFICATION_TYPES } from './notifications.js';
-import { getSystemSettings } from './system-settings.js';
+
+// Default pg_dump timeout (5 minutes)
+const DEFAULT_PG_DUMP_TIMEOUT_MS = 300000;
 
 export type BackupStep = 'connect' | 'dump' | 'upload';
 
@@ -45,6 +47,7 @@ export interface DatabaseInput {
   backupCompression?: 'none' | 'gzip';
   backupCompressionLevel?: number;
   pgDumpOptions?: PgDumpOptions;
+  pgDumpTimeoutMs?: number;
 }
 
 export interface LastBackupInfo {
@@ -81,6 +84,7 @@ export interface DatabaseOutput {
   backupCompression: string;
   backupCompressionLevel: number;
   pgDumpOptions: PgDumpOptions | null;
+  pgDumpTimeoutMs: number;
   createdAt: Date;
   updatedAt: Date;
   environmentId: string;
@@ -111,6 +115,7 @@ export async function createDatabase(
     backupCompression: string;
     backupCompressionLevel: number;
     pgDumpOptions?: string;
+    pgDumpTimeoutMs?: number;
     environmentId: string;
   } = {
     name: input.name,
@@ -127,6 +132,7 @@ export async function createDatabase(
     backupFormat: input.backupFormat || 'plain',
     backupCompression: input.backupCompression || 'none',
     backupCompressionLevel: input.backupCompressionLevel || 6,
+    pgDumpTimeoutMs: input.pgDumpTimeoutMs,
     environmentId,
   };
 
@@ -170,6 +176,7 @@ export async function updateDatabase(
   if (input.backupCompression !== undefined) data.backupCompression = input.backupCompression;
   if (input.backupCompressionLevel !== undefined) data.backupCompressionLevel = input.backupCompressionLevel;
   if (input.pgDumpOptions !== undefined) data.pgDumpOptions = JSON.stringify(input.pgDumpOptions);
+  if (input.pgDumpTimeoutMs !== undefined) data.pgDumpTimeoutMs = input.pgDumpTimeoutMs;
 
   if (input.username !== undefined && input.password !== undefined) {
     if (input.username && input.password) {
@@ -260,6 +267,7 @@ function toOutput(db: {
   backupCompression: string;
   backupCompressionLevel: number;
   pgDumpOptions: string | null;
+  pgDumpTimeoutMs: number;
   createdAt: Date;
   updatedAt: Date;
   environmentId: string;
@@ -291,6 +299,7 @@ function toOutput(db: {
     backupCompression: db.backupCompression,
     backupCompressionLevel: db.backupCompressionLevel,
     pgDumpOptions: parsedPgDumpOptions,
+    pgDumpTimeoutMs: db.pgDumpTimeoutMs,
     createdAt: db.createdAt,
     updatedAt: db.updatedAt,
     environmentId: db.environmentId,
@@ -444,9 +453,8 @@ async function executeBackup(backupId: string): Promise<void> {
 
       // Use 2>&1 to capture stderr in stdout so we get better error messages
       dumpCommand = cmdParts.join(' ') + ' 2>&1';
-      // Get pg_dump timeout from system settings
-      const systemSettings = await getSystemSettings();
-      execOptions = { env: { PGPASSWORD: password, PGSSLMODE: 'require' }, timeout: systemSettings.pgDumpTimeoutMs };
+      // Use per-database timeout setting
+      execOptions = { env: { PGPASSWORD: password, PGSSLMODE: 'require' }, timeout: db.pgDumpTimeoutMs || DEFAULT_PG_DUMP_TIMEOUT_MS };
     } else if (db.type === 'sqlite' && db.filePath) {
       if (!db.server) {
         throw new Error('SQLite databases require a server to be configured');

@@ -49,6 +49,7 @@ const createDatabaseSchema = z.object({
   backupCompression: backupCompressionSchema.optional(),
   backupCompressionLevel: z.number().min(1).max(9).optional(),
   pgDumpOptions: pgDumpOptionsSchema.optional(),
+  pgDumpTimeoutMs: z.number().min(30000).max(3600000).optional(), // 30s to 1h
 });
 
 const updateDatabaseSchema = createDatabaseSchema.partial();

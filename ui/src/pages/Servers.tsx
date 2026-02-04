@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppStore } from '../lib/store.js';
-import { listServers, checkServerHealth, discoverContainers, createServer, getHostInfo, registerHost, type Server, type HostInfo } from '../lib/api.js';
+import { listServers, checkServerHealth, discoverContainers, createServer, getHostInfo, registerHost, getHealthLogs, type Server, type HostInfo, type HealthCheckLog } from '../lib/api.js';
 import { formatDistanceToNow } from 'date-fns';
 import { Modal } from '../components/Modal.js';
 import Pagination from '../components/Pagination.js';
@@ -26,6 +26,16 @@ export default function Servers() {
   const [hostInfo, setHostInfo] = useState<HostInfo | null>(null);
   const [hostBannerDismissed, setHostBannerDismissed] = useState(false);
   const [registeringHost, setRegisteringHost] = useState(false);
+  const [healthLogs, setHealthLogs] = useState<HealthCheckLog[]>([]);
+
+  const loadHealthLogs = async (envId: string) => {
+    try {
+      const { logs } = await getHealthLogs(envId, { type: 'server', limit: 20, hours: 24 });
+      setHealthLogs(logs);
+    } catch {
+      setHealthLogs([]);
+    }
+  };
 
   useEffect(() => {
     if (selectedEnvironment?.id) {
@@ -39,6 +49,8 @@ export default function Servers() {
           setHostInfo(hostInfoRes);
         })
         .finally(() => setLoading(false));
+
+      loadHealthLogs(selectedEnvironment.id);
     }
   }, [selectedEnvironment?.id]);
 
@@ -68,6 +80,10 @@ export default function Servers() {
             : s
         )
       );
+      // Reload health logs to show new entry
+      if (selectedEnvironment?.id) {
+        loadHealthLogs(selectedEnvironment.id);
+      }
     } finally {
       setActionLoading(null);
     }
@@ -358,6 +374,76 @@ export default function Servers() {
           />
         )}
       </div>
+
+      {/* Recent Health Checks */}
+      {healthLogs.length > 0 && (
+        <div className="mt-8">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-white">Recent Health Checks</h2>
+            <Link to="/monitoring/health" className="text-sm text-slate-400 hover:text-white">
+              View all
+            </Link>
+          </div>
+          <div className="card overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-700">
+                  <th className="text-left py-3 px-4 text-slate-400 font-medium">Time</th>
+                  <th className="text-left py-3 px-4 text-slate-400 font-medium">Server</th>
+                  <th className="text-left py-3 px-4 text-slate-400 font-medium">Status</th>
+                  <th className="text-left py-3 px-4 text-slate-400 font-medium">Duration</th>
+                  <th className="text-left py-3 px-4 text-slate-400 font-medium">Error</th>
+                </tr>
+              </thead>
+              <tbody>
+                {healthLogs.map((log) => (
+                  <tr key={log.id} className="border-b border-slate-800 last:border-0">
+                    <td className="py-3 px-4 text-slate-400">
+                      {formatDistanceToNow(new Date(log.createdAt), { addSuffix: true })}
+                    </td>
+                    <td className="py-3 px-4">
+                      <Link
+                        to={`/servers/${log.resourceId}`}
+                        className="text-white hover:text-primary-400"
+                      >
+                        {log.resourceName}
+                      </Link>
+                    </td>
+                    <td className="py-3 px-4">
+                      <span
+                        className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium ${
+                          log.status === 'success'
+                            ? 'bg-green-500/20 text-green-400'
+                            : log.status === 'failure'
+                            ? 'bg-red-500/20 text-red-400'
+                            : 'bg-yellow-500/20 text-yellow-400'
+                        }`}
+                      >
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full ${
+                            log.status === 'success'
+                              ? 'bg-green-400'
+                              : log.status === 'failure'
+                              ? 'bg-red-400'
+                              : 'bg-yellow-400'
+                          }`}
+                        />
+                        {log.status}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-slate-400">
+                      {log.durationMs !== null ? `${log.durationMs}ms` : '-'}
+                    </td>
+                    <td className="py-3 px-4 text-slate-500 max-w-xs truncate">
+                      {log.errorMessage || '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

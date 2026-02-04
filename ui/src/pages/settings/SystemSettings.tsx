@@ -4,10 +4,6 @@ import { getSystemSettings, updateSystemSettings, resetSystemSettings } from '..
 interface FormData {
   sshCommandTimeoutSec: number;
   sshReadyTimeoutSec: number;
-  webhookMaxRetries: number;
-  webhookTimeoutSec: number;
-  webhookRetryDelaysSec: string;
-  pgDumpTimeoutSec: number;
   maxUploadSizeMb: number;
   activeUserWindowMin: number;
   registryMaxTags: number;
@@ -15,17 +11,12 @@ interface FormData {
   agentCallbackUrl: string;
   agentStaleThresholdSec: number;
   agentOfflineThresholdSec: number;
-  doRegistryToken: string;
   auditLogRetentionDays: number;
 }
 
 interface Defaults {
   sshCommandTimeoutMs: number;
   sshReadyTimeoutMs: number;
-  webhookMaxRetries: number;
-  webhookTimeoutMs: number;
-  webhookRetryDelaysMs: string;
-  pgDumpTimeoutMs: number;
   maxUploadSizeMb: number;
   activeUserWindowMin: number;
   registryMaxTags: number;
@@ -43,58 +34,23 @@ function secToMs(sec: number): number {
   return sec * 1000;
 }
 
-function parseDelaysMs(delaysJson: string): string {
-  try {
-    const delays = JSON.parse(delaysJson) as number[];
-    return delays.map(d => Math.round(d / 1000)).join(', ');
-  } catch {
-    return '1, 5, 15';
-  }
-}
-
-function formatDelaysMs(delaysSec: string): string {
-  const delays = delaysSec.split(',').map(s => {
-    const num = parseInt(s.trim(), 10);
-    return isNaN(num) ? 1000 : num * 1000;
-  });
-  return JSON.stringify(delays);
-}
-
-// Collapsible section component
+// Settings section component - always expanded, cleaner UI
 function SettingsSection({
   title,
   icon,
   children,
-  defaultExpanded = false,
 }: {
   title: string;
   icon: React.ReactNode;
   children: React.ReactNode;
-  defaultExpanded?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(defaultExpanded);
-
   return (
-    <section className="card overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between p-5 hover:bg-slate-800/50 transition-colors"
-      >
-        <div className="flex items-center gap-3">
-          <div className="text-slate-400">{icon}</div>
-          <h2 className="text-lg font-semibold text-white">{title}</h2>
-        </div>
-        <svg
-          className={`w-5 h-5 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-      {expanded && <div className="px-5 pb-5 pt-0">{children}</div>}
+    <section className="card">
+      <div className="flex items-center gap-3 mb-4">
+        <div className="text-slate-400">{icon}</div>
+        <h2 className="text-base font-semibold text-white">{title}</h2>
+      </div>
+      <div>{children}</div>
     </section>
   );
 }
@@ -108,34 +64,10 @@ function SSHIcon({ className }: { className?: string }) {
   );
 }
 
-function WebhookIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className || "w-5 h-5"} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-    </svg>
-  );
-}
-
-function RegistryIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className || "w-5 h-5"} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-    </svg>
-  );
-}
-
 function AgentIcon({ className }: { className?: string }) {
   return (
     <svg className={className || "w-5 h-5"} fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
-    </svg>
-  );
-}
-
-function DatabaseIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className || "w-5 h-5"} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
     </svg>
   );
 }
@@ -166,10 +98,6 @@ export default function SystemSettings() {
   const [formData, setFormData] = useState<FormData>({
     sshCommandTimeoutSec: 60,
     sshReadyTimeoutSec: 10,
-    webhookMaxRetries: 3,
-    webhookTimeoutSec: 30,
-    webhookRetryDelaysSec: '1, 5, 15',
-    pgDumpTimeoutSec: 300,
     maxUploadSizeMb: 50,
     activeUserWindowMin: 15,
     registryMaxTags: 50,
@@ -177,10 +105,8 @@ export default function SystemSettings() {
     agentCallbackUrl: '',
     agentStaleThresholdSec: 180,
     agentOfflineThresholdSec: 300,
-    doRegistryToken: '',
     auditLogRetentionDays: 90,
   });
-  const [doRegistryTokenSet, setDoRegistryTokenSet] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -195,10 +121,6 @@ export default function SystemSettings() {
       setFormData({
         sshCommandTimeoutSec: msToSec(settings.sshCommandTimeoutMs),
         sshReadyTimeoutSec: msToSec(settings.sshReadyTimeoutMs),
-        webhookMaxRetries: settings.webhookMaxRetries,
-        webhookTimeoutSec: msToSec(settings.webhookTimeoutMs),
-        webhookRetryDelaysSec: parseDelaysMs(settings.webhookRetryDelaysMs),
-        pgDumpTimeoutSec: msToSec(settings.pgDumpTimeoutMs),
         maxUploadSizeMb: settings.maxUploadSizeMb,
         activeUserWindowMin: settings.activeUserWindowMin,
         registryMaxTags: settings.registryMaxTags,
@@ -206,10 +128,8 @@ export default function SystemSettings() {
         agentCallbackUrl: settings.agentCallbackUrl || '',
         agentStaleThresholdSec: msToSec(settings.agentStaleThresholdMs),
         agentOfflineThresholdSec: msToSec(settings.agentOfflineThresholdMs),
-        doRegistryToken: '',
         auditLogRetentionDays: settings.auditLogRetentionDays,
       });
-      setDoRegistryTokenSet(settings.doRegistryTokenSet);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load settings');
     } finally {
@@ -227,10 +147,6 @@ export default function SystemSettings() {
       const updateData: Parameters<typeof updateSystemSettings>[0] = {
         sshCommandTimeoutMs: secToMs(formData.sshCommandTimeoutSec),
         sshReadyTimeoutMs: secToMs(formData.sshReadyTimeoutSec),
-        webhookMaxRetries: formData.webhookMaxRetries,
-        webhookTimeoutMs: secToMs(formData.webhookTimeoutSec),
-        webhookRetryDelaysMs: formatDelaysMs(formData.webhookRetryDelaysSec),
-        pgDumpTimeoutMs: secToMs(formData.pgDumpTimeoutSec),
         maxUploadSizeMb: formData.maxUploadSizeMb,
         activeUserWindowMin: formData.activeUserWindowMin,
         registryMaxTags: formData.registryMaxTags,
@@ -240,13 +156,7 @@ export default function SystemSettings() {
         agentOfflineThresholdMs: secToMs(formData.agentOfflineThresholdSec),
         auditLogRetentionDays: formData.auditLogRetentionDays,
       };
-      // Only include doRegistryToken if it was changed (non-empty)
-      if (formData.doRegistryToken) {
-        updateData.doRegistryToken = formData.doRegistryToken;
-      }
-      const { settings } = await updateSystemSettings(updateData);
-      setDoRegistryTokenSet(settings.doRegistryTokenSet);
-      setFormData(prev => ({ ...prev, doRegistryToken: '' }));
+      await updateSystemSettings(updateData);
 
       setSuccess('Settings saved successfully');
     } catch (err) {
@@ -270,10 +180,6 @@ export default function SystemSettings() {
       setFormData({
         sshCommandTimeoutSec: msToSec(settings.sshCommandTimeoutMs),
         sshReadyTimeoutSec: msToSec(settings.sshReadyTimeoutMs),
-        webhookMaxRetries: settings.webhookMaxRetries,
-        webhookTimeoutSec: msToSec(settings.webhookTimeoutMs),
-        webhookRetryDelaysSec: parseDelaysMs(settings.webhookRetryDelaysMs),
-        pgDumpTimeoutSec: msToSec(settings.pgDumpTimeoutMs),
         maxUploadSizeMb: settings.maxUploadSizeMb,
         activeUserWindowMin: settings.activeUserWindowMin,
         registryMaxTags: settings.registryMaxTags,
@@ -281,10 +187,8 @@ export default function SystemSettings() {
         agentCallbackUrl: settings.agentCallbackUrl || '',
         agentStaleThresholdSec: msToSec(settings.agentStaleThresholdMs),
         agentOfflineThresholdSec: msToSec(settings.agentOfflineThresholdMs),
-        doRegistryToken: '',
         auditLogRetentionDays: settings.auditLogRetentionDays,
       });
-      setDoRegistryTokenSet(settings.doRegistryTokenSet);
 
       setSuccess('Settings reset to defaults');
     } catch (err) {
@@ -307,7 +211,7 @@ export default function SystemSettings() {
   }
 
   return (
-    <div className="p-6 max-w-4xl">
+    <div className="p-6">
       <div className="mb-5">
         <p className="text-slate-400">
           Configure global operational settings for BridgePort
@@ -364,86 +268,6 @@ export default function SystemSettings() {
                 SSH connection establishment timeout (default: {defaults ? msToSec(defaults.sshReadyTimeoutMs) : 10}s)
               </p>
             </div>
-          </div>
-        </SettingsSection>
-
-        {/* Webhook Delivery */}
-        <SettingsSection title="Webhook Delivery" icon={<WebhookIcon />}>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">Max Retries</label>
-              <input
-                type="number"
-                min={0}
-                max={10}
-                value={formData.webhookMaxRetries}
-                onChange={(e) => updateField('webhookMaxRetries', parseInt(e.target.value) || 3)}
-                className="input w-full"
-              />
-              <p className="text-xs text-slate-500 mt-1">
-                Retry attempts for failed webhooks (default: {defaults?.webhookMaxRetries || 3})
-              </p>
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">
-                Request Timeout
-                <span className="text-slate-500 ml-1">(seconds)</span>
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={300}
-                value={formData.webhookTimeoutSec}
-                onChange={(e) => updateField('webhookTimeoutSec', parseInt(e.target.value) || 30)}
-                className="input w-full"
-              />
-              <p className="text-xs text-slate-500 mt-1">
-                HTTP timeout for webhook delivery (default: {defaults ? msToSec(defaults.webhookTimeoutMs) : 30}s)
-              </p>
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">
-                Retry Delays
-                <span className="text-slate-500 ml-1">(seconds, comma-separated)</span>
-              </label>
-              <input
-                type="text"
-                value={formData.webhookRetryDelaysSec}
-                onChange={(e) => updateField('webhookRetryDelaysSec', e.target.value)}
-                placeholder="1, 5, 15"
-                className="input w-full"
-              />
-              <p className="text-xs text-slate-500 mt-1">
-                Backoff delays between retries (default: {defaults ? parseDelaysMs(defaults.webhookRetryDelaysMs) : '1, 5, 15'})
-              </p>
-            </div>
-          </div>
-        </SettingsSection>
-
-        {/* Registry Configuration */}
-        <SettingsSection title="Registry Configuration" icon={<RegistryIcon />}>
-          <div>
-            <label className="block text-sm text-slate-400 mb-1">
-              DigitalOcean Registry Token
-            </label>
-            <div className="relative">
-              <input
-                type="password"
-                value={formData.doRegistryToken}
-                onChange={(e) => updateField('doRegistryToken', e.target.value)}
-                placeholder={doRegistryTokenSet ? '••••••••' : 'Enter token'}
-                className="input w-full pr-20"
-              />
-              {doRegistryTokenSet && (
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-green-400">
-                  Configured
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-slate-500 mt-1">
-              API token for DigitalOcean Container Registry. Used for image pulls and tag listing.
-              Leave empty to keep current value. Falls back to DO_REGISTRY_TOKEN env var if not set.
-            </p>
           </div>
         </SettingsSection>
 
@@ -506,27 +330,6 @@ export default function SystemSettings() {
                 </p>
               </div>
             </div>
-          </div>
-        </SettingsSection>
-
-        {/* Database Backup */}
-        <SettingsSection title="Database Backup" icon={<DatabaseIcon />}>
-          <div>
-            <label className="block text-sm text-slate-400 mb-1">
-              pg_dump Timeout
-              <span className="text-slate-500 ml-1">(seconds)</span>
-            </label>
-            <input
-              type="number"
-              min={30}
-              max={3600}
-              value={formData.pgDumpTimeoutSec}
-              onChange={(e) => updateField('pgDumpTimeoutSec', parseInt(e.target.value) || 300)}
-              className="input w-48"
-            />
-            <p className="text-xs text-slate-500 mt-1">
-              Max time for database backup execution (default: {defaults ? msToSec(defaults.pgDumpTimeoutMs) : 300}s / {defaults ? msToSec(defaults.pgDumpTimeoutMs) / 60 : 5} min)
-            </p>
           </div>
         </SettingsSection>
 
