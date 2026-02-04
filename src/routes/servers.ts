@@ -465,4 +465,47 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
       return { server, success: true };
     }
   );
+
+  // Get server process snapshot (from agent)
+  fastify.get(
+    '/api/servers/:id/processes',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      const server = await prisma.server.findUnique({
+        where: { id },
+        include: {
+          processSnapshot: true,
+        },
+      });
+
+      if (!server) {
+        return reply.code(404).send({ error: 'Server not found' });
+      }
+
+      if (!server.processSnapshot) {
+        return {
+          hasData: false,
+          processes: null,
+          updatedAt: null,
+        };
+      }
+
+      try {
+        const processes = JSON.parse(server.processSnapshot.data);
+        return {
+          hasData: true,
+          processes,
+          updatedAt: server.processSnapshot.updatedAt,
+        };
+      } catch {
+        return {
+          hasData: false,
+          processes: null,
+          updatedAt: null,
+        };
+      }
+    }
+  );
 }

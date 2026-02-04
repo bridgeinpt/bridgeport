@@ -8,6 +8,7 @@ import {
   createService,
   getAgentStatus,
   getServerMetrics,
+  getServerProcesses,
   collectServerMetrics,
   updateServerMetricsMode,
   regenerateAgentToken,
@@ -28,6 +29,7 @@ import {
   type ServerConfigFilesSyncTotals,
   type ServerSyncAllResult,
   type ContainerImage,
+  type ProcessSnapshot,
 } from '../lib/api';
 import { useToast } from '../components/Toast';
 import { formatDistanceToNow } from 'date-fns';
@@ -139,6 +141,10 @@ export default function ServerDetail() {
   const [syncResults, setSyncResults] = useState<ServerSyncAllResult[] | null>(null);
   const [showSyncResults, setShowSyncResults] = useState(false);
 
+  // Process snapshot (from agent)
+  const [processSnapshot, setProcessSnapshot] = useState<ProcessSnapshot | null>(null);
+  const [processUpdatedAt, setProcessUpdatedAt] = useState<string | null>(null);
+
   useEffect(() => {
     if (id) {
       setLoading(true);
@@ -146,12 +152,17 @@ export default function ServerDetail() {
         getServer(id),
         getAgentStatus(id),
         getServerMetrics(id, undefined, undefined, 1),
+        getServerProcesses(id),
       ])
-        .then(([serverRes, statusRes, metricsRes]) => {
+        .then(([serverRes, statusRes, metricsRes, processRes]) => {
           setServer(serverRes.server);
           setAgentStatus(statusRes);
           if (metricsRes.metrics.length > 0) {
             setLatestMetrics(metricsRes.metrics[0]);
+          }
+          if (processRes.hasData && processRes.processes) {
+            setProcessSnapshot(processRes.processes);
+            setProcessUpdatedAt(processRes.updatedAt);
           }
           // Load container images for the server's environment
           if (serverRes.server.environmentId) {
@@ -1104,6 +1115,84 @@ export default function ServerDetail() {
           </div>
         )}
       </Modal>
+
+      {/* Top Processes (from Agent) */}
+      {processSnapshot && (
+        <div className="panel mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-white">
+              Top Processes
+              {processUpdatedAt && (
+                <span className="text-xs text-slate-500 font-normal ml-2">
+                  {formatDistanceToNow(new Date(processUpdatedAt), { addSuffix: true })}
+                </span>
+              )}
+            </h3>
+            <div className="flex items-center gap-4 text-sm text-slate-400">
+              <span>Total: {processSnapshot.stats.total}</span>
+              <span className="text-green-400">Running: {processSnapshot.stats.running}</span>
+              <span>Sleeping: {processSnapshot.stats.sleeping}</span>
+              {processSnapshot.stats.zombie > 0 && (
+                <span className="text-red-400">Zombie: {processSnapshot.stats.zombie}</span>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-6">
+            {/* Top by CPU */}
+            <div>
+              <h4 className="text-sm font-medium text-slate-400 mb-3">Top by CPU</h4>
+              <div className="space-y-2">
+                {processSnapshot.byCpu.slice(0, 10).map((proc) => (
+                  <div
+                    key={`cpu-${proc.pid}`}
+                    className="flex items-center justify-between p-2 bg-slate-800/50 rounded text-sm"
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <span className="text-slate-500 font-mono text-xs w-12">{proc.pid}</span>
+                      <span className="text-white truncate" title={proc.name}>{proc.name}</span>
+                    </div>
+                    <div className="flex items-center gap-4 text-xs shrink-0">
+                      <span className={`font-mono ${proc.cpuPercent > 50 ? 'text-red-400' : proc.cpuPercent > 20 ? 'text-yellow-400' : 'text-green-400'}`}>
+                        {proc.cpuPercent.toFixed(1)}% CPU
+                      </span>
+                      <span className="text-slate-400 font-mono">
+                        {proc.memoryMb.toFixed(0)} MB
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Top by Memory */}
+            <div>
+              <h4 className="text-sm font-medium text-slate-400 mb-3">Top by Memory</h4>
+              <div className="space-y-2">
+                {processSnapshot.byMemory.slice(0, 10).map((proc) => (
+                  <div
+                    key={`mem-${proc.pid}`}
+                    className="flex items-center justify-between p-2 bg-slate-800/50 rounded text-sm"
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <span className="text-slate-500 font-mono text-xs w-12">{proc.pid}</span>
+                      <span className="text-white truncate" title={proc.name}>{proc.name}</span>
+                    </div>
+                    <div className="flex items-center gap-4 text-xs shrink-0">
+                      <span className="text-slate-400 font-mono">
+                        {proc.cpuPercent.toFixed(1)}% CPU
+                      </span>
+                      <span className={`font-mono ${proc.memoryMb > 1000 ? 'text-yellow-400' : 'text-primary-400'}`}>
+                        {proc.memoryMb.toFixed(0)} MB
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Active Services */}
       {(() => {

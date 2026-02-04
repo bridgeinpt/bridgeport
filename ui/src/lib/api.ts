@@ -1033,6 +1033,39 @@ export const getServerMetrics = (id: string, from?: string, to?: string, limit?:
   return api.get<{ metrics: ServerMetrics[] }>(`/servers/${id}/metrics${query ? `?${query}` : ''}`);
 };
 
+// Process snapshot types
+export interface ProcessInfo {
+  pid: number;
+  name: string;
+  state: string;
+  cpuPercent: number;
+  memoryMb: number;
+  threads: number;
+}
+
+export interface ProcessStats {
+  total: number;
+  running: number;
+  sleeping: number;
+  stopped: number;
+  zombie: number;
+}
+
+export interface ProcessSnapshot {
+  byCpu: ProcessInfo[];
+  byMemory: ProcessInfo[];
+  stats: ProcessStats;
+}
+
+export interface ServerProcessesResponse {
+  hasData: boolean;
+  processes: ProcessSnapshot | null;
+  updatedAt: string | null;
+}
+
+export const getServerProcesses = (id: string) =>
+  api.get<ServerProcessesResponse>(`/servers/${id}/processes`);
+
 export const getServiceMetrics = (id: string, from?: string, to?: string, limit?: number) => {
   const params = new URLSearchParams();
   if (from) params.append('from', from);
