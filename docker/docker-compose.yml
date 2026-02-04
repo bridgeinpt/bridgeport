@@ -26,15 +26,13 @@ services:
     environment:
       - NODE_ENV=production
       - DATABASE_URL=file:/data/bridgeport.db
-      - SSH_KEY_PATH=/app/.ssh/bios-infra
-      - SSH_USER=root
       - UPLOAD_DIR=/data/uploads
     user: "1000:1000"  # Run as node user (non-root)
     volumes:
       - ./data:/data
-      - /root/.ssh/bios-infra:/app/.ssh/bios-infra:ro
-      # SSH keys can also be configured via the UI (Settings > SSH Configuration)
-      # The UI-configured key is encrypted and stored in the database
+      # SSH keys are configured via the UI per environment (Settings > SSH)
+      # Each environment has its own SSH key for security isolation
+      # Keys are encrypted and stored in the BridgePort database
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 30s

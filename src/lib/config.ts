@@ -7,7 +7,8 @@ const envSchema = z.object({
   HOST: z.string().default('0.0.0.0'),
   PORT: z.coerce.number().default(3000),
   DO_REGISTRY_TOKEN: z.string().optional(),
-  SSH_KEY_PATH: z.string().default('/root/.ssh/bios-infra'),
+  // Legacy fallback SSH settings - prefer per-environment keys configured via UI
+  SSH_KEY_PATH: z.string().optional(),
   SSH_USER: z.string().default('root'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   UPLOAD_DIR: z.string().default('./uploads'),
