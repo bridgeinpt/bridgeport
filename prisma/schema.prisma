@@ -26,7 +26,6 @@ model User {
   notifications           Notification[]
   notificationPreferences NotificationPreference[]
   deploymentPlans         DeploymentPlan[]
-  deploymentTemplates     DeploymentTemplate[]
 }
 
 model ApiToken {
@@ -64,7 +63,6 @@ model Environment {
   containerImages      ContainerImage[]
   deploymentPlans      DeploymentPlan[]
   healthCheckLogs      HealthCheckLog[]
-  deploymentTemplates  DeploymentTemplate[]
 }
 
 model Server {
@@ -636,8 +634,6 @@ model DeploymentPlan {
   containerImage   ContainerImage? @relation(fields: [containerImageId], references: [id], onDelete: SetNull)
   userId           String?
   user             User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
-  templateId       String?
-  template         DeploymentTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
 
   steps DeploymentPlanStep[]
 
@@ -670,32 +666,6 @@ model DeploymentPlanStep {
   deployment       Deployment?    @relation(fields: [deploymentId], references: [id], onDelete: SetNull)
 
   @@index([deploymentPlanId, order])
-}
-
-// Deployment plan template - reusable deployment configurations
-model DeploymentTemplate {
-  id          String  @id @default(cuid())
-  name        String
-  description String?
-
-  // Template definition as JSON
-  // Schema: { version: "1.0", parallelExecution: boolean, steps: TemplateStep[] }
-  definition String
-
-  // Metadata
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  lastUsedAt  DateTime?
-  useCount    Int       @default(0)
-
-  environmentId String
-  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
-  createdById   String
-  createdBy     User        @relation(fields: [createdById], references: [id], onDelete: Cascade)
-
-  deploymentPlans DeploymentPlan[]
-
-  @@unique([environmentId, name])
 }
 
 // ==================== Global Settings ====================

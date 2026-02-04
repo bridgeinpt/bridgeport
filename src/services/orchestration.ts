@@ -15,7 +15,6 @@ export interface BuildPlanOptions {
   userId?: string;
   autoRollback?: boolean;
   parallelExecution?: boolean;
-  templateId?: string;
 }
 
 type ServiceWithDeps = Service & {
@@ -189,7 +188,6 @@ export async function buildDeploymentPlan(options: BuildPlanOptions): Promise<De
       environmentId: options.environmentId,
       containerImageId: options.containerImageId,
       userId: options.userId,
-      templateId: options.templateId,
     },
   });
 

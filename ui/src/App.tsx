@@ -25,8 +25,6 @@ import NotificationSettings from './pages/admin/NotificationSettings';
 import ContainerImages from './pages/ContainerImages';
 import DeploymentPlans from './pages/DeploymentPlans';
 import DeploymentPlanDetail from './pages/DeploymentPlanDetail';
-import DeploymentTemplates from './pages/DeploymentTemplates';
-import DeploymentTemplateEditor from './pages/DeploymentTemplateEditor';
 import ServiceTypes from './pages/settings/ServiceTypes';
 import GlobalSpaces from './pages/settings/GlobalSpaces';
 import SystemSettings from './pages/settings/SystemSettings';
@@ -66,10 +64,6 @@ export default function App() {
                 <Route path="/config-files" element={<ConfigFiles />} />
                 <Route path="/registries" element={<Registries />} />
                 <Route path="/container-images" element={<ContainerImages />} />
-                <Route path="/deployment-templates" element={<DeploymentTemplates />} />
-                <Route path="/deployment-templates/new" element={<DeploymentTemplateEditor />} />
-                <Route path="/deployment-templates/:id" element={<DeploymentTemplateEditor />} />
-                <Route path="/deployment-templates/:id/execute" element={<DeploymentTemplateEditor />} />
                 <Route path="/deployment-plans" element={<DeploymentPlans />} />
                 <Route path="/deployment-plans/:id" element={<DeploymentPlanDetail />} />
                 <Route path="/databases" element={<Databases />} />
