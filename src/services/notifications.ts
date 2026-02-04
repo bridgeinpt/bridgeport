@@ -2,6 +2,7 @@ import { prisma } from '../lib/db.js';
 import type { Notification, NotificationType, NotificationPreference } from '@prisma/client';
 import { sendEmail, generateNotificationEmail } from './email.js';
 import { dispatchWebhook } from './outgoing-webhooks.js';
+import { dispatchSlackNotification } from './slack-notifications.js';
 
 // Predefined notification types
 export const NOTIFICATION_TYPES = {
@@ -401,14 +402,20 @@ export async function sendSystemNotification(
 
   // Send webhooks for system notifications
   const defaultChannels = JSON.parse(notificationType.defaultChannels || '[]') as string[];
+  let envName: string | undefined;
+  if (environmentId) {
+    const env = await prisma.environment.findUnique({ where: { id: environmentId }, select: { name: true } });
+    envName = env?.name;
+  }
+
   if (defaultChannels.includes('webhook')) {
-    let envName: string | undefined;
-    if (environmentId) {
-      const env = await prisma.environment.findUnique({ where: { id: environmentId }, select: { name: true } });
-      envName = env?.name;
-    }
     await dispatchWebhook(typeCode, environmentId, data, envName);
   }
+
+  // Send Slack notifications (routing is configured separately in Slack settings)
+  const title = notificationType.name;
+  const message = renderTemplate(notificationType.template, data);
+  await dispatchSlackNotification(notificationType, title, message, data, environmentId, envName);
 
   return notifications;
 }

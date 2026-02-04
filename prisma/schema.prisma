@@ -394,6 +394,9 @@ model Database {
   // pg_dump options as JSON
   pgDumpOptions String? // {"noOwner":true,"clean":true,...}
 
+  // Backup timeout (milliseconds)
+  pgDumpTimeoutMs Int @default(300000) // 5 minutes
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -478,8 +481,9 @@ model NotificationType {
 
   createdAt DateTime @default(now())
 
-  notifications Notification[]
-  preferences   NotificationPreference[]
+  notifications    Notification[]
+  preferences      NotificationPreference[]
+  slackRoutings    SlackTypeRouting[]
 }
 
 // Individual notifications sent to users
@@ -803,6 +807,36 @@ model AgentProcessSnapshot {
   server    Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
   data      String   // JSON with byCpu, byMemory, stats
   updatedAt DateTime @updatedAt
+}
+
+// ==================== Slack Integration ====================
+
+// Slack channel configuration for incoming webhooks
+model SlackChannel {
+  id               String    @id @default(cuid())
+  name             String // Display name (e.g., "Alerts", "Deployments")
+  slackChannelName String? // Actual Slack channel name (e.g., "#alerts")
+  webhookUrl       String // Encrypted incoming webhook URL
+  webhookUrlNonce  String?
+  isDefault        Boolean   @default(false) // Fallback channel
+  enabled          Boolean   @default(true)
+  lastTestedAt     DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  typeRoutings SlackTypeRouting[]
+}
+
+// Routes notification types to Slack channels
+model SlackTypeRouting {
+  id             String          @id @default(cuid())
+  typeId         String
+  type           NotificationType @relation(fields: [typeId], references: [id], onDelete: Cascade)
+  channelId      String
+  channel        SlackChannel     @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  environmentIds String? // JSON array of environment IDs (null = all environments)
+
+  @@unique([typeId, channelId])
 }
 
 // ==================== Health Check Logging ====================

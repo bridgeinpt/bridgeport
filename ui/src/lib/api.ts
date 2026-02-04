@@ -1159,6 +1159,7 @@ export interface Database {
   backupCompression: BackupCompression;
   backupCompressionLevel: number;
   pgDumpOptions: PgDumpOptions | null;
+  pgDumpTimeoutMs: number;
   createdAt: string;
   updatedAt: string;
   environmentId: string;
@@ -1185,6 +1186,7 @@ export interface DatabaseInput {
   backupCompression?: BackupCompression;
   backupCompressionLevel?: number;
   pgDumpOptions?: PgDumpOptions;
+  pgDumpTimeoutMs?: number;
 }
 
 export interface DatabaseBackup {
@@ -2059,4 +2061,74 @@ export const checkContainerImageUpdates = (id: string) =>
 
 export const getEnhancedContainerImageHistory = (id: string, limit?: number) =>
   api.get<{ history: EnhancedContainerImageHistory[] }>(`/container-images/${id}/history${limit ? `?limit=${limit}` : ''}`);
+
+// ==================== Slack Integration ====================
+
+export interface SlackChannel {
+  id: string;
+  name: string;
+  slackChannelName: string | null;
+  hasWebhookUrl: boolean;
+  isDefault: boolean;
+  enabled: boolean;
+  lastTestedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SlackChannelInput {
+  name: string;
+  slackChannelName?: string;
+  webhookUrl: string;
+  isDefault?: boolean;
+  enabled?: boolean;
+}
+
+export interface SlackRouting {
+  id: string;
+  typeId: string;
+  channelId: string;
+  environmentIds: string | null;
+  type: {
+    id: string;
+    code: string;
+    name: string;
+    severity: string;
+  };
+  channel: {
+    id: string;
+    name: string;
+  };
+}
+
+// Slack Channels
+export const listSlackChannels = () =>
+  api.get<{ channels: SlackChannel[] }>('/admin/slack/channels');
+
+export const getSlackChannel = (id: string) =>
+  api.get<{ channel: SlackChannel }>(`/admin/slack/channels/${id}`);
+
+export const createSlackChannel = (data: SlackChannelInput) =>
+  api.post<{ channel: SlackChannel }>('/admin/slack/channels', data);
+
+export const updateSlackChannel = (id: string, data: Partial<SlackChannelInput>) =>
+  api.put<{ channel: SlackChannel }>(`/admin/slack/channels/${id}`, data);
+
+export const deleteSlackChannel = (id: string) =>
+  api.delete<{ success: boolean }>(`/admin/slack/channels/${id}`);
+
+export const testSlackChannel = (id: string) =>
+  api.post<{ success: boolean; message: string }>(`/admin/slack/channels/${id}/test`);
+
+// Slack Routing
+export const listSlackRoutings = () =>
+  api.get<{ routings: SlackRouting[] }>('/admin/slack/routing');
+
+export const updateSlackRoutings = (
+  typeId: string,
+  routings: Array<{ channelId: string; environmentIds?: string[] | null }>
+) => api.put<{ routings: SlackRouting[] }>('/admin/slack/routing', { typeId, routings });
+
+export const deleteSlackRouting = (typeId: string, channelId: string) =>
+  api.delete<{ success: boolean }>(`/admin/slack/routing/${typeId}/${channelId}`);
 

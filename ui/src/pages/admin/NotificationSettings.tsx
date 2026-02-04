@@ -12,17 +12,54 @@ import {
   getAdminNotificationTypes,
   updateAdminNotificationType,
   listEnvironments,
+  getSystemSettings,
+  updateSystemSettings,
+  listSlackChannels,
+  createSlackChannel,
+  updateSlackChannel,
+  deleteSlackChannel,
+  testSlackChannel,
+  listSlackRoutings,
+  updateSlackRoutings,
   type SmtpConfig,
   type SmtpConfigInput,
   type WebhookConfig,
   type WebhookConfigInput,
   type NotificationType,
   type Environment,
+  type SlackChannel,
+  type SlackChannelInput,
+  type SlackRouting,
 } from '../../lib/api';
 import { useToast } from '../../components/Toast';
 import { PlusIcon, TrashIcon, RefreshIcon } from '../../components/Icons';
 
-type TabType = 'smtp' | 'webhooks' | 'types';
+type TabType = 'smtp' | 'webhooks' | 'slack' | 'types';
+
+function msToSec(ms: number): number {
+  return Math.round(ms / 1000);
+}
+
+function secToMs(sec: number): number {
+  return sec * 1000;
+}
+
+function parseDelaysMs(delaysJson: string): string {
+  try {
+    const delays = JSON.parse(delaysJson) as number[];
+    return delays.map((d) => Math.round(d / 1000)).join(', ');
+  } catch {
+    return '1, 5, 15';
+  }
+}
+
+function formatDelaysMs(delaysSec: string): string {
+  const delays = delaysSec.split(',').map((s) => {
+    const num = parseInt(s.trim(), 10);
+    return isNaN(num) ? 1000 : num * 1000;
+  });
+  return JSON.stringify(delays);
+}
 
 export default function NotificationSettings() {
   const { user } = useAuthStore();
@@ -58,10 +95,38 @@ export default function NotificationSettings() {
   const [webhookSaving, setWebhookSaving] = useState(false);
   const [showWebhookModal, setShowWebhookModal] = useState(false);
 
+  // Slack state
+  const [slackChannels, setSlackChannels] = useState<SlackChannel[]>([]);
+  const [slackRoutings, setSlackRoutings] = useState<SlackRouting[]>([]);
+  const [editingSlackChannel, setEditingSlackChannel] = useState<SlackChannel | null>(null);
+  const [slackChannelForm, setSlackChannelForm] = useState<SlackChannelInput>({
+    name: '',
+    slackChannelName: '',
+    webhookUrl: '',
+    isDefault: false,
+    enabled: true,
+  });
+  const [slackChannelSaving, setSlackChannelSaving] = useState(false);
+  const [showSlackChannelModal, setShowSlackChannelModal] = useState(false);
+  const [testingSlackChannel, setTestingSlackChannel] = useState<string | null>(null);
+
   // Notification types state
   const [notificationTypes, setNotificationTypes] = useState<NotificationType[]>([]);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_environments, setEnvironments] = useState<Environment[]>([]);
+
+  // Webhook delivery settings state
+  const [deliverySettings, setDeliverySettings] = useState({
+    webhookMaxRetries: 3,
+    webhookTimeoutSec: 30,
+    webhookRetryDelaysSec: '1, 5, 15',
+  });
+  const [deliverySettingsDefaults, setDeliverySettingsDefaults] = useState({
+    webhookMaxRetries: 3,
+    webhookTimeoutMs: 30000,
+    webhookRetryDelaysMs: '[1000,5000,15000]',
+  });
+  const [deliverySaving, setDeliverySaving] = useState(false);
 
   useEffect(() => {
     if (!isAdmin(user)) return;
@@ -71,11 +136,14 @@ export default function NotificationSettings() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [smtpRes, webhooksRes, typesRes, envsRes] = await Promise.all([
+      const [smtpRes, webhooksRes, typesRes, envsRes, systemRes, slackChannelsRes, slackRoutingsRes] = await Promise.all([
         getSmtpConfig(),
         listWebhooks(),
         getAdminNotificationTypes(),
         listEnvironments(),
+        getSystemSettings(),
+        listSlackChannels(),
+        listSlackRoutings(),
       ]);
 
       setSmtpConfig(smtpRes.config);
@@ -95,6 +163,16 @@ export default function NotificationSettings() {
       setWebhooks(webhooksRes.webhooks);
       setNotificationTypes(typesRes.types);
       setEnvironments(envsRes.environments);
+      setSlackChannels(slackChannelsRes.channels);
+      setSlackRoutings(slackRoutingsRes.routings);
+
+      // Load webhook delivery settings
+      setDeliverySettings({
+        webhookMaxRetries: systemRes.settings.webhookMaxRetries,
+        webhookTimeoutSec: msToSec(systemRes.settings.webhookTimeoutMs),
+        webhookRetryDelaysSec: parseDelaysMs(systemRes.settings.webhookRetryDelaysMs),
+      });
+      setDeliverySettingsDefaults(systemRes.defaults);
     } finally {
       setLoading(false);
     }
@@ -173,7 +251,7 @@ export default function NotificationSettings() {
       await deleteWebhook(id);
       setWebhooks((prev) => prev.filter((w) => w.id !== id));
       toast.success('Webhook deleted');
-    } catch (error) {
+    } catch {
       toast.error('Failed to delete webhook');
     }
   };
@@ -187,6 +265,114 @@ export default function NotificationSettings() {
     }
   };
 
+  // Slack channel handlers
+  const openSlackChannelModal = (channel?: SlackChannel) => {
+    if (channel) {
+      setEditingSlackChannel(channel);
+      setSlackChannelForm({
+        name: channel.name,
+        slackChannelName: channel.slackChannelName || '',
+        webhookUrl: '',
+        isDefault: channel.isDefault,
+        enabled: channel.enabled,
+      });
+    } else {
+      setEditingSlackChannel(null);
+      setSlackChannelForm({
+        name: '',
+        slackChannelName: '',
+        webhookUrl: '',
+        isDefault: false,
+        enabled: true,
+      });
+    }
+    setShowSlackChannelModal(true);
+  };
+
+  const handleSaveSlackChannel = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSlackChannelSaving(true);
+    try {
+      if (editingSlackChannel) {
+        // Only include webhookUrl if provided (for updates)
+        const updateData: Partial<SlackChannelInput> = {
+          name: slackChannelForm.name,
+          slackChannelName: slackChannelForm.slackChannelName || undefined,
+          isDefault: slackChannelForm.isDefault,
+          enabled: slackChannelForm.enabled,
+        };
+        if (slackChannelForm.webhookUrl) {
+          updateData.webhookUrl = slackChannelForm.webhookUrl;
+        }
+        const result = await updateSlackChannel(editingSlackChannel.id, updateData);
+        setSlackChannels((prev) => prev.map((c) => (c.id === editingSlackChannel.id ? result.channel : c)));
+        toast.success('Slack channel updated');
+      } else {
+        if (!slackChannelForm.webhookUrl) {
+          toast.error('Webhook URL is required');
+          setSlackChannelSaving(false);
+          return;
+        }
+        const result = await createSlackChannel(slackChannelForm);
+        setSlackChannels((prev) => [...prev, result.channel]);
+        toast.success('Slack channel created');
+      }
+      setShowSlackChannelModal(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to save Slack channel');
+    } finally {
+      setSlackChannelSaving(false);
+    }
+  };
+
+  const handleDeleteSlackChannel = async (id: string) => {
+    if (!confirm('Delete this Slack channel? All routing rules for this channel will also be removed.')) return;
+    try {
+      await deleteSlackChannel(id);
+      setSlackChannels((prev) => prev.filter((c) => c.id !== id));
+      setSlackRoutings((prev) => prev.filter((r) => r.channelId !== id));
+      toast.success('Slack channel deleted');
+    } catch {
+      toast.error('Failed to delete Slack channel');
+    }
+  };
+
+  const handleTestSlackChannel = async (id: string) => {
+    setTestingSlackChannel(id);
+    try {
+      const result = await testSlackChannel(id);
+      toast.success(result.message);
+      // Update lastTestedAt
+      setSlackChannels((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, lastTestedAt: new Date().toISOString() } : c))
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Slack test failed');
+    } finally {
+      setTestingSlackChannel(null);
+    }
+  };
+
+  // Slack routing handlers
+  const handleRoutingChange = async (typeId: string, channelId: string, checked: boolean) => {
+    const currentRoutings = slackRoutings.filter((r) => r.typeId === typeId);
+    let newRoutings: Array<{ channelId: string; environmentIds?: string[] | null }>;
+
+    if (checked) {
+      newRoutings = [...currentRoutings.map((r) => ({ channelId: r.channelId })), { channelId }];
+    } else {
+      newRoutings = currentRoutings.filter((r) => r.channelId !== channelId).map((r) => ({ channelId: r.channelId }));
+    }
+
+    try {
+      const result = await updateSlackRoutings(typeId, newRoutings);
+      // Update local state
+      setSlackRoutings((prev) => [...prev.filter((r) => r.typeId !== typeId), ...result.routings]);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to update routing');
+    }
+  };
+
   // Notification type handlers
   const handleUpdateType = async (
     id: string,
@@ -196,8 +382,25 @@ export default function NotificationSettings() {
       const result = await updateAdminNotificationType(id, data);
       setNotificationTypes((prev) => prev.map((t) => (t.id === id ? result.type : t)));
       toast.success('Updated');
-    } catch (error) {
+    } catch {
       toast.error('Failed to update');
+    }
+  };
+
+  // Webhook delivery settings handlers
+  const handleSaveDeliverySettings = async () => {
+    setDeliverySaving(true);
+    try {
+      await updateSystemSettings({
+        webhookMaxRetries: deliverySettings.webhookMaxRetries,
+        webhookTimeoutMs: secToMs(deliverySettings.webhookTimeoutSec),
+        webhookRetryDelaysMs: formatDelaysMs(deliverySettings.webhookRetryDelaysSec),
+      });
+      toast.success('Delivery settings saved');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to save delivery settings');
+    } finally {
+      setDeliverySaving(false);
     }
   };
 
@@ -222,10 +425,13 @@ export default function NotificationSettings() {
     );
   }
 
+  // Group notification types by category for Slack routing
+  const systemTypes = notificationTypes.filter((t) => t.category === 'system');
+
   return (
     <div className="p-6">
       <div className="mb-5">
-        <p className="text-slate-400">Configure email, webhooks, and notification types</p>
+        <p className="text-slate-400">Configure email, webhooks, Slack, and notification types</p>
       </div>
 
       {/* Tabs */}
@@ -233,6 +439,7 @@ export default function NotificationSettings() {
         {[
           { id: 'smtp', label: 'Email (SMTP)' },
           { id: 'webhooks', label: 'Webhooks' },
+          { id: 'slack', label: 'Slack' },
           { id: 'types', label: 'Notification Types' },
         ].map((tab) => (
           <button
@@ -375,71 +582,315 @@ export default function NotificationSettings() {
 
       {/* Webhooks Tab */}
       {activeTab === 'webhooks' && (
-        <div className="card">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-white">Outgoing Webhooks</h3>
-            <button onClick={() => openWebhookModal()} className="btn btn-primary">
-              <PlusIcon className="w-4 h-4 mr-2" />
-              Add Webhook
-            </button>
-          </div>
+        <div className="space-y-6">
+          <div className="card">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-white">Outgoing Webhooks</h3>
+              <button onClick={() => openWebhookModal()} className="btn btn-primary">
+                <PlusIcon className="w-4 h-4 mr-2" />
+                Add Webhook
+              </button>
+            </div>
 
-          {webhooks.length === 0 ? (
-            <p className="text-slate-400 text-center py-8">No webhooks configured</p>
-          ) : (
-            <div className="space-y-3">
-              {webhooks.map((webhook) => (
-                <div key={webhook.id} className="p-4 bg-slate-800 rounded-lg">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-medium text-white">{webhook.name}</h4>
-                        <span
-                          className={`text-xs px-2 py-0.5 rounded ${
-                            webhook.enabled ? 'bg-green-500/20 text-green-400' : 'bg-slate-700 text-slate-400'
-                          }`}
-                        >
-                          {webhook.enabled ? 'Enabled' : 'Disabled'}
-                        </span>
-                        {webhook.hasSecret && (
-                          <span className="text-xs px-2 py-0.5 rounded bg-primary-500/20 text-primary-400">
-                            Signed
+            {webhooks.length === 0 ? (
+              <p className="text-slate-400 text-center py-8">No webhooks configured</p>
+            ) : (
+              <div className="space-y-3">
+                {webhooks.map((webhook) => (
+                  <div key={webhook.id} className="p-4 bg-slate-800 rounded-lg">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-medium text-white">{webhook.name}</h4>
+                          <span
+                            className={`text-xs px-2 py-0.5 rounded ${
+                              webhook.enabled ? 'bg-green-500/20 text-green-400' : 'bg-slate-700 text-slate-400'
+                            }`}
+                          >
+                            {webhook.enabled ? 'Enabled' : 'Disabled'}
                           </span>
-                        )}
+                          {webhook.hasSecret && (
+                            <span className="text-xs px-2 py-0.5 rounded bg-primary-500/20 text-primary-400">
+                              Signed
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-slate-400 mt-1 font-mono">{webhook.url}</p>
+                        <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
+                          <span>Success: {webhook.successCount}</span>
+                          <span>Failed: {webhook.failureCount}</span>
+                          {webhook.lastTriggeredAt && (
+                            <span>Last: {new Date(webhook.lastTriggeredAt).toLocaleString()}</span>
+                          )}
+                        </div>
                       </div>
-                      <p className="text-sm text-slate-400 mt-1 font-mono">{webhook.url}</p>
-                      <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
-                        <span>Success: {webhook.successCount}</span>
-                        <span>Failed: {webhook.failureCount}</span>
-                        {webhook.lastTriggeredAt && (
-                          <span>Last: {new Date(webhook.lastTriggeredAt).toLocaleString()}</span>
-                        )}
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleTestWebhook(webhook.id)}
+                          className="btn btn-ghost text-xs"
+                          title="Test webhook"
+                        >
+                          <RefreshIcon className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => openWebhookModal(webhook)}
+                          className="btn btn-ghost text-xs"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDeleteWebhook(webhook.id)}
+                          className="btn btn-ghost text-xs text-red-400 hover:text-red-300"
+                        >
+                          <TrashIcon className="w-4 h-4" />
+                        </button>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleTestWebhook(webhook.id)}
-                        className="btn btn-ghost text-xs"
-                        title="Test webhook"
-                      >
-                        <RefreshIcon className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => openWebhookModal(webhook)}
-                        className="btn btn-ghost text-xs"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDeleteWebhook(webhook.id)}
-                        className="btn btn-ghost text-xs text-red-400 hover:text-red-300"
-                      >
-                        <TrashIcon className="w-4 h-4" />
-                      </button>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Delivery Settings */}
+          <div className="card">
+            <h3 className="text-base font-semibold text-white mb-4">Delivery Settings</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Max Retries</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={10}
+                  value={deliverySettings.webhookMaxRetries}
+                  onChange={(e) =>
+                    setDeliverySettings({
+                      ...deliverySettings,
+                      webhookMaxRetries: parseInt(e.target.value) || 3,
+                    })
+                  }
+                  className="input w-full"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Retry attempts for failed webhooks (default: {deliverySettingsDefaults?.webhookMaxRetries || 3})
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">
+                  Request Timeout <span className="text-slate-500">(seconds)</span>
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={300}
+                  value={deliverySettings.webhookTimeoutSec}
+                  onChange={(e) =>
+                    setDeliverySettings({
+                      ...deliverySettings,
+                      webhookTimeoutSec: parseInt(e.target.value) || 30,
+                    })
+                  }
+                  className="input w-full"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  HTTP timeout for webhook delivery (default:{' '}
+                  {deliverySettingsDefaults ? msToSec(deliverySettingsDefaults.webhookTimeoutMs) : 30}s)
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">
+                  Retry Delays <span className="text-slate-500">(seconds, comma-separated)</span>
+                </label>
+                <input
+                  type="text"
+                  value={deliverySettings.webhookRetryDelaysSec}
+                  onChange={(e) =>
+                    setDeliverySettings({
+                      ...deliverySettings,
+                      webhookRetryDelaysSec: e.target.value,
+                    })
+                  }
+                  placeholder="1, 5, 15"
+                  className="input w-full"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Backoff delays between retries (default:{' '}
+                  {deliverySettingsDefaults ? parseDelaysMs(deliverySettingsDefaults.webhookRetryDelaysMs) : '1, 5, 15'})
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 pt-4 border-t border-slate-700">
+              <button
+                onClick={handleSaveDeliverySettings}
+                disabled={deliverySaving}
+                className="btn btn-primary"
+              >
+                {deliverySaving ? 'Saving...' : 'Save Delivery Settings'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Slack Tab */}
+      {activeTab === 'slack' && (
+        <div className="space-y-6">
+          {/* Slack Channels */}
+          <div className="card">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-white">Slack Channels</h3>
+                <p className="text-sm text-slate-400 mt-1">
+                  Configure Slack incoming webhook URLs. Create a webhook in your Slack workspace and paste the URL here.
+                </p>
+              </div>
+              <button onClick={() => openSlackChannelModal()} className="btn btn-primary">
+                <PlusIcon className="w-4 h-4 mr-2" />
+                Add Channel
+              </button>
+            </div>
+
+            {slackChannels.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-slate-400 mb-2">No Slack channels configured</p>
+                <p className="text-sm text-slate-500">
+                  Add a Slack incoming webhook to start receiving notifications in Slack.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {slackChannels.map((channel) => (
+                  <div key={channel.id} className="p-4 bg-slate-800 rounded-lg">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-medium text-white">{channel.name}</h4>
+                          {channel.slackChannelName && (
+                            <span className="text-sm text-slate-400">{channel.slackChannelName}</span>
+                          )}
+                          <span
+                            className={`text-xs px-2 py-0.5 rounded ${
+                              channel.enabled ? 'bg-green-500/20 text-green-400' : 'bg-slate-700 text-slate-400'
+                            }`}
+                          >
+                            {channel.enabled ? 'Enabled' : 'Disabled'}
+                          </span>
+                          {channel.isDefault && (
+                            <span className="text-xs px-2 py-0.5 rounded bg-primary-500/20 text-primary-400">
+                              Default
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
+                          {channel.hasWebhookUrl && <span>Webhook configured</span>}
+                          {channel.lastTestedAt && (
+                            <span>Last tested: {new Date(channel.lastTestedAt).toLocaleString()}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleTestSlackChannel(channel.id)}
+                          disabled={testingSlackChannel === channel.id}
+                          className="btn btn-ghost text-xs"
+                          title="Send test message"
+                        >
+                          {testingSlackChannel === channel.id ? (
+                            <span className="animate-spin">...</span>
+                          ) : (
+                            <RefreshIcon className="w-4 h-4" />
+                          )}
+                        </button>
+                        <button
+                          onClick={() => openSlackChannelModal(channel)}
+                          className="btn btn-ghost text-xs"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDeleteSlackChannel(channel.id)}
+                          className="btn btn-ghost text-xs text-red-400 hover:text-red-300"
+                        >
+                          <TrashIcon className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Slack Routing */}
+          {slackChannels.length > 0 && (
+            <div className="card">
+              <h3 className="text-lg font-semibold text-white mb-2">Channel Routing</h3>
+              <p className="text-sm text-slate-400 mb-4">
+                Route notification types to specific Slack channels. Unrouted notifications use the default channel.
+              </p>
+
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-slate-700">
+                      <th className="text-left text-sm font-medium text-slate-400 pb-3 pr-4">
+                        Notification Type
+                      </th>
+                      {slackChannels.map((channel) => (
+                        <th
+                          key={channel.id}
+                          className="text-center text-sm font-medium text-slate-400 pb-3 px-2"
+                        >
+                          <div className="flex flex-col items-center">
+                            <span>{channel.name}</span>
+                            {channel.isDefault && (
+                              <span className="text-xs text-primary-400">(default)</span>
+                            )}
+                          </div>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {systemTypes.map((type) => {
+                      const typeRoutings = slackRoutings.filter((r) => r.typeId === type.id);
+                      return (
+                        <tr key={type.id} className="border-b border-slate-800">
+                          <td className="py-3 pr-4">
+                            <div className="flex items-center gap-2">
+                              <span className="text-white">{type.name}</span>
+                              <span
+                                className={`text-xs px-1.5 py-0.5 rounded ${
+                                  type.severity === 'critical'
+                                    ? 'bg-red-500/20 text-red-400'
+                                    : type.severity === 'warning'
+                                      ? 'bg-yellow-500/20 text-yellow-400'
+                                      : 'bg-slate-700 text-slate-400'
+                                }`}
+                              >
+                                {type.severity}
+                              </span>
+                            </div>
+                          </td>
+                          {slackChannels.map((channel) => {
+                            const isRouted = typeRoutings.some((r) => r.channelId === channel.id);
+                            return (
+                              <td key={channel.id} className="py-3 px-2 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={isRouted}
+                                  onChange={(e) => handleRoutingChange(type.id, channel.id, e.target.checked)}
+                                  className="rounded bg-slate-700 border-slate-600 text-primary-500"
+                                />
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>
@@ -591,6 +1042,95 @@ export default function NotificationSettings() {
                 </button>
                 <button type="submit" disabled={webhookSaving} className="btn btn-primary">
                   {webhookSaving ? 'Saving...' : 'Save'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Slack Channel Modal */}
+      {showSlackChannelModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-lg p-6">
+            <h3 className="text-lg font-semibold text-white mb-4">
+              {editingSlackChannel ? 'Edit Slack Channel' : 'Add Slack Channel'}
+            </h3>
+            <form onSubmit={handleSaveSlackChannel} className="space-y-4">
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Display Name</label>
+                <input
+                  type="text"
+                  value={slackChannelForm.name}
+                  onChange={(e) => setSlackChannelForm({ ...slackChannelForm, name: e.target.value })}
+                  placeholder="e.g., Alerts, Deployments"
+                  className="input"
+                  required
+                />
+                <p className="text-xs text-slate-500 mt-1">A friendly name for this channel configuration</p>
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Slack Channel Name (optional)</label>
+                <input
+                  type="text"
+                  value={slackChannelForm.slackChannelName || ''}
+                  onChange={(e) => setSlackChannelForm({ ...slackChannelForm, slackChannelName: e.target.value })}
+                  placeholder="e.g., #alerts"
+                  className="input"
+                />
+                <p className="text-xs text-slate-500 mt-1">The actual Slack channel name (for reference)</p>
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">
+                  Webhook URL {!editingSlackChannel && <span className="text-red-400">*</span>}
+                </label>
+                <input
+                  type="url"
+                  value={slackChannelForm.webhookUrl}
+                  onChange={(e) => setSlackChannelForm({ ...slackChannelForm, webhookUrl: e.target.value })}
+                  placeholder={editingSlackChannel ? 'Leave empty to keep current URL' : 'https://hooks.slack.com/services/...'}
+                  className="input"
+                  required={!editingSlackChannel}
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  {editingSlackChannel
+                    ? 'Leave empty to keep the current webhook URL'
+                    : 'Create an incoming webhook in your Slack workspace'}
+                </p>
+              </div>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={slackChannelForm.isDefault}
+                    onChange={(e) => setSlackChannelForm({ ...slackChannelForm, isDefault: e.target.checked })}
+                    className="rounded bg-slate-800 border-slate-600 text-primary-500"
+                  />
+                  <span className="text-sm text-slate-300">Default channel</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={slackChannelForm.enabled}
+                    onChange={(e) => setSlackChannelForm({ ...slackChannelForm, enabled: e.target.checked })}
+                    className="rounded bg-slate-800 border-slate-600 text-primary-500"
+                  />
+                  <span className="text-sm text-slate-300">Enabled</span>
+                </label>
+              </div>
+              <p className="text-xs text-slate-500">
+                The default channel receives all notifications that don&apos;t have specific routing rules.
+              </p>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowSlackChannelModal(false)}
+                  className="btn btn-ghost"
+                >
+                  Cancel
+                </button>
+                <button type="submit" disabled={slackChannelSaving} className="btn btn-primary">
+                  {slackChannelSaving ? 'Saving...' : 'Save'}
                 </button>
               </div>
             </form>

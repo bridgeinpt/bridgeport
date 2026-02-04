@@ -29,6 +29,7 @@ import { databaseRoutes } from './routes/databases.js';
 import { notificationRoutes } from './routes/notifications.js';
 import { smtpRoutes } from './routes/admin/smtp.js';
 import { webhookAdminRoutes } from './routes/admin/webhooks.js';
+import { slackAdminRoutes } from './routes/admin/slack.js';
 import { initializeNotificationTypes } from './services/notifications.js';
 import { initializeServiceTypes } from './services/service-types.js';
 import { containerImageRoutes } from './routes/container-images.js';
@@ -162,6 +163,7 @@ async function buildServer() {
   await fastify.register(notificationRoutes);
   await fastify.register(smtpRoutes);
   await fastify.register(webhookAdminRoutes);
+  await fastify.register(slackAdminRoutes);
   await fastify.register(containerImageRoutes);
   await fastify.register(serviceDependencyRoutes);
   await fastify.register(deploymentPlanRoutes);
