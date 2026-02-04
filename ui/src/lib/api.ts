@@ -864,6 +864,7 @@ export interface MetricsSummaryServer {
   id: string;
   name: string;
   hostname: string;
+  tags: string;
   metricsMode: MetricsMode;
   latestMetrics: ServerMetrics | null;
   services: Array<{
@@ -1718,6 +1719,7 @@ export interface MetricsHistoryDataPoint {
 export interface MetricsHistoryServer {
   id: string;
   name: string;
+  tags: string;
   data: MetricsHistoryDataPoint[];
 }
 

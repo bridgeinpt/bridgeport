@@ -55,6 +55,8 @@ interface AppState {
   setMonitoringTimeRange: (hours: number) => void;
   autoRefreshEnabled: boolean;
   setAutoRefreshEnabled: (enabled: boolean) => void;
+  monitoringTagFilter: string[];
+  setMonitoringTagFilter: (tags: string[]) => void;
 
   // Dashboard alert dismissals (session-only, not persisted)
   dismissedAlerts: string[];
@@ -99,6 +101,8 @@ export const useAppStore = create<AppState>()(
       setMonitoringTimeRange: (hours) => set({ monitoringTimeRange: hours }),
       autoRefreshEnabled: true,
       setAutoRefreshEnabled: (enabled) => set({ autoRefreshEnabled: enabled }),
+      monitoringTagFilter: [],
+      setMonitoringTagFilter: (tags) => set({ monitoringTagFilter: tags }),
 
       // Dashboard alert dismissals (session-only)
       dismissedAlerts: [],
@@ -130,6 +134,7 @@ export const useAppStore = create<AppState>()(
         collapsedGroups: state.collapsedGroups,
         monitoringTimeRange: state.monitoringTimeRange,
         autoRefreshEnabled: state.autoRefreshEnabled,
+        monitoringTagFilter: state.monitoringTagFilter,
         // Note: dismissedAlerts NOT persisted (session-only)
         servicesShowUpdatesOnly: state.servicesShowUpdatesOnly,
         configFilesAttachedFilter: state.configFilesAttachedFilter,

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppStore } from '../lib/store';
 import {
@@ -30,8 +30,17 @@ const timeRanges = [
 
 const COLORS = ['#60a5fa', '#34d399', '#fbbf24', '#f472b6', '#a78bfa', '#f87171'];
 
+function parseTags(tagsJson: string): string[] {
+  if (!tagsJson) return [];
+  try {
+    return JSON.parse(tagsJson);
+  } catch {
+    return [];
+  }
+}
+
 export default function Monitoring() {
-  const { selectedEnvironment, monitoringTimeRange, setMonitoringTimeRange, autoRefreshEnabled, setAutoRefreshEnabled } = useAppStore();
+  const { selectedEnvironment, monitoringTimeRange, setMonitoringTimeRange, autoRefreshEnabled, setAutoRefreshEnabled, monitoringTagFilter, setMonitoringTagFilter } = useAppStore();
   const [servers, setServers] = useState<MetricsSummaryServer[]>([]);
   const [metricsHistory, setMetricsHistory] = useState<MetricsHistoryServer[]>([]);
   const [stats, setStats] = useState<MonitoringOverviewStats | null>(null);
@@ -69,12 +78,38 @@ export default function Monitoring() {
     return () => clearInterval(interval);
   }, [selectedEnvironment?.id, monitoringTimeRange, autoRefreshEnabled]);
 
+  // Collect unique tags from all servers
+  const allTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    servers.forEach((server) => {
+      parseTags(server.tags).forEach((tag) => tagSet.add(tag));
+    });
+    return Array.from(tagSet).sort();
+  }, [servers]);
+
+  // Filter servers and metrics history based on selected tags
+  const filteredServers = useMemo(() => {
+    if (monitoringTagFilter.length === 0) return servers;
+    return servers.filter((server) => {
+      const serverTags = parseTags(server.tags);
+      return monitoringTagFilter.some((tag) => serverTags.includes(tag));
+    });
+  }, [servers, monitoringTagFilter]);
+
+  const filteredMetricsHistory = useMemo(() => {
+    if (monitoringTagFilter.length === 0) return metricsHistory;
+    return metricsHistory.filter((server) => {
+      const serverTags = parseTags(server.tags);
+      return monitoringTagFilter.some((tag) => serverTags.includes(tag));
+    });
+  }, [metricsHistory, monitoringTagFilter]);
+
   // Prepare chart data - combine all servers into single timeline
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const prepareChartData = (metric: 'cpu' | 'memory' | 'disk' | 'load'): any[] => {
     const timeMap = new Map<string, { time: string; [key: string]: string | number | null }>();
 
-    metricsHistory.forEach((server) => {
+    filteredMetricsHistory.forEach((server) => {
       server.data.forEach((point) => {
         if (!timeMap.has(point.time)) {
           timeMap.set(point.time, { time: point.time });
@@ -103,31 +138,34 @@ export default function Monitoring() {
     }
   };
 
-  // Collect all services with metrics for the table
-  const servicesWithMetrics: Array<{
-    id: string;
-    name: string;
-    serverName: string;
-    serverId: string;
-    metrics: ServiceMetrics;
-  }> = [];
+  // Collect all services with metrics for the table (using filtered servers)
+  const servicesWithMetrics = useMemo(() => {
+    const services: Array<{
+      id: string;
+      name: string;
+      serverName: string;
+      serverId: string;
+      metrics: ServiceMetrics;
+    }> = [];
 
-  servers.forEach((server) => {
-    server.services.forEach((service) => {
-      if (service.latestMetrics) {
-        servicesWithMetrics.push({
-          id: service.id,
-          name: service.name,
-          serverName: server.name,
-          serverId: server.id,
-          metrics: service.latestMetrics,
-        });
-      }
+    filteredServers.forEach((server) => {
+      server.services.forEach((service) => {
+        if (service.latestMetrics) {
+          services.push({
+            id: service.id,
+            name: service.name,
+            serverName: server.name,
+            serverId: server.id,
+            metrics: service.latestMetrics,
+          });
+        }
+      });
     });
-  });
 
-  // Sort by CPU usage descending
-  servicesWithMetrics.sort((a, b) => (b.metrics.cpuPercent || 0) - (a.metrics.cpuPercent || 0));
+    // Sort by CPU usage descending
+    services.sort((a, b) => (b.metrics.cpuPercent || 0) - (a.metrics.cpuPercent || 0));
+    return services;
+  }, [filteredServers]);
 
   if (loading) {
     return (
@@ -149,8 +187,8 @@ export default function Monitoring() {
     );
   }
 
-  const serversWithMetrics = servers.filter((s) => s.latestMetrics);
-  const serverNames = metricsHistory.map((s) => s.name);
+  const serversWithMetrics = filteredServers.filter((s) => s.latestMetrics);
+  const serverNames = filteredMetricsHistory.map((s) => s.name);
 
   return (
     <div className="p-6">
@@ -207,28 +245,65 @@ export default function Monitoring() {
         </div>
       )}
 
-      {/* Time Range Selector */}
-      <div className="flex items-center gap-4 mb-6">
-        <span className="text-sm text-slate-400">Time Range:</span>
-        <div className="flex rounded-lg overflow-hidden border border-slate-600">
-          {timeRanges.map((range) => (
-            <button
-              key={range.hours}
-              onClick={() => setMonitoringTimeRange(range.hours)}
-              className={`px-3 py-1.5 text-sm ${
-                monitoringTimeRange === range.hours
-                  ? 'bg-brand-600 text-white'
-                  : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-              }`}
-            >
-              {range.label}
-            </button>
-          ))}
+      {/* Time Range and Tag Filter */}
+      <div className="flex items-center flex-wrap gap-4 mb-6">
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-slate-400">Time Range:</span>
+          <div className="flex rounded-lg overflow-hidden border border-slate-600">
+            {timeRanges.map((range) => (
+              <button
+                key={range.hours}
+                onClick={() => setMonitoringTimeRange(range.hours)}
+                className={`px-3 py-1.5 text-sm ${
+                  monitoringTimeRange === range.hours
+                    ? 'bg-brand-600 text-white'
+                    : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
+                }`}
+              >
+                {range.label}
+              </button>
+            ))}
+          </div>
         </div>
+
+        {allTags.length > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-slate-400">Tags:</span>
+            <div className="flex flex-wrap gap-1">
+              {allTags.map((tag) => (
+                <button
+                  key={tag}
+                  onClick={() => {
+                    if (monitoringTagFilter.includes(tag)) {
+                      setMonitoringTagFilter(monitoringTagFilter.filter((t) => t !== tag));
+                    } else {
+                      setMonitoringTagFilter([...monitoringTagFilter, tag]);
+                    }
+                  }}
+                  className={`px-2 py-1 text-xs rounded-full transition-colors ${
+                    monitoringTagFilter.includes(tag)
+                      ? 'bg-brand-600 text-white'
+                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                  }`}
+                >
+                  {tag}
+                </button>
+              ))}
+              {monitoringTagFilter.length > 0 && (
+                <button
+                  onClick={() => setMonitoringTagFilter([])}
+                  className="px-2 py-1 text-xs rounded-full bg-slate-800 text-slate-400 hover:bg-slate-700"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Charts */}
-      {metricsHistory.length > 0 && metricsHistory.some((s) => s.data.length > 0) ? (
+      {filteredMetricsHistory.length > 0 && filteredMetricsHistory.some((s) => s.data.length > 0) ? (
         <div className="grid grid-cols-2 gap-6 mb-8">
           <ChartCard title="CPU Usage" data={prepareChartData('cpu')} serverNames={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
           <ChartCard title="Memory Usage" data={prepareChartData('memory')} serverNames={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />

@@ -374,7 +374,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
       // Get servers in this environment
       const servers = await prisma.server.findMany({
         where: { environmentId: envId },
-        select: { id: true, name: true },
+        select: { id: true, name: true, tags: true },
       });
 
       // Get metrics for each server
@@ -447,6 +447,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
           return {
             id: server.id,
             name: server.name,
+            tags: server.tags,
             data,
           };
         })

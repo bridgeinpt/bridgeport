@@ -319,6 +319,7 @@ export async function getEnvironmentMetricsSummary(environmentId: string) {
     id: server.id,
     name: server.name,
     hostname: server.hostname,
+    tags: server.tags,
     metricsMode: server.metricsMode,
     latestMetrics: server.metrics[0] || null,
     services: server.services.map((service) => ({
