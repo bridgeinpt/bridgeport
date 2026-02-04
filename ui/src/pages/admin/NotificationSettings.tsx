@@ -32,7 +32,7 @@ import {
   type SlackRouting,
 } from '../../lib/api';
 import { useToast } from '../../components/Toast';
-import { PlusIcon, TrashIcon, RefreshIcon } from '../../components/Icons';
+import { PlusIcon, TrashIcon } from '../../components/Icons';
 
 type TabType = 'smtp' | 'webhooks' | 'slack' | 'types';
 
@@ -94,6 +94,7 @@ export default function NotificationSettings() {
   });
   const [webhookSaving, setWebhookSaving] = useState(false);
   const [showWebhookModal, setShowWebhookModal] = useState(false);
+  const [testingWebhook, setTestingWebhook] = useState<string | null>(null);
 
   // Slack state
   const [slackChannels, setSlackChannels] = useState<SlackChannel[]>([]);
@@ -257,11 +258,18 @@ export default function NotificationSettings() {
   };
 
   const handleTestWebhook = async (id: string) => {
+    setTestingWebhook(id);
     try {
       const result = await testWebhook(id);
       toast.success(result.message);
+      // Update lastTriggeredAt
+      setWebhooks((prev) =>
+        prev.map((w) => (w.id === id ? { ...w, lastTriggeredAt: new Date().toISOString() } : w))
+      );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Webhook test failed');
+    } finally {
+      setTestingWebhook(null);
     }
   };
 
@@ -627,10 +635,11 @@ export default function NotificationSettings() {
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => handleTestWebhook(webhook.id)}
-                          className="btn btn-ghost text-xs"
-                          title="Test webhook"
+                          disabled={testingWebhook === webhook.id}
+                          className="btn btn-secondary text-xs"
+                          title="Send test notification"
                         >
-                          <RefreshIcon className="w-4 h-4" />
+                          {testingWebhook === webhook.id ? 'Testing...' : 'Test'}
                         </button>
                         <button
                           onClick={() => openWebhookModal(webhook)}
@@ -792,14 +801,10 @@ export default function NotificationSettings() {
                         <button
                           onClick={() => handleTestSlackChannel(channel.id)}
                           disabled={testingSlackChannel === channel.id}
-                          className="btn btn-ghost text-xs"
-                          title="Send test message"
+                          className="btn btn-secondary text-xs"
+                          title="Send test message to Slack"
                         >
-                          {testingSlackChannel === channel.id ? (
-                            <span className="animate-spin">...</span>
-                          ) : (
-                            <RefreshIcon className="w-4 h-4" />
-                          )}
+                          {testingSlackChannel === channel.id ? 'Testing...' : 'Test'}
                         </button>
                         <button
                           onClick={() => openSlackChannelModal(channel)}
