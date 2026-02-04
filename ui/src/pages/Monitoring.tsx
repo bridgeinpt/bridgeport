@@ -5,10 +5,12 @@ import {
   getEnvironmentMetricsSummary,
   getMetricsHistory,
   getMonitoringOverview,
+  getSchedulerConfig,
   type MetricsSummaryServer,
   type ServiceMetrics,
   type MetricsHistoryServer,
   type MonitoringOverviewStats,
+  type SchedulerConfig,
 } from '../lib/api';
 import { formatDistanceToNow, format } from 'date-fns';
 import {
@@ -44,6 +46,8 @@ export default function Monitoring() {
   const [servers, setServers] = useState<MetricsSummaryServer[]>([]);
   const [metricsHistory, setMetricsHistory] = useState<MetricsHistoryServer[]>([]);
   const [stats, setStats] = useState<MonitoringOverviewStats | null>(null);
+  const [schedulerConfig, setSchedulerConfig] = useState<SchedulerConfig | null>(null);
+  const [disabledMetricsExpanded, setDisabledMetricsExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -53,14 +57,16 @@ export default function Monitoring() {
     else setLoading(true);
 
     try {
-      const [summaryRes, historyRes, overviewRes] = await Promise.all([
+      const [summaryRes, historyRes, overviewRes, configRes] = await Promise.all([
         getEnvironmentMetricsSummary(selectedEnvironment.id),
         getMetricsHistory(selectedEnvironment.id, monitoringTimeRange),
         getMonitoringOverview(selectedEnvironment.id),
+        getSchedulerConfig(selectedEnvironment.id),
       ]);
       setServers(summaryRes.servers);
       setMetricsHistory(historyRes.servers);
       setStats(overviewRes.stats);
+      setSchedulerConfig(configRes.config);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -314,12 +320,24 @@ export default function Monitoring() {
       {/* Charts */}
       {filteredMetricsHistory.length > 0 && filteredMetricsHistory.some((s) => s.data.length > 0) ? (
         <div className="grid grid-cols-2 gap-6 mb-8">
-          <ChartCard title="CPU Usage" data={prepareChartData('cpu')} serverNames={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
-          <ChartCard title="Memory Usage" data={prepareChartData('memory')} serverNames={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
-          <ChartCard title="Swap Usage" data={prepareChartData('swap')} serverNames={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
-          <ChartCard title="Disk Usage" data={prepareChartData('disk')} serverNames={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
-          <ChartCard title="Load Average" data={prepareChartData('load')} serverNames={serverNames} formatTime={formatTime} domain={[0, 'auto']} />
-          <ChartCard title="TCP Connections" data={prepareChartData('tcp')} serverNames={serverNames} formatTime={formatTime} domain={[0, 'auto']} />
+          {(schedulerConfig?.collectCpu ?? true) && (
+            <ChartCard title="CPU Usage" data={prepareChartData('cpu')} serverNames={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
+          )}
+          {(schedulerConfig?.collectMemory ?? true) && (
+            <ChartCard title="Memory Usage" data={prepareChartData('memory')} serverNames={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
+          )}
+          {(schedulerConfig?.collectSwap ?? true) && (
+            <ChartCard title="Swap Usage" data={prepareChartData('swap')} serverNames={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
+          )}
+          {(schedulerConfig?.collectDisk ?? true) && (
+            <ChartCard title="Disk Usage" data={prepareChartData('disk')} serverNames={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
+          )}
+          {(schedulerConfig?.collectLoad ?? true) && (
+            <ChartCard title="Load Average" data={prepareChartData('load')} serverNames={serverNames} formatTime={formatTime} domain={[0, 'auto']} />
+          )}
+          {(schedulerConfig?.collectTcp ?? true) && (
+            <ChartCard title="TCP Connections" data={prepareChartData('tcp')} serverNames={serverNames} formatTime={formatTime} domain={[0, 'auto']} />
+          )}
         </div>
       ) : (
         <div className="card text-center py-8 mb-8">
@@ -352,114 +370,129 @@ export default function Monitoring() {
                   </span>
                 </div>
 
+                {/* Primary metrics row */}
                 <div className="grid grid-cols-4 gap-4 mb-4">
-                  <MetricGauge
-                    label="CPU"
-                    value={server.latestMetrics?.cpuPercent ?? undefined}
-                    max={100}
-                    unit="%"
-                    color="primary"
-                  />
-                  <MetricGauge
-                    label="Memory"
-                    value={
-                      server.latestMetrics?.memoryTotalMb
-                        ? ((server.latestMetrics.memoryUsedMb ?? 0) /
-                            server.latestMetrics.memoryTotalMb) *
-                          100
-                        : undefined
-                    }
-                    displayValue={
-                      server.latestMetrics?.memoryUsedMb != null && server.latestMetrics?.memoryTotalMb
-                        ? `${(server.latestMetrics.memoryUsedMb / 1024).toFixed(1)}/${(server.latestMetrics.memoryTotalMb / 1024).toFixed(0)}GB`
-                        : undefined
-                    }
-                    max={100}
-                    unit="%"
-                    color="green"
-                  />
-                  <MetricGauge
-                    label="Disk"
-                    value={
-                      server.latestMetrics?.diskTotalGb
-                        ? ((server.latestMetrics.diskUsedGb ?? 0) /
-                            server.latestMetrics.diskTotalGb) *
-                          100
-                        : undefined
-                    }
-                    displayValue={
-                      server.latestMetrics?.diskUsedGb != null && server.latestMetrics?.diskTotalGb
-                        ? `${server.latestMetrics.diskUsedGb.toFixed(0)}/${server.latestMetrics.diskTotalGb.toFixed(0)}GB`
-                        : undefined
-                    }
-                    max={100}
-                    unit="%"
-                    color="yellow"
-                  />
-                  <MetricGauge
-                    label="Load"
-                    value={server.latestMetrics?.loadAvg1 ?? undefined}
-                    max={4}
-                    displayValue={server.latestMetrics?.loadAvg1?.toFixed(2) ?? undefined}
-                    color="purple"
-                  />
+                  {(schedulerConfig?.collectCpu ?? true) && (
+                    <MetricGauge
+                      label="CPU"
+                      value={server.latestMetrics?.cpuPercent ?? undefined}
+                      max={100}
+                      unit="%"
+                      color="primary"
+                    />
+                  )}
+                  {(schedulerConfig?.collectMemory ?? true) && (
+                    <MetricGauge
+                      label="Memory"
+                      value={
+                        server.latestMetrics?.memoryTotalMb
+                          ? ((server.latestMetrics.memoryUsedMb ?? 0) /
+                              server.latestMetrics.memoryTotalMb) *
+                            100
+                          : undefined
+                      }
+                      displayValue={
+                        server.latestMetrics?.memoryUsedMb != null && server.latestMetrics?.memoryTotalMb
+                          ? `${(server.latestMetrics.memoryUsedMb / 1024).toFixed(1)}/${(server.latestMetrics.memoryTotalMb / 1024).toFixed(0)}GB`
+                          : undefined
+                      }
+                      max={100}
+                      unit="%"
+                      color="green"
+                    />
+                  )}
+                  {(schedulerConfig?.collectDisk ?? true) && (
+                    <MetricGauge
+                      label="Disk"
+                      value={
+                        server.latestMetrics?.diskTotalGb
+                          ? ((server.latestMetrics.diskUsedGb ?? 0) /
+                              server.latestMetrics.diskTotalGb) *
+                            100
+                          : undefined
+                      }
+                      displayValue={
+                        server.latestMetrics?.diskUsedGb != null && server.latestMetrics?.diskTotalGb
+                          ? `${server.latestMetrics.diskUsedGb.toFixed(0)}/${server.latestMetrics.diskTotalGb.toFixed(0)}GB`
+                          : undefined
+                      }
+                      max={100}
+                      unit="%"
+                      color="yellow"
+                    />
+                  )}
+                  {(schedulerConfig?.collectLoad ?? true) && (
+                    <MetricGauge
+                      label="Load"
+                      value={server.latestMetrics?.loadAvg1 ?? undefined}
+                      max={4}
+                      displayValue={server.latestMetrics?.loadAvg1?.toFixed(2) ?? undefined}
+                      color="purple"
+                    />
+                  )}
                 </div>
                 {/* Additional metrics row */}
                 <div className="grid grid-cols-4 gap-4">
-                  <MetricGauge
-                    label="Swap"
-                    value={
-                      server.latestMetrics?.swapTotalMb && server.latestMetrics.swapTotalMb > 0
-                        ? ((server.latestMetrics.swapUsedMb ?? 0) /
-                            server.latestMetrics.swapTotalMb) *
-                          100
-                        : 0
-                    }
-                    displayValue={
-                      server.latestMetrics?.swapUsedMb != null && server.latestMetrics?.swapTotalMb
-                        ? server.latestMetrics.swapTotalMb > 0
-                          ? `${(server.latestMetrics.swapUsedMb / 1024).toFixed(1)}/${(server.latestMetrics.swapTotalMb / 1024).toFixed(0)}GB`
-                          : 'No swap'
-                        : undefined
-                    }
-                    max={100}
-                    unit="%"
-                    color="purple"
-                  />
-                  <MetricGauge
-                    label="File Descriptors"
-                    value={
-                      server.latestMetrics?.maxFds && server.latestMetrics.maxFds > 0
-                        ? ((server.latestMetrics.openFds ?? 0) /
-                            server.latestMetrics.maxFds) *
-                          100
-                        : undefined
-                    }
-                    displayValue={
-                      server.latestMetrics?.openFds != null && server.latestMetrics?.maxFds
-                        ? `${(server.latestMetrics.openFds / 1000).toFixed(1)}k/${(server.latestMetrics.maxFds / 1000).toFixed(0)}k`
-                        : undefined
-                    }
-                    max={100}
-                    unit="%"
-                    color="yellow"
-                  />
-                  <div className="p-4 rounded-lg bg-slate-800/50">
-                    <p className="text-slate-400 text-xs mb-2">TCP Connections</p>
-                    {server.latestMetrics?.tcpTotal != null ? (
-                      <div className="text-sm">
-                        <span className="text-white font-bold text-lg">{server.latestMetrics.tcpTotal}</span>
-                        <span className="text-slate-500 text-xs ml-2">total</span>
-                        <div className="flex gap-3 mt-1 text-xs">
-                          <span className="text-green-400">{server.latestMetrics.tcpEstablished ?? 0} est</span>
-                          <span className="text-blue-400">{server.latestMetrics.tcpListen ?? 0} listen</span>
-                          <span className="text-yellow-400">{server.latestMetrics.tcpTimeWait ?? 0} tw</span>
+                  {(schedulerConfig?.collectSwap ?? true) && (
+                    <MetricGauge
+                      label="Swap"
+                      value={
+                        server.latestMetrics?.swapTotalMb && server.latestMetrics.swapTotalMb > 0
+                          ? ((server.latestMetrics.swapUsedMb ?? 0) /
+                              server.latestMetrics.swapTotalMb) *
+                            100
+                          : 0
+                      }
+                      displayValue={
+                        server.latestMetrics?.swapUsedMb != null && server.latestMetrics?.swapTotalMb
+                          ? server.latestMetrics.swapTotalMb > 0
+                            ? `${(server.latestMetrics.swapUsedMb / 1024).toFixed(1)}/${(server.latestMetrics.swapTotalMb / 1024).toFixed(0)}GB`
+                            : 'No swap'
+                          : undefined
+                      }
+                      max={100}
+                      unit="%"
+                      color="purple"
+                    />
+                  )}
+                  {(schedulerConfig?.collectFds ?? true) && (
+                    <MetricGauge
+                      label="File Descriptors"
+                      value={
+                        server.latestMetrics?.maxFds && server.latestMetrics.maxFds > 0
+                          ? ((server.latestMetrics.openFds ?? 0) /
+                              server.latestMetrics.maxFds) *
+                            100
+                          : undefined
+                      }
+                      displayValue={
+                        server.latestMetrics?.openFds != null && server.latestMetrics?.maxFds
+                          ? `${(server.latestMetrics.openFds / 1000).toFixed(1)}k/${(server.latestMetrics.maxFds / 1000).toFixed(0)}k`
+                          : undefined
+                      }
+                      max={100}
+                      unit="%"
+                      color="yellow"
+                    />
+                  )}
+                  {(schedulerConfig?.collectTcp ?? true) && (
+                    <div className="p-4 rounded-lg bg-slate-800/50">
+                      <p className="text-slate-400 text-xs mb-2">TCP Connections</p>
+                      {server.latestMetrics?.tcpTotal != null ? (
+                        <div className="text-sm">
+                          <span className="text-white font-bold text-lg">{server.latestMetrics.tcpTotal}</span>
+                          <span className="text-slate-500 text-xs ml-2">total</span>
+                          <div className="flex gap-3 mt-1 text-xs">
+                            <span className="text-green-400">{server.latestMetrics.tcpEstablished ?? 0} est</span>
+                            <span className="text-blue-400">{server.latestMetrics.tcpListen ?? 0} listen</span>
+                            <span className="text-yellow-400">{server.latestMetrics.tcpTimeWait ?? 0} tw</span>
+                          </div>
                         </div>
-                      </div>
-                    ) : (
-                      <p className="text-slate-500 text-sm">-</p>
-                    )}
-                  </div>
+                      ) : (
+                        <p className="text-slate-500 text-sm">-</p>
+                      )}
+                    </div>
+                  )}
                   <div className="p-4 rounded-lg bg-slate-800/50">
                     <p className="text-slate-400 text-xs mb-2">Uptime</p>
                     {server.latestMetrics?.uptime != null ? (
@@ -584,6 +617,68 @@ export default function Monitoring() {
           </div>
         </div>
       )}
+
+      {/* Disabled Metrics Section */}
+      {schedulerConfig && (() => {
+        const disabledMetrics: string[] = [];
+        if (!schedulerConfig.collectCpu) disabledMetrics.push('CPU');
+        if (!schedulerConfig.collectMemory) disabledMetrics.push('Memory');
+        if (!schedulerConfig.collectSwap) disabledMetrics.push('Swap');
+        if (!schedulerConfig.collectDisk) disabledMetrics.push('Disk');
+        if (!schedulerConfig.collectLoad) disabledMetrics.push('Load Average');
+        if (!schedulerConfig.collectFds) disabledMetrics.push('File Descriptors');
+        if (!schedulerConfig.collectTcp) disabledMetrics.push('TCP Connections');
+        if (!schedulerConfig.collectProcesses) disabledMetrics.push('Top Processes');
+        if (!schedulerConfig.collectTcpChecks) disabledMetrics.push('TCP Port Checks');
+        if (!schedulerConfig.collectCertChecks) disabledMetrics.push('Certificate Expiry');
+
+        if (disabledMetrics.length === 0) return null;
+
+        return (
+          <div className="card mt-6">
+            <button
+              onClick={() => setDisabledMetricsExpanded(!disabledMetricsExpanded)}
+              className="w-full flex items-center justify-between"
+            >
+              <div className="flex items-center gap-2">
+                <svg
+                  className={`w-4 h-4 text-slate-400 transition-transform ${disabledMetricsExpanded ? 'rotate-90' : ''}`}
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+                <span className="text-slate-400">Disabled Metrics ({disabledMetrics.length})</span>
+              </div>
+              <span className="text-xs text-slate-500">Click to expand</span>
+            </button>
+
+            {disabledMetricsExpanded && (
+              <div className="mt-4 pt-4 border-t border-slate-700">
+                <div className="space-y-2">
+                  {disabledMetrics.map((metric) => (
+                    <div key={metric} className="flex items-center gap-2 text-sm text-slate-400">
+                      <span className="w-1.5 h-1.5 bg-slate-600 rounded-full" />
+                      <span>{metric}</span>
+                      <span className="text-slate-500">- Disabled in environment settings</span>
+                    </div>
+                  ))}
+                </div>
+                <Link
+                  to="/settings"
+                  className="inline-flex items-center gap-1 mt-4 text-sm text-primary-400 hover:text-primary-300"
+                >
+                  Configure in Settings
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </Link>
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }

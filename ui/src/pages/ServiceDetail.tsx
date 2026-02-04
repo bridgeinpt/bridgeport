@@ -23,6 +23,7 @@ import {
   getServiceDependencies,
   getContainerImage,
   listServiceTypes,
+  getSchedulerConfig,
   type ServiceWithServer,
   type Deployment,
   type ServiceFile,
@@ -38,6 +39,7 @@ import {
   type TCPCheckResult,
   type CertCheckConfig,
   type CertCheckResult,
+  type SchedulerConfig,
 } from '../lib/api';
 import { DependencyEditor } from '../components/DependencyEditor';
 import Pagination from '../components/Pagination';
@@ -184,6 +186,9 @@ export default function ServiceDetail() {
   const [dependencies, setDependencies] = useState<ServiceDependency[]>([]);
   const [containerImage, setContainerImage] = useState<ContainerImage | null>(null);
 
+  // Metrics config (for filtering health checks display)
+  const [schedulerConfig, setSchedulerConfig] = useState<SchedulerConfig | null>(null);
+
   // Pagination hooks (must be at top level)
   const deploymentPagination = usePagination({ data: deployments, defaultPageSize: 10 });
   const healthPagination = usePagination({ data: healthCheckHistory, defaultPageSize: 10 });
@@ -217,6 +222,10 @@ export default function ServiceDetail() {
       listConfigFiles(selectedEnvironment.id).then(({ configFiles }) =>
         setConfigFiles(configFiles)
       );
+      // Load scheduler config for metrics/health check toggles
+      getSchedulerConfig(selectedEnvironment.id)
+        .then(({ config }) => setSchedulerConfig(config))
+        .catch(() => setSchedulerConfig(null));
     }
     // Load service types (global, not per-environment)
     listServiceTypes().then(({ serviceTypes }) =>
@@ -1245,10 +1254,13 @@ export default function ServiceDetail() {
       )}
 
       {/* Agent Health Check Results (TCP & Cert) */}
-      {service && (parseTCPCheckResults(service.agentTcpCheckResults).length > 0 || parseCertCheckResults(service.agentCertCheckResults).length > 0) && (
+      {service && (
+        ((schedulerConfig?.collectTcpChecks ?? true) && parseTCPCheckResults(service.agentTcpCheckResults).length > 0) ||
+        ((schedulerConfig?.collectCertChecks ?? true) && parseCertCheckResults(service.agentCertCheckResults).length > 0)
+      ) && (
         <div className="grid grid-cols-2 gap-4 mb-5">
           {/* TCP Check Results */}
-          {parseTCPCheckResults(service.agentTcpCheckResults).length > 0 && (
+          {(schedulerConfig?.collectTcpChecks ?? true) && parseTCPCheckResults(service.agentTcpCheckResults).length > 0 && (
             <div className="panel">
               <h3 className="text-lg font-semibold text-white mb-4">
                 TCP Port Checks
@@ -1288,7 +1300,7 @@ export default function ServiceDetail() {
           )}
 
           {/* Certificate Check Results */}
-          {parseCertCheckResults(service.agentCertCheckResults).length > 0 && (
+          {(schedulerConfig?.collectCertChecks ?? true) && parseCertCheckResults(service.agentCertCheckResults).length > 0 && (
             <div className="panel">
               <h3 className="text-lg font-semibold text-white mb-4">
                 Certificate Expiry
@@ -1918,11 +1930,15 @@ export default function ServiceDetail() {
                 <div className="flex items-center justify-between mb-2">
                   <label className="block text-sm text-slate-400">
                     TCP Port Checks (Agent)
+                    {schedulerConfig && !schedulerConfig.collectTcpChecks && (
+                      <span className="text-yellow-500 text-xs ml-2">(disabled in environment settings)</span>
+                    )}
                   </label>
                   <button
                     type="button"
                     onClick={() => setEditTcpChecks([...editTcpChecks, { host: 'localhost', port: 0, name: '' }])}
                     className="text-xs text-primary-400 hover:text-primary-300"
+                    disabled={schedulerConfig !== null && !schedulerConfig.collectTcpChecks}
                   >
                     + Add Check
                   </button>
@@ -1986,11 +2002,15 @@ export default function ServiceDetail() {
                 <div className="flex items-center justify-between mb-2">
                   <label className="block text-sm text-slate-400">
                     Certificate Expiry Checks (Agent)
+                    {schedulerConfig && !schedulerConfig.collectCertChecks && (
+                      <span className="text-yellow-500 text-xs ml-2">(disabled in environment settings)</span>
+                    )}
                   </label>
                   <button
                     type="button"
                     onClick={() => setEditCertChecks([...editCertChecks, { host: '', port: 443, name: '' }])}
                     className="text-xs text-primary-400 hover:text-primary-300"
+                    disabled={schedulerConfig !== null && !schedulerConfig.collectCertChecks}
                   >
                     + Add Check
                   </button>

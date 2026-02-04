@@ -47,11 +47,26 @@ type ServiceHealthConfig struct {
 	CertChecks     []CertCheckConfig `json:"certChecks,omitempty"`
 }
 
+// MetricsConfig defines which metrics to collect (per-environment config)
+type MetricsConfig struct {
+	CollectCpu        bool `json:"collectCpu"`
+	CollectMemory     bool `json:"collectMemory"`
+	CollectSwap       bool `json:"collectSwap"`
+	CollectDisk       bool `json:"collectDisk"`
+	CollectLoad       bool `json:"collectLoad"`
+	CollectFds        bool `json:"collectFds"`
+	CollectTcp        bool `json:"collectTcp"`
+	CollectProcesses  bool `json:"collectProcesses"`
+	CollectTcpChecks  bool `json:"collectTcpChecks"`
+	CollectCertChecks bool `json:"collectCertChecks"`
+}
+
 // AgentConfig is the configuration fetched from BridgePort
 type AgentConfig struct {
-	ServerID   string                `json:"serverId"`
-	ServerName string                `json:"serverName"`
-	Services   []ServiceHealthConfig `json:"services"`
+	ServerID      string                `json:"serverId"`
+	ServerName    string                `json:"serverName"`
+	Services      []ServiceHealthConfig `json:"services"`
+	MetricsConfig MetricsConfig         `json:"metricsConfig"`
 }
 
 // ServiceHealthResult is the result of a health check
@@ -468,44 +483,89 @@ func collectAndSend(config Config) {
 	version := Version
 	payload.AgentVersion = &version
 
+	// Get metrics config (defaults to all enabled if not configured)
+	agentConfigMutex.RLock()
+	metricsConfig := MetricsConfig{
+		CollectCpu:        true,
+		CollectMemory:     true,
+		CollectSwap:       true,
+		CollectDisk:       true,
+		CollectLoad:       true,
+		CollectFds:        true,
+		CollectTcp:        true,
+		CollectProcesses:  true,
+		CollectTcpChecks:  true,
+		CollectCertChecks: true,
+	}
+	if agentConfig != nil {
+		metricsConfig = agentConfig.MetricsConfig
+	}
+	agentConfigMutex.RUnlock()
+
 	// Perform health checks on services
 	healthResults := performHealthChecks()
 	if len(healthResults) > 0 {
 		payload.ServiceHealthChecks = healthResults
 	}
 
-	// Perform TCP port connectivity checks
-	tcpResults := performTCPChecks()
-	if len(tcpResults) > 0 {
-		payload.TCPCheckResults = tcpResults
+	// Perform TCP port connectivity checks (if enabled)
+	if metricsConfig.CollectTcpChecks {
+		tcpResults := performTCPChecks()
+		if len(tcpResults) > 0 {
+			payload.TCPCheckResults = tcpResults
+		}
 	}
 
-	// Perform TLS certificate expiry checks
-	certResults := performCertChecks()
-	if len(certResults) > 0 {
-		payload.CertCheckResults = certResults
+	// Perform TLS certificate expiry checks (if enabled)
+	if metricsConfig.CollectCertChecks {
+		certResults := performCertChecks()
+		if len(certResults) > 0 {
+			payload.CertCheckResults = certResults
+		}
 	}
 
 	// Collect system metrics
 	if sysMetrics, err := collector.CollectSystemMetrics(); err == nil {
-		payload.CPUPercent = &sysMetrics.CPUPercent
-		payload.MemoryUsedMb = &sysMetrics.MemoryUsedMb
-		payload.MemoryTotalMb = &sysMetrics.MemoryTotalMb
-		payload.SwapUsedMb = &sysMetrics.SwapUsedMb
-		payload.SwapTotalMb = &sysMetrics.SwapTotalMb
-		payload.DiskUsedGb = &sysMetrics.DiskUsedGb
-		payload.DiskTotalGb = &sysMetrics.DiskTotalGb
-		payload.LoadAvg1 = &sysMetrics.LoadAvg1
-		payload.LoadAvg5 = &sysMetrics.LoadAvg5
-		payload.LoadAvg15 = &sysMetrics.LoadAvg15
+		// CPU metrics
+		if metricsConfig.CollectCpu {
+			payload.CPUPercent = &sysMetrics.CPUPercent
+		}
+		// Memory metrics
+		if metricsConfig.CollectMemory {
+			payload.MemoryUsedMb = &sysMetrics.MemoryUsedMb
+			payload.MemoryTotalMb = &sysMetrics.MemoryTotalMb
+		}
+		// Swap metrics
+		if metricsConfig.CollectSwap {
+			payload.SwapUsedMb = &sysMetrics.SwapUsedMb
+			payload.SwapTotalMb = &sysMetrics.SwapTotalMb
+		}
+		// Disk metrics
+		if metricsConfig.CollectDisk {
+			payload.DiskUsedGb = &sysMetrics.DiskUsedGb
+			payload.DiskTotalGb = &sysMetrics.DiskTotalGb
+		}
+		// Load average metrics
+		if metricsConfig.CollectLoad {
+			payload.LoadAvg1 = &sysMetrics.LoadAvg1
+			payload.LoadAvg5 = &sysMetrics.LoadAvg5
+			payload.LoadAvg15 = &sysMetrics.LoadAvg15
+		}
+		// Always include uptime
 		payload.Uptime = &sysMetrics.Uptime
-		payload.OpenFDs = &sysMetrics.OpenFDs
-		payload.MaxFDs = &sysMetrics.MaxFDs
-		payload.TCPEstablished = &sysMetrics.TCPConns.Established
-		payload.TCPListen = &sysMetrics.TCPConns.Listen
-		payload.TCPTimeWait = &sysMetrics.TCPConns.TimeWait
-		payload.TCPCloseWait = &sysMetrics.TCPConns.CloseWait
-		payload.TCPTotal = &sysMetrics.TCPConns.Total
+		// File descriptor metrics
+		if metricsConfig.CollectFds {
+			payload.OpenFDs = &sysMetrics.OpenFDs
+			payload.MaxFDs = &sysMetrics.MaxFDs
+		}
+		// TCP connection metrics
+		if metricsConfig.CollectTcp {
+			payload.TCPEstablished = &sysMetrics.TCPConns.Established
+			payload.TCPListen = &sysMetrics.TCPConns.Listen
+			payload.TCPTimeWait = &sysMetrics.TCPConns.TimeWait
+			payload.TCPCloseWait = &sysMetrics.TCPConns.CloseWait
+			payload.TCPTotal = &sysMetrics.TCPConns.Total
+		}
 	} else {
 		log.Printf("Error collecting system metrics: %v", err)
 	}
@@ -573,43 +633,45 @@ func collectAndSend(config Config) {
 		log.Printf("Error collecting container list: %v", err)
 	}
 
-	// Collect top processes
-	if topProcs, err := collector.CollectTopProcesses(10); err == nil {
-		byCPU := make([]ProcessInfoPayload, 0, len(topProcs.ByCPU))
-		for _, p := range topProcs.ByCPU {
-			byCPU = append(byCPU, ProcessInfoPayload{
-				PID:        p.PID,
-				Name:       p.Name,
-				State:      p.State,
-				CPUPercent: p.CPUPercent,
-				MemoryMb:   p.MemoryMb,
-				Threads:    p.Threads,
-			})
+	// Collect top processes (if enabled)
+	if metricsConfig.CollectProcesses {
+		if topProcs, err := collector.CollectTopProcesses(10); err == nil {
+			byCPU := make([]ProcessInfoPayload, 0, len(topProcs.ByCPU))
+			for _, p := range topProcs.ByCPU {
+				byCPU = append(byCPU, ProcessInfoPayload{
+					PID:        p.PID,
+					Name:       p.Name,
+					State:      p.State,
+					CPUPercent: p.CPUPercent,
+					MemoryMb:   p.MemoryMb,
+					Threads:    p.Threads,
+				})
+			}
+			byMemory := make([]ProcessInfoPayload, 0, len(topProcs.ByMemory))
+			for _, p := range topProcs.ByMemory {
+				byMemory = append(byMemory, ProcessInfoPayload{
+					PID:        p.PID,
+					Name:       p.Name,
+					State:      p.State,
+					CPUPercent: p.CPUPercent,
+					MemoryMb:   p.MemoryMb,
+					Threads:    p.Threads,
+				})
+			}
+			payload.TopProcesses = &TopProcessesPayload{
+				ByCPU:    byCPU,
+				ByMemory: byMemory,
+				Stats: ProcessStatsPayload{
+					Total:    topProcs.Stats.Total,
+					Running:  topProcs.Stats.Running,
+					Sleeping: topProcs.Stats.Sleeping,
+					Stopped:  topProcs.Stats.Stopped,
+					Zombie:   topProcs.Stats.Zombie,
+				},
+			}
+		} else {
+			log.Printf("Error collecting top processes: %v", err)
 		}
-		byMemory := make([]ProcessInfoPayload, 0, len(topProcs.ByMemory))
-		for _, p := range topProcs.ByMemory {
-			byMemory = append(byMemory, ProcessInfoPayload{
-				PID:        p.PID,
-				Name:       p.Name,
-				State:      p.State,
-				CPUPercent: p.CPUPercent,
-				MemoryMb:   p.MemoryMb,
-				Threads:    p.Threads,
-			})
-		}
-		payload.TopProcesses = &TopProcessesPayload{
-			ByCPU:    byCPU,
-			ByMemory: byMemory,
-			Stats: ProcessStatsPayload{
-				Total:    topProcs.Stats.Total,
-				Running:  topProcs.Stats.Running,
-				Sleeping: topProcs.Stats.Sleeping,
-				Stopped:  topProcs.Stats.Stopped,
-				Zombie:   topProcs.Stats.Zombie,
-			},
-		}
-	} else {
-		log.Printf("Error collecting top processes: %v", err)
 	}
 
 	// Send to server

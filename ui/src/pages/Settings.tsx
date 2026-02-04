@@ -46,6 +46,7 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [schedulerConfig, setSchedulerConfig] = useState<SchedulerConfig | null>(null);
   const [monitoringExpanded, setMonitoringExpanded] = useState(false);
+  const [metricsCollectionExpanded, setMetricsCollectionExpanded] = useState(false);
   const [savingScheduler, setSavingScheduler] = useState(false);
   const [sshStatus, setSshStatus] = useState<SshStatus | null>(null);
   const [sshModalOpen, setSshModalOpen] = useState(false);
@@ -112,15 +113,15 @@ export default function Settings() {
     }
   };
 
-  const handleSchedulerConfigChange = async (key: keyof SchedulerConfig, value: number) => {
+  const handleSchedulerConfigChange = async (key: keyof SchedulerConfig, value: number | boolean) => {
     if (!selectedEnvironment?.id || !isAdmin(user) || !schedulerConfig) return;
     setSavingScheduler(true);
     try {
       const result = await updateSchedulerConfig(selectedEnvironment.id, { [key]: value });
       setSchedulerConfig(result.config);
-      toast.success('Scheduler config updated');
+      toast.success('Config updated');
     } catch (error) {
-      toast.error('Failed to update scheduler config');
+      toast.error('Failed to update config');
     } finally {
       setSavingScheduler(false);
     }
@@ -589,6 +590,129 @@ export default function Settings() {
         )}
       </div>
 
+      {/* Metrics Collection Configuration */}
+      <div className="card mb-6">
+        <button
+          onClick={() => setMetricsCollectionExpanded(!metricsCollectionExpanded)}
+          className="w-full flex items-center justify-between"
+        >
+          <h3 className="text-lg font-semibold text-white">Metrics Collection</h3>
+          <svg
+            className={`w-5 h-5 text-slate-400 transition-transform ${metricsCollectionExpanded ? 'rotate-180' : ''}`}
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+
+        {metricsCollectionExpanded && schedulerConfig && (
+          <div className="mt-6 space-y-6">
+            <p className="text-sm text-slate-400">
+              Choose which metrics to collect and display for this environment. Disabled metrics will not be collected by agents or shown in the UI.
+            </p>
+
+            {/* System Metrics */}
+            <div>
+              <h4 className="text-sm font-medium text-slate-300 mb-3">System Metrics</h4>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                <MetricToggle
+                  label="CPU"
+                  description="CPU usage percentage"
+                  checked={schedulerConfig.collectCpu}
+                  onChange={(v) => handleSchedulerConfigChange('collectCpu', v)}
+                  disabled={savingScheduler || !isAdmin(user)}
+                />
+                <MetricToggle
+                  label="Memory"
+                  description="RAM usage"
+                  checked={schedulerConfig.collectMemory}
+                  onChange={(v) => handleSchedulerConfigChange('collectMemory', v)}
+                  disabled={savingScheduler || !isAdmin(user)}
+                />
+                <MetricToggle
+                  label="Swap"
+                  description="Swap space usage"
+                  checked={schedulerConfig.collectSwap}
+                  onChange={(v) => handleSchedulerConfigChange('collectSwap', v)}
+                  disabled={savingScheduler || !isAdmin(user)}
+                />
+                <MetricToggle
+                  label="Disk"
+                  description="Disk space usage"
+                  checked={schedulerConfig.collectDisk}
+                  onChange={(v) => handleSchedulerConfigChange('collectDisk', v)}
+                  disabled={savingScheduler || !isAdmin(user)}
+                />
+                <MetricToggle
+                  label="Load Average"
+                  description="System load averages"
+                  checked={schedulerConfig.collectLoad}
+                  onChange={(v) => handleSchedulerConfigChange('collectLoad', v)}
+                  disabled={savingScheduler || !isAdmin(user)}
+                />
+                <MetricToggle
+                  label="File Descriptors"
+                  description="Open file handles"
+                  checked={schedulerConfig.collectFds}
+                  onChange={(v) => handleSchedulerConfigChange('collectFds', v)}
+                  disabled={savingScheduler || !isAdmin(user)}
+                />
+                <MetricToggle
+                  label="TCP Connections"
+                  description="Network connection counts"
+                  checked={schedulerConfig.collectTcp}
+                  onChange={(v) => handleSchedulerConfigChange('collectTcp', v)}
+                  disabled={savingScheduler || !isAdmin(user)}
+                />
+              </div>
+            </div>
+
+            {/* Process Monitoring */}
+            <div>
+              <h4 className="text-sm font-medium text-slate-300 mb-3">Process Monitoring</h4>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                <MetricToggle
+                  label="Top Processes"
+                  description="Top CPU/memory consumers"
+                  checked={schedulerConfig.collectProcesses}
+                  onChange={(v) => handleSchedulerConfigChange('collectProcesses', v)}
+                  disabled={savingScheduler || !isAdmin(user)}
+                />
+              </div>
+            </div>
+
+            {/* Health Checks */}
+            <div>
+              <h4 className="text-sm font-medium text-slate-300 mb-3">Health Checks</h4>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                <MetricToggle
+                  label="TCP Ports"
+                  description="Port connectivity checks"
+                  checked={schedulerConfig.collectTcpChecks}
+                  onChange={(v) => handleSchedulerConfigChange('collectTcpChecks', v)}
+                  disabled={savingScheduler || !isAdmin(user)}
+                />
+                <MetricToggle
+                  label="Certificate Expiry"
+                  description="TLS certificate checks"
+                  checked={schedulerConfig.collectCertChecks}
+                  onChange={(v) => handleSchedulerConfigChange('collectCertChecks', v)}
+                  disabled={savingScheduler || !isAdmin(user)}
+                />
+              </div>
+            </div>
+
+            {!isAdmin(user) && (
+              <p className="text-sm text-slate-500 pt-2">
+                Only administrators can modify metrics collection settings.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Environment Info */}
       <div className="card">
         <h3 className="text-lg font-semibold text-white mb-4">Environment Info</h3>
@@ -612,5 +736,37 @@ export default function Settings() {
         </dl>
       </div>
     </div>
+  );
+}
+
+// Metric toggle component
+interface MetricToggleProps {
+  label: string;
+  description: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  disabled?: boolean;
+}
+
+function MetricToggle({ label, description, checked, onChange, disabled }: MetricToggleProps) {
+  return (
+    <label
+      className={`flex items-center gap-3 p-3 bg-slate-800 rounded-lg cursor-pointer hover:bg-slate-700/70 transition-colors ${
+        disabled ? 'opacity-50 cursor-not-allowed' : ''
+      }`}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        disabled={disabled}
+        className="sr-only peer"
+      />
+      <div className="w-9 h-5 bg-slate-600 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary-600 relative shrink-0"></div>
+      <div className="min-w-0">
+        <p className="text-white text-sm font-medium">{label}</p>
+        <p className="text-slate-500 text-xs truncate">{description}</p>
+      </div>
+    </label>
   );
 }

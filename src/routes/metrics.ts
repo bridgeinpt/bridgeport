@@ -11,6 +11,7 @@ import {
   getEnvironmentMetricsSummary,
 } from '../services/metrics.js';
 import { logAudit } from '../services/audit.js';
+import { getSchedulerConfig } from './monitoring.js';
 import crypto from 'crypto';
 
 const metricsQuerySchema = z.object({
@@ -506,6 +507,9 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.code(401).send({ error: 'Invalid agent token' });
     }
 
+    // Get scheduler/metrics config for the environment
+    const schedulerConfig = await getSchedulerConfig(server.environmentId);
+
     // Parse JSON fields for TCP and cert checks
     const parseChecks = (jsonStr: string | null): Array<{ host: string; port: number; name?: string }> => {
       if (!jsonStr) return [];
@@ -526,10 +530,25 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
         certChecks: parseChecks(s.certChecks),
       }));
 
+    // Extract metrics config for the agent
+    const metricsConfig = {
+      collectCpu: schedulerConfig.collectCpu,
+      collectMemory: schedulerConfig.collectMemory,
+      collectSwap: schedulerConfig.collectSwap,
+      collectDisk: schedulerConfig.collectDisk,
+      collectLoad: schedulerConfig.collectLoad,
+      collectFds: schedulerConfig.collectFds,
+      collectTcp: schedulerConfig.collectTcp,
+      collectProcesses: schedulerConfig.collectProcesses,
+      collectTcpChecks: schedulerConfig.collectTcpChecks,
+      collectCertChecks: schedulerConfig.collectCertChecks,
+    };
+
     return {
       serverId: server.id,
       serverName: server.name,
       services: servicesConfig,
+      metricsConfig,
     };
   });
 
