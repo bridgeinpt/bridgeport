@@ -40,7 +40,7 @@ export default function TopBar({ onOpenAccount }: TopBarProps) {
           <NotificationBell />
           <button
             onClick={onOpenAccount}
-            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-colors"
+            className="icon-btn"
             title="My Account"
             aria-label="My Account"
           >
@@ -48,7 +48,7 @@ export default function TopBar({ onOpenAccount }: TopBarProps) {
           </button>
           <Link
             to="/about"
-            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-colors"
+            className="icon-btn"
             title="About BridgePort"
             aria-label="About BridgePort"
           >
@@ -59,7 +59,7 @@ export default function TopBar({ onOpenAccount }: TopBarProps) {
               logout();
               window.location.href = '/login';
             }}
-            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-colors"
+            className="icon-btn"
             title="Logout"
             aria-label="Logout"
           >

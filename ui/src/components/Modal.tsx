@@ -111,7 +111,7 @@ export function Modal({
     <div
       ref={overlayRef}
       onClick={handleOverlayClick}
-      className="fixed inset-0 bg-black/50 flex items-center justify-center"
+      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center"
       style={{ zIndex }}
       role="dialog"
       aria-modal="true"
@@ -119,7 +119,7 @@ export function Modal({
     >
       <div
         ref={contentRef}
-        className={`bg-slate-900 rounded-lg border border-slate-700 w-full ${sizeClasses[size]} p-5 max-h-[90vh] flex flex-col`}
+        className={`bg-slate-900 rounded-lg border border-slate-700 w-full ${sizeClasses[size]} p-5 max-h-[90vh] flex flex-col shadow-modal`}
       >
         {(title || showCloseButton) && (
           <div className="flex items-start justify-between mb-3">

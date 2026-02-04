@@ -1,7 +1,8 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { useAuthStore, useAppStore, isAdmin } from '../lib/store';
-import { listEnvironments, changeUserPassword, updateUser, type Environment } from '../lib/api';
+import { listEnvironments, type Environment } from '../lib/api';
+import { AccountModal } from './AccountModal';
 import {
   HomeIcon,
   ServerIcon,
@@ -162,78 +163,10 @@ const globalGroups = navigationGroups.filter(g => g.isGlobal);
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
-  const { user, setUser } = useAuthStore();
+  const { user } = useAuthStore();
   const { selectedEnvironment, setSelectedEnvironment, clearSelectedEnvironment, sidebarCollapsed, toggleSidebar, collapsedGroups, toggleGroup } = useAppStore();
   const [environments, setEnvironments] = useState<Environment[]>([]);
-
-  // Account modal state
   const [showAccountModal, setShowAccountModal] = useState(false);
-  const [accountTab, setAccountTab] = useState<'profile' | 'password'>('profile');
-  const [editName, setEditName] = useState('');
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-
-  const openAccountModal = () => {
-    setEditName(user?.name || '');
-    setCurrentPassword('');
-    setNewPassword('');
-    setConfirmPassword('');
-    setError(null);
-    setSuccess(null);
-    setAccountTab('profile');
-    setShowAccountModal(true);
-  };
-
-  const handleUpdateProfile = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user) return;
-    setSaving(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      const { user: updatedUser } = await updateUser(user.id, { name: editName || undefined });
-      setUser({ ...user, name: updatedUser.name });
-      setSuccess('Profile updated');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update profile');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleChangePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user) return;
-    if (newPassword !== confirmPassword) {
-      setError('Passwords do not match');
-      return;
-    }
-    if (newPassword.length < 8) {
-      setError('Password must be at least 8 characters');
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    setSuccess(null);
-    try {
-      await changeUserPassword(user.id, {
-        currentPassword,
-        newPassword,
-      });
-      setSuccess('Password changed successfully');
-      setCurrentPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to change password');
-    } finally {
-      setSaving(false);
-    }
-  };
 
   useEffect(() => {
     listEnvironments().then(({ environments }) => {
@@ -323,6 +256,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                   {!sidebarCollapsed && (
                     <button
                       onClick={() => toggleGroup(group.name)}
+                      aria-label={`${isGroupCollapsed ? 'Expand' : 'Collapse'} ${group.name} navigation`}
+                      aria-expanded={!isGroupCollapsed}
                       className="flex items-center justify-between w-full text-[10px] text-slate-500 uppercase tracking-wider font-medium mb-1 px-2 hover:text-slate-400 transition-colors"
                     >
                       <span>{group.name}</span>
@@ -387,6 +322,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                       {!sidebarCollapsed && (
                         <button
                           onClick={() => toggleGroup(group.name)}
+                          aria-label={`${isGroupCollapsed ? 'Expand' : 'Collapse'} ${group.name} navigation`}
+                          aria-expanded={!isGroupCollapsed}
                           className="flex items-center justify-between w-full text-[10px] text-slate-500 uppercase tracking-wider font-medium mb-1 px-2 hover:text-slate-400 transition-colors"
                         >
                           <span>{group.name}</span>
@@ -437,8 +374,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <div className="p-2 border-t border-slate-700 flex-shrink-0">
           <button
             onClick={toggleSidebar}
-            className="w-full flex items-center justify-center p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-colors"
+            className="w-full flex items-center justify-center icon-btn"
             title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
             <ChevronLeftIcon className={`w-4 h-4 transition-transform ${sidebarCollapsed ? 'rotate-180' : ''}`} />
           </button>
@@ -448,7 +386,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       {/* Main content area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top bar */}
-        <TopBar onOpenAccount={openAccountModal} />
+        <TopBar onOpenAccount={() => setShowAccountModal(true)} />
 
         {/* Main content */}
         <main className="flex-1 overflow-auto">
@@ -460,139 +398,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       </div>
 
       {/* Account Modal */}
-      {showAccountModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-md p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-white">My Account</h3>
-              <button
-                onClick={() => setShowAccountModal(false)}
-                className="text-slate-400 hover:text-white"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            {/* Tabs */}
-            <div className="flex border-b border-slate-700 mb-4">
-              <button
-                onClick={() => { setAccountTab('profile'); setError(null); setSuccess(null); }}
-                className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
-                  accountTab === 'profile'
-                    ? 'border-brand-600 text-brand-500'
-                    : 'border-transparent text-slate-400 hover:text-white'
-                }`}
-              >
-                Profile
-              </button>
-              <button
-                onClick={() => { setAccountTab('password'); setError(null); setSuccess(null); }}
-                className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
-                  accountTab === 'password'
-                    ? 'border-brand-600 text-brand-500'
-                    : 'border-transparent text-slate-400 hover:text-white'
-                }`}
-              >
-                Change Password
-              </button>
-            </div>
-
-            {error && (
-              <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
-                <p className="text-red-400 text-sm">{error}</p>
-              </div>
-            )}
-
-            {success && (
-              <div className="mb-4 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
-                <p className="text-green-400 text-sm">{success}</p>
-              </div>
-            )}
-
-            {accountTab === 'profile' && (
-              <form onSubmit={handleUpdateProfile} className="space-y-4">
-                <div>
-                  <label className="block text-sm text-slate-400 mb-1">Email</label>
-                  <input
-                    type="email"
-                    value={user?.email || ''}
-                    className="input bg-slate-800"
-                    disabled
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-slate-400 mb-1">Name</label>
-                  <input
-                    type="text"
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    placeholder="Your name"
-                    className="input"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-slate-400 mb-1">Role</label>
-                  <input
-                    type="text"
-                    value={user?.role || ''}
-                    className="input bg-slate-800 capitalize"
-                    disabled
-                  />
-                </div>
-                <div className="flex justify-end pt-2">
-                  <button type="submit" disabled={saving} className="btn btn-primary">
-                    {saving ? 'Saving...' : 'Save Changes'}
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {accountTab === 'password' && (
-              <form onSubmit={handleChangePassword} className="space-y-4">
-                <div>
-                  <label className="block text-sm text-slate-400 mb-1">Current Password</label>
-                  <input
-                    type="password"
-                    value={currentPassword}
-                    onChange={(e) => setCurrentPassword(e.target.value)}
-                    className="input"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-slate-400 mb-1">New Password</label>
-                  <input
-                    type="password"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    placeholder="Minimum 8 characters"
-                    minLength={8}
-                    className="input"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-slate-400 mb-1">Confirm New Password</label>
-                  <input
-                    type="password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="input"
-                    required
-                  />
-                </div>
-                <div className="flex justify-end pt-2">
-                  <button type="submit" disabled={saving} className="btn btn-primary">
-                    {saving ? 'Changing...' : 'Change Password'}
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
+      <AccountModal isOpen={showAccountModal} onClose={() => setShowAccountModal(false)} />
     </div>
   );
 }

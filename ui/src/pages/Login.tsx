@@ -57,7 +57,7 @@ export default function Login() {
           <form onSubmit={handleSubmit} className="space-y-4">
             {isRegister && (
               <div>
-                <label className="block text-sm text-slate-300 mb-1">Name</label>
+                <label className="block text-sm text-slate-400 mb-1">Name</label>
                 <input
                   type="text"
                   value={name}
@@ -69,7 +69,7 @@ export default function Login() {
             )}
 
             <div>
-              <label className="block text-sm text-slate-300 mb-1">Email</label>
+              <label className="block text-sm text-slate-400 mb-1">Email</label>
               <input
                 type="email"
                 value={email}
@@ -81,7 +81,7 @@ export default function Login() {
             </div>
 
             <div>
-              <label className="block text-sm text-slate-300 mb-1">Password</label>
+              <label className="block text-sm text-slate-400 mb-1">Password</label>
               <input
                 type="password"
                 value={password}

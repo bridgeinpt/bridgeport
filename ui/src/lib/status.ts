@@ -32,7 +32,7 @@ export function getHealthStatusColor(status: string): string {
     case 'unhealthy':
       return 'badge-error';
     case 'none':
-      return 'bg-slate-600 text-slate-300';
+      return 'badge-neutral';
     default:
       return 'badge-warning';
   }
@@ -139,7 +139,7 @@ export function getSyncStatusColor(status: 'synced' | 'pending' | 'never' | 'out
     case 'outdated':
       return 'badge-warning';
     case 'never':
-      return 'bg-slate-600 text-slate-300';
+      return 'badge-neutral';
     default:
       return 'badge-warning';
   }

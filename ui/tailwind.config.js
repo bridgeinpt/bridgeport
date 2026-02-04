@@ -24,6 +24,10 @@ export default {
           800: '#990000',
         },
       },
+      boxShadow: {
+        'card': '0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2)',
+        'modal': '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+      },
     },
   },
   plugins: [],

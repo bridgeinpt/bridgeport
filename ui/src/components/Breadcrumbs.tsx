@@ -63,7 +63,7 @@ export default function Breadcrumbs() {
   }
 
   return (
-    <nav className="flex items-center text-sm text-slate-400">
+    <nav aria-label="Breadcrumb" className="flex items-center text-sm text-slate-400">
       <Link to="/" className="hover:text-white transition-colors">
         Dashboard
       </Link>
