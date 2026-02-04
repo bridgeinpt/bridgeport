@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, lazy, Suspense } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAppStore } from '../lib/store.js';
 import { getEnvironment, deployService, getDependencyGraph, type Service, type ExposedPort, type DependencyGraphNode, type DependencyGraphEdge } from '../lib/api.js';
 import { formatDistanceToNow } from 'date-fns';
@@ -45,10 +45,24 @@ type TabType = 'list' | 'dependencies';
 
 export default function Services() {
   const { selectedEnvironment, servicesShowUpdatesOnly, setServicesShowUpdatesOnly } = useAppStore();
+  const location = useLocation();
+  const navigate = useNavigate();
   const toast = useToast();
+
+  // Get tab from URL hash, default to 'list'
+  const getTabFromHash = (): TabType => {
+    const hash = location.hash.replace('#', '');
+    return hash === 'dependencies' ? 'dependencies' : 'list';
+  };
+
   const [services, setServices] = useState<ServiceWithServer[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<TabType>('list');
+
+  const activeTab = getTabFromHash();
+
+  const setActiveTab = (tab: TabType) => {
+    navigate({ hash: tab }, { replace: true });
+  };
 
   // Bulk deploy state
   const [bulkDeploying, setBulkDeploying] = useState(false);

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAppStore } from '../lib/store';
 import {
   getAgents,
@@ -13,17 +13,33 @@ import {
 } from '../lib/api';
 import { formatDistanceToNow } from 'date-fns';
 
+type TabType = 'ssh' | 'agents';
+
 export default function MonitoringAgents() {
   const { selectedEnvironment } = useAppStore();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Get tab from URL hash, default to 'ssh'
+  const getTabFromHash = (): TabType => {
+    const hash = location.hash.replace('#', '');
+    return hash === 'agents' ? 'agents' : 'ssh';
+  };
+
   const [sshUser, setSshUser] = useState('root');
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [testingAll, setTestingAll] = useState(false);
   const [testingServer, setTestingServer] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, { success: boolean; durationMs: number; error?: string }>>({});
-  const [activeTab, setActiveTab] = useState<'ssh' | 'agents'>('ssh');
   const [expandedToken, setExpandedToken] = useState<string | null>(null);
   const [changingMode, setChangingMode] = useState<string | null>(null);
+
+  const activeTab = getTabFromHash();
+
+  const setActiveTab = (tab: TabType) => {
+    navigate({ hash: tab }, { replace: true });
+  };
 
   const fetchData = async () => {
     if (!selectedEnvironment?.id) return;
