@@ -818,110 +818,115 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Recent Activity */}
-      {recentActivity.length > 0 && (
-        <div className="panel mb-5">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-white">Recent Activity</h2>
-            <Link to="/activity" className="text-sm text-primary-400 hover:text-primary-300">
-              View All
-            </Link>
-          </div>
-          <div className="space-y-3">
-            {recentActivity.map((log) => (
-              <div
-                key={log.id}
-                className="flex items-center justify-between py-2 border-b border-slate-700/50 last:border-0"
-              >
-                <div className="flex items-center gap-3">
-                  <ActivityIcon action={log.action} success={log.success} />
-                  <div>
-                    <p className="text-sm text-white">
-                      <span className="capitalize">{formatAction(log.action)}</span>
-                      {log.resourceName && (
-                        <span className="text-slate-400"> {log.resourceName}</span>
-                      )}
-                      {log.details && (
-                        <span className="text-slate-500 text-xs ml-1">
-                          ({formatDetails(log.details)})
-                        </span>
-                      )}
-                    </p>
-                    {log.user && (
-                      <p className="text-xs text-slate-500">by {log.user.name || log.user.email}</p>
-                    )}
-                  </div>
-                </div>
-                <span className="text-xs text-slate-500">
-                  {formatDistanceToNow(new Date(log.createdAt), { addSuffix: true })}
-                </span>
+      {/* Recent Activity & Database Backups - Side by side */}
+      {(recentActivity.length > 0 || databases.length > 0) && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
+          {/* Recent Activity */}
+          {recentActivity.length > 0 && (
+            <div className="panel">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-white">Recent Activity</h2>
+                <Link to="/activity" className="text-sm text-primary-400 hover:text-primary-300">
+                  View All
+                </Link>
               </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Database Backups */}
-      {databases.length > 0 && (
-        <div className="panel mb-5">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-white">Database Backups</h2>
-            <Link to="/databases" className="text-sm text-primary-400 hover:text-primary-300">
-              Manage
-            </Link>
-          </div>
-          <div className="space-y-4">
-            {databases.map((db) => (
-              <div
-                key={db.id}
-                className="p-3 bg-slate-800/50 rounded-lg border border-slate-700"
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-white">{db.name}</p>
-                    <div className="flex items-center gap-4 mt-1">
-                      <p className="text-xs text-slate-400">
-                        Last backup:{' '}
-                        {db.lastBackup ? (
-                          <span className="text-slate-300">
-                            {formatDistanceToNow(new Date(db.lastBackup.completedAt || db.lastBackup.createdAt), {
-                              addSuffix: true,
-                            })}
-                          </span>
-                        ) : (
-                          <span className="text-yellow-400">Never</span>
-                        )}
-                      </p>
-                      {db.schedule?.enabled && db.schedule.nextRunAt && (
-                        <p className="text-xs text-slate-400">
-                          Next:{' '}
-                          <span className="text-slate-300">
-                            {formatDistanceToNow(new Date(db.schedule.nextRunAt), { addSuffix: true })}
-                          </span>
+              <div className="space-y-3">
+                {recentActivity.map((log) => (
+                  <div
+                    key={log.id}
+                    className="flex items-center justify-between py-2 border-b border-slate-700/50 last:border-0"
+                  >
+                    <div className="flex items-center gap-3">
+                      <ActivityIcon action={log.action} success={log.success} />
+                      <div>
+                        <p className="text-sm text-white">
+                          <span className="capitalize">{formatAction(log.action)}</span>
+                          {log.resourceName && (
+                            <span className="text-slate-400"> {log.resourceName}</span>
+                          )}
+                          {log.details && (
+                            <span className="text-slate-500 text-xs ml-1">
+                              ({formatDetails(log.details)})
+                            </span>
+                          )}
                         </p>
-                      )}
+                        {log.user && (
+                          <p className="text-xs text-slate-500">by {log.user.name || log.user.email}</p>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-xs text-slate-500 whitespace-nowrap ml-2">
+                      {formatDistanceToNow(new Date(log.createdAt), { addSuffix: true })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Database Backups */}
+          {databases.length > 0 && (
+            <div className="panel">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-white">Database Backups</h2>
+                <Link to="/databases" className="text-sm text-primary-400 hover:text-primary-300">
+                  Manage
+                </Link>
+              </div>
+              <div className="space-y-4">
+                {databases.map((db) => (
+                  <div
+                    key={db.id}
+                    className="p-3 bg-slate-800/50 rounded-lg border border-slate-700"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-white">{db.name}</p>
+                        <div className="flex items-center gap-4 mt-1">
+                          <p className="text-xs text-slate-400">
+                            Last backup:{' '}
+                            {db.lastBackup ? (
+                              <span className="text-slate-300">
+                                {formatDistanceToNow(new Date(db.lastBackup.completedAt || db.lastBackup.createdAt), {
+                                  addSuffix: true,
+                                })}
+                              </span>
+                            ) : (
+                              <span className="text-yellow-400">Never</span>
+                            )}
+                          </p>
+                          {db.schedule?.enabled && db.schedule.nextRunAt && (
+                            <p className="text-xs text-slate-400">
+                              Next:{' '}
+                              <span className="text-slate-300">
+                                {formatDistanceToNow(new Date(db.schedule.nextRunAt), { addSuffix: true })}
+                              </span>
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {!db.schedule?.enabled && (
+                          <Link
+                            to={`/databases/${db.id}`}
+                            className="text-xs text-yellow-400 hover:text-yellow-300"
+                          >
+                            Configure schedule
+                          </Link>
+                        )}
+                        <Link
+                          to={`/databases/${db.id}`}
+                          className="btn btn-sm btn-secondary"
+                        >
+                          Backup Now
+                        </Link>
+                      </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {!db.schedule?.enabled && (
-                      <Link
-                        to={`/databases/${db.id}`}
-                        className="text-xs text-yellow-400 hover:text-yellow-300"
-                      >
-                        Configure schedule
-                      </Link>
-                    )}
-                    <Link
-                      to={`/databases/${db.id}`}
-                      className="btn btn-sm btn-secondary"
-                    >
-                      Backup Now
-                    </Link>
-                  </div>
-                </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </div>
+          )}
         </div>
       )}
 
