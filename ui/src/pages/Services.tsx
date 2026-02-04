@@ -193,34 +193,9 @@ export default function Services() {
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-5">
-        <div className="flex items-center gap-6">
-          <p className="text-slate-400">
-            All services in {selectedEnvironment?.name}
-          </p>
-          {/* Tabs */}
-          <div className="flex border border-slate-700 rounded-lg overflow-hidden">
-            <button
-              onClick={() => setActiveTab('list')}
-              className={`px-4 py-1.5 text-sm font-medium transition-colors ${
-                activeTab === 'list'
-                  ? 'bg-slate-700 text-white'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              List
-            </button>
-            <button
-              onClick={() => setActiveTab('dependencies')}
-              className={`px-4 py-1.5 text-sm font-medium transition-colors ${
-                activeTab === 'dependencies'
-                  ? 'bg-slate-700 text-white'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
-              }`}
-            >
-              Dependencies
-            </button>
-          </div>
-        </div>
+        <p className="text-slate-400">
+          All services in {selectedEnvironment?.name}
+        </p>
         <div className="flex items-center gap-4">
           {activeTab === 'list' && servicesWithUpdates.length > 0 && (
             <>
@@ -244,6 +219,30 @@ export default function Services() {
             </>
           )}
         </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex border-b border-slate-700 mb-6">
+        <button
+          onClick={() => setActiveTab('list')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
+            activeTab === 'list'
+              ? 'border-brand-600 text-white'
+              : 'border-transparent text-slate-400 hover:text-white'
+          }`}
+        >
+          List
+        </button>
+        <button
+          onClick={() => setActiveTab('dependencies')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
+            activeTab === 'dependencies'
+              ? 'border-brand-600 text-white'
+              : 'border-transparent text-slate-400 hover:text-white'
+          }`}
+        >
+          Dependencies
+        </button>
       </div>
 
       {/* Bulk Deploy Results Modal */}
