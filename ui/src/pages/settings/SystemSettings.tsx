@@ -308,9 +308,8 @@ export default function SystemSettings() {
 
   return (
     <div className="p-6 max-w-4xl">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-white">System Settings</h1>
-        <p className="text-slate-400 mt-1">
+      <div className="mb-5">
+        <p className="text-slate-400">
           Configure global operational settings for BridgePort
         </p>
       </div>

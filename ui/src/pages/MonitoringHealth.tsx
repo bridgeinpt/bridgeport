@@ -111,12 +111,9 @@ export default function MonitoringHealth() {
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-5">
-        <div>
-          <h1 className="text-xl font-semibold text-white">Health Checks</h1>
-          <p className="text-slate-400 text-sm mt-1">
-            Health check logs for {selectedEnvironment.name}
-          </p>
-        </div>
+        <p className="text-slate-400">
+          Health check logs for {selectedEnvironment.name}
+        </p>
         <div className="flex gap-2">
           <button
             onClick={handleRunAll}

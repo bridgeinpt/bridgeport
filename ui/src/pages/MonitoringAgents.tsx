@@ -159,12 +159,9 @@ export default function MonitoringAgents() {
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-5">
-        <div>
-          <h1 className="text-xl font-semibold text-white">Agents & SSH Connections</h1>
-          <p className="text-slate-400 text-sm mt-1">
-            Manage SSH connections and monitoring agents
-          </p>
-        </div>
+        <p className="text-slate-400">
+          Manage SSH connections and monitoring agents
+        </p>
         <button
           onClick={handleTestAll}
           disabled={testingAll}

@@ -414,7 +414,7 @@ export default function DatabaseDetail() {
           </Link>
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold text-white">{database.name}</h1>
+              <span className="text-2xl font-bold text-white">{database.name}</span>
               <span className="badge bg-slate-700 text-slate-300">
                 {DATABASE_TYPES.find(t => t.value === database.type)?.label}
               </span>

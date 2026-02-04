@@ -453,10 +453,12 @@ Dashboard and list pages should follow clear hierarchy:
 Avoid overloading pages with redundant data - link to detail pages instead.
 
 ### 3. Consistent Patterns
+- **Page titles**: Do NOT add `<h1>` titles in pages - titles are shown in breadcrumbs (TopBar). Pages should only have a description paragraph (`<p className="text-slate-400">`). Detail pages show the item name as styled text (`<span className="text-xl font-bold">`), not `<h1>`.
 - **Filters**: Use segmented buttons for time ranges, checkboxes for boolean filters
 - **Status colors**: Always use `ui/src/lib/status.ts` utilities
 - **Dismissible items**: Alerts/notifications should be dismissible (session-only)
 - **Loading states**: Use skeleton placeholders, not spinners
+- **Tabs**: Use underline style with `border-brand-600 text-white` for active state
 
 ### 4. State Management Rules
 - **Page-local state**: Only for truly ephemeral UI (modal open, hover states)

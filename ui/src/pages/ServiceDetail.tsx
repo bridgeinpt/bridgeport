@@ -681,7 +681,7 @@ export default function ServiceDetail() {
                 )}
               </div>
             ) : (
-              <h1
+              <span
                 className="text-xl font-bold text-white cursor-pointer hover:text-primary-400 group flex items-center gap-2"
                 onClick={startEditingName}
                 title="Click to edit service name"
@@ -690,7 +690,7 @@ export default function ServiceDetail() {
                 <svg className="w-4 h-4 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
                 </svg>
-              </h1>
+              </span>
             )}
           </div>
           <p className="text-slate-400 mt-1">

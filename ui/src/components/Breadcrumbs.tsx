@@ -12,12 +12,19 @@ const routeNames: Record<string, string> = {
   'databases': 'Databases',
   'activity': 'Audit Logs',
   'users': 'Users',
-  'settings': 'Environment Config',
+  'settings': 'Settings',
   'about': 'About',
   'container-images': 'Container Images',
   'deployment-plans': 'Deployment Plans',
   'admin': 'Admin',
-  'notifications': 'Notifications Config',
+  'notifications': 'Notifications',
+  'monitoring': 'Monitoring',
+  'health': 'Health Checks',
+  'agents': 'Agents & SSH',
+  'system': 'System',
+  'service-types': 'Service Types',
+  'spaces': 'Spaces',
+  'cli': 'CLI Tool',
 };
 
 interface Crumb {

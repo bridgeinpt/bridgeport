@@ -490,7 +490,7 @@ export default function ServerDetail() {
                   : 'bg-yellow-500'
               }`}
             />
-            <h1 className="text-xl font-bold text-white">{server.name}</h1>
+            <span className="text-xl font-bold text-white">{server.name}</span>
             {server.serverType === 'host' && (
               <span className="px-2 py-0.5 bg-purple-500/20 text-purple-400 text-sm font-medium rounded">
                 Host Server

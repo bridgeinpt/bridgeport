@@ -214,12 +214,9 @@ export default function Monitoring() {
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-5">
-        <div>
-          <h1 className="text-xl font-semibold text-white">Monitoring Overview</h1>
-          <p className="text-slate-400 text-sm mt-1">
-            Resource usage across {selectedEnvironment?.name || 'environment'}
-          </p>
-        </div>
+        <p className="text-slate-400">
+          Resource usage across {selectedEnvironment?.name || 'environment'}
+        </p>
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-2 text-sm text-slate-400">
             <input

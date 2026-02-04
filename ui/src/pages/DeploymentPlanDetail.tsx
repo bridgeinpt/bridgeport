@@ -173,7 +173,7 @@ export default function DeploymentPlanDetail() {
             </Link>
           </div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-white">{plan.name}</h1>
+            <span className="text-2xl font-bold text-white">{plan.name}</span>
             <span className={`badge ${statusColor.bg} ${statusColor.text}`}>
               {plan.status.replace('_', ' ')}
             </span>

@@ -160,9 +160,8 @@ export default function GlobalSpaces() {
 
   return (
     <div className="p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-white">Global Spaces Configuration</h1>
-        <p className="text-slate-400 text-sm mt-1">
+      <div className="mb-5">
+        <p className="text-slate-400">
           Configure DigitalOcean Spaces for database backups across all environments
         </p>
       </div>
