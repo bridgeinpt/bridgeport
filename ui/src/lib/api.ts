@@ -287,6 +287,8 @@ export interface HostInfo {
   sshReachable: boolean;
   sshError?: string;
   registered: boolean;
+  registeredGlobally: boolean; // true if host is registered in ANY environment
+  registeredEnvironment?: string; // name of environment where host is registered
   serverId?: string;
   serverName?: string;
 }

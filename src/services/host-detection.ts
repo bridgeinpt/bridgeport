@@ -18,6 +18,8 @@ export interface HostInfo {
   sshReachable: boolean;
   sshError?: string;
   registered: boolean;
+  registeredGlobally: boolean; // true if host is registered in ANY environment
+  registeredEnvironment?: string; // name of environment where host is registered
   serverId?: string;
   serverName?: string;
 }
@@ -134,10 +136,11 @@ export async function getHostInfo(environmentId: string): Promise<HostInfo> {
       gatewayIp: null,
       sshReachable: false,
       registered: false,
+      registeredGlobally: false,
     };
   }
 
-  // Check if host server already registered
+  // Check if host server already registered in this environment
   const existingServer = await prisma.server.findFirst({
     where: {
       environmentId,
@@ -147,6 +150,20 @@ export async function getHostInfo(environmentId: string): Promise<HostInfo> {
       id: true,
       name: true,
       hostname: true,
+    },
+  });
+
+  // Check if host server registered in ANY environment (global check)
+  const globalServer = existingServer ? null : await prisma.server.findFirst({
+    where: {
+      serverType: 'host',
+    },
+    select: {
+      id: true,
+      name: true,
+      environment: {
+        select: { name: true },
+      },
     },
   });
 
@@ -175,6 +192,8 @@ export async function getHostInfo(environmentId: string): Promise<HostInfo> {
     sshReachable,
     sshError,
     registered: !!existingServer,
+    registeredGlobally: !!existingServer || !!globalServer,
+    registeredEnvironment: existingServer ? undefined : globalServer?.environment.name,
     serverId: existingServer?.id,
     serverName: existingServer?.name,
   };

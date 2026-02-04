@@ -163,6 +163,16 @@ async function runServiceHealthChecks(): Promise<void> {
         // Determine if health check was successful
         const isHealthy = result.container.running && (result.url === null || result.url.success);
 
+        // Build error message based on what failed
+        let errorMessage: string | undefined;
+        if (!isHealthy) {
+          if (!result.container.running) {
+            errorMessage = `Container not running (state: ${result.container.state})`;
+          } else if (result.url && !result.url.success) {
+            errorMessage = result.url.error || `HTTP ${result.url.statusCode}`;
+          }
+        }
+
         // Log health check result
         await logHealthCheck({
           environmentId: service.server.environmentId,
@@ -173,7 +183,7 @@ async function runServiceHealthChecks(): Promise<void> {
           status: isHealthy ? 'success' : 'failure',
           durationMs,
           httpStatus: result.url?.statusCode,
-          errorMessage: result.url?.error,
+          errorMessage,
         });
       } catch (error) {
         const durationMs = Date.now() - start;

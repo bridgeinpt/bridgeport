@@ -680,13 +680,27 @@ export default function ServerDetail() {
               </div>
               <div className="flex gap-2">
                 {agentStatus.installed ? (
-                  <button
-                    onClick={handleRemoveAgent}
-                    disabled={modeChanging}
-                    className="btn btn-secondary text-red-400"
-                  >
-                    Remove Agent
-                  </button>
+                  <>
+                    {agentStatus.agentVersion &&
+                      agentStatus.bundledAgentVersion &&
+                      agentStatus.bundledAgentVersion !== 'unknown' &&
+                      agentStatus.agentVersion !== agentStatus.bundledAgentVersion && (
+                      <button
+                        onClick={handleDeployAgent}
+                        disabled={modeChanging}
+                        className="btn btn-primary"
+                      >
+                        {modeChanging ? 'Updating...' : 'Update Agent'}
+                      </button>
+                    )}
+                    <button
+                      onClick={handleRemoveAgent}
+                      disabled={modeChanging}
+                      className="btn btn-secondary text-red-400"
+                    >
+                      Remove Agent
+                    </button>
+                  </>
                 ) : (
                   <button
                     onClick={handleDeployAgent}

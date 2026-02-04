@@ -748,6 +748,41 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Servers Health Grid */}
+      {environment.servers.length > 0 && (
+        <div className="panel mb-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-white">
+              Servers Health
+              <span className="ml-2 text-sm font-normal text-slate-400">
+                ({healthyServers}/{serverCount} healthy)
+              </span>
+            </h2>
+            <Link to="/servers" className="text-sm text-primary-400 hover:text-primary-300">
+              View All
+            </Link>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {environment.servers.map((server) => {
+              const isHealthy = server.status === 'healthy';
+              const isWarning = server.status === 'unknown';
+              const statusColor = isHealthy ? 'bg-green-500' : isWarning ? 'bg-yellow-500' : 'bg-red-500';
+              return (
+                <Link
+                  key={server.id}
+                  to={`/servers/${server.id}`}
+                  className="flex items-center gap-2 px-3 py-2 bg-slate-800/50 rounded-lg border border-slate-700 hover:border-slate-600 transition-colors"
+                  title={`${server.name} - ${server.status}`}
+                >
+                  <span className={`w-2 h-2 rounded-full ${statusColor}`} />
+                  <span className="text-sm text-white">{server.name}</span>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Services Health Grid */}
       {allServices.length > 0 && (
         <div className="panel mb-5">

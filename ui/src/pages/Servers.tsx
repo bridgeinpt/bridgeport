@@ -137,8 +137,8 @@ export default function Servers() {
         <button onClick={() => setShowCreate(true)} className="btn btn-primary">Add Server</button>
       </div>
 
-      {/* Host Detection Banner */}
-      {hostInfo?.detected && !hostInfo.registered && !hostBannerDismissed && (
+      {/* Host Detection Banner - only show if not registered in ANY environment */}
+      {hostInfo?.detected && !hostInfo.registeredGlobally && !hostBannerDismissed && (
         <Alert
           variant={hostInfo.sshReachable ? 'info' : 'warning'}
           className="mb-4"

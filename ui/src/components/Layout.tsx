@@ -91,6 +91,19 @@ function CommandIcon({ className }: { className?: string }) {
   );
 }
 
+function TerminalIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+      />
+    </svg>
+  );
+}
+
 function CloudIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -151,6 +164,7 @@ const navigationGroups: NavGroup[] = [
       { name: 'System', href: '/settings/system', icon: CogIcon, adminOnly: true },
       { name: 'Service Types', href: '/settings/service-types', icon: CommandIcon, adminOnly: true },
       { name: 'Spaces', href: '/settings/spaces', icon: CloudIcon, adminOnly: true },
+      { name: 'CLI Tool', href: '/settings/cli', icon: TerminalIcon },
       { name: 'Users', href: '/users', icon: UsersIcon, adminOnly: true },
       { name: 'Notifications', href: '/admin/notifications', icon: NavBellIcon, adminOnly: true },
     ],
