@@ -29,16 +29,70 @@ const serviceHealthCheckSchema = z.object({
   error: z.string().optional(),
 });
 
+const containerInfoSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  image: z.string(),
+  imageId: z.string(),
+  state: z.string(),
+  status: z.string(),
+  created: z.number(),
+  ports: z.array(z.object({
+    privatePort: z.number(),
+    publicPort: z.number().optional(),
+    type: z.string(),
+    ip: z.string().optional(),
+  })).optional(),
+  labels: z.record(z.string()).optional(),
+  mounts: z.array(z.object({
+    source: z.string(),
+    destination: z.string(),
+    mode: z.string(),
+    type: z.string(),
+  })).optional(),
+  networkMode: z.string().optional(),
+});
+
+const processInfoSchema = z.object({
+  pid: z.number(),
+  name: z.string(),
+  state: z.string(),
+  cpuPercent: z.number(),
+  memoryMb: z.number(),
+  threads: z.number(),
+});
+
+const topProcessesSchema = z.object({
+  byCpu: z.array(processInfoSchema),
+  byMemory: z.array(processInfoSchema),
+  stats: z.object({
+    total: z.number(),
+    running: z.number(),
+    sleeping: z.number(),
+    stopped: z.number(),
+    zombie: z.number(),
+  }),
+});
+
 const serverMetricsIngestSchema = z.object({
   cpuPercent: z.number().optional(),
   memoryUsedMb: z.number().optional(),
   memoryTotalMb: z.number().optional(),
+  swapUsedMb: z.number().optional(),
+  swapTotalMb: z.number().optional(),
   diskUsedGb: z.number().optional(),
   diskTotalGb: z.number().optional(),
   loadAvg1: z.number().optional(),
   loadAvg5: z.number().optional(),
   loadAvg15: z.number().optional(),
   uptime: z.number().optional(),
+  openFds: z.number().optional(),
+  maxFds: z.number().optional(),
+  tcpEstablished: z.number().optional(),
+  tcpListen: z.number().optional(),
+  tcpTimeWait: z.number().optional(),
+  tcpCloseWait: z.number().optional(),
+  tcpTotal: z.number().optional(),
   serverHealthy: z.boolean().optional(), // Agent confirms server is reachable
   agentVersion: z.string().optional(),   // Agent reports its version
   services: z
@@ -59,6 +113,8 @@ const serverMetricsIngestSchema = z.object({
     )
     .optional(),
   serviceHealthChecks: z.array(serviceHealthCheckSchema).optional(), // Agent-performed URL health checks
+  containers: z.array(containerInfoSchema).optional(), // Full container list for discovery
+  topProcesses: topProcessesSchema.optional(), // Top processes by CPU/memory
 });
 
 export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
@@ -208,9 +264,37 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'Invalid metrics data', details: body.error.issues });
     }
 
-    // Save server metrics (exclude health fields from metrics data)
-    const { services: serviceMetrics, serverHealthy, agentVersion, serviceHealthChecks, ...serverMetricsData } = body.data;
+    // Save server metrics (exclude non-metrics fields)
+    const { services: serviceMetrics, serverHealthy, agentVersion, serviceHealthChecks, containers, topProcesses, ...serverMetricsData } = body.data;
     await saveServerMetrics(server.id, serverMetricsData, 'agent');
+
+    // Save container snapshot for discovery (upsert)
+    if (containers && containers.length > 0) {
+      await prisma.agentContainerSnapshot.upsert({
+        where: { serverId: server.id },
+        create: {
+          serverId: server.id,
+          data: JSON.stringify(containers),
+        },
+        update: {
+          data: JSON.stringify(containers),
+        },
+      });
+    }
+
+    // Save process snapshot (upsert)
+    if (topProcesses) {
+      await prisma.agentProcessSnapshot.upsert({
+        where: { serverId: server.id },
+        create: {
+          serverId: server.id,
+          data: JSON.stringify(topProcesses),
+        },
+        update: {
+          data: JSON.stringify(topProcesses),
+        },
+      });
+    }
 
     // Update server status: agent push means server is healthy and agent is active
     const now = new Date();

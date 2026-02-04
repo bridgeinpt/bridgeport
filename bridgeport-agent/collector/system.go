@@ -13,12 +13,25 @@ type SystemMetrics struct {
 	CPUPercent    float64
 	MemoryUsedMb  float64
 	MemoryTotalMb float64
+	SwapUsedMb    float64
+	SwapTotalMb   float64
 	DiskUsedGb    float64
 	DiskTotalGb   float64
 	LoadAvg1      float64
 	LoadAvg5      float64
 	LoadAvg15     float64
 	Uptime        int
+	OpenFDs       int
+	MaxFDs        int
+	TCPConns      TCPConnections
+}
+
+type TCPConnections struct {
+	Established int
+	Listen      int
+	TimeWait    int
+	CloseWait   int
+	Total       int
 }
 
 var lastCPUStats cpuStats
@@ -36,10 +49,12 @@ func CollectSystemMetrics() (*SystemMetrics, error) {
 		metrics.CPUPercent = cpu
 	}
 
-	// Memory
-	if memTotal, memUsed, err := getMemory(); err == nil {
-		metrics.MemoryTotalMb = memTotal
-		metrics.MemoryUsedMb = memUsed
+	// Memory and Swap (from same source)
+	if memInfo, err := getMemoryInfo(); err == nil {
+		metrics.MemoryTotalMb = memInfo.memTotalMb
+		metrics.MemoryUsedMb = memInfo.memUsedMb
+		metrics.SwapTotalMb = memInfo.swapTotalMb
+		metrics.SwapUsedMb = memInfo.swapUsedMb
 	}
 
 	// Disk
@@ -58,6 +73,17 @@ func CollectSystemMetrics() (*SystemMetrics, error) {
 	// Uptime
 	if uptime, err := getUptime(); err == nil {
 		metrics.Uptime = uptime
+	}
+
+	// File descriptors
+	if openFDs, maxFDs, err := getFileDescriptors(); err == nil {
+		metrics.OpenFDs = openFDs
+		metrics.MaxFDs = maxFDs
+	}
+
+	// TCP connections
+	if tcpConns, err := getTCPConnections(); err == nil {
+		metrics.TCPConns = tcpConns
 	}
 
 	return metrics, nil
@@ -119,14 +145,21 @@ func getCPUPercent() (float64, error) {
 	return (totalDelta - idleDelta) / totalDelta * 100, nil
 }
 
-func getMemory() (float64, float64, error) {
+type memoryInfo struct {
+	memTotalMb  float64
+	memUsedMb   float64
+	swapTotalMb float64
+	swapUsedMb  float64
+}
+
+func getMemoryInfo() (*memoryInfo, error) {
 	file, err := os.Open("/proc/meminfo")
 	if err != nil {
-		return 0, 0, err
+		return nil, err
 	}
 	defer file.Close()
 
-	var memTotal, memAvailable uint64
+	var memTotal, memAvailable, swapTotal, swapFree uint64
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -141,13 +174,19 @@ func getMemory() (float64, float64, error) {
 			memTotal = value
 		case "MemAvailable:":
 			memAvailable = value
+		case "SwapTotal:":
+			swapTotal = value
+		case "SwapFree:":
+			swapFree = value
 		}
 	}
 
-	totalMb := float64(memTotal) / 1024
-	usedMb := float64(memTotal-memAvailable) / 1024
-
-	return totalMb, usedMb, nil
+	return &memoryInfo{
+		memTotalMb:  float64(memTotal) / 1024,
+		memUsedMb:   float64(memTotal-memAvailable) / 1024,
+		swapTotalMb: float64(swapTotal) / 1024,
+		swapUsedMb:  float64(swapTotal-swapFree) / 1024,
+	}, nil
 }
 
 func getDisk(path string) (float64, float64, error) {
@@ -197,4 +236,68 @@ func getUptime() (int, error) {
 
 	uptime, _ := strconv.ParseFloat(fields[0], 64)
 	return int(uptime), nil
+}
+
+func getFileDescriptors() (int, int, error) {
+	data, err := os.ReadFile("/proc/sys/fs/file-nr")
+	if err != nil {
+		return 0, 0, err
+	}
+
+	fields := strings.Fields(string(data))
+	if len(fields) < 3 {
+		return 0, 0, nil
+	}
+
+	// file-nr format: allocated  free  maximum
+	allocated, _ := strconv.Atoi(fields[0])
+	maximum, _ := strconv.Atoi(fields[2])
+
+	return allocated, maximum, nil
+}
+
+func getTCPConnections() (TCPConnections, error) {
+	conns := TCPConnections{}
+
+	// Parse both IPv4 and IPv6 TCP connections
+	for _, path := range []string{"/proc/net/tcp", "/proc/net/tcp6"} {
+		file, err := os.Open(path)
+		if err != nil {
+			continue // tcp6 might not exist
+		}
+
+		scanner := bufio.NewScanner(file)
+		// Skip header line
+		scanner.Scan()
+
+		for scanner.Scan() {
+			fields := strings.Fields(scanner.Text())
+			if len(fields) < 4 {
+				continue
+			}
+
+			// Field 3 is the state (hex)
+			state, err := strconv.ParseInt(fields[3], 16, 32)
+			if err != nil {
+				continue
+			}
+
+			conns.Total++
+
+			// TCP state codes from kernel
+			switch state {
+			case 0x01: // ESTABLISHED
+				conns.Established++
+			case 0x0A: // LISTEN
+				conns.Listen++
+			case 0x06: // TIME_WAIT
+				conns.TimeWait++
+			case 0x08: // CLOSE_WAIT
+				conns.CloseWait++
+			}
+		}
+		file.Close()
+	}
+
+	return conns, nil
 }

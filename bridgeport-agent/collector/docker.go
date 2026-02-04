@@ -24,10 +24,78 @@ type ContainerMetrics struct {
 	Health        string // "healthy", "unhealthy", "none" (no healthcheck), "" (starting)
 }
 
+// ContainerInfo provides full container details for discovery
+type ContainerInfo struct {
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	Image     string            `json:"image"`
+	ImageID   string            `json:"imageId"`
+	State     string            `json:"state"`
+	Status    string            `json:"status"` // Human-readable status like "Up 2 hours"
+	Created   int64             `json:"created"`
+	Ports     []ContainerPort   `json:"ports"`
+	Labels    map[string]string `json:"labels"`
+	Mounts    []ContainerMount  `json:"mounts"`
+	NetworkMode string          `json:"networkMode"`
+}
+
+type ContainerPort struct {
+	PrivatePort int    `json:"privatePort"`
+	PublicPort  int    `json:"publicPort,omitempty"`
+	Type        string `json:"type"` // tcp or udp
+	IP          string `json:"ip,omitempty"`
+}
+
+type ContainerMount struct {
+	Source      string `json:"source"`
+	Destination string `json:"destination"`
+	Mode        string `json:"mode"`
+	Type        string `json:"type"` // bind, volume, tmpfs
+}
+
+// ImageInfo provides details about images on the server
+type ImageInfo struct {
+	ID        string   `json:"id"`
+	RepoTags  []string `json:"repoTags"`
+	Size      int64    `json:"size"`
+	Created   int64    `json:"created"`
+}
+
 type dockerContainer struct {
-	ID    string   `json:"Id"`
-	Names []string `json:"Names"`
-	State string   `json:"State"`
+	ID         string            `json:"Id"`
+	Names      []string          `json:"Names"`
+	Image      string            `json:"Image"`
+	ImageID    string            `json:"ImageID"`
+	State      string            `json:"State"`
+	Status     string            `json:"Status"`
+	Created    int64             `json:"Created"`
+	Ports      []dockerPort      `json:"Ports"`
+	Labels     map[string]string `json:"Labels"`
+	Mounts     []dockerMount     `json:"Mounts"`
+	HostConfig struct {
+		NetworkMode string `json:"NetworkMode"`
+	} `json:"HostConfig"`
+}
+
+type dockerPort struct {
+	PrivatePort int    `json:"PrivatePort"`
+	PublicPort  int    `json:"PublicPort"`
+	Type        string `json:"Type"`
+	IP          string `json:"IP"`
+}
+
+type dockerMount struct {
+	Source      string `json:"Source"`
+	Destination string `json:"Destination"`
+	Mode        string `json:"Mode"`
+	Type        string `json:"Type"`
+}
+
+type dockerImage struct {
+	ID       string   `json:"Id"`
+	RepoTags []string `json:"RepoTags"`
+	Size     int64    `json:"Size"`
+	Created  int64    `json:"Created"`
 }
 
 type dockerStats struct {
@@ -198,4 +266,91 @@ func getContainerMetrics(id string, names []string) (*ContainerMetrics, error) {
 		State:         inspect.State.Status,
 		Health:        health,
 	}, nil
+}
+
+// CollectContainerList returns all containers (running and stopped) with full details
+func CollectContainerList() ([]ContainerInfo, error) {
+	// List all containers (including stopped)
+	resp, err := dockerClient.Get("http://docker/containers/json?all=true")
+	if err != nil {
+		return nil, fmt.Errorf("failed to list containers: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var containers []dockerContainer
+	if err := json.NewDecoder(resp.Body).Decode(&containers); err != nil {
+		return nil, fmt.Errorf("failed to decode containers: %w", err)
+	}
+
+	result := make([]ContainerInfo, 0, len(containers))
+	for _, c := range containers {
+		name := c.ID[:12]
+		if len(c.Names) > 0 {
+			name = strings.TrimPrefix(c.Names[0], "/")
+		}
+
+		// Convert ports
+		ports := make([]ContainerPort, 0, len(c.Ports))
+		for _, p := range c.Ports {
+			ports = append(ports, ContainerPort{
+				PrivatePort: p.PrivatePort,
+				PublicPort:  p.PublicPort,
+				Type:        p.Type,
+				IP:          p.IP,
+			})
+		}
+
+		// Convert mounts
+		mounts := make([]ContainerMount, 0, len(c.Mounts))
+		for _, m := range c.Mounts {
+			mounts = append(mounts, ContainerMount{
+				Source:      m.Source,
+				Destination: m.Destination,
+				Mode:        m.Mode,
+				Type:        m.Type,
+			})
+		}
+
+		result = append(result, ContainerInfo{
+			ID:          c.ID,
+			Name:        name,
+			Image:       c.Image,
+			ImageID:     c.ImageID,
+			State:       c.State,
+			Status:      c.Status,
+			Created:     c.Created,
+			Ports:       ports,
+			Labels:      c.Labels,
+			Mounts:      mounts,
+			NetworkMode: c.HostConfig.NetworkMode,
+		})
+	}
+
+	return result, nil
+}
+
+// CollectImageList returns all images on the server
+func CollectImageList() ([]ImageInfo, error) {
+	resp, err := dockerClient.Get("http://docker/images/json")
+	if err != nil {
+		return nil, fmt.Errorf("failed to list images: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var images []dockerImage
+	if err := json.NewDecoder(resp.Body).Decode(&images); err != nil {
+		return nil, fmt.Errorf("failed to decode images: %w", err)
+	}
+
+	result := make([]ImageInfo, 0, len(images))
+	for _, img := range images {
+		result = append(result, ImageInfo{
+			ID:       img.ID,
+			RepoTags: img.RepoTags,
+			Size:     img.Size,
+			Created:  img.Created,
+		})
+	}
+
+	return result, nil
 }

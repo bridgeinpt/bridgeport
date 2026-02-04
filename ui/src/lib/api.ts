@@ -933,12 +933,21 @@ export interface ServerMetrics {
   cpuPercent: number | null;
   memoryUsedMb: number | null;
   memoryTotalMb: number | null;
+  swapUsedMb: number | null;
+  swapTotalMb: number | null;
   diskUsedGb: number | null;
   diskTotalGb: number | null;
   loadAvg1: number | null;
   loadAvg5: number | null;
   loadAvg15: number | null;
   uptime: number | null;
+  openFds: number | null;
+  maxFds: number | null;
+  tcpEstablished: number | null;
+  tcpListen: number | null;
+  tcpTimeWait: number | null;
+  tcpCloseWait: number | null;
+  tcpTotal: number | null;
   source: string;
   collectedAt: string;
 }
@@ -1807,11 +1816,20 @@ export interface MetricsHistoryDataPoint {
   cpu?: number | null;
   memory?: number | null;
   memoryUsedMb?: number | null;
+  swap?: number | null;
+  swapUsedMb?: number | null;
   disk?: number | null;
   diskUsedGb?: number | null;
   load1?: number | null;
   load5?: number | null;
   load15?: number | null;
+  openFds?: number | null;
+  maxFds?: number | null;
+  tcpEstablished?: number | null;
+  tcpListen?: number | null;
+  tcpTimeWait?: number | null;
+  tcpCloseWait?: number | null;
+  tcpTotal?: number | null;
 }
 
 export interface MetricsHistoryServer {

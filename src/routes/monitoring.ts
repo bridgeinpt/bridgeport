@@ -390,11 +390,20 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
               cpuPercent: true,
               memoryUsedMb: true,
               memoryTotalMb: true,
+              swapUsedMb: true,
+              swapTotalMb: true,
               diskUsedGb: true,
               diskTotalGb: true,
               loadAvg1: true,
               loadAvg5: true,
               loadAvg15: true,
+              openFds: true,
+              maxFds: true,
+              tcpEstablished: true,
+              tcpListen: true,
+              tcpTimeWait: true,
+              tcpCloseWait: true,
+              tcpTotal: true,
               collectedAt: true,
             },
           });
@@ -409,6 +418,10 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
                 m.memoryUsedMb && m.memoryTotalMb
                   ? (m.memoryUsedMb / m.memoryTotalMb) * 100
                   : null;
+              const swapPercent =
+                m.swapUsedMb && m.swapTotalMb && m.swapTotalMb > 0
+                  ? (m.swapUsedMb / m.swapTotalMb) * 100
+                  : null;
               const diskPercent =
                 m.diskUsedGb && m.diskTotalGb ? (m.diskUsedGb / m.diskTotalGb) * 100 : null;
               return {
@@ -416,11 +429,20 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
                 cpu: m.cpuPercent,
                 memory: memPercent,
                 memoryUsedMb: m.memoryUsedMb,
+                swap: swapPercent,
+                swapUsedMb: m.swapUsedMb,
                 disk: diskPercent,
                 diskUsedGb: m.diskUsedGb,
                 load1: m.loadAvg1,
                 load5: m.loadAvg5,
                 load15: m.loadAvg15,
+                openFds: m.openFds,
+                maxFds: m.maxFds,
+                tcpEstablished: m.tcpEstablished,
+                tcpListen: m.tcpListen,
+                tcpTimeWait: m.tcpTimeWait,
+                tcpCloseWait: m.tcpCloseWait,
+                tcpTotal: m.tcpTotal,
               };
             }
             if (metric === 'cpu') {

@@ -120,7 +120,7 @@ export default function Monitoring() {
 
   // Prepare chart data - combine all servers into single timeline
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const prepareChartData = (metric: 'cpu' | 'memory' | 'disk' | 'load'): any[] => {
+  const prepareChartData = (metric: 'cpu' | 'memory' | 'disk' | 'load' | 'swap' | 'tcp'): any[] => {
     const timeMap = new Map<string, { time: string; [key: string]: string | number | null }>();
 
     filteredMetricsHistory.forEach((server) => {
@@ -133,6 +133,8 @@ export default function Monitoring() {
         else if (metric === 'memory') entry[server.name] = point.memory ?? null;
         else if (metric === 'disk') entry[server.name] = point.disk ?? null;
         else if (metric === 'load') entry[server.name] = point.load1 ?? null;
+        else if (metric === 'swap') entry[server.name] = point.swap ?? null;
+        else if (metric === 'tcp') entry[server.name] = point.tcpTotal ?? null;
       });
     });
 
@@ -314,8 +316,10 @@ export default function Monitoring() {
         <div className="grid grid-cols-2 gap-6 mb-8">
           <ChartCard title="CPU Usage" data={prepareChartData('cpu')} serverNames={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
           <ChartCard title="Memory Usage" data={prepareChartData('memory')} serverNames={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
+          <ChartCard title="Swap Usage" data={prepareChartData('swap')} serverNames={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
           <ChartCard title="Disk Usage" data={prepareChartData('disk')} serverNames={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
           <ChartCard title="Load Average" data={prepareChartData('load')} serverNames={serverNames} formatTime={formatTime} domain={[0, 'auto']} />
+          <ChartCard title="TCP Connections" data={prepareChartData('tcp')} serverNames={serverNames} formatTime={formatTime} domain={[0, 'auto']} />
         </div>
       ) : (
         <div className="card text-center py-8 mb-8">
@@ -348,7 +352,7 @@ export default function Monitoring() {
                   </span>
                 </div>
 
-                <div className="grid grid-cols-4 gap-4">
+                <div className="grid grid-cols-4 gap-4 mb-4">
                   <MetricGauge
                     label="CPU"
                     value={server.latestMetrics?.cpuPercent ?? undefined}
@@ -399,6 +403,73 @@ export default function Monitoring() {
                     displayValue={server.latestMetrics?.loadAvg1?.toFixed(2) ?? undefined}
                     color="purple"
                   />
+                </div>
+                {/* Additional metrics row */}
+                <div className="grid grid-cols-4 gap-4">
+                  <MetricGauge
+                    label="Swap"
+                    value={
+                      server.latestMetrics?.swapTotalMb && server.latestMetrics.swapTotalMb > 0
+                        ? ((server.latestMetrics.swapUsedMb ?? 0) /
+                            server.latestMetrics.swapTotalMb) *
+                          100
+                        : 0
+                    }
+                    displayValue={
+                      server.latestMetrics?.swapUsedMb != null && server.latestMetrics?.swapTotalMb
+                        ? server.latestMetrics.swapTotalMb > 0
+                          ? `${(server.latestMetrics.swapUsedMb / 1024).toFixed(1)}/${(server.latestMetrics.swapTotalMb / 1024).toFixed(0)}GB`
+                          : 'No swap'
+                        : undefined
+                    }
+                    max={100}
+                    unit="%"
+                    color="purple"
+                  />
+                  <MetricGauge
+                    label="File Descriptors"
+                    value={
+                      server.latestMetrics?.maxFds && server.latestMetrics.maxFds > 0
+                        ? ((server.latestMetrics.openFds ?? 0) /
+                            server.latestMetrics.maxFds) *
+                          100
+                        : undefined
+                    }
+                    displayValue={
+                      server.latestMetrics?.openFds != null && server.latestMetrics?.maxFds
+                        ? `${(server.latestMetrics.openFds / 1000).toFixed(1)}k/${(server.latestMetrics.maxFds / 1000).toFixed(0)}k`
+                        : undefined
+                    }
+                    max={100}
+                    unit="%"
+                    color="yellow"
+                  />
+                  <div className="p-4 rounded-lg bg-slate-800/50">
+                    <p className="text-slate-400 text-xs mb-2">TCP Connections</p>
+                    {server.latestMetrics?.tcpTotal != null ? (
+                      <div className="text-sm">
+                        <span className="text-white font-bold text-lg">{server.latestMetrics.tcpTotal}</span>
+                        <span className="text-slate-500 text-xs ml-2">total</span>
+                        <div className="flex gap-3 mt-1 text-xs">
+                          <span className="text-green-400">{server.latestMetrics.tcpEstablished ?? 0} est</span>
+                          <span className="text-blue-400">{server.latestMetrics.tcpListen ?? 0} listen</span>
+                          <span className="text-yellow-400">{server.latestMetrics.tcpTimeWait ?? 0} tw</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-slate-500 text-sm">-</p>
+                    )}
+                  </div>
+                  <div className="p-4 rounded-lg bg-slate-800/50">
+                    <p className="text-slate-400 text-xs mb-2">Uptime</p>
+                    {server.latestMetrics?.uptime != null ? (
+                      <p className="text-white font-bold text-lg">
+                        {Math.floor(server.latestMetrics.uptime / 86400)}d {Math.floor((server.latestMetrics.uptime % 86400) / 3600)}h
+                      </p>
+                    ) : (
+                      <p className="text-slate-500 text-sm">-</p>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}

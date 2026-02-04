@@ -7,12 +7,21 @@ export interface ServerMetricsData {
   cpuPercent?: number;
   memoryUsedMb?: number;
   memoryTotalMb?: number;
+  swapUsedMb?: number;
+  swapTotalMb?: number;
   diskUsedGb?: number;
   diskTotalGb?: number;
   loadAvg1?: number;
   loadAvg5?: number;
   loadAvg15?: number;
   uptime?: number;
+  openFds?: number;
+  maxFds?: number;
+  tcpEstablished?: number;
+  tcpListen?: number;
+  tcpTimeWait?: number;
+  tcpCloseWait?: number;
+  tcpTotal?: number;
 }
 
 export interface ServiceMetricsData {

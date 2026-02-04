@@ -57,16 +57,79 @@ type MetricsPayload struct {
 	CPUPercent          *float64              `json:"cpuPercent,omitempty"`
 	MemoryUsedMb        *float64              `json:"memoryUsedMb,omitempty"`
 	MemoryTotalMb       *float64              `json:"memoryTotalMb,omitempty"`
+	SwapUsedMb          *float64              `json:"swapUsedMb,omitempty"`
+	SwapTotalMb         *float64              `json:"swapTotalMb,omitempty"`
 	DiskUsedGb          *float64              `json:"diskUsedGb,omitempty"`
 	DiskTotalGb         *float64              `json:"diskTotalGb,omitempty"`
 	LoadAvg1            *float64              `json:"loadAvg1,omitempty"`
 	LoadAvg5            *float64              `json:"loadAvg5,omitempty"`
 	LoadAvg15           *float64              `json:"loadAvg15,omitempty"`
 	Uptime              *int                  `json:"uptime,omitempty"`
+	OpenFDs             *int                  `json:"openFds,omitempty"`
+	MaxFDs              *int                  `json:"maxFds,omitempty"`
+	TCPEstablished      *int                  `json:"tcpEstablished,omitempty"`
+	TCPListen           *int                  `json:"tcpListen,omitempty"`
+	TCPTimeWait         *int                  `json:"tcpTimeWait,omitempty"`
+	TCPCloseWait        *int                  `json:"tcpCloseWait,omitempty"`
+	TCPTotal            *int                  `json:"tcpTotal,omitempty"`
 	ServerHealthy       *bool                 `json:"serverHealthy,omitempty"` // Agent confirms server is reachable
 	AgentVersion        *string               `json:"agentVersion,omitempty"`  // Agent version
 	Services            []ServiceMetrics      `json:"services,omitempty"`
 	ServiceHealthChecks []ServiceHealthResult `json:"serviceHealthChecks,omitempty"` // Health check results
+	Containers          []ContainerInfo       `json:"containers,omitempty"`          // Full container list for discovery
+	TopProcesses        *TopProcessesPayload  `json:"topProcesses,omitempty"`        // Top processes by CPU/memory
+}
+
+// ContainerInfo mirrors collector.ContainerInfo for JSON serialization
+type ContainerInfo struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Image       string            `json:"image"`
+	ImageID     string            `json:"imageId"`
+	State       string            `json:"state"`
+	Status      string            `json:"status"`
+	Created     int64             `json:"created"`
+	Ports       []ContainerPort   `json:"ports"`
+	Labels      map[string]string `json:"labels"`
+	Mounts      []ContainerMount  `json:"mounts"`
+	NetworkMode string            `json:"networkMode"`
+}
+
+type ContainerPort struct {
+	PrivatePort int    `json:"privatePort"`
+	PublicPort  int    `json:"publicPort,omitempty"`
+	Type        string `json:"type"`
+	IP          string `json:"ip,omitempty"`
+}
+
+type ContainerMount struct {
+	Source      string `json:"source"`
+	Destination string `json:"destination"`
+	Mode        string `json:"mode"`
+	Type        string `json:"type"`
+}
+
+type TopProcessesPayload struct {
+	ByCPU    []ProcessInfoPayload `json:"byCpu"`
+	ByMemory []ProcessInfoPayload `json:"byMemory"`
+	Stats    ProcessStatsPayload  `json:"stats"`
+}
+
+type ProcessInfoPayload struct {
+	PID        int     `json:"pid"`
+	Name       string  `json:"name"`
+	State      string  `json:"state"`
+	CPUPercent float64 `json:"cpuPercent"`
+	MemoryMb   float64 `json:"memoryMb"`
+	Threads    int     `json:"threads"`
+}
+
+type ProcessStatsPayload struct {
+	Total    int `json:"total"`
+	Running  int `json:"running"`
+	Sleeping int `json:"sleeping"`
+	Stopped  int `json:"stopped"`
+	Zombie   int `json:"zombie"`
 }
 
 type ServiceMetrics struct {
@@ -249,12 +312,21 @@ func collectAndSend(config Config) {
 		payload.CPUPercent = &sysMetrics.CPUPercent
 		payload.MemoryUsedMb = &sysMetrics.MemoryUsedMb
 		payload.MemoryTotalMb = &sysMetrics.MemoryTotalMb
+		payload.SwapUsedMb = &sysMetrics.SwapUsedMb
+		payload.SwapTotalMb = &sysMetrics.SwapTotalMb
 		payload.DiskUsedGb = &sysMetrics.DiskUsedGb
 		payload.DiskTotalGb = &sysMetrics.DiskTotalGb
 		payload.LoadAvg1 = &sysMetrics.LoadAvg1
 		payload.LoadAvg5 = &sysMetrics.LoadAvg5
 		payload.LoadAvg15 = &sysMetrics.LoadAvg15
 		payload.Uptime = &sysMetrics.Uptime
+		payload.OpenFDs = &sysMetrics.OpenFDs
+		payload.MaxFDs = &sysMetrics.MaxFDs
+		payload.TCPEstablished = &sysMetrics.TCPConns.Established
+		payload.TCPListen = &sysMetrics.TCPConns.Listen
+		payload.TCPTimeWait = &sysMetrics.TCPConns.TimeWait
+		payload.TCPCloseWait = &sysMetrics.TCPConns.CloseWait
+		payload.TCPTotal = &sysMetrics.TCPConns.Total
 	} else {
 		log.Printf("Error collecting system metrics: %v", err)
 	}
@@ -281,6 +353,84 @@ func collectAndSend(config Config) {
 		}
 	} else {
 		log.Printf("Error collecting Docker metrics: %v", err)
+	}
+
+	// Collect full container list for discovery
+	if containerList, err := collector.CollectContainerList(); err == nil {
+		for _, c := range containerList {
+			ports := make([]ContainerPort, 0, len(c.Ports))
+			for _, p := range c.Ports {
+				ports = append(ports, ContainerPort{
+					PrivatePort: p.PrivatePort,
+					PublicPort:  p.PublicPort,
+					Type:        p.Type,
+					IP:          p.IP,
+				})
+			}
+			mounts := make([]ContainerMount, 0, len(c.Mounts))
+			for _, m := range c.Mounts {
+				mounts = append(mounts, ContainerMount{
+					Source:      m.Source,
+					Destination: m.Destination,
+					Mode:        m.Mode,
+					Type:        m.Type,
+				})
+			}
+			payload.Containers = append(payload.Containers, ContainerInfo{
+				ID:          c.ID,
+				Name:        c.Name,
+				Image:       c.Image,
+				ImageID:     c.ImageID,
+				State:       c.State,
+				Status:      c.Status,
+				Created:     c.Created,
+				Ports:       ports,
+				Labels:      c.Labels,
+				Mounts:      mounts,
+				NetworkMode: c.NetworkMode,
+			})
+		}
+	} else {
+		log.Printf("Error collecting container list: %v", err)
+	}
+
+	// Collect top processes
+	if topProcs, err := collector.CollectTopProcesses(10); err == nil {
+		byCPU := make([]ProcessInfoPayload, 0, len(topProcs.ByCPU))
+		for _, p := range topProcs.ByCPU {
+			byCPU = append(byCPU, ProcessInfoPayload{
+				PID:        p.PID,
+				Name:       p.Name,
+				State:      p.State,
+				CPUPercent: p.CPUPercent,
+				MemoryMb:   p.MemoryMb,
+				Threads:    p.Threads,
+			})
+		}
+		byMemory := make([]ProcessInfoPayload, 0, len(topProcs.ByMemory))
+		for _, p := range topProcs.ByMemory {
+			byMemory = append(byMemory, ProcessInfoPayload{
+				PID:        p.PID,
+				Name:       p.Name,
+				State:      p.State,
+				CPUPercent: p.CPUPercent,
+				MemoryMb:   p.MemoryMb,
+				Threads:    p.Threads,
+			})
+		}
+		payload.TopProcesses = &TopProcessesPayload{
+			ByCPU:    byCPU,
+			ByMemory: byMemory,
+			Stats: ProcessStatsPayload{
+				Total:    topProcs.Stats.Total,
+				Running:  topProcs.Stats.Running,
+				Sleeping: topProcs.Stats.Sleeping,
+				Stopped:  topProcs.Stats.Stopped,
+				Zombie:   topProcs.Stats.Zombie,
+			},
+		}
+	} else {
+		log.Printf("Error collecting top processes: %v", err)
 	}
 
 	// Send to server

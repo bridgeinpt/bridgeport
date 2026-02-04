@@ -695,7 +695,8 @@ export default function ServerDetail() {
         {latestMetrics && agentStatus?.metricsMode !== 'disabled' && (
           <div>
             <p className="text-slate-400 text-sm mb-3">Recent Metrics</p>
-            <div className="grid grid-cols-4 gap-4">
+            {/* Primary metrics row */}
+            <div className="grid grid-cols-4 gap-4 mb-4">
               {/* CPU */}
               <div className="p-3 bg-slate-800 rounded-lg">
                 <p className="text-slate-400 text-xs mb-1">CPU</p>
@@ -769,6 +770,106 @@ export default function ServerDetail() {
                 <p className="text-xs text-slate-500 mt-1">
                   {latestMetrics.loadAvg5?.toFixed(2)} / {latestMetrics.loadAvg15?.toFixed(2)}
                 </p>
+              </div>
+            </div>
+
+            {/* Secondary metrics row (swap, FDs, TCP, uptime) */}
+            <div className="grid grid-cols-4 gap-4">
+              {/* Swap */}
+              <div className="p-3 bg-slate-800 rounded-lg">
+                <p className="text-slate-400 text-xs mb-1">Swap</p>
+                {latestMetrics.swapTotalMb && latestMetrics.swapTotalMb > 0 ? (
+                  <>
+                    <p className="text-xl font-semibold text-white">
+                      {((latestMetrics.swapUsedMb || 0) / 1024).toFixed(1)}
+                      <span className="text-sm text-slate-400">
+                        /{(latestMetrics.swapTotalMb / 1024).toFixed(0)}GB
+                      </span>
+                    </p>
+                    <div className="h-1 mt-2 bg-slate-700 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-purple-500 rounded-full"
+                        style={{
+                          width: `${Math.min(
+                            ((latestMetrics.swapUsedMb || 0) / latestMetrics.swapTotalMb) * 100,
+                            100
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-slate-500 text-sm">No swap</p>
+                )}
+              </div>
+
+              {/* File Descriptors */}
+              <div className="p-3 bg-slate-800 rounded-lg">
+                <p className="text-slate-400 text-xs mb-1">File Descriptors</p>
+                {latestMetrics.openFds != null && latestMetrics.maxFds ? (
+                  <>
+                    <p className="text-xl font-semibold text-white">
+                      {(latestMetrics.openFds / 1000).toFixed(1)}k
+                      <span className="text-sm text-slate-400">
+                        /{(latestMetrics.maxFds / 1000).toFixed(0)}k
+                      </span>
+                    </p>
+                    <div className="h-1 mt-2 bg-slate-700 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full ${
+                          (latestMetrics.openFds / latestMetrics.maxFds) > 0.8
+                            ? 'bg-red-500'
+                            : (latestMetrics.openFds / latestMetrics.maxFds) > 0.6
+                            ? 'bg-yellow-500'
+                            : 'bg-green-500'
+                        }`}
+                        style={{
+                          width: `${Math.min(
+                            (latestMetrics.openFds / latestMetrics.maxFds) * 100,
+                            100
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-slate-500 text-sm">-</p>
+                )}
+              </div>
+
+              {/* TCP Connections */}
+              <div className="p-3 bg-slate-800 rounded-lg">
+                <p className="text-slate-400 text-xs mb-1">TCP Connections</p>
+                {latestMetrics.tcpTotal != null ? (
+                  <>
+                    <p className="text-xl font-semibold text-white">
+                      {latestMetrics.tcpTotal}
+                    </p>
+                    <div className="flex gap-2 mt-1 text-xs">
+                      <span className="text-green-400">{latestMetrics.tcpEstablished ?? 0} est</span>
+                      <span className="text-blue-400">{latestMetrics.tcpListen ?? 0} listen</span>
+                      <span className="text-yellow-400">{latestMetrics.tcpTimeWait ?? 0} tw</span>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-slate-500 text-sm">-</p>
+                )}
+              </div>
+
+              {/* Uptime */}
+              <div className="p-3 bg-slate-800 rounded-lg">
+                <p className="text-slate-400 text-xs mb-1">Uptime</p>
+                {latestMetrics.uptime != null ? (
+                  <p className="text-xl font-semibold text-white">
+                    {Math.floor(latestMetrics.uptime / 86400)}d{' '}
+                    {Math.floor((latestMetrics.uptime % 86400) / 3600)}h
+                    <span className="text-sm text-slate-400 ml-1">
+                      {Math.floor((latestMetrics.uptime % 3600) / 60)}m
+                    </span>
+                  </p>
+                ) : (
+                  <p className="text-slate-500 text-sm">-</p>
+                )}
               </div>
             </div>
           </div>

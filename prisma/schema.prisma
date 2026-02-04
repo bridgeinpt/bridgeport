@@ -90,9 +90,11 @@ model Server {
   environmentId String
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
 
-  services  Service[]
-  metrics   ServerMetrics[]
-  databases Database[]
+  services           Service[]
+  metrics            ServerMetrics[]
+  databases          Database[]
+  containerSnapshot  AgentContainerSnapshot?
+  processSnapshot    AgentProcessSnapshot?
 
   @@unique([environmentId, name])
 }
@@ -103,12 +105,21 @@ model ServerMetrics {
   cpuPercent    Float?
   memoryUsedMb  Float?
   memoryTotalMb Float?
+  swapUsedMb    Float?
+  swapTotalMb   Float?
   diskUsedGb    Float?
   diskTotalGb   Float?
   loadAvg1      Float?
   loadAvg5      Float?
   loadAvg15     Float?
   uptime        Int? // seconds
+  openFds       Int? // open file descriptors
+  maxFds        Int? // max file descriptors
+  tcpEstablished Int? // TCP connections in ESTABLISHED state
+  tcpListen      Int? // TCP connections in LISTEN state
+  tcpTimeWait    Int? // TCP connections in TIME_WAIT state
+  tcpCloseWait   Int? // TCP connections in CLOSE_WAIT state
+  tcpTotal       Int? // Total TCP connections
   source        String // "ssh" | "agent"
   collectedAt   DateTime @default(now())
 
@@ -762,6 +773,26 @@ model SpacesEnvironment {
   // This will be handled in the query layer
 
   @@unique([spacesConfigId, environmentId])
+}
+
+// ==================== Agent Discovery Data ====================
+
+// Agent-reported container discovery data (latest snapshot per server)
+model AgentContainerSnapshot {
+  id        String   @id @default(cuid())
+  serverId  String   @unique // One snapshot per server
+  server    Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  data      String   // JSON array of ContainerInfo
+  updatedAt DateTime @updatedAt
+}
+
+// Agent-reported top processes (latest snapshot per server)
+model AgentProcessSnapshot {
+  id        String   @id @default(cuid())
+  serverId  String   @unique // One snapshot per server
+  server    Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  data      String   // JSON with byCpu, byMemory, stats
+  updatedAt DateTime @updatedAt
 }
 
 // ==================== Health Check Logging ====================
