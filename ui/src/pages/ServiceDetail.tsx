@@ -808,35 +808,6 @@ export default function ServiceDetail() {
               </div>
             </div>
 
-            {/* Auto-update indicator - now managed at image level */}
-            {containerImage && (
-              <div className="flex items-center justify-between pt-4 border-t border-slate-700">
-                <div>
-                  <p className="text-white font-medium">Auto-update</p>
-                  <p className="text-sm text-slate-400">
-                    {containerImage.autoUpdate
-                      ? 'Enabled at image level - all linked services update together'
-                      : 'Disabled - enable in Container Images'}
-                  </p>
-                </div>
-                {containerImage.autoUpdate ? (
-                  <div className="flex items-center gap-2 text-green-400">
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    <span className="text-sm font-medium">Auto-updates with image</span>
-                  </div>
-                ) : (
-                  <Link
-                    to="/container-images"
-                    className="text-sm text-primary-400 hover:text-primary-300"
-                  >
-                    Manage in Container Images
-                  </Link>
-                )}
-              </div>
-            )}
-
             {/* Last update check */}
             {service.lastUpdateCheckAt && (
               <p className="text-xs text-slate-500">

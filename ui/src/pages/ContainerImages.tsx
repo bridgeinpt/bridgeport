@@ -50,7 +50,9 @@ export default function ContainerImages() {
 
   // Check updates state
   const [checkingUpdatesId, setCheckingUpdatesId] = useState<string | null>(null);
-  const [togglingAutoUpdate, setTogglingAutoUpdate] = useState<string | null>(null);
+
+  // Edit form auto-update state
+  const [editAutoUpdate, setEditAutoUpdate] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState<ContainerImageInput>({
@@ -82,6 +84,7 @@ export default function ContainerImages() {
       currentTag: 'latest',
       registryConnectionId: null,
     });
+    setEditAutoUpdate(false);
   };
 
   const openCreate = () => {
@@ -97,6 +100,7 @@ export default function ContainerImages() {
       currentTag: image.currentTag,
       registryConnectionId: image.registryConnectionId,
     });
+    setEditAutoUpdate(image.autoUpdate);
     setEditingId(image.id);
     setShowCreate(true);
   };
@@ -109,6 +113,11 @@ export default function ContainerImages() {
     try {
       if (editingId) {
         const { image } = await updateContainerImage(editingId, formData);
+        // Also update autoUpdate setting if it has a registry
+        if (formData.registryConnectionId) {
+          await updateContainerImageSettings(editingId, { autoUpdate: editAutoUpdate });
+          image.autoUpdate = editAutoUpdate;
+        }
         setImages((prev) => prev.map((i) => (i.id === editingId ? image : i)));
         toast.success('Image updated');
       } else {
@@ -234,23 +243,6 @@ export default function ContainerImages() {
     }
   };
 
-  const handleToggleAutoUpdate = async (imageId: string, currentValue: boolean) => {
-    setTogglingAutoUpdate(imageId);
-    try {
-      await updateContainerImageSettings(imageId, { autoUpdate: !currentValue });
-      setImages((prev) =>
-        prev.map((img) =>
-          img.id === imageId ? { ...img, autoUpdate: !currentValue } : img
-        )
-      );
-      toast.success(`Auto-update ${!currentValue ? 'enabled' : 'disabled'}`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to update');
-    } finally {
-      setTogglingAutoUpdate(null);
-    }
-  };
-
   // Helper function to get status badge color
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -372,23 +364,6 @@ export default function ContainerImages() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {/* Auto-update toggle */}
-                  {image.registryConnectionId && (
-                    <button
-                      onClick={() => handleToggleAutoUpdate(image.id, image.autoUpdate)}
-                      disabled={togglingAutoUpdate === image.id}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                        image.autoUpdate ? 'bg-primary-600' : 'bg-slate-600'
-                      }`}
-                      title={image.autoUpdate ? 'Disable auto-update' : 'Enable auto-update'}
-                    >
-                      <span
-                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                          image.autoUpdate ? 'translate-x-6' : 'translate-x-1'
-                        }`}
-                      />
-                    </button>
-                  )}
                   {/* Check updates button */}
                   {image.registryConnectionId && (
                     <button
@@ -574,6 +549,31 @@ export default function ContainerImages() {
                   ))}
                 </select>
               </div>
+
+              {/* Auto-update toggle - only shown when editing and has registry */}
+              {editingId && formData.registryConnectionId && (
+                <div className="flex items-center justify-between pt-2">
+                  <div>
+                    <label className="block text-sm text-white font-medium">Auto-update</label>
+                    <p className="text-xs text-slate-400">
+                      Automatically deploy when new tags are detected
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setEditAutoUpdate(!editAutoUpdate)}
+                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                      editAutoUpdate ? 'bg-primary-600' : 'bg-slate-600'
+                    }`}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        editAutoUpdate ? 'translate-x-6' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+              )}
 
               <div className="flex gap-2 justify-end pt-4">
                 <button
