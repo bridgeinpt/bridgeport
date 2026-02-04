@@ -19,6 +19,7 @@ import {
   getServerConfigFilesStatus,
   syncAllServerFiles,
   listContainerImages,
+  getSchedulerConfig,
   type ServerWithServices,
   type MetricsMode,
   type ServerMetrics,
@@ -30,6 +31,7 @@ import {
   type ServerSyncAllResult,
   type ContainerImage,
   type ProcessSnapshot,
+  type SchedulerConfig,
 } from '../lib/api';
 import { useToast } from '../components/Toast';
 import { formatDistanceToNow } from 'date-fns';
@@ -65,6 +67,7 @@ interface AgentStatus {
   agentStatus: AgentStatusType;
   agentVersion: string | null;
   lastAgentPushAt: string | null;
+  bundledAgentVersion: string;
   installed: boolean;
   running: boolean;
   error?: string;
@@ -145,6 +148,9 @@ export default function ServerDetail() {
   const [processSnapshot, setProcessSnapshot] = useState<ProcessSnapshot | null>(null);
   const [processUpdatedAt, setProcessUpdatedAt] = useState<string | null>(null);
 
+  // Metrics config (for filtering disabled metrics)
+  const [schedulerConfig, setSchedulerConfig] = useState<SchedulerConfig | null>(null);
+
   useEffect(() => {
     if (id) {
       setLoading(true);
@@ -164,11 +170,15 @@ export default function ServerDetail() {
             setProcessSnapshot(processRes.processes);
             setProcessUpdatedAt(processRes.updatedAt);
           }
-          // Load container images for the server's environment
+          // Load container images and scheduler config for the server's environment
           if (serverRes.server.environmentId) {
             listContainerImages(serverRes.server.environmentId)
               .then(({ images }) => setContainerImages(images))
               .catch(() => setContainerImages([]));
+            // Load scheduler config for metrics toggles
+            getSchedulerConfig(serverRes.server.environmentId)
+              .then(({ config }) => setSchedulerConfig(config))
+              .catch(() => setSchedulerConfig(null));
           }
         })
         .finally(() => setLoading(false));
@@ -653,6 +663,14 @@ export default function ServerDetail() {
                       v{agentStatus.agentVersion}
                     </span>
                   )}
+                  {agentStatus.agentVersion &&
+                    agentStatus.bundledAgentVersion &&
+                    agentStatus.bundledAgentVersion !== 'unknown' &&
+                    agentStatus.agentVersion !== agentStatus.bundledAgentVersion && (
+                    <span className="px-2 py-0.5 text-xs rounded bg-yellow-500/20 text-yellow-400">
+                      Update available ({agentStatus.bundledAgentVersion})
+                    </span>
+                  )}
                   {agentStatus.lastAgentPushAt && (
                     <span className="text-slate-500 text-sm">
                       Last push: {formatDistanceToNow(new Date(agentStatus.lastAgentPushAt), { addSuffix: true })}
@@ -709,165 +727,179 @@ export default function ServerDetail() {
             {/* Primary metrics row */}
             <div className="grid grid-cols-4 gap-4 mb-4">
               {/* CPU */}
-              <div className="p-3 bg-slate-800 rounded-lg">
-                <p className="text-slate-400 text-xs mb-1">CPU</p>
-                <p className="text-xl font-semibold text-white">
-                  {latestMetrics.cpuPercent?.toFixed(1) ?? '-'}%
-                </p>
-                <div className="h-1 mt-2 bg-slate-700 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-primary-500 rounded-full"
-                    style={{ width: `${Math.min(latestMetrics.cpuPercent || 0, 100)}%` }}
-                  />
+              {(schedulerConfig?.collectCpu ?? true) && (
+                <div className="p-3 bg-slate-800 rounded-lg">
+                  <p className="text-slate-400 text-xs mb-1">CPU</p>
+                  <p className="text-xl font-semibold text-white">
+                    {latestMetrics.cpuPercent?.toFixed(1) ?? '-'}%
+                  </p>
+                  <div className="h-1 mt-2 bg-slate-700 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-primary-500 rounded-full"
+                      style={{ width: `${Math.min(latestMetrics.cpuPercent || 0, 100)}%` }}
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Memory */}
-              <div className="p-3 bg-slate-800 rounded-lg">
-                <p className="text-slate-400 text-xs mb-1">Memory</p>
-                <p className="text-xl font-semibold text-white">
-                  {latestMetrics.memoryUsedMb
-                    ? `${(latestMetrics.memoryUsedMb / 1024).toFixed(1)}`
-                    : '-'}
-                  <span className="text-sm text-slate-400">
-                    /{latestMetrics.memoryTotalMb ? (latestMetrics.memoryTotalMb / 1024).toFixed(0) : '-'}GB
-                  </span>
-                </p>
-                {latestMetrics.memoryTotalMb && (
-                  <div className="h-1 mt-2 bg-slate-700 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-green-500 rounded-full"
-                      style={{
-                        width: `${Math.min(
-                          ((latestMetrics.memoryUsedMb || 0) / latestMetrics.memoryTotalMb) * 100,
-                          100
-                        )}%`,
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
+              {(schedulerConfig?.collectMemory ?? true) && (
+                <div className="p-3 bg-slate-800 rounded-lg">
+                  <p className="text-slate-400 text-xs mb-1">Memory</p>
+                  <p className="text-xl font-semibold text-white">
+                    {latestMetrics.memoryUsedMb
+                      ? `${(latestMetrics.memoryUsedMb / 1024).toFixed(1)}`
+                      : '-'}
+                    <span className="text-sm text-slate-400">
+                      /{latestMetrics.memoryTotalMb ? (latestMetrics.memoryTotalMb / 1024).toFixed(0) : '-'}GB
+                    </span>
+                  </p>
+                  {latestMetrics.memoryTotalMb && (
+                    <div className="h-1 mt-2 bg-slate-700 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-green-500 rounded-full"
+                        style={{
+                          width: `${Math.min(
+                            ((latestMetrics.memoryUsedMb || 0) / latestMetrics.memoryTotalMb) * 100,
+                            100
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Disk */}
-              <div className="p-3 bg-slate-800 rounded-lg">
-                <p className="text-slate-400 text-xs mb-1">Disk</p>
-                <p className="text-xl font-semibold text-white">
-                  {latestMetrics.diskUsedGb?.toFixed(0) ?? '-'}
-                  <span className="text-sm text-slate-400">
-                    /{latestMetrics.diskTotalGb?.toFixed(0) ?? '-'}GB
-                  </span>
-                </p>
-                {latestMetrics.diskTotalGb && (
-                  <div className="h-1 mt-2 bg-slate-700 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-yellow-500 rounded-full"
-                      style={{
-                        width: `${Math.min(
-                          ((latestMetrics.diskUsedGb || 0) / latestMetrics.diskTotalGb) * 100,
-                          100
-                        )}%`,
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
+              {(schedulerConfig?.collectDisk ?? true) && (
+                <div className="p-3 bg-slate-800 rounded-lg">
+                  <p className="text-slate-400 text-xs mb-1">Disk</p>
+                  <p className="text-xl font-semibold text-white">
+                    {latestMetrics.diskUsedGb?.toFixed(0) ?? '-'}
+                    <span className="text-sm text-slate-400">
+                      /{latestMetrics.diskTotalGb?.toFixed(0) ?? '-'}GB
+                    </span>
+                  </p>
+                  {latestMetrics.diskTotalGb && (
+                    <div className="h-1 mt-2 bg-slate-700 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-yellow-500 rounded-full"
+                        style={{
+                          width: `${Math.min(
+                            ((latestMetrics.diskUsedGb || 0) / latestMetrics.diskTotalGb) * 100,
+                            100
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Load */}
-              <div className="p-3 bg-slate-800 rounded-lg">
-                <p className="text-slate-400 text-xs mb-1">Load Avg</p>
-                <p className="text-xl font-semibold text-white font-mono">
-                  {latestMetrics.loadAvg1?.toFixed(2) ?? '-'}
-                </p>
-                <p className="text-xs text-slate-500 mt-1">
-                  {latestMetrics.loadAvg5?.toFixed(2)} / {latestMetrics.loadAvg15?.toFixed(2)}
-                </p>
-              </div>
+              {(schedulerConfig?.collectLoad ?? true) && (
+                <div className="p-3 bg-slate-800 rounded-lg">
+                  <p className="text-slate-400 text-xs mb-1">Load Avg</p>
+                  <p className="text-xl font-semibold text-white font-mono">
+                    {latestMetrics.loadAvg1?.toFixed(2) ?? '-'}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {latestMetrics.loadAvg5?.toFixed(2)} / {latestMetrics.loadAvg15?.toFixed(2)}
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Secondary metrics row (swap, FDs, TCP, uptime) */}
             <div className="grid grid-cols-4 gap-4">
               {/* Swap */}
-              <div className="p-3 bg-slate-800 rounded-lg">
-                <p className="text-slate-400 text-xs mb-1">Swap</p>
-                {latestMetrics.swapTotalMb && latestMetrics.swapTotalMb > 0 ? (
-                  <>
-                    <p className="text-xl font-semibold text-white">
-                      {((latestMetrics.swapUsedMb || 0) / 1024).toFixed(1)}
-                      <span className="text-sm text-slate-400">
-                        /{(latestMetrics.swapTotalMb / 1024).toFixed(0)}GB
-                      </span>
-                    </p>
-                    <div className="h-1 mt-2 bg-slate-700 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-purple-500 rounded-full"
-                        style={{
-                          width: `${Math.min(
-                            ((latestMetrics.swapUsedMb || 0) / latestMetrics.swapTotalMb) * 100,
-                            100
-                          )}%`,
-                        }}
-                      />
-                    </div>
-                  </>
-                ) : (
-                  <p className="text-slate-500 text-sm">No swap</p>
-                )}
-              </div>
+              {(schedulerConfig?.collectSwap ?? true) && (
+                <div className="p-3 bg-slate-800 rounded-lg">
+                  <p className="text-slate-400 text-xs mb-1">Swap</p>
+                  {latestMetrics.swapTotalMb && latestMetrics.swapTotalMb > 0 ? (
+                    <>
+                      <p className="text-xl font-semibold text-white">
+                        {((latestMetrics.swapUsedMb || 0) / 1024).toFixed(1)}
+                        <span className="text-sm text-slate-400">
+                          /{(latestMetrics.swapTotalMb / 1024).toFixed(0)}GB
+                        </span>
+                      </p>
+                      <div className="h-1 mt-2 bg-slate-700 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-purple-500 rounded-full"
+                          style={{
+                            width: `${Math.min(
+                              ((latestMetrics.swapUsedMb || 0) / latestMetrics.swapTotalMb) * 100,
+                              100
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-slate-500 text-sm">No swap</p>
+                  )}
+                </div>
+              )}
 
               {/* File Descriptors */}
-              <div className="p-3 bg-slate-800 rounded-lg">
-                <p className="text-slate-400 text-xs mb-1">File Descriptors</p>
-                {latestMetrics.openFds != null && latestMetrics.maxFds ? (
-                  <>
-                    <p className="text-xl font-semibold text-white">
-                      {(latestMetrics.openFds / 1000).toFixed(1)}k
-                      <span className="text-sm text-slate-400">
-                        /{(latestMetrics.maxFds / 1000).toFixed(0)}k
-                      </span>
-                    </p>
-                    <div className="h-1 mt-2 bg-slate-700 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full ${
-                          (latestMetrics.openFds / latestMetrics.maxFds) > 0.8
-                            ? 'bg-red-500'
-                            : (latestMetrics.openFds / latestMetrics.maxFds) > 0.6
-                            ? 'bg-yellow-500'
-                            : 'bg-green-500'
-                        }`}
-                        style={{
-                          width: `${Math.min(
-                            (latestMetrics.openFds / latestMetrics.maxFds) * 100,
-                            100
-                          )}%`,
-                        }}
-                      />
-                    </div>
-                  </>
-                ) : (
-                  <p className="text-slate-500 text-sm">-</p>
-                )}
-              </div>
+              {(schedulerConfig?.collectFds ?? true) && (
+                <div className="p-3 bg-slate-800 rounded-lg">
+                  <p className="text-slate-400 text-xs mb-1">File Descriptors</p>
+                  {latestMetrics.openFds != null && latestMetrics.maxFds ? (
+                    <>
+                      <p className="text-xl font-semibold text-white">
+                        {(latestMetrics.openFds / 1000).toFixed(1)}k
+                        <span className="text-sm text-slate-400">
+                          /{(latestMetrics.maxFds / 1000).toFixed(0)}k
+                        </span>
+                      </p>
+                      <div className="h-1 mt-2 bg-slate-700 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${
+                            (latestMetrics.openFds / latestMetrics.maxFds) > 0.8
+                              ? 'bg-red-500'
+                              : (latestMetrics.openFds / latestMetrics.maxFds) > 0.6
+                              ? 'bg-yellow-500'
+                              : 'bg-green-500'
+                          }`}
+                          style={{
+                            width: `${Math.min(
+                              (latestMetrics.openFds / latestMetrics.maxFds) * 100,
+                              100
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-slate-500 text-sm">-</p>
+                  )}
+                </div>
+              )}
 
               {/* TCP Connections */}
-              <div className="p-3 bg-slate-800 rounded-lg">
-                <p className="text-slate-400 text-xs mb-1">TCP Connections</p>
-                {latestMetrics.tcpTotal != null ? (
-                  <>
-                    <p className="text-xl font-semibold text-white">
-                      {latestMetrics.tcpTotal}
-                    </p>
-                    <div className="flex gap-2 mt-1 text-xs">
-                      <span className="text-green-400">{latestMetrics.tcpEstablished ?? 0} est</span>
-                      <span className="text-blue-400">{latestMetrics.tcpListen ?? 0} listen</span>
-                      <span className="text-yellow-400">{latestMetrics.tcpTimeWait ?? 0} tw</span>
-                    </div>
-                  </>
-                ) : (
-                  <p className="text-slate-500 text-sm">-</p>
-                )}
-              </div>
+              {(schedulerConfig?.collectTcp ?? true) && (
+                <div className="p-3 bg-slate-800 rounded-lg">
+                  <p className="text-slate-400 text-xs mb-1">TCP Connections</p>
+                  {latestMetrics.tcpTotal != null ? (
+                    <>
+                      <p className="text-xl font-semibold text-white">
+                        {latestMetrics.tcpTotal}
+                      </p>
+                      <div className="flex gap-2 mt-1 text-xs">
+                        <span className="text-green-400">{latestMetrics.tcpEstablished ?? 0} est</span>
+                        <span className="text-blue-400">{latestMetrics.tcpListen ?? 0} listen</span>
+                        <span className="text-yellow-400">{latestMetrics.tcpTimeWait ?? 0} tw</span>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-slate-500 text-sm">-</p>
+                  )}
+                </div>
+              )}
 
-              {/* Uptime */}
+              {/* Uptime - always shown as it's not configurable */}
               <div className="p-3 bg-slate-800 rounded-lg">
                 <p className="text-slate-400 text-xs mb-1">Uptime</p>
                 {latestMetrics.uptime != null ? (
@@ -1117,7 +1149,7 @@ export default function ServerDetail() {
       </Modal>
 
       {/* Top Processes (from Agent) */}
-      {processSnapshot && (
+      {processSnapshot && (schedulerConfig?.collectProcesses ?? true) && (
         <div className="panel mb-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-white">

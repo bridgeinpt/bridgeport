@@ -14,6 +14,7 @@ import { logAudit } from '../services/audit.js';
 import { deployAgent, removeAgent, checkAgentStatus } from '../services/agent-deploy.js';
 import { getHostInfo, registerHostServer } from '../services/host-detection.js';
 import { prisma } from '../lib/db.js';
+import { bundledAgentVersion } from '../server.js';
 
 const createServerSchema = z.object({
   name: z.string().min(1),
@@ -353,6 +354,7 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
         agentStatus: server.agentStatus,
         agentVersion: server.agentVersion,
         lastAgentPushAt: server.lastAgentPushAt,
+        bundledAgentVersion,
         ...status,
       };
     }

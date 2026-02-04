@@ -1,11 +1,31 @@
 import { useEffect, useState } from 'react';
-import { getHealth } from '../lib/api';
+import { getCliDownloads, getCliDownloadUrl, type CliDownload } from '../lib/api';
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+// App version is baked in at build time via Vite
+const appVersion = import.meta.env.VITE_APP_VERSION || 'dev';
 
 export default function About() {
-  const [version, setVersion] = useState<string | null>(null);
+  const [cliVersion, setCliVersion] = useState<string | null>(null);
+  const [cliDownloads, setCliDownloads] = useState<CliDownload[]>([]);
 
   useEffect(() => {
-    getHealth().then((data) => setVersion(data.version)).catch(() => setVersion('unknown'));
+    getCliDownloads()
+      .then((data) => {
+        setCliVersion(data.version);
+        setCliDownloads(data.downloads);
+      })
+      .catch(() => {
+        setCliVersion(null);
+        setCliDownloads([]);
+      });
   }, []);
 
   return (
@@ -21,7 +41,7 @@ export default function About() {
           <p className="text-primary-400 mt-1 font-medium">
             Dock. Run. Ship. Repeat.
           </p>
-          <p className="text-slate-500 text-sm mt-2">{version ? `v${version}` : '...'}</p>
+          <p className="text-slate-500 text-sm mt-2">v{appVersion}</p>
         </div>
 
         <div className="border-t border-slate-700 my-6" />
@@ -62,6 +82,41 @@ export default function About() {
             </li>
           </ul>
         </div>
+
+        {/* CLI Downloads */}
+        {cliDownloads.length > 0 && (
+          <>
+            <div className="border-t border-slate-700 my-6" />
+            <div className="text-left mb-6">
+              <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wide mb-3">
+                CLI Tool {cliVersion && <span className="text-slate-500 font-normal">v{cliVersion}</span>}
+              </h2>
+              <p className="text-slate-400 text-sm mb-4">
+                Download the BridgePort CLI to manage your infrastructure from the terminal.
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                {cliDownloads.map((download) => (
+                  <a
+                    key={`${download.os}-${download.arch}`}
+                    href={getCliDownloadUrl(download.os, download.arch)}
+                    className="flex items-center justify-between p-3 rounded-lg bg-slate-800 hover:bg-slate-700 transition-colors group"
+                  >
+                    <div className="flex items-center gap-3">
+                      <DownloadIcon className="w-5 h-5 text-slate-400 group-hover:text-primary-400" />
+                      <div>
+                        <p className="text-white text-sm font-medium">{download.label}</p>
+                        <p className="text-slate-500 text-xs">{formatBytes(download.size)}</p>
+                      </div>
+                    </div>
+                  </a>
+                ))}
+              </div>
+              <p className="text-slate-500 text-xs mt-3">
+                After downloading, make it executable: <code className="bg-slate-800 px-1.5 py-0.5 rounded">chmod +x bridgeport-*</code>
+              </p>
+            </div>
+          </>
+        )}
 
         <div className="border-t border-slate-700 my-6" />
 
@@ -179,6 +234,24 @@ function FileIcon({ className }: { className?: string }) {
         strokeLinejoin="round"
         strokeWidth={2}
         d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
+      />
+    </svg>
+  );
+}
+
+function DownloadIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
       />
     </svg>
   );

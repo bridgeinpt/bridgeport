@@ -168,7 +168,23 @@ export const api = new ApiClient();
 
 // Health check (public endpoint, no auth needed)
 export const getHealth = () =>
-  fetch('/health').then(res => res.json() as Promise<{ status: string; timestamp: string; version: string }>);
+  fetch('/health').then(res => res.json() as Promise<{ status: string; timestamp: string; version: string; bundledAgentVersion: string; cliVersion: string }>);
+
+// CLI Downloads
+export interface CliDownload {
+  os: string;
+  arch: string;
+  label: string;
+  filename: string;
+  available: boolean;
+  size: number;
+}
+
+export const getCliDownloads = () =>
+  api.get<{ version: string; downloads: CliDownload[] }>('/downloads/cli');
+
+export const getCliDownloadUrl = (os: string, arch: string) =>
+  `/api/downloads/cli/${os}/${arch}`;
 
 // Auth
 export const login = (email: string, password: string) =>
@@ -347,6 +363,7 @@ export const getAgentStatus = (id: string) =>
     agentStatus: AgentStatus;
     agentVersion: string | null;
     lastAgentPushAt: string | null;
+    bundledAgentVersion: string;
     installed: boolean;
     running: boolean;
     error?: string;
@@ -1957,6 +1974,17 @@ export interface SchedulerConfig {
   healthLogRetentionDays: number;
   bounceThreshold: number;
   bounceCooldownMs: number;
+  // Metrics collection toggles
+  collectCpu: boolean;
+  collectMemory: boolean;
+  collectSwap: boolean;
+  collectDisk: boolean;
+  collectLoad: boolean;
+  collectFds: boolean;
+  collectTcp: boolean;
+  collectProcesses: boolean;
+  collectTcpChecks: boolean;
+  collectCertChecks: boolean;
 }
 
 export const getSchedulerConfig = (envId: string) =>
@@ -1996,7 +2024,7 @@ export interface AgentInfo {
 }
 
 export const getAgents = (envId: string) =>
-  api.get<{ sshUser: string; agents: AgentInfo[] }>(`/environments/${envId}/agents`);
+  api.get<{ sshUser: string; agents: AgentInfo[]; bundledAgentVersion: string }>(`/environments/${envId}/agents`);
 
 // ==================== Container Image Updates ====================
 

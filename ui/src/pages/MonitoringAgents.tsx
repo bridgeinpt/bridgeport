@@ -28,6 +28,7 @@ export default function MonitoringAgents() {
 
   const [sshUser, setSshUser] = useState('root');
   const [agents, setAgents] = useState<AgentInfo[]>([]);
+  const [bundledAgentVersion, setBundledAgentVersion] = useState<string>('unknown');
   const [loading, setLoading] = useState(true);
   const [testingAll, setTestingAll] = useState(false);
   const [testingServer, setTestingServer] = useState<string | null>(null);
@@ -48,6 +49,7 @@ export default function MonitoringAgents() {
       const response = await getAgents(selectedEnvironment.id);
       setSshUser(response.sshUser);
       setAgents(response.agents);
+      setBundledAgentVersion(response.bundledAgentVersion);
     } finally {
       setLoading(false);
     }
@@ -287,6 +289,7 @@ export default function MonitoringAgents() {
                   <th className="pb-3 font-medium">Status</th>
                   <th className="pb-3 font-medium">Status Changed</th>
                   <th className="pb-3 font-medium">Version</th>
+                  <th className="pb-3 font-medium">Update</th>
                   <th className="pb-3 font-medium">Last Push</th>
                   <th className="pb-3 font-medium">Actions</th>
                 </tr>
@@ -327,6 +330,20 @@ export default function MonitoringAgents() {
                       {agent.metricsMode === 'agent' && agent.agentVersion
                         ? agent.agentVersion
                         : '--'}
+                    </td>
+                    <td className="py-3">
+                      {agent.metricsMode === 'agent' &&
+                        agent.agentVersion &&
+                        bundledAgentVersion !== 'unknown' &&
+                        agent.agentVersion !== bundledAgentVersion ? (
+                        <span className="px-2 py-0.5 text-xs rounded bg-yellow-500/20 text-yellow-400">
+                          Available
+                        </span>
+                      ) : agent.metricsMode === 'agent' && agent.agentVersion ? (
+                        <span className="text-slate-500 text-xs">Up to date</span>
+                      ) : (
+                        <span className="text-slate-500">--</span>
+                      )}
                     </td>
                     <td className="py-3 text-sm text-slate-500">
                       {agent.metricsMode === 'agent' && agent.lastAgentPushAt

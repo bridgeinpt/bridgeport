@@ -38,6 +38,7 @@ import { settingsRoutes } from './routes/settings.js';
 import { spacesRoutes } from './routes/spaces.js';
 import { monitoringRoutes } from './routes/monitoring.js';
 import { systemSettingsRoutes } from './routes/system-settings.js';
+import { downloadRoutes } from './routes/downloads.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -52,6 +53,25 @@ try {
 } catch {
   // Fallback if package.json can't be read
 }
+
+// Read bundled agent version at startup
+let bundledAgentVersion = 'unknown';
+try {
+  bundledAgentVersion = (await readFile(join(__dirname, '../agent/agent-version.txt'), 'utf-8')).trim();
+} catch {
+  // Fallback if agent-version.txt can't be read (dev mode)
+}
+
+// Read CLI version at startup
+let cliVersion = 'unknown';
+try {
+  cliVersion = (await readFile(join(__dirname, '../cli/cli-version.txt'), 'utf-8')).trim();
+} catch {
+  // Fallback if cli-version.txt can't be read (dev mode)
+}
+
+// Export for use in routes
+export { bundledAgentVersion, cliVersion };
 
 async function buildServer() {
   const fastify = Fastify({
@@ -149,10 +169,17 @@ async function buildServer() {
   await fastify.register(spacesRoutes);
   await fastify.register(monitoringRoutes);
   await fastify.register(systemSettingsRoutes);
+  await fastify.register(downloadRoutes);
 
   // Health check
   fastify.get('/health', async () => {
-    return { status: 'ok', timestamp: new Date().toISOString(), version: appVersion };
+    return {
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+      version: appVersion,
+      bundledAgentVersion,
+      cliVersion,
+    };
   });
 
   // Serve static files in production

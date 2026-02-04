@@ -4,6 +4,7 @@ import { prisma } from '../lib/db.js';
 import { checkServerHealth } from '../services/servers.js';
 import { checkServiceHealth } from '../services/services.js';
 import { logAudit } from '../services/audit.js';
+import { bundledAgentVersion } from '../server.js';
 
 const healthLogQuerySchema = z.object({
   type: z.enum(['server', 'service', 'container']).optional(),
@@ -35,6 +36,17 @@ const schedulerConfigSchema = z.object({
   healthLogRetentionDays: z.number().min(1).max(365).optional(),
   bounceThreshold: z.number().min(1).max(10).optional(),
   bounceCooldownMs: z.number().min(60000).max(86400000).optional(),
+  // Metrics collection toggles
+  collectCpu: z.boolean().optional(),
+  collectMemory: z.boolean().optional(),
+  collectSwap: z.boolean().optional(),
+  collectDisk: z.boolean().optional(),
+  collectLoad: z.boolean().optional(),
+  collectFds: z.boolean().optional(),
+  collectTcp: z.boolean().optional(),
+  collectProcesses: z.boolean().optional(),
+  collectTcpChecks: z.boolean().optional(),
+  collectCertChecks: z.boolean().optional(),
 });
 
 // Default scheduler config values
@@ -49,6 +61,17 @@ const DEFAULT_SCHEDULER_CONFIG = {
   healthLogRetentionDays: 30,
   bounceThreshold: 3,
   bounceCooldownMs: 900000,
+  // Metrics collection toggles - all enabled by default
+  collectCpu: true,
+  collectMemory: true,
+  collectSwap: true,
+  collectDisk: true,
+  collectLoad: true,
+  collectFds: true,
+  collectTcp: true,
+  collectProcesses: true,
+  collectTcpChecks: true,
+  collectCertChecks: true,
 };
 
 export type SchedulerConfig = typeof DEFAULT_SCHEDULER_CONFIG;
@@ -783,6 +806,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
       return {
         sshUser: env.sshUser,
         agents: agentsInfo,
+        bundledAgentVersion,
       };
     }
   );

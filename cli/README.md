@@ -4,6 +4,21 @@ Command-line interface for managing BridgePort infrastructure.
 
 ## Installation
 
+### From BridgePort UI (Recommended)
+
+1. Open your BridgePort instance and go to the **About** page
+2. Download the appropriate binary for your platform:
+   - **macOS (Intel)**: `bridgeport-darwin-amd64`
+   - **macOS (Apple Silicon)**: `bridgeport-darwin-arm64`
+   - **Linux (x64)**: `bridgeport-linux-amd64`
+   - **Linux (ARM64)**: `bridgeport-linux-arm64`
+3. Make it executable and move to your PATH:
+
+```bash
+chmod +x bridgeport-*
+sudo mv bridgeport-* /usr/local/bin/bridgeport
+```
+
 ### From Source
 
 ```bash
@@ -131,6 +146,8 @@ Completions are context-aware - environments, servers, and services are fetched 
 ```bash
 bridgeport version
 ```
+
+The CLI version is derived from git at build time (format: `YYYYMMDD-{7-char SHA}`) and only changes when the `cli/` directory is modified.
 
 ## Configuration
 

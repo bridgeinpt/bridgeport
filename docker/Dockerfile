@@ -4,15 +4,34 @@ WORKDIR /build
 ARG AGENT_VERSION=dev
 COPY bridgeport-agent/ ./
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.Version=${AGENT_VERSION}" -o bridgeport-agent .
+# Write agent version to file for runtime access
+RUN echo "${AGENT_VERSION}" > agent-version.txt
+
+# Build stage for Go CLI (multi-platform)
+FROM golang:1.22-alpine AS cli-build
+WORKDIR /build
+ARG CLI_VERSION=dev
+COPY cli/ ./
+# Build for all supported platforms
+RUN mkdir -p dist && \
+    CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w -X github.com/bridgein/bridgeport-cli/cmd.Version=${CLI_VERSION}" -o dist/bridgeport-darwin-amd64 . && \
+    CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w -X github.com/bridgein/bridgeport-cli/cmd.Version=${CLI_VERSION}" -o dist/bridgeport-darwin-arm64 . && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X github.com/bridgein/bridgeport-cli/cmd.Version=${CLI_VERSION}" -o dist/bridgeport-linux-amd64 . && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X github.com/bridgein/bridgeport-cli/cmd.Version=${CLI_VERSION}" -o dist/bridgeport-linux-arm64 .
+# Write CLI version to file for runtime access
+RUN echo "${CLI_VERSION}" > cli-version.txt
 
 # Build stage for UI
 FROM node:22-alpine AS ui-build
 WORKDIR /app/ui
+ARG APP_VERSION=dev
 
 COPY ui/package.json ui/package-lock.json* ./
 RUN npm ci --ignore-scripts
 
 COPY ui/ ./
+# Pass version to Vite at build time
+ENV VITE_APP_VERSION=${APP_VERSION}
 RUN npm run build
 
 # Build stage for API (TypeScript compilation)
@@ -102,8 +121,13 @@ COPY --from=api-build /app/prisma ./prisma
 # Copy built UI
 COPY --from=ui-build /app/ui/dist ./ui/dist
 
-# Copy agent binary for deployment to servers
+# Copy agent binary and version file for deployment to servers
 COPY --from=agent-build /build/bridgeport-agent ./agent/bridgeport-agent
+COPY --from=agent-build /build/agent-version.txt ./agent/agent-version.txt
+
+# Copy CLI binaries and version file for downloads
+COPY --from=cli-build /build/dist/ ./cli/
+COPY --from=cli-build /build/cli-version.txt ./cli/cli-version.txt
 
 COPY package.json ./
 COPY docker/entrypoint.sh ./entrypoint.sh

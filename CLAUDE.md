@@ -254,6 +254,20 @@ cd bridgeport-agent && make build-linux
 cd cli && make build
 ```
 
+## Versioning
+
+BridgePort uses git-based versioning derived at build time:
+
+- **App version**: `YYYYMMDD-{7-char SHA}` from current commit (passed as `APP_VERSION` build arg)
+- **Agent version**: Derived from last commit touching `bridgeport-agent/` directory
+- **CLI version**: Derived from last commit touching `cli/` directory
+
+This means:
+- No version files to maintain in the repo
+- Agent/CLI versions only change when their code changes
+- UI displays app version via `import.meta.env.VITE_APP_VERSION`
+- Bundled agent/CLI versions stored in text files inside the Docker image
+
 ## Key Patterns
 
 ### API Routes
@@ -383,8 +397,13 @@ SystemSettings     - System-wide operational settings (timeouts, limits, retries
 ### Monitoring Hub (`/monitoring/*`)
 - **Overview** (`/monitoring`): Environment-wide metrics with time-series charts (Recharts)
 - **Health Checks** (`/monitoring/health`): Filterable health check logs with pagination
-- **Agents** (`/monitoring/agents`): Agent management, SSH connectivity testing
+- **Agents** (`/monitoring/agents`): Agent management, SSH connectivity testing, upgrade indicators
 - Auto-refresh every 30 seconds
+
+### Agent Upgrade Indicators
+- Server detail page shows "Update available" badge when deployed agent differs from bundled version
+- Monitoring Agents page shows upgrade status column for all agents
+- Bundled agent version exposed via `/health` and agent status API
 
 ### Global Settings (`/settings/*`)
 - **System** (`/settings/system`): SSH timeouts, webhook retries, backup timeouts, limits
@@ -392,7 +411,9 @@ SystemSettings     - System-wide operational settings (timeouts, limits, retries
 - **Spaces** (`/settings/spaces`): Global DO Spaces config with per-environment toggles
 
 ### About Page
-- Dynamic version display fetched from `/health` endpoint
+- App version displayed (baked in at build time via Vite)
+- CLI tool downloads with version info and file sizes
+- Links to all supported platforms (macOS Intel/Silicon, Linux x64/ARM64)
 
 ## Important Notes
 

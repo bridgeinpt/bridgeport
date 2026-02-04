@@ -10,6 +10,12 @@ The agent runs on monitored servers and periodically collects:
 
 Metrics are pushed to BridgePort via HTTP POST every 30 seconds (configurable).
 
+## Versioning
+
+The agent version is derived from git at build time (format: `YYYYMMDD-{7-char SHA}`) and only changes when the `bridgeport-agent/` directory is modified.
+
+**Upgrade Indicators**: BridgePort UI shows an "Update available" badge on servers when the deployed agent version differs from the bundled version. Check the Monitoring > Agents page to see which servers need agent updates.
+
 ## Building
 
 ```bash
@@ -81,6 +87,7 @@ journalctl -u bridgeport-agent -f
 | `-server` | `BRIDGEPORT_SERVER` | BridgePort server URL | Required |
 | `-token` | `BRIDGEPORT_TOKEN` | Agent authentication token | Required |
 | `-interval` | - | Collection/push interval | 30s |
+| `-version` | - | Print version and exit | - |
 
 ### Internal Networking (Recommended)
 

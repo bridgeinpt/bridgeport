@@ -382,7 +382,7 @@ METRICS_RETENTION_DAYS=30  # Larger storage, more history
 
 ### Health & Authentication
 ```bash
-GET  /health               # Health check (returns status, timestamp, version)
+GET  /health               # Health check (returns status, timestamp, version, bundledAgentVersion, cliVersion)
 POST /api/auth/login       # Login, returns JWT
 GET  /api/auth/me          # Get current user
 ```
@@ -515,6 +515,12 @@ GET  /api/monitoring/metrics-history          # Server/service metrics over time
 POST /api/monitoring/test-ssh/:serverId       # Test SSH connectivity to server
 ```
 
+### Downloads
+```bash
+GET  /api/downloads/cli                       # List available CLI downloads with version and sizes
+GET  /api/downloads/cli/:os/:arch             # Download CLI binary (darwin/linux, amd64/arm64)
+```
+
 ### Settings (Admin)
 ```bash
 # Service Types
@@ -624,6 +630,13 @@ BridgePort includes a command-line interface for managing infrastructure from th
 
 ### Installation
 
+**From BridgePort UI (recommended):**
+1. Go to the **About** page in BridgePort
+2. Download the appropriate binary for your platform
+3. Make it executable: `chmod +x bridgeport-*`
+4. Move to your PATH: `sudo mv bridgeport-* /usr/local/bin/bridgeport`
+
+**From source:**
 ```bash
 cd cli
 make build
@@ -664,6 +677,20 @@ bridgeport exec staging app-api app-api -- python manage.py shell
 
 See [cli/README.md](cli/README.md) for full documentation.
 
+## Versioning
+
+BridgePort uses git-based versioning derived at build time:
+
+| Component | Version Source | Format |
+|-----------|---------------|--------|
+| **App** | Current commit | `YYYYMMDD-{7-char SHA}` |
+| **Agent** | Last commit to `bridgeport-agent/` | `YYYYMMDD-{7-char SHA}` |
+| **CLI** | Last commit to `cli/` | `YYYYMMDD-{7-char SHA}` |
+
+This means agent and CLI versions only change when their code changes, making it easy to identify outdated deployments.
+
+The UI displays an **"Update available"** badge on servers when the deployed agent version differs from the bundled version.
+
 ## Building
 
 ```bash
@@ -673,8 +700,15 @@ npm run build
 # Build frontend
 cd ui && npm run build
 
-# Build Docker image
+# Build Docker image (versions derived from git)
 docker build -f docker/Dockerfile -t bridgeport .
+
+# Build Docker image with explicit versions
+docker build \
+  --build-arg APP_VERSION=20260204-abc1234 \
+  --build-arg AGENT_VERSION=20260201-def5678 \
+  --build-arg CLI_VERSION=20260203-ghi9012 \
+  -f docker/Dockerfile -t bridgeport .
 
 # Build monitoring agent
 cd bridgeport-agent && make build-linux
