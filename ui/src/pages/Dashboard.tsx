@@ -173,10 +173,11 @@ export default function Dashboard() {
       }
     });
 
-    // Unhealthy services
+    // Unhealthy services (using Set for O(1) lookup)
+    const healthyStatuses = new Set(['running', 'healthy', 'unknown']);
     environment?.servers.forEach((server) => {
       server.services.forEach((service) => {
-        if (!['running', 'healthy', 'unknown'].includes(service.status)) {
+        if (!healthyStatuses.has(service.status)) {
           result.push({
             id: `unhealthy-${service.id}`,
             type: 'unhealthy',
@@ -314,35 +315,32 @@ export default function Dashboard() {
     setDeployAllResults(null);
     setShowDeployAllResults(true);
 
-    const results: DeployAllResult[] = [];
-
-    for (const service of servicesWithUpdates) {
-      try {
-        await deployService(service.id, {
-          imageTag: service.latestAvailableTag!,
-          pullImage: true,
-        });
-        results.push({
+    // Deploy all services in parallel using Promise.allSettled
+    const deployPromises = servicesWithUpdates.map((service) =>
+      deployService(service.id, {
+        imageTag: service.latestAvailableTag!,
+        pullImage: true,
+      }).then(
+        () => ({
           serviceId: service.id,
           serviceName: service.name,
           serverName: service.serverName,
           imageTag: service.latestAvailableTag!,
-          success: true,
-        });
-      } catch (err) {
-        results.push({
+          success: true as const,
+        }),
+        (err) => ({
           serviceId: service.id,
           serviceName: service.name,
           serverName: service.serverName,
           imageTag: service.latestAvailableTag!,
-          success: false,
+          success: false as const,
           error: err instanceof Error ? err.message : 'Deploy failed',
-        });
-      }
-      // Update results as we go
-      setDeployAllResults([...results]);
-    }
+        })
+      )
+    );
 
+    const results = await Promise.all(deployPromises);
+    setDeployAllResults(results);
     setDeployingAll(false);
 
     // Refresh environment data

@@ -5,8 +5,17 @@ interface ApiError {
   details?: unknown;
 }
 
+interface CacheEntry<T> {
+  data: T;
+  expiry: number;
+}
+
 class ApiClient {
   private token: string | null = null;
+  // Request deduplication: tracks in-flight requests to prevent duplicate calls
+  private pendingRequests = new Map<string, Promise<unknown>>();
+  // Simple TTL cache for frequently accessed static data
+  private cache = new Map<string, CacheEntry<unknown>>();
 
   setToken(token: string | null) {
     this.token = token;
@@ -22,6 +31,51 @@ class ApiClient {
       this.token = localStorage.getItem('auth_token');
     }
     return this.token;
+  }
+
+  // Clear cache (useful when data changes)
+  clearCache(keyPattern?: string) {
+    if (keyPattern) {
+      for (const key of this.cache.keys()) {
+        if (key.includes(keyPattern)) {
+          this.cache.delete(key);
+        }
+      }
+    } else {
+      this.cache.clear();
+    }
+  }
+
+  // Deduplicated GET request - prevents duplicate in-flight requests
+  private async dedupedGet<T>(path: string): Promise<T> {
+    const key = `GET:${path}`;
+
+    // If request is already in-flight, return the existing promise
+    if (this.pendingRequests.has(key)) {
+      return this.pendingRequests.get(key) as Promise<T>;
+    }
+
+    // Create new request and track it
+    const promise = this.request<T>('GET', path).finally(() => {
+      this.pendingRequests.delete(key);
+    });
+
+    this.pendingRequests.set(key, promise);
+    return promise;
+  }
+
+  // Cached GET request with TTL
+  async getCached<T>(path: string, ttlMs: number = 60000): Promise<T> {
+    const cacheKey = `GET:${path}`;
+    const cached = this.cache.get(cacheKey) as CacheEntry<T> | undefined;
+
+    if (cached && cached.expiry > Date.now()) {
+      return cached.data;
+    }
+
+    const data = await this.dedupedGet<T>(path);
+    this.cache.set(cacheKey, { data, expiry: Date.now() + ttlMs });
+    return data;
   }
 
   private async request<T>(
@@ -60,7 +114,7 @@ class ApiClient {
   }
 
   get<T>(path: string): Promise<T> {
-    return this.request<T>('GET', path);
+    return this.dedupedGet<T>(path);
   }
 
   post<T>(path: string, body?: unknown): Promise<T> {
@@ -1487,8 +1541,9 @@ export interface ServiceTypeCommandInput {
   sortOrder?: number;
 }
 
+// Cached for 5 minutes - service types rarely change
 export const listServiceTypes = () =>
-  api.get<{ serviceTypes: ServiceType[] }>('/settings/service-types');
+  api.getCached<{ serviceTypes: ServiceType[] }>('/settings/service-types', 300000);
 
 export const getServiceType = (id: string) =>
   api.get<{ serviceType: ServiceType }>(`/settings/service-types/${id}`);
@@ -1623,8 +1678,9 @@ export interface SystemSettingsInput {
   auditLogRetentionDays?: number;
 }
 
+// Cached for 5 minutes - system settings rarely change
 export const getSystemSettings = () =>
-  api.get<{ settings: SystemSettings; defaults: SystemSettingsDefaults }>('/settings/system');
+  api.getCached<{ settings: SystemSettings; defaults: SystemSettingsDefaults }>('/settings/system', 300000);
 
 export const updateSystemSettings = (data: SystemSettingsInput) =>
   api.put<{ settings: SystemSettings }>('/settings/system', data);

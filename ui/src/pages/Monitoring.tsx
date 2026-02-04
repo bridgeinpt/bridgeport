@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback, memo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppStore } from '../lib/store';
 import {
@@ -87,22 +87,36 @@ export default function Monitoring() {
     return Array.from(tagSet).sort();
   }, [servers]);
 
+  // Convert tag filter to Set for O(1) lookups
+  const tagFilterSet = useMemo(() => new Set(monitoringTagFilter), [monitoringTagFilter]);
+
   // Filter servers and metrics history based on selected tags
   const filteredServers = useMemo(() => {
-    if (monitoringTagFilter.length === 0) return servers;
+    if (tagFilterSet.size === 0) return servers;
     return servers.filter((server) => {
       const serverTags = parseTags(server.tags);
-      return monitoringTagFilter.some((tag) => serverTags.includes(tag));
+      return serverTags.some((tag) => tagFilterSet.has(tag));
     });
-  }, [servers, monitoringTagFilter]);
+  }, [servers, tagFilterSet]);
 
   const filteredMetricsHistory = useMemo(() => {
-    if (monitoringTagFilter.length === 0) return metricsHistory;
+    if (tagFilterSet.size === 0) return metricsHistory;
     return metricsHistory.filter((server) => {
       const serverTags = parseTags(server.tags);
-      return monitoringTagFilter.some((tag) => serverTags.includes(tag));
+      return serverTags.some((tag) => tagFilterSet.has(tag));
     });
-  }, [metricsHistory, monitoringTagFilter]);
+  }, [metricsHistory, tagFilterSet]);
+
+  // Stable callback for tag toggle to avoid creating new closures on each render
+  const handleTagToggle = useCallback(
+    (tag: string) => {
+      const newFilter = monitoringTagFilter.includes(tag)
+        ? monitoringTagFilter.filter((t) => t !== tag)
+        : [...monitoringTagFilter, tag];
+      setMonitoringTagFilter(newFilter);
+    },
+    [monitoringTagFilter, setMonitoringTagFilter]
+  );
 
   // Prepare chart data - combine all servers into single timeline
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -162,9 +176,8 @@ export default function Monitoring() {
       });
     });
 
-    // Sort by CPU usage descending
-    services.sort((a, b) => (b.metrics.cpuPercent || 0) - (a.metrics.cpuPercent || 0));
-    return services;
+    // Sort by CPU usage descending (copy array to avoid mutation)
+    return [...services].sort((a, b) => (b.metrics.cpuPercent || 0) - (a.metrics.cpuPercent || 0));
   }, [filteredServers]);
 
   if (loading) {
@@ -273,15 +286,9 @@ export default function Monitoring() {
               {allTags.map((tag) => (
                 <button
                   key={tag}
-                  onClick={() => {
-                    if (monitoringTagFilter.includes(tag)) {
-                      setMonitoringTagFilter(monitoringTagFilter.filter((t) => t !== tag));
-                    } else {
-                      setMonitoringTagFilter([...monitoringTagFilter, tag]);
-                    }
-                  }}
+                  onClick={() => handleTagToggle(tag)}
                   className={`px-2 py-1 text-xs rounded-full transition-colors ${
-                    monitoringTagFilter.includes(tag)
+                    tagFilterSet.has(tag)
                       ? 'bg-brand-600 text-white'
                       : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
                   }`}
@@ -289,7 +296,7 @@ export default function Monitoring() {
                   {tag}
                 </button>
               ))}
-              {monitoringTagFilter.length > 0 && (
+              {tagFilterSet.size > 0 && (
                 <button
                   onClick={() => setMonitoringTagFilter([])}
                   className="px-2 py-1 text-xs rounded-full bg-slate-800 text-slate-400 hover:bg-slate-700"
@@ -516,30 +523,32 @@ interface StatCardProps {
   color: 'blue' | 'green' | 'emerald' | 'red' | 'slate';
 }
 
-function StatCard({ label, value, color }: StatCardProps) {
-  const colorClasses = {
-    blue: 'bg-blue-500/10 border-blue-500/30',
-    green: 'bg-green-500/10 border-green-500/30',
-    emerald: 'bg-emerald-500/10 border-emerald-500/30',
-    red: 'bg-red-500/10 border-red-500/30',
-    slate: 'bg-slate-500/10 border-slate-500/30',
-  };
+// Hoisted color maps outside component to avoid recreation on each render
+const STAT_COLOR_CLASSES = {
+  blue: 'bg-blue-500/10 border-blue-500/30',
+  green: 'bg-green-500/10 border-green-500/30',
+  emerald: 'bg-emerald-500/10 border-emerald-500/30',
+  red: 'bg-red-500/10 border-red-500/30',
+  slate: 'bg-slate-500/10 border-slate-500/30',
+} as const;
 
-  const textColors = {
-    blue: 'text-blue-400',
-    green: 'text-green-400',
-    emerald: 'text-emerald-400',
-    red: 'text-red-400',
-    slate: 'text-slate-400',
-  };
+const STAT_TEXT_COLORS = {
+  blue: 'text-blue-400',
+  green: 'text-green-400',
+  emerald: 'text-emerald-400',
+  red: 'text-red-400',
+  slate: 'text-slate-400',
+} as const;
 
+// Memoized to prevent re-renders when parent updates
+const StatCard = memo(function StatCard({ label, value, color }: StatCardProps) {
   return (
-    <div className={`rounded-xl border p-4 ${colorClasses[color]}`}>
+    <div className={`rounded-xl border p-4 ${STAT_COLOR_CLASSES[color]}`}>
       <p className="text-slate-400 text-xs mb-1">{label}</p>
-      <p className={`text-2xl font-bold ${textColors[color]}`}>{value}</p>
+      <p className={`text-2xl font-bold ${STAT_TEXT_COLORS[color]}`}>{value}</p>
     </div>
   );
-}
+});
 
 interface ChartCardProps {
   title: string;
@@ -550,7 +559,8 @@ interface ChartCardProps {
   domain?: [number | 'auto', number | 'auto'];
 }
 
-function ChartCard({ title, data, serverNames, formatTime, unit, domain }: ChartCardProps) {
+// Memoized to prevent expensive Recharts re-renders during auto-refresh
+const ChartCard = memo(function ChartCard({ title, data, serverNames, formatTime, unit, domain }: ChartCardProps) {
   if (data.length === 0) {
     return (
       <div className="card">
@@ -608,7 +618,7 @@ function ChartCard({ title, data, serverNames, formatTime, unit, domain }: Chart
       </ResponsiveContainer>
     </div>
   );
-}
+});
 
 interface MetricGaugeProps {
   label: string;
@@ -619,25 +629,27 @@ interface MetricGaugeProps {
   color: 'primary' | 'green' | 'yellow' | 'purple';
 }
 
-function MetricGauge({ label, value, displayValue, max, unit, color }: MetricGaugeProps) {
+// Hoisted color maps outside component
+const GAUGE_COLOR_CLASSES = {
+  primary: 'bg-primary-500',
+  green: 'bg-green-500',
+  yellow: 'bg-yellow-500',
+  purple: 'bg-purple-500',
+} as const;
+
+const GAUGE_BG_COLOR_CLASSES = {
+  primary: 'bg-primary-900/30',
+  green: 'bg-green-900/30',
+  yellow: 'bg-yellow-900/30',
+  purple: 'bg-purple-900/30',
+} as const;
+
+// Memoized to prevent re-renders when parent updates
+const MetricGauge = memo(function MetricGauge({ label, value, displayValue, max, unit, color }: MetricGaugeProps) {
   const percentage = value != null ? Math.min((value / max) * 100, 100) : 0;
 
-  const colorClasses = {
-    primary: 'bg-primary-500',
-    green: 'bg-green-500',
-    yellow: 'bg-yellow-500',
-    purple: 'bg-purple-500',
-  };
-
-  const bgColorClasses = {
-    primary: 'bg-primary-900/30',
-    green: 'bg-green-900/30',
-    yellow: 'bg-yellow-900/30',
-    purple: 'bg-purple-900/30',
-  };
-
   return (
-    <div className={`p-4 rounded-lg ${bgColorClasses[color]}`}>
+    <div className={`p-4 rounded-lg ${GAUGE_BG_COLOR_CLASSES[color]}`}>
       <p className="text-slate-400 text-xs mb-2">{label}</p>
       <p className="text-2xl font-bold text-white mb-3">
         {displayValue ?? (value != null ? value.toFixed(1) : '-')}
@@ -647,10 +659,10 @@ function MetricGauge({ label, value, displayValue, max, unit, color }: MetricGau
       </p>
       <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
         <div
-          className={`h-full rounded-full transition-all ${colorClasses[color]}`}
+          className={`h-full rounded-full transition-all ${GAUGE_COLOR_CLASSES[color]}`}
           style={{ width: `${percentage}%` }}
         />
       </div>
     </div>
   );
-}
+});

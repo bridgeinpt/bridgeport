@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, lazy, Suspense } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppStore } from '../lib/store';
 import { getEnvironment, deployService, getDependencyGraph, type Service, type ExposedPort, type DependencyGraphNode, type DependencyGraphEdge } from '../lib/api';
@@ -9,7 +9,11 @@ import { CheckIcon, WarningIcon, RefreshIcon } from '../components/Icons';
 import { useToast } from '../components/Toast';
 import Pagination from '../components/Pagination';
 import { usePagination } from '../hooks/usePagination';
-import { DependencyFlow } from '../components/DependencyFlow';
+
+// Lazy load DependencyFlow to avoid loading @xyflow/react (~80KB) until needed
+const DependencyFlow = lazy(() =>
+  import('../components/DependencyFlow').then((m) => ({ default: m.DependencyFlow }))
+);
 
 interface ServiceWithServer extends Service {
   serverName: string;
@@ -97,13 +101,17 @@ export default function Services() {
     }
   }, [selectedEnvironment?.id]);
 
-  // Services with available updates
-  const servicesWithUpdates = services.filter(
-    (s) => s.latestAvailableTag && s.latestAvailableTag !== s.imageTag
+  // Services with available updates (memoized)
+  const servicesWithUpdates = useMemo(
+    () => services.filter((s) => s.latestAvailableTag && s.latestAvailableTag !== s.imageTag),
+    [services]
   );
 
-  // Filtered services based on "show updates only" toggle
-  const filteredServices = servicesShowUpdatesOnly ? servicesWithUpdates : services;
+  // Filtered services based on "show updates only" toggle (memoized)
+  const filteredServices = useMemo(
+    () => (servicesShowUpdatesOnly ? servicesWithUpdates : services),
+    [servicesShowUpdatesOnly, servicesWithUpdates, services]
+  );
 
   const handleBulkDeployAll = async () => {
     if (servicesWithUpdates.length === 0) return;
@@ -112,35 +120,32 @@ export default function Services() {
     setDeployResults(null);
     setShowDeployResults(true);
 
-    const results: DeployResult[] = [];
-
-    for (const service of servicesWithUpdates) {
-      try {
-        await deployService(service.id, {
-          imageTag: service.latestAvailableTag!,
-          pullImage: true,
-        });
-        results.push({
+    // Deploy all services in parallel using Promise.all
+    const deployPromises = servicesWithUpdates.map((service) =>
+      deployService(service.id, {
+        imageTag: service.latestAvailableTag!,
+        pullImage: true,
+      }).then(
+        () => ({
           serviceId: service.id,
           serviceName: service.name,
           serverName: service.serverName,
           imageTag: service.latestAvailableTag!,
-          success: true,
-        });
-      } catch (err) {
-        results.push({
+          success: true as const,
+        }),
+        (err) => ({
           serviceId: service.id,
           serviceName: service.name,
           serverName: service.serverName,
           imageTag: service.latestAvailableTag!,
-          success: false,
+          success: false as const,
           error: err instanceof Error ? err.message : 'Deploy failed',
-        });
-      }
-      // Update results as we go
-      setDeployResults([...results]);
-    }
+        })
+      )
+    );
 
+    const results = await Promise.all(deployPromises);
+    setDeployResults(results);
     setBulkDeploying(false);
 
     // Reload services
@@ -331,11 +336,19 @@ export default function Services() {
       </Modal>
 
       {activeTab === 'dependencies' ? (
-        <DependencyFlow
-          nodes={graphNodes}
-          edges={graphEdges}
-          deploymentOrder={deploymentOrder}
-        />
+        <Suspense
+          fallback={
+            <div className="flex items-center justify-center h-96 bg-slate-800 rounded-lg">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
+            </div>
+          }
+        >
+          <DependencyFlow
+            nodes={graphNodes}
+            edges={graphEdges}
+            deploymentOrder={deploymentOrder}
+          />
+        </Suspense>
       ) : (
       <div className="panel">
         {filteredServices.length > 0 ? (
