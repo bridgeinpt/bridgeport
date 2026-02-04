@@ -4,6 +4,7 @@ import { prisma } from '../lib/db.js';
 import { SSHClient, LocalClient, isLocalhost, type CommandClient } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 import { getSystemSettings } from './system-settings.js';
+import { logAgentEvent } from './agent-events.js';
 import crypto from 'crypto';
 
 const AGENT_PATH = join(process.cwd(), 'agent', 'bridgeport-agent');
@@ -69,6 +70,14 @@ export async function deployAgent(
   await prisma.server.update({
     where: { id: serverId },
     data: { agentStatus: 'deploying', agentStatusChangedAt: new Date() },
+  });
+
+  // Log deploy_started event
+  await logAgentEvent({
+    serverId,
+    eventType: 'deploy_started',
+    message: 'Agent deployment initiated',
+    details: { serverUrl },
   });
 
   // Create appropriate client based on hostname
@@ -182,16 +191,33 @@ WantedBy=multi-user.target
       },
     });
 
+    // Log deploy_success event
+    await logAgentEvent({
+      serverId,
+      eventType: 'deploy_success',
+      message: 'Agent deployed successfully',
+      details: { serverUrl },
+    });
+
     return { success: true };
   } catch (error) {
     client.disconnect();
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+    // Log deploy_failed event
+    await logAgentEvent({
+      serverId,
+      eventType: 'deploy_failed',
+      message: errorMessage,
+      details: { serverUrl },
+    });
+
     // Reset agent status on failure
     await prisma.server.update({
       where: { id: serverId },
       data: { agentStatus: 'unknown', agentStatusChangedAt: new Date() },
     });
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    return { success: false, error: message };
+    return { success: false, error: errorMessage };
   }
 }
 

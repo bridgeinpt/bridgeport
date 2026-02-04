@@ -19,6 +19,7 @@ import { recordFailure, recordSuccess } from '../services/bounce-tracker.js';
 import { buildDeploymentPlan, executePlan } from '../services/orchestration.js';
 import { logHealthCheck, cleanupHealthCheckLogs } from '../routes/monitoring.js';
 import { getSystemSettings } from '../services/system-settings.js';
+import { logAgentEvent } from '../services/agent-events.js';
 
 interface SchedulerConfig {
   serverHealthIntervalMs: number;
@@ -676,6 +677,16 @@ async function runAgentStalenessCheck(): Promise<void> {
         // Agent is offline (exceeds offline threshold)
         if (server.agentStatus !== 'offline') {
           newStatus = 'offline';
+
+          // Log status_change event
+          await logAgentEvent({
+            serverId: server.id,
+            eventType: 'status_change',
+            status: 'offline',
+            message: 'Agent stopped reporting',
+            details: { previousStatus: server.agentStatus, lastPush: server.lastAgentPushAt },
+          });
+
           // Send notification for agent going offline
           const bounce = await recordFailure('server', server.id, 'offline', NOTIFICATION_TYPES.SYSTEM_SERVER_OFFLINE);
           if (bounce.shouldAlert) {
@@ -690,6 +701,15 @@ async function runAgentStalenessCheck(): Promise<void> {
         // Agent is stale (exceeds stale threshold but not offline)
         if (server.agentStatus === 'active') {
           newStatus = 'stale';
+
+          // Log status_change event
+          await logAgentEvent({
+            serverId: server.id,
+            eventType: 'status_change',
+            status: 'stale',
+            message: 'Agent not reporting recently',
+            details: { previousStatus: server.agentStatus, lastPush: server.lastAgentPushAt },
+          });
         }
       }
 
@@ -733,6 +753,15 @@ async function runAgentStalenessCheck(): Promise<void> {
         });
         console.log(`[Scheduler] Agent ${server.name} marked as offline (never connected)`);
 
+        // Log status_change event
+        await logAgentEvent({
+          serverId: server.id,
+          eventType: 'status_change',
+          status: 'offline',
+          message: 'Agent never connected after deployment',
+          details: { previousStatus: server.agentStatus },
+        });
+
         // Send notification
         const bounce = await recordFailure('server', server.id, 'offline', NOTIFICATION_TYPES.SYSTEM_SERVER_OFFLINE);
         if (bounce.shouldAlert) {
@@ -749,6 +778,15 @@ async function runAgentStalenessCheck(): Promise<void> {
           data: { agentStatus: 'stale', agentStatusChangedAt: new Date() },
         });
         console.log(`[Scheduler] Agent ${server.name} marked as stale (not connecting)`);
+
+        // Log status_change event
+        await logAgentEvent({
+          serverId: server.id,
+          eventType: 'status_change',
+          status: 'stale',
+          message: 'Agent not connecting after deployment',
+          details: { previousStatus: server.agentStatus },
+        });
       }
     }
   } catch (error) {

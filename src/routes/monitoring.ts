@@ -5,6 +5,7 @@ import { checkServerHealth } from '../services/servers.js';
 import { checkServiceHealth } from '../services/services.js';
 import { logAudit } from '../services/audit.js';
 import { bundledAgentVersion } from '../server.js';
+import { getAgentEvents } from '../services/agent-events.js';
 
 const healthLogQuerySchema = z.object({
   type: z.enum(['server', 'service', 'container']).optional(),
@@ -808,6 +809,25 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         agents: agentsInfo,
         bundledAgentVersion,
       };
+    }
+  );
+
+  // Get agent events for a server
+  fastify.get(
+    '/api/servers/:id/agent-events',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const { limit } = request.query as { limit?: string };
+
+      const server = await prisma.server.findUnique({ where: { id } });
+      if (!server) {
+        return reply.code(404).send({ error: 'Server not found' });
+      }
+
+      const events = await getAgentEvents(id, limit ? parseInt(limit, 10) : 20);
+
+      return { events };
     }
   );
 }

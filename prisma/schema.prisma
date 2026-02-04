@@ -95,6 +95,7 @@ model Server {
   databases          Database[]
   containerSnapshot  AgentContainerSnapshot?
   processSnapshot    AgentProcessSnapshot?
+  agentEvents        AgentEvent[]
 
   @@unique([environmentId, name])
 }
@@ -866,4 +867,22 @@ model HealthCheckLog {
   @@index([environmentId, createdAt(sort: Desc)])
   @@index([resourceId, createdAt(sort: Desc)])
   @@index([status, createdAt(sort: Desc)])
+}
+
+// ==================== Agent Event History ====================
+
+// Tracks agent lifecycle events (deploy, token regeneration, status changes)
+model AgentEvent {
+  id       String @id @default(cuid())
+  serverId String
+  server   Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  eventType String // deploy_started, deploy_success, deploy_failed, token_regenerated, status_change
+  status    String? // For status_change events: active, stale, offline, waiting
+  message   String? // Error message or description
+  details   String? // JSON blob for extra context (version, previous status, etc.)
+
+  createdAt DateTime @default(now())
+
+  @@index([serverId, createdAt(sort: Desc)])
 }

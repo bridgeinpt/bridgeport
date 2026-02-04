@@ -3,15 +3,17 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAppStore } from '../lib/store';
 import {
   getAgents,
+  getAgentEvents,
   testAllSSH,
   testServerSSH,
   updateServerMetricsMode,
   regenerateAgentToken,
   type AgentInfo,
+  type AgentEvent,
   type MetricsMode,
   type AgentStatus,
 } from '../lib/api';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow, format } from 'date-fns';
 
 type TabType = 'ssh' | 'agents';
 
@@ -35,6 +37,9 @@ export default function MonitoringAgents() {
   const [testResults, setTestResults] = useState<Record<string, { success: boolean; durationMs: number; error?: string }>>({});
   const [changingMode, setChangingMode] = useState<string | null>(null);
   const [regenerating, setRegenerating] = useState<string | null>(null);
+  const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
+  const [agentEvents, setAgentEvents] = useState<AgentEvent[]>([]);
+  const [loadingEvents, setLoadingEvents] = useState(false);
 
   const activeTab = getTabFromHash();
 
@@ -109,10 +114,48 @@ export default function MonitoringAgents() {
     try {
       await regenerateAgentToken(serverId);
       await fetchData();
+      // Refresh events if this agent is expanded
+      if (expandedAgent === serverId) {
+        const { events } = await getAgentEvents(serverId);
+        setAgentEvents(events);
+      }
     } catch (e) {
       // Error is handled by API client
     } finally {
       setRegenerating(null);
+    }
+  };
+
+  const handleToggleExpand = async (serverId: string) => {
+    if (expandedAgent === serverId) {
+      setExpandedAgent(null);
+      setAgentEvents([]);
+    } else {
+      setExpandedAgent(serverId);
+      setLoadingEvents(true);
+      try {
+        const { events } = await getAgentEvents(serverId);
+        setAgentEvents(events);
+      } finally {
+        setLoadingEvents(false);
+      }
+    }
+  };
+
+  const getEventTypeBadge = (eventType: string) => {
+    switch (eventType) {
+      case 'deploy_started':
+        return <span className="px-2 py-0.5 text-xs rounded-full bg-blue-500/20 text-blue-400">Deploy Started</span>;
+      case 'deploy_success':
+        return <span className="px-2 py-0.5 text-xs rounded-full bg-green-500/20 text-green-400">Deploy Success</span>;
+      case 'deploy_failed':
+        return <span className="px-2 py-0.5 text-xs rounded-full bg-red-500/20 text-red-400">Deploy Failed</span>;
+      case 'token_regenerated':
+        return <span className="px-2 py-0.5 text-xs rounded-full bg-purple-500/20 text-purple-400">Token Regenerated</span>;
+      case 'status_change':
+        return <span className="px-2 py-0.5 text-xs rounded-full bg-yellow-500/20 text-yellow-400">Status Change</span>;
+      default:
+        return <span className="px-2 py-0.5 text-xs rounded-full bg-slate-500/20 text-slate-400">{eventType}</span>;
     }
   };
 
@@ -287,6 +330,7 @@ export default function MonitoringAgents() {
             <table className="w-full">
               <thead>
                 <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
+                  <th className="pb-3 font-medium w-8"></th>
                   <th className="pb-3 font-medium">Server</th>
                   <th className="pb-3 font-medium">Metrics Mode</th>
                   <th className="pb-3 font-medium">Status</th>
@@ -297,75 +341,138 @@ export default function MonitoringAgents() {
                   <th className="pb-3 font-medium">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-700">
+              <tbody>
                 {agents.map((agent) => (
-                  <tr key={agent.id} className="text-slate-300">
-                    <td className="py-3">
-                      <Link to={`/servers/${agent.id}`} className="text-white hover:text-brand-400">
-                        {agent.name}
-                      </Link>
-                    </td>
-                    <td className="py-3">
-                      <select
-                        value={agent.metricsMode}
-                        onChange={(e) => handleModeChange(agent.id, e.target.value as MetricsMode)}
-                        disabled={changingMode === agent.id}
-                        className="input py-1 px-2 w-28"
-                      >
-                        <option value="disabled">Disabled</option>
-                        <option value="ssh">SSH</option>
-                        <option value="agent">Agent</option>
-                      </select>
-                    </td>
-                    <td className="py-3">
-                      {agent.metricsMode === 'agent' ? (
-                        getAgentStatusBadge(agent.agentStatus)
-                      ) : (
-                        <span className="text-slate-500">--</span>
-                      )}
-                    </td>
-                    <td className="py-3 text-sm text-slate-500">
-                      {agent.metricsMode === 'agent' && agent.agentStatusChangedAt
-                        ? formatDistanceToNow(new Date(agent.agentStatusChangedAt), { addSuffix: true })
-                        : '--'}
-                    </td>
-                    <td className="py-3 text-sm text-slate-500 font-mono">
-                      {agent.metricsMode === 'agent' && agent.agentVersion
-                        ? agent.agentVersion
-                        : '--'}
-                    </td>
-                    <td className="py-3">
-                      {agent.metricsMode === 'agent' &&
-                        agent.agentVersion &&
-                        bundledAgentVersion !== 'unknown' &&
-                        agent.agentVersion !== bundledAgentVersion ? (
-                        <span className="px-2 py-0.5 text-xs rounded bg-yellow-500/20 text-yellow-400">
-                          Available
-                        </span>
-                      ) : agent.metricsMode === 'agent' && agent.agentVersion ? (
-                        <span className="text-slate-500 text-xs">Up to date</span>
-                      ) : (
-                        <span className="text-slate-500">--</span>
-                      )}
-                    </td>
-                    <td className="py-3 text-sm text-slate-500">
-                      {agent.metricsMode === 'agent' && agent.lastAgentPushAt
-                        ? formatDistanceToNow(new Date(agent.lastAgentPushAt), { addSuffix: true })
-                        : '--'}
-                    </td>
-                    <td className="py-3">
-                      {agent.metricsMode === 'agent' && (
-                        <button
-                          onClick={() => handleRegenerateToken(agent.id)}
-                          disabled={regenerating === agent.id}
-                          className="btn btn-secondary px-2 py-1 text-xs"
-                          title="Regenerate token and redeploy agent"
+                  <>
+                    <tr key={agent.id} className="text-slate-300 border-b border-slate-700">
+                      <td className="py-3">
+                        {agent.metricsMode === 'agent' && (
+                          <button
+                            onClick={() => handleToggleExpand(agent.id)}
+                            className="text-slate-400 hover:text-white p-1"
+                            title={expandedAgent === agent.id ? 'Collapse' : 'Show event history'}
+                          >
+                            <svg
+                              className={`w-4 h-4 transition-transform ${expandedAgent === agent.id ? 'rotate-90' : ''}`}
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                            </svg>
+                          </button>
+                        )}
+                      </td>
+                      <td className="py-3">
+                        <Link to={`/servers/${agent.id}`} className="text-white hover:text-brand-400">
+                          {agent.name}
+                        </Link>
+                      </td>
+                      <td className="py-3">
+                        <select
+                          value={agent.metricsMode}
+                          onChange={(e) => handleModeChange(agent.id, e.target.value as MetricsMode)}
+                          disabled={changingMode === agent.id}
+                          className="input py-1 px-2 w-28"
                         >
-                          {regenerating === agent.id ? 'Regenerating...' : 'Regenerate Token'}
-                        </button>
-                      )}
-                    </td>
-                  </tr>
+                          <option value="disabled">Disabled</option>
+                          <option value="ssh">SSH</option>
+                          <option value="agent">Agent</option>
+                        </select>
+                      </td>
+                      <td className="py-3">
+                        {agent.metricsMode === 'agent' ? (
+                          getAgentStatusBadge(agent.agentStatus)
+                        ) : (
+                          <span className="text-slate-500">--</span>
+                        )}
+                      </td>
+                      <td className="py-3 text-sm text-slate-500">
+                        {agent.metricsMode === 'agent' && agent.agentStatusChangedAt
+                          ? formatDistanceToNow(new Date(agent.agentStatusChangedAt), { addSuffix: true })
+                          : '--'}
+                      </td>
+                      <td className="py-3 text-sm text-slate-500 font-mono">
+                        {agent.metricsMode === 'agent' && agent.agentVersion
+                          ? agent.agentVersion
+                          : '--'}
+                      </td>
+                      <td className="py-3">
+                        {agent.metricsMode === 'agent' &&
+                          agent.agentVersion &&
+                          bundledAgentVersion !== 'unknown' &&
+                          agent.agentVersion !== bundledAgentVersion ? (
+                          <span className="px-2 py-0.5 text-xs rounded bg-yellow-500/20 text-yellow-400">
+                            Available
+                          </span>
+                        ) : agent.metricsMode === 'agent' && agent.agentVersion ? (
+                          <span className="text-slate-500 text-xs">Up to date</span>
+                        ) : (
+                          <span className="text-slate-500">--</span>
+                        )}
+                      </td>
+                      <td className="py-3 text-sm text-slate-500">
+                        {agent.metricsMode === 'agent' && agent.lastAgentPushAt
+                          ? formatDistanceToNow(new Date(agent.lastAgentPushAt), { addSuffix: true })
+                          : '--'}
+                      </td>
+                      <td className="py-3">
+                        {agent.metricsMode === 'agent' && (
+                          <button
+                            onClick={() => handleRegenerateToken(agent.id)}
+                            disabled={regenerating === agent.id}
+                            className="btn btn-secondary px-2 py-1 text-xs"
+                            title="Regenerate token and redeploy agent"
+                          >
+                            {regenerating === agent.id ? 'Regenerating...' : 'Regenerate Token'}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                    {expandedAgent === agent.id && (
+                      <tr key={`${agent.id}-events`} className="bg-slate-800/50">
+                        <td colSpan={9} className="p-4">
+                          <div className="text-sm font-medium text-slate-300 mb-3">Event History</div>
+                          {loadingEvents ? (
+                            <div className="animate-pulse space-y-2">
+                              {[1, 2, 3].map((i) => (
+                                <div key={i} className="h-8 bg-slate-700 rounded" />
+                              ))}
+                            </div>
+                          ) : agentEvents.length === 0 ? (
+                            <div className="text-slate-500 text-sm">No events recorded</div>
+                          ) : (
+                            <table className="w-full text-sm">
+                              <thead>
+                                <tr className="text-left text-slate-500 border-b border-slate-700">
+                                  <th className="pb-2 font-medium">Type</th>
+                                  <th className="pb-2 font-medium">Status</th>
+                                  <th className="pb-2 font-medium">Message</th>
+                                  <th className="pb-2 font-medium">Time</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-700/50">
+                                {agentEvents.map((event) => (
+                                  <tr key={event.id}>
+                                    <td className="py-2">{getEventTypeBadge(event.eventType)}</td>
+                                    <td className="py-2 text-slate-400">
+                                      {event.status || '--'}
+                                    </td>
+                                    <td className={`py-2 ${event.eventType === 'deploy_failed' ? 'text-red-400' : 'text-slate-400'}`}>
+                                      {event.message || '--'}
+                                    </td>
+                                    <td className="py-2 text-slate-500">
+                                      {format(new Date(event.createdAt), 'MMM d, HH:mm:ss')}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </>
                 ))}
               </tbody>
             </table>

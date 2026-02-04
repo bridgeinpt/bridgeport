@@ -13,6 +13,7 @@ import {
 import { logAudit } from '../services/audit.js';
 import { getSchedulerConfig } from './monitoring.js';
 import { deployAgent } from '../services/agent-deploy.js';
+import { logAgentEvent } from '../services/agent-events.js';
 import crypto from 'crypto';
 
 const metricsQuerySchema = z.object({
@@ -342,6 +343,17 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
     // Track status change time if status is changing
     if (server.agentStatus !== 'active') {
       serverUpdateData.agentStatusChangedAt = now;
+
+      // Log status_change event when agent becomes active
+      await logAgentEvent({
+        serverId: server.id,
+        eventType: 'status_change',
+        status: 'active',
+        message: server.agentStatus === 'waiting' || server.agentStatus === 'deploying'
+          ? 'Agent connected for the first time'
+          : 'Agent recovered and is now active',
+        details: { previousStatus: server.agentStatus, version: agentVersion },
+      });
     }
 
     // Set server health status if provided
@@ -586,6 +598,13 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
         details: { agentTokenRegenerated: true },
         userId: request.authUser!.id,
         environmentId: server.environmentId,
+      });
+
+      // Log token_regenerated event
+      await logAgentEvent({
+        serverId: id,
+        eventType: 'token_regenerated',
+        message: 'Agent token regenerated',
       });
 
       // Redeploy the agent with the new token so it keeps working

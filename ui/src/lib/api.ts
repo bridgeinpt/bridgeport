@@ -2030,6 +2030,21 @@ export interface AgentInfo {
 export const getAgents = (envId: string) =>
   api.get<{ sshUser: string; agents: AgentInfo[]; bundledAgentVersion: string }>(`/environments/${envId}/agents`);
 
+// Agent Events
+export type AgentEventType = 'deploy_started' | 'deploy_success' | 'deploy_failed' | 'token_regenerated' | 'status_change';
+
+export interface AgentEvent {
+  id: string;
+  eventType: AgentEventType;
+  status: string | null;
+  message: string | null;
+  details: string | null;
+  createdAt: string;
+}
+
+export const getAgentEvents = (serverId: string, limit?: number) =>
+  api.get<{ events: AgentEvent[] }>(`/servers/${serverId}/agent-events${limit ? `?limit=${limit}` : ''}`);
+
 // ==================== Container Image Updates ====================
 
 export interface ContainerImageUpdateInput {
