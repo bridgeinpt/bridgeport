@@ -6,19 +6,21 @@ import {
   listContainerImages,
   createContainerImage,
   updateContainerImage,
+  updateContainerImageSettings,
   deleteContainerImage,
   deployContainerImage,
   getContainerImageHistory,
   linkServiceToContainerImage,
   getLinkableServices,
   listRegistryConnections,
+  checkContainerImageUpdates,
   type ContainerImage,
   type ContainerImageInput,
   type ContainerImageHistory,
   type Service,
   type RegistryConnection,
 } from '../lib/api';
-import { formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow, format } from 'date-fns';
 
 export default function ContainerImages() {
   const { selectedEnvironment } = useAppStore();
@@ -45,6 +47,10 @@ export default function ContainerImages() {
   const [linkingImage, setLinkingImage] = useState<ContainerImage | null>(null);
   const [linkableServices, setLinkableServices] = useState<Service[]>([]);
   const [loadingLinkable, setLoadingLinkable] = useState(false);
+
+  // Check updates state
+  const [checkingUpdatesId, setCheckingUpdatesId] = useState<string | null>(null);
+  const [togglingAutoUpdate, setTogglingAutoUpdate] = useState<string | null>(null);
 
   // Form state
   const [formData, setFormData] = useState<ContainerImageInput>({
@@ -207,6 +213,44 @@ export default function ContainerImages() {
     }
   };
 
+  const handleCheckUpdates = async (imageId: string) => {
+    setCheckingUpdatesId(imageId);
+    try {
+      const result = await checkContainerImageUpdates(imageId);
+      // Refresh images to get updated latestTag
+      if (selectedEnvironment?.id) {
+        const { images: updated } = await listContainerImages(selectedEnvironment.id);
+        setImages(updated);
+      }
+      if (result.hasUpdate) {
+        toast.success(`Update available: ${result.latestTag}`);
+      } else {
+        toast.success('No updates available');
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to check updates');
+    } finally {
+      setCheckingUpdatesId(null);
+    }
+  };
+
+  const handleToggleAutoUpdate = async (imageId: string, currentValue: boolean) => {
+    setTogglingAutoUpdate(imageId);
+    try {
+      await updateContainerImageSettings(imageId, { autoUpdate: !currentValue });
+      setImages((prev) =>
+        prev.map((img) =>
+          img.id === imageId ? { ...img, autoUpdate: !currentValue } : img
+        )
+      );
+      toast.success(`Auto-update ${!currentValue ? 'enabled' : 'disabled'}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to update');
+    } finally {
+      setTogglingAutoUpdate(null);
+    }
+  };
+
   // Helper function to get status badge color
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -291,9 +335,20 @@ export default function ContainerImages() {
                           Registry: {image.registryConnection.name}
                         </span>
                       )}
+                      {image.autoUpdate && (
+                        <span className="text-green-400 flex items-center gap-1">
+                          <RefreshIcon className="w-3 h-3" />
+                          Auto-update enabled
+                        </span>
+                      )}
                       <span>
                         Updated {formatDistanceToNow(new Date(image.updatedAt), { addSuffix: true })}
                       </span>
+                      {image.lastCheckedAt && (
+                        <span>
+                          Checked {formatDistanceToNow(new Date(image.lastCheckedAt), { addSuffix: true })}
+                        </span>
+                      )}
                     </div>
 
                     {/* Linked Services */}
@@ -316,7 +371,44 @@ export default function ContainerImages() {
                     )}
                   </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
+                  {/* Auto-update toggle */}
+                  {image.registryConnectionId && (
+                    <button
+                      onClick={() => handleToggleAutoUpdate(image.id, image.autoUpdate)}
+                      disabled={togglingAutoUpdate === image.id}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                        image.autoUpdate ? 'bg-primary-600' : 'bg-slate-600'
+                      }`}
+                      title={image.autoUpdate ? 'Disable auto-update' : 'Enable auto-update'}
+                    >
+                      <span
+                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                          image.autoUpdate ? 'translate-x-6' : 'translate-x-1'
+                        }`}
+                      />
+                    </button>
+                  )}
+                  {/* Check updates button */}
+                  {image.registryConnectionId && (
+                    <button
+                      onClick={() => handleCheckUpdates(image.id)}
+                      disabled={checkingUpdatesId === image.id}
+                      className="btn btn-ghost text-sm"
+                      title="Check for updates from registry"
+                    >
+                      {checkingUpdatesId === image.id ? (
+                        <span className="flex items-center gap-1">
+                          <span className="animate-spin">
+                            <RefreshIcon className="w-4 h-4" />
+                          </span>
+                          Checking...
+                        </span>
+                      ) : (
+                        'Check Updates'
+                      )}
+                    </button>
+                  )}
                   {image.services.length > 0 && (
                     <button
                       onClick={() => openDeployModal(image)}
@@ -367,18 +459,46 @@ export default function ContainerImages() {
                       {history.slice(0, 10).map((entry) => (
                         <div
                           key={entry.id}
-                          className="flex items-center justify-between p-2 bg-slate-800/50 rounded text-sm"
+                          className="p-3 bg-slate-800/50 rounded text-sm"
                         >
-                          <div className="flex items-center gap-4">
-                            <span className="font-mono text-white">{entry.tag}</span>
-                            <span className={`badge text-xs ${getStatusBadge(entry.status)}`}>
-                              {entry.status}
-                            </span>
-                            <span className="text-slate-500">
-                              {formatDistanceToNow(new Date(entry.deployedAt), { addSuffix: true })}
-                            </span>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-4">
+                              <span className="font-mono text-white">{entry.tag}</span>
+                              <span className={`badge text-xs ${getStatusBadge(entry.status)}`}>
+                                {entry.status}
+                              </span>
+                              {entry.deploymentCount && entry.deploymentCount > 0 && (
+                                <span className="text-slate-500">
+                                  {entry.deploymentCount} deployment{entry.deploymentCount !== 1 ? 's' : ''}
+                                </span>
+                              )}
+                              {entry.totalDurationMs && entry.totalDurationMs > 0 && (
+                                <span className="text-slate-500">
+                                  {Math.round(entry.totalDurationMs / 1000)}s
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3 text-slate-400">
+                              <span>{entry.deployedBy}</span>
+                              <span className="text-slate-500">
+                                {format(new Date(entry.deployedAt), 'MMM d, HH:mm')}
+                              </span>
+                            </div>
                           </div>
-                          <span className="text-slate-400">{entry.deployedBy}</span>
+                          {/* Services deployed */}
+                          {entry.services && entry.services.length > 0 && (
+                            <div className="mt-2 pt-2 border-t border-slate-700 flex flex-wrap gap-2">
+                              {entry.services.map((svc) => (
+                                <div
+                                  key={svc.id}
+                                  className="flex items-center gap-1 px-2 py-0.5 bg-slate-700/50 rounded text-xs"
+                                >
+                                  <span className="text-slate-300">{svc.name}</span>
+                                  <span className="text-slate-500">on {svc.serverName}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -614,6 +734,19 @@ function ImageIcon({ className }: { className?: string }) {
         strokeLinejoin="round"
         strokeWidth={2}
         d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+      />
+    </svg>
+  );
+}
+
+function RefreshIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
       />
     </svg>
   );

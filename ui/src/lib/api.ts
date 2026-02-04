@@ -1250,6 +1250,7 @@ export interface ContainerImage {
   latestTag: string | null;
   latestDigest: string | null;
   lastCheckedAt: string | null;
+  autoUpdate: boolean;
   createdAt: string;
   updatedAt: string;
   environmentId: string;
@@ -1274,6 +1275,10 @@ export interface ContainerImageHistory {
   deployedBy: string | null;
   containerImageId: string;
   deployments?: Deployment[];
+  // Enhanced fields from new API
+  services?: Array<{ id: string; name: string; serverName: string }>;
+  totalDurationMs?: number;
+  deploymentCount?: number;
 }
 
 export const listContainerImages = (envId: string) =>
@@ -1794,3 +1799,149 @@ export interface AgentInfo {
 
 export const getAgents = (envId: string) =>
   api.get<{ sshUser: string; agents: AgentInfo[] }>(`/environments/${envId}/agents`);
+
+// ==================== Container Image Updates ====================
+
+export interface ContainerImageUpdateInput {
+  name?: string;
+  currentTag?: string;
+  registryConnectionId?: string | null;
+  autoUpdate?: boolean;
+}
+
+export interface ImageUpdateCheckResult {
+  hasUpdate: boolean;
+  currentTag: string;
+  latestTag: string | null;
+  latestDigest: string | null;
+  lastCheckedAt: string;
+}
+
+export interface EnhancedContainerImageHistory extends ContainerImageHistory {
+  services: Array<{ id: string; name: string; serverName: string }>;
+  totalDurationMs: number;
+  deploymentCount: number;
+}
+
+export const updateContainerImageSettings = (id: string, data: ContainerImageUpdateInput) =>
+  api.patch<{ image: ContainerImage }>(`/container-images/${id}`, data);
+
+export const checkContainerImageUpdates = (id: string) =>
+  api.post<ImageUpdateCheckResult>(`/container-images/${id}/check-updates`);
+
+export const getEnhancedContainerImageHistory = (id: string, limit?: number) =>
+  api.get<{ history: EnhancedContainerImageHistory[] }>(`/container-images/${id}/history${limit ? `?limit=${limit}` : ''}`);
+
+// ==================== Deployment Templates ====================
+
+export interface TemplateServiceSelector {
+  by: 'id' | 'name' | 'tag' | 'serviceType';
+  value: string;
+  pattern?: boolean;
+}
+
+export interface TemplateStep {
+  type: 'deploy' | 'health_check' | 'wait' | 'group';
+  serviceSelector?: TemplateServiceSelector;
+  waitMs?: number;
+  retries?: number;
+  durationMs?: number;
+  name?: string;
+  parallel?: boolean;
+  children?: TemplateStep[];
+}
+
+export interface TemplateDefinition {
+  version: '1.0';
+  parallelExecution: boolean;
+  steps: TemplateStep[];
+}
+
+export interface DeploymentTemplate {
+  id: string;
+  name: string;
+  description: string | null;
+  definition: string; // JSON string of TemplateDefinition
+  environmentId: string;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt: string | null;
+  useCount: number;
+  createdBy?: { id: string; email: string; name: string | null };
+  deploymentPlans?: Array<{
+    id: string;
+    name: string;
+    status: DeploymentPlanStatus;
+    imageTag: string | null;
+    createdAt: string;
+  }>;
+}
+
+export interface DeploymentTemplateInput {
+  name: string;
+  description?: string;
+  definition: string; // JSON string
+}
+
+export interface PreviewStep {
+  type: 'deploy' | 'health_check' | 'wait';
+  serviceName?: string;
+  serviceId?: string;
+  serverName?: string;
+  currentTag?: string;
+  targetTag?: string;
+  healthCheckUrl?: string;
+  estimatedDurationMs?: number;
+  waitMs?: number;
+}
+
+export interface PreviewLevel {
+  order: number;
+  parallel: boolean;
+  steps: PreviewStep[];
+}
+
+export interface PlanPreview {
+  levels: PreviewLevel[];
+  estimatedDurationMs: number;
+  servicesCount: number;
+  warnings: string[];
+}
+
+export interface TemplateExecutionResult {
+  planId: string;
+}
+
+// Template CRUD
+export const listDeploymentTemplates = (envId: string) =>
+  api.get<{ templates: DeploymentTemplate[] }>(`/environments/${envId}/deployment-templates`);
+
+export const createDeploymentTemplate = (envId: string, data: DeploymentTemplateInput) =>
+  api.post<{ template: DeploymentTemplate }>(`/environments/${envId}/deployment-templates`, data);
+
+export const getDeploymentTemplate = (envId: string, id: string) =>
+  api.get<{ template: DeploymentTemplate }>(`/environments/${envId}/deployment-templates/${id}`);
+
+export const updateDeploymentTemplate = (envId: string, id: string, data: Partial<DeploymentTemplateInput>) =>
+  api.patch<{ template: DeploymentTemplate }>(`/environments/${envId}/deployment-templates/${id}`, data);
+
+export const deleteDeploymentTemplate = (envId: string, id: string) =>
+  api.delete<{ success: boolean }>(`/environments/${envId}/deployment-templates/${id}`);
+
+// Template preview and execution
+export const previewDeploymentTemplate = (envId: string, id: string, targetTag: string) =>
+  api.post<{ preview: PlanPreview }>(`/environments/${envId}/deployment-templates/${id}/preview`, { targetTag });
+
+export const executeDeploymentTemplate = (envId: string, id: string, targetTag: string) =>
+  api.post<TemplateExecutionResult>(`/environments/${envId}/deployment-templates/${id}/execute`, { targetTag });
+
+// Template YAML export/import
+export const exportDeploymentTemplate = (envId: string, id: string) =>
+  api.get<{ yaml: string }>(`/environments/${envId}/deployment-templates/${id}/export`);
+
+export const importDeploymentTemplate = (envId: string, yaml: string, name?: string, description?: string) =>
+  api.post<{ template: DeploymentTemplate }>(`/environments/${envId}/deployment-templates/import`, {
+    yaml,
+    name,
+    description,
+  });

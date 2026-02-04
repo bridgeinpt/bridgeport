@@ -77,6 +77,19 @@ function PlanIcon({ className }: { className?: string }) {
   );
 }
 
+function TemplateIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"
+      />
+    </svg>
+  );
+}
+
 function CommandIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -124,6 +137,7 @@ const navigationGroups: NavGroup[] = [
     name: 'Orchestration',
     items: [
       { name: 'Container Images', href: '/container-images', icon: ImageIcon },
+      { name: 'Templates', href: '/deployment-templates', icon: TemplateIcon },
       { name: 'Deployment Plans', href: '/deployment-plans', icon: PlanIcon },
       { name: 'Registries', href: '/registries', icon: RegistryIcon },
     ],
