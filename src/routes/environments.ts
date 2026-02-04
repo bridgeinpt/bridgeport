@@ -51,7 +51,12 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
         include: {
           servers: {
             include: {
-              services: true,
+              services: {
+                include: {
+                  serviceType: true,
+                  containerImage: true,
+                },
+              },
             },
           },
           _count: {
