@@ -25,10 +25,26 @@ type Config struct {
 	Interval  time.Duration
 }
 
+// TCPCheckConfig defines a TCP port to check
+type TCPCheckConfig struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
+	Name string `json:"name,omitempty"`
+}
+
+// CertCheckConfig defines a TLS endpoint to check
+type CertCheckConfig struct {
+	Host string `json:"host"`
+	Port int    `json:"port"`
+	Name string `json:"name,omitempty"`
+}
+
 // ServiceHealthConfig represents a service that needs health checks
 type ServiceHealthConfig struct {
-	ContainerName  string `json:"containerName"`
-	HealthCheckURL string `json:"healthCheckUrl"`
+	ContainerName  string            `json:"containerName"`
+	HealthCheckURL string            `json:"healthCheckUrl"`
+	TCPChecks      []TCPCheckConfig  `json:"tcpChecks,omitempty"`
+	CertChecks     []CertCheckConfig `json:"certChecks,omitempty"`
 }
 
 // AgentConfig is the configuration fetched from BridgePort
@@ -47,6 +63,32 @@ type ServiceHealthResult struct {
 	DurationMs     *int    `json:"durationMs,omitempty"`
 	CheckedAt      string  `json:"checkedAt"`
 	Error          *string `json:"error,omitempty"`
+}
+
+// TCPCheckResult is the result of a TCP port check
+type TCPCheckResult struct {
+	ContainerName string  `json:"containerName"`
+	Host          string  `json:"host"`
+	Port          int     `json:"port"`
+	Name          string  `json:"name,omitempty"`
+	Success       bool    `json:"success"`
+	DurationMs    int     `json:"durationMs"`
+	Error         *string `json:"error,omitempty"`
+}
+
+// CertCheckResult is the result of a certificate check
+type CertCheckResult struct {
+	ContainerName   string  `json:"containerName"`
+	Host            string  `json:"host"`
+	Port            int     `json:"port"`
+	Name            string  `json:"name,omitempty"`
+	Success         bool    `json:"success"`
+	DurationMs      int     `json:"durationMs"`
+	ExpiresAt       *string `json:"expiresAt,omitempty"`
+	DaysUntilExpiry *int    `json:"daysUntilExpiry,omitempty"`
+	Issuer          *string `json:"issuer,omitempty"`
+	Subject         *string `json:"subject,omitempty"`
+	Error           *string `json:"error,omitempty"`
 }
 
 // agentConfig stores the current configuration from BridgePort
@@ -76,6 +118,8 @@ type MetricsPayload struct {
 	AgentVersion        *string               `json:"agentVersion,omitempty"`  // Agent version
 	Services            []ServiceMetrics      `json:"services,omitempty"`
 	ServiceHealthChecks []ServiceHealthResult `json:"serviceHealthChecks,omitempty"` // Health check results
+	TCPCheckResults     []TCPCheckResult      `json:"tcpCheckResults,omitempty"`     // TCP port check results
+	CertCheckResults    []CertCheckResult     `json:"certCheckResults,omitempty"`    // TLS cert check results
 	Containers          []ContainerInfo       `json:"containers,omitempty"`          // Full container list for discovery
 	TopProcesses        *TopProcessesPayload  `json:"topProcesses,omitempty"`        // Top processes by CPU/memory
 }
@@ -263,6 +307,11 @@ func performHealthChecks() []ServiceHealthResult {
 	client := &http.Client{Timeout: 10 * time.Second}
 
 	for _, svc := range cfg.Services {
+		// Skip services without health check URLs
+		if svc.HealthCheckURL == "" {
+			continue
+		}
+
 		result := ServiceHealthResult{
 			ContainerName:  svc.ContainerName,
 			HealthCheckURL: svc.HealthCheckURL,
@@ -290,6 +339,124 @@ func performHealthChecks() []ServiceHealthResult {
 	return results
 }
 
+// performTCPChecks performs TCP port connectivity checks
+func performTCPChecks() []TCPCheckResult {
+	agentConfigMutex.RLock()
+	cfg := agentConfig
+	agentConfigMutex.RUnlock()
+
+	if cfg == nil || len(cfg.Services) == 0 {
+		return nil
+	}
+
+	var results []TCPCheckResult
+
+	for _, svc := range cfg.Services {
+		if len(svc.TCPChecks) == 0 {
+			continue
+		}
+
+		// Convert to collector types
+		targets := make([]collector.TCPCheckConfig, len(svc.TCPChecks))
+		for i, tc := range svc.TCPChecks {
+			targets[i] = collector.TCPCheckConfig{
+				Host: tc.Host,
+				Port: tc.Port,
+				Name: tc.Name,
+			}
+		}
+
+		// Perform checks
+		checkResults := collector.CheckTCPPorts(targets, 5*time.Second)
+
+		// Convert results back
+		for _, cr := range checkResults {
+			result := TCPCheckResult{
+				ContainerName: svc.ContainerName,
+				Host:          cr.Host,
+				Port:          cr.Port,
+				Name:          cr.Name,
+				Success:       cr.Success,
+				DurationMs:    cr.DurationMs,
+			}
+			if cr.Error != "" {
+				errStr := cr.Error
+				result.Error = &errStr
+			}
+			results = append(results, result)
+		}
+	}
+
+	return results
+}
+
+// performCertChecks performs TLS certificate expiry checks
+func performCertChecks() []CertCheckResult {
+	agentConfigMutex.RLock()
+	cfg := agentConfig
+	agentConfigMutex.RUnlock()
+
+	if cfg == nil || len(cfg.Services) == 0 {
+		return nil
+	}
+
+	var results []CertCheckResult
+
+	for _, svc := range cfg.Services {
+		if len(svc.CertChecks) == 0 {
+			continue
+		}
+
+		// Convert to collector types
+		targets := make([]collector.CertCheckConfig, len(svc.CertChecks))
+		for i, cc := range svc.CertChecks {
+			targets[i] = collector.CertCheckConfig{
+				Host: cc.Host,
+				Port: cc.Port,
+				Name: cc.Name,
+			}
+		}
+
+		// Perform checks
+		checkResults := collector.CheckCertificates(targets, 10*time.Second)
+
+		// Convert results back
+		for _, cr := range checkResults {
+			result := CertCheckResult{
+				ContainerName: svc.ContainerName,
+				Host:          cr.Host,
+				Port:          cr.Port,
+				Name:          cr.Name,
+				Success:       cr.Success,
+				DurationMs:    cr.DurationMs,
+			}
+			if cr.ExpiresAt != "" {
+				expiresAt := cr.ExpiresAt
+				result.ExpiresAt = &expiresAt
+			}
+			if cr.DaysUntilExpiry != 0 {
+				days := cr.DaysUntilExpiry
+				result.DaysUntilExpiry = &days
+			}
+			if cr.Issuer != "" {
+				issuer := cr.Issuer
+				result.Issuer = &issuer
+			}
+			if cr.Subject != "" {
+				subject := cr.Subject
+				result.Subject = &subject
+			}
+			if cr.Error != "" {
+				errStr := cr.Error
+				result.Error = &errStr
+			}
+			results = append(results, result)
+		}
+	}
+
+	return results
+}
+
 func collectAndSend(config Config) {
 	payload := MetricsPayload{}
 
@@ -305,6 +472,18 @@ func collectAndSend(config Config) {
 	healthResults := performHealthChecks()
 	if len(healthResults) > 0 {
 		payload.ServiceHealthChecks = healthResults
+	}
+
+	// Perform TCP port connectivity checks
+	tcpResults := performTCPChecks()
+	if len(tcpResults) > 0 {
+		payload.TCPCheckResults = tcpResults
+	}
+
+	// Perform TLS certificate expiry checks
+	certResults := performCertChecks()
+	if len(certResults) > 0 {
+		payload.CertCheckResults = certResults
 	}
 
 	// Collect system metrics

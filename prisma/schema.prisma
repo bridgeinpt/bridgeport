@@ -158,6 +158,16 @@ model Service {
   agentHealthDurationMs Int? // Duration of agent health check
   agentHealthCheckedAt  DateTime? // When agent last performed health check
 
+  // TCP port connectivity checks (agent-performed)
+  tcpChecks            String? // JSON array: [{"host": "localhost", "port": 5432, "name": "postgres"}]
+  agentTcpCheckResults String? // JSON array of results from agent
+  agentTcpCheckedAt    DateTime? // When agent last performed TCP checks
+
+  // TLS certificate expiry checks (agent-performed)
+  certChecks            String? // JSON array: [{"host": "example.com", "port": 443, "name": "api"}]
+  agentCertCheckResults String? // JSON array of results from agent
+  agentCertCheckedAt    DateTime? // When agent last performed cert checks
+
   serverId    String
   server      Server            @relation(fields: [serverId], references: [id], onDelete: Cascade)
   deployments Deployment[]

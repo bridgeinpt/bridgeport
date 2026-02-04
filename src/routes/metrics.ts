@@ -74,6 +74,30 @@ const topProcessesSchema = z.object({
   }),
 });
 
+const tcpCheckResultSchema = z.object({
+  containerName: z.string(),
+  host: z.string(),
+  port: z.number(),
+  name: z.string().optional(),
+  success: z.boolean(),
+  durationMs: z.number(),
+  error: z.string().optional(),
+});
+
+const certCheckResultSchema = z.object({
+  containerName: z.string(),
+  host: z.string(),
+  port: z.number(),
+  name: z.string().optional(),
+  success: z.boolean(),
+  durationMs: z.number(),
+  expiresAt: z.string().optional(),
+  daysUntilExpiry: z.number().optional(),
+  issuer: z.string().optional(),
+  subject: z.string().optional(),
+  error: z.string().optional(),
+});
+
 const serverMetricsIngestSchema = z.object({
   cpuPercent: z.number().optional(),
   memoryUsedMb: z.number().optional(),
@@ -113,6 +137,8 @@ const serverMetricsIngestSchema = z.object({
     )
     .optional(),
   serviceHealthChecks: z.array(serviceHealthCheckSchema).optional(), // Agent-performed URL health checks
+  tcpCheckResults: z.array(tcpCheckResultSchema).optional(), // Agent-performed TCP port checks
+  certCheckResults: z.array(certCheckResultSchema).optional(), // Agent-performed TLS cert checks
   containers: z.array(containerInfoSchema).optional(), // Full container list for discovery
   topProcesses: topProcessesSchema.optional(), // Top processes by CPU/memory
 });
@@ -265,7 +291,7 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
     }
 
     // Save server metrics (exclude non-metrics fields)
-    const { services: serviceMetrics, serverHealthy, agentVersion, serviceHealthChecks, containers, topProcesses, ...serverMetricsData } = body.data;
+    const { services: serviceMetrics, serverHealthy, agentVersion, serviceHealthChecks, tcpCheckResults, certCheckResults, containers, topProcesses, ...serverMetricsData } = body.data;
     await saveServerMetrics(server.id, serverMetricsData, 'agent');
 
     // Save container snapshot for discovery (upsert)
@@ -399,6 +425,54 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
       }
     }
 
+    // Process agent-performed TCP port checks
+    if (tcpCheckResults && tcpCheckResults.length > 0) {
+      // Group results by container name
+      const resultsByContainer = new Map<string, typeof tcpCheckResults>();
+      for (const result of tcpCheckResults) {
+        const existing = resultsByContainer.get(result.containerName) || [];
+        existing.push(result);
+        resultsByContainer.set(result.containerName, existing);
+      }
+
+      for (const [containerName, results] of resultsByContainer) {
+        const service = server.services.find((s) => s.containerName === containerName);
+        if (service) {
+          await prisma.service.update({
+            where: { id: service.id },
+            data: {
+              agentTcpCheckResults: JSON.stringify(results),
+              agentTcpCheckedAt: now,
+            },
+          });
+        }
+      }
+    }
+
+    // Process agent-performed TLS certificate checks
+    if (certCheckResults && certCheckResults.length > 0) {
+      // Group results by container name
+      const resultsByContainer = new Map<string, typeof certCheckResults>();
+      for (const result of certCheckResults) {
+        const existing = resultsByContainer.get(result.containerName) || [];
+        existing.push(result);
+        resultsByContainer.set(result.containerName, existing);
+      }
+
+      for (const [containerName, results] of resultsByContainer) {
+        const service = server.services.find((s) => s.containerName === containerName);
+        if (service) {
+          await prisma.service.update({
+            where: { id: service.id },
+            data: {
+              agentCertCheckResults: JSON.stringify(results),
+              agentCertCheckedAt: now,
+            },
+          });
+        }
+      }
+    }
+
     return { success: true };
   });
 
@@ -416,14 +490,13 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
       where: { agentToken: token, metricsMode: 'agent' },
       include: {
         services: {
-          where: {
-            healthCheckUrl: { not: null },
-            discoveryStatus: 'found',
-          },
+          where: { discoveryStatus: 'found' },
           select: {
             id: true,
             containerName: true,
             healthCheckUrl: true,
+            tcpChecks: true,
+            certChecks: true,
           },
         },
       },
@@ -433,13 +506,30 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.code(401).send({ error: 'Invalid agent token' });
     }
 
+    // Parse JSON fields for TCP and cert checks
+    const parseChecks = (jsonStr: string | null): Array<{ host: string; port: number; name?: string }> => {
+      if (!jsonStr) return [];
+      try {
+        return JSON.parse(jsonStr);
+      } catch {
+        return [];
+      }
+    };
+
+    // Build service config including health checks
+    const servicesConfig = server.services
+      .filter((s) => s.healthCheckUrl || s.tcpChecks || s.certChecks)
+      .map((s) => ({
+        containerName: s.containerName,
+        healthCheckUrl: s.healthCheckUrl,
+        tcpChecks: parseChecks(s.tcpChecks),
+        certChecks: parseChecks(s.certChecks),
+      }));
+
     return {
       serverId: server.id,
       serverName: server.name,
-      services: server.services.map((s) => ({
-        containerName: s.containerName,
-        healthCheckUrl: s.healthCheckUrl,
-      })),
+      services: servicesConfig,
     };
   });
 

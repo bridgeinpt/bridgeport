@@ -34,6 +34,10 @@ import {
   type ServiceDependency,
   type ContainerImage,
   type ServiceType,
+  type TCPCheckConfig,
+  type TCPCheckResult,
+  type CertCheckConfig,
+  type CertCheckResult,
 } from '../lib/api';
 import { DependencyEditor } from '../components/DependencyEditor';
 import Pagination from '../components/Pagination';
@@ -52,6 +56,42 @@ function parseExposedPorts(portsJson: string | null): ExposedPort[] {
   if (!portsJson) return [];
   try {
     return JSON.parse(portsJson);
+  } catch {
+    return [];
+  }
+}
+
+function parseTCPChecks(jsonStr: string | null): TCPCheckConfig[] {
+  if (!jsonStr) return [];
+  try {
+    return JSON.parse(jsonStr);
+  } catch {
+    return [];
+  }
+}
+
+function parseTCPCheckResults(jsonStr: string | null): TCPCheckResult[] {
+  if (!jsonStr) return [];
+  try {
+    return JSON.parse(jsonStr);
+  } catch {
+    return [];
+  }
+}
+
+function parseCertChecks(jsonStr: string | null): CertCheckConfig[] {
+  if (!jsonStr) return [];
+  try {
+    return JSON.parse(jsonStr);
+  } catch {
+    return [];
+  }
+}
+
+function parseCertCheckResults(jsonStr: string | null): CertCheckResult[] {
+  if (!jsonStr) return [];
+  try {
+    return JSON.parse(jsonStr);
   } catch {
     return [];
   }
@@ -84,6 +124,8 @@ export default function ServiceDetail() {
   const [editComposePath, setEditComposePath] = useState<string>('');
   const [editContainerName, setEditContainerName] = useState<string>('');
   const [editHealthCheckUrl, setEditHealthCheckUrl] = useState<string>('');
+  const [editTcpChecks, setEditTcpChecks] = useState<TCPCheckConfig[]>([]);
+  const [editCertChecks, setEditCertChecks] = useState<CertCheckConfig[]>([]);
 
   // Attached files state
   const [attachedFiles, setAttachedFiles] = useState<ServiceFile[]>([]);
@@ -405,6 +447,8 @@ export default function ServiceDetail() {
     setEditContainerName(service.containerName || '');
     setEditHealthCheckUrl(service.healthCheckUrl || '');
     setEditServiceTypeId(service.serviceTypeId || '');
+    setEditTcpChecks(parseTCPChecks(service.tcpChecks));
+    setEditCertChecks(parseCertChecks(service.certChecks));
     setShowConfig(true);
   };
 
@@ -417,6 +461,8 @@ export default function ServiceDetail() {
         containerName: editContainerName || undefined,
         healthCheckUrl: editHealthCheckUrl || null,
         serviceTypeId: editServiceTypeId || null,
+        tcpChecks: editTcpChecks.length > 0 ? JSON.stringify(editTcpChecks) : null,
+        certChecks: editCertChecks.length > 0 ? JSON.stringify(editCertChecks) : null,
       });
       setService((prev) => (prev ? { ...prev, ...updated } : null));
       setShowConfig(false);
@@ -1198,6 +1244,122 @@ export default function ServiceDetail() {
         </div>
       )}
 
+      {/* Agent Health Check Results (TCP & Cert) */}
+      {service && (parseTCPCheckResults(service.agentTcpCheckResults).length > 0 || parseCertCheckResults(service.agentCertCheckResults).length > 0) && (
+        <div className="grid grid-cols-2 gap-4 mb-5">
+          {/* TCP Check Results */}
+          {parseTCPCheckResults(service.agentTcpCheckResults).length > 0 && (
+            <div className="panel">
+              <h3 className="text-lg font-semibold text-white mb-4">
+                TCP Port Checks
+                {service.agentTcpCheckedAt && (
+                  <span className="text-xs text-slate-500 font-normal ml-2">
+                    {formatDistanceToNow(new Date(service.agentTcpCheckedAt), { addSuffix: true })}
+                  </span>
+                )}
+              </h3>
+              <div className="space-y-2">
+                {parseTCPCheckResults(service.agentTcpCheckResults).map((result, i) => (
+                  <div
+                    key={i}
+                    className={`flex items-center justify-between p-2 rounded-lg ${
+                      result.success ? 'bg-green-500/10' : 'bg-red-500/10'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full ${result.success ? 'bg-green-400' : 'bg-red-400'}`} />
+                      <span className="text-white font-mono text-sm">
+                        {result.host}:{result.port}
+                      </span>
+                      {result.name && (
+                        <span className="text-slate-400 text-xs">({result.name})</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-400">{result.durationMs}ms</span>
+                      {result.error && (
+                        <span className="text-xs text-red-400" title={result.error}>error</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Certificate Check Results */}
+          {parseCertCheckResults(service.agentCertCheckResults).length > 0 && (
+            <div className="panel">
+              <h3 className="text-lg font-semibold text-white mb-4">
+                Certificate Expiry
+                {service.agentCertCheckedAt && (
+                  <span className="text-xs text-slate-500 font-normal ml-2">
+                    {formatDistanceToNow(new Date(service.agentCertCheckedAt), { addSuffix: true })}
+                  </span>
+                )}
+              </h3>
+              <div className="space-y-2">
+                {parseCertCheckResults(service.agentCertCheckResults).map((result, i) => (
+                  <div
+                    key={i}
+                    className={`p-3 rounded-lg ${
+                      result.success
+                        ? result.daysUntilExpiry !== undefined && result.daysUntilExpiry < 30
+                          ? 'bg-yellow-500/10'
+                          : 'bg-green-500/10'
+                        : 'bg-red-500/10'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className={`w-2 h-2 rounded-full ${
+                          result.success
+                            ? result.daysUntilExpiry !== undefined && result.daysUntilExpiry < 30
+                              ? 'bg-yellow-400'
+                              : 'bg-green-400'
+                            : 'bg-red-400'
+                        }`} />
+                        <span className="text-white font-mono text-sm">
+                          {result.host}:{result.port}
+                        </span>
+                        {result.name && (
+                          <span className="text-slate-400 text-xs">({result.name})</span>
+                        )}
+                      </div>
+                      {result.daysUntilExpiry !== undefined && (
+                        <span className={`text-sm font-medium ${
+                          result.daysUntilExpiry < 0
+                            ? 'text-red-400'
+                            : result.daysUntilExpiry < 30
+                            ? 'text-yellow-400'
+                            : 'text-green-400'
+                        }`}>
+                          {result.daysUntilExpiry < 0
+                            ? 'Expired'
+                            : `${result.daysUntilExpiry} days`}
+                        </span>
+                      )}
+                    </div>
+                    {result.success && (
+                      <div className="text-xs text-slate-400 space-y-0.5">
+                        {result.subject && <div>Subject: {result.subject}</div>}
+                        {result.issuer && <div>Issuer: {result.issuer}</div>}
+                        {result.expiresAt && (
+                          <div>Expires: {format(new Date(result.expiresAt), 'MMM d, yyyy')}</div>
+                        )}
+                      </div>
+                    )}
+                    {result.error && (
+                      <div className="text-xs text-red-400 mt-1">{result.error}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Deployment History */}
       <div className="panel">
             <h3 className="text-lg font-semibold text-white mb-4">
@@ -1667,12 +1829,43 @@ export default function ServiceDetail() {
 
       {/* Config Modal */}
       {showConfig && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-lg p-6">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-y-auto py-8">
+          <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-2xl p-6 my-auto">
             <h3 className="text-lg font-semibold text-white mb-4">
               Configure Service
             </h3>
             <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm text-slate-400 mb-1">
+                    Container Name
+                  </label>
+                  <input
+                    type="text"
+                    value={editContainerName}
+                    onChange={(e) => setEditContainerName(e.target.value)}
+                    placeholder="my-container"
+                    className="input font-mono text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-slate-400 mb-1">
+                    Service Type
+                  </label>
+                  <select
+                    value={editServiceTypeId}
+                    onChange={(e) => setEditServiceTypeId(e.target.value)}
+                    className="input"
+                  >
+                    <option value="">None</option>
+                    {serviceTypes.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.displayName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
               <div>
                 <label className="block text-sm text-slate-400 mb-1">
                   Compose Path
@@ -1690,21 +1883,6 @@ export default function ServiceDetail() {
               </div>
               <div>
                 <label className="block text-sm text-slate-400 mb-1">
-                  Container Name
-                </label>
-                <input
-                  type="text"
-                  value={editContainerName}
-                  onChange={(e) => setEditContainerName(e.target.value)}
-                  placeholder="my-container"
-                  className="input font-mono text-sm"
-                />
-                <p className="text-xs text-slate-500 mt-1">
-                  Docker container name for logs and health checks
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">
                   Health Check URL
                 </label>
                 <input
@@ -1715,7 +1893,7 @@ export default function ServiceDetail() {
                   className="input font-mono text-sm"
                 />
                 <p className="text-xs text-slate-500 mt-1">
-                  URL to check during health checks (from the server)
+                  URL to check during health checks (from the server via agent)
                 </p>
               </div>
               {containerImage && (
@@ -1734,25 +1912,141 @@ export default function ServiceDetail() {
                   </p>
                 </div>
               )}
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">
-                  Service Type
-                </label>
-                <select
-                  value={editServiceTypeId}
-                  onChange={(e) => setEditServiceTypeId(e.target.value)}
-                  className="input"
-                >
-                  <option value="">None</option>
-                  {serviceTypes.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.displayName}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-slate-500 mt-1">
-                  Predefined commands for this service type (Django, Node.js, etc.)
-                </p>
+
+              {/* TCP Port Checks */}
+              <div className="border-t border-slate-700 pt-4">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm text-slate-400">
+                    TCP Port Checks (Agent)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setEditTcpChecks([...editTcpChecks, { host: 'localhost', port: 0, name: '' }])}
+                    className="text-xs text-primary-400 hover:text-primary-300"
+                  >
+                    + Add Check
+                  </button>
+                </div>
+                {editTcpChecks.length > 0 ? (
+                  <div className="space-y-2">
+                    {editTcpChecks.map((check, i) => (
+                      <div key={i} className="flex gap-2 items-center">
+                        <input
+                          type="text"
+                          value={check.host}
+                          onChange={(e) => {
+                            const newChecks = [...editTcpChecks];
+                            newChecks[i] = { ...check, host: e.target.value };
+                            setEditTcpChecks(newChecks);
+                          }}
+                          placeholder="host"
+                          className="input font-mono text-sm flex-1"
+                        />
+                        <input
+                          type="number"
+                          value={check.port || ''}
+                          onChange={(e) => {
+                            const newChecks = [...editTcpChecks];
+                            newChecks[i] = { ...check, port: parseInt(e.target.value) || 0 };
+                            setEditTcpChecks(newChecks);
+                          }}
+                          placeholder="port"
+                          className="input font-mono text-sm w-24"
+                        />
+                        <input
+                          type="text"
+                          value={check.name || ''}
+                          onChange={(e) => {
+                            const newChecks = [...editTcpChecks];
+                            newChecks[i] = { ...check, name: e.target.value };
+                            setEditTcpChecks(newChecks);
+                          }}
+                          placeholder="label (optional)"
+                          className="input text-sm w-32"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setEditTcpChecks(editTcpChecks.filter((_, j) => j !== i))}
+                          className="text-red-400 hover:text-red-300 p-1"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500">No TCP checks configured. Agent will check port connectivity.</p>
+                )}
+              </div>
+
+              {/* Certificate Expiry Checks */}
+              <div className="border-t border-slate-700 pt-4">
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm text-slate-400">
+                    Certificate Expiry Checks (Agent)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setEditCertChecks([...editCertChecks, { host: '', port: 443, name: '' }])}
+                    className="text-xs text-primary-400 hover:text-primary-300"
+                  >
+                    + Add Check
+                  </button>
+                </div>
+                {editCertChecks.length > 0 ? (
+                  <div className="space-y-2">
+                    {editCertChecks.map((check, i) => (
+                      <div key={i} className="flex gap-2 items-center">
+                        <input
+                          type="text"
+                          value={check.host}
+                          onChange={(e) => {
+                            const newChecks = [...editCertChecks];
+                            newChecks[i] = { ...check, host: e.target.value };
+                            setEditCertChecks(newChecks);
+                          }}
+                          placeholder="hostname"
+                          className="input font-mono text-sm flex-1"
+                        />
+                        <input
+                          type="number"
+                          value={check.port || ''}
+                          onChange={(e) => {
+                            const newChecks = [...editCertChecks];
+                            newChecks[i] = { ...check, port: parseInt(e.target.value) || 443 };
+                            setEditCertChecks(newChecks);
+                          }}
+                          placeholder="port"
+                          className="input font-mono text-sm w-24"
+                        />
+                        <input
+                          type="text"
+                          value={check.name || ''}
+                          onChange={(e) => {
+                            const newChecks = [...editCertChecks];
+                            newChecks[i] = { ...check, name: e.target.value };
+                            setEditCertChecks(newChecks);
+                          }}
+                          placeholder="label (optional)"
+                          className="input text-sm w-32"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setEditCertChecks(editCertChecks.filter((_, j) => j !== i))}
+                          className="text-red-400 hover:text-red-300 p-1"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500">No certificate checks configured. Agent will check TLS cert expiry.</p>
+                )}
               </div>
             </div>
             <div className="flex gap-2 justify-end mt-6">

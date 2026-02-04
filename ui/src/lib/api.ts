@@ -472,6 +472,41 @@ export interface ExposedPort {
   protocol: 'tcp' | 'udp';
 }
 
+// Agent health check types
+export interface TCPCheckConfig {
+  host: string;
+  port: number;
+  name?: string;
+}
+
+export interface TCPCheckResult {
+  host: string;
+  port: number;
+  name?: string;
+  success: boolean;
+  durationMs: number;
+  error?: string;
+}
+
+export interface CertCheckConfig {
+  host: string;
+  port: number;
+  name?: string;
+}
+
+export interface CertCheckResult {
+  host: string;
+  port: number;
+  name?: string;
+  success: boolean;
+  durationMs: number;
+  expiresAt?: string;
+  daysUntilExpiry?: number;
+  issuer?: string;
+  subject?: string;
+  error?: string;
+}
+
 export interface Service {
   id: string;
   name: string;
@@ -513,6 +548,13 @@ export interface Service {
       description: string | null;
     }>;
   } | null;
+  // Agent-performed health checks
+  tcpChecks: string | null; // JSON array of TCPCheckConfig
+  agentTcpCheckResults: string | null; // JSON array of TCPCheckResult
+  agentTcpCheckedAt: string | null;
+  certChecks: string | null; // JSON array of CertCheckConfig
+  agentCertCheckResults: string | null; // JSON array of CertCheckResult
+  agentCertCheckedAt: string | null;
 }
 
 export interface ServiceWithServer extends Service {
@@ -582,6 +624,8 @@ export interface ServiceUpdate {
   autoUpdate?: boolean;
   containerImageId?: string;
   serviceTypeId?: string | null;
+  tcpChecks?: string | null;
+  certChecks?: string | null;
 }
 
 // Audit Logs
