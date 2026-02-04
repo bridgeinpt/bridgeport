@@ -36,7 +36,6 @@ import {
   type ServiceType,
 } from '../lib/api';
 import { DependencyEditor } from '../components/DependencyEditor';
-import { HealthConfigEditor } from '../components/HealthConfigEditor';
 import Pagination from '../components/Pagination';
 import { usePagination } from '../hooks/usePagination';
 import { useAppStore } from '../lib/store';
@@ -978,27 +977,125 @@ export default function ServiceDetail() {
           )}
         </div>
 
-        {/* Health Check Config Card */}
+        {/* Config Files Card */}
         <div className="panel">
-          <h3 className="text-lg font-semibold text-white mb-4">Health Check Config</h3>
-          <p className="text-sm text-slate-400 mb-4">
-            Configure how health checks work during orchestrated deployments.
-          </p>
-          {service && (
-            <HealthConfigEditor
-              serviceId={id!}
-              initialConfig={{
-                healthWaitMs: service.healthWaitMs ?? 30000,
-                healthRetries: service.healthRetries ?? 3,
-                healthIntervalMs: service.healthIntervalMs ?? 5000,
-              }}
-              onUpdate={() => {
-                // Refresh service to get updated health config
-                if (id) {
-                  getService(id).then(({ service }) => setService(service));
-                }
-              }}
-            />
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-white">Config Files</h3>
+            <div className="flex gap-2">
+              {attachedFiles.length > 0 && (
+                <button
+                  onClick={handleSyncFiles}
+                  disabled={syncing}
+                  className="btn btn-secondary text-sm"
+                >
+                  {syncing ? 'Syncing...' : 'Sync'}
+                </button>
+              )}
+              <button onClick={openAttachFile} className="btn btn-ghost text-sm">
+                Attach
+              </button>
+            </div>
+          </div>
+
+          {/* Sync Results */}
+          {syncResults && (
+            <div className="mb-4 p-3 bg-slate-800/50 rounded-lg border border-slate-700">
+              <p className="text-sm text-slate-400 mb-2">Sync Results:</p>
+              <div className="space-y-1">
+                {syncResults.map((result, i) => (
+                  <div key={i} className="flex items-center gap-2 text-sm">
+                    {result.success ? (
+                      <span className="text-green-400">✓</span>
+                    ) : (
+                      <span className="text-red-400">✕</span>
+                    )}
+                    <span className="text-white">{result.file}</span>
+                    <span className="text-slate-500">→</span>
+                    <code className="text-slate-400 text-xs">{result.targetPath}</code>
+                    {result.error && (
+                      <span className="text-red-400 text-xs">({result.error})</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={() => setSyncResults(null)}
+                className="mt-2 text-xs text-slate-400 hover:text-white"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {attachedFiles.length > 0 ? (
+            <div className="space-y-2">
+              {attachedFiles.map((file) => (
+                <div
+                  key={file.id}
+                  className="flex items-center justify-between p-2 bg-slate-800/50 rounded-lg"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-white text-sm">{file.configFile.name}</span>
+                      {file.configFile.isBinary && (
+                        <span className="px-1 py-0.5 text-xs bg-purple-900/30 text-purple-400 rounded">
+                          bin
+                        </span>
+                      )}
+                    </div>
+                    {editingMountPath === file.configFileId ? (
+                      <div className="flex items-center gap-2 mt-1">
+                        <input
+                          type="text"
+                          value={editMountPathValue}
+                          onChange={(e) => setEditMountPathValue(e.target.value)}
+                          onKeyDown={(e) => handleMountPathKeyDown(e, file.configFileId)}
+                          onBlur={() => saveMountPath(file.configFileId)}
+                          disabled={savingMountPath}
+                          autoFocus
+                          className="flex-1 bg-slate-900 border border-primary-500 rounded px-2 py-0.5 text-green-400 font-mono text-xs focus:outline-none"
+                        />
+                      </div>
+                    ) : (
+                      <code
+                        className="text-xs text-green-400 cursor-pointer hover:text-green-300"
+                        onClick={() => startEditMountPath(file.configFileId, file.targetPath)}
+                        title="Click to edit"
+                      >
+                        {file.targetPath}
+                      </code>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {!file.configFile.isBinary && (
+                      <button
+                        onClick={() => handleViewFileContent(file.configFileId, file.configFile.name, file.configFile.filename)}
+                        className="p-1 text-slate-400 hover:text-primary-400"
+                        title="View"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleDetachFile(file.configFileId)}
+                      className="p-1 text-slate-400 hover:text-red-400"
+                      title="Detach"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-slate-400 text-sm">
+              No config files attached.
+            </p>
           )}
         </div>
       </div>
@@ -1100,132 +1197,6 @@ export default function ServiceDetail() {
           )}
         </div>
       )}
-
-      {/* Config Files - Moved up per plan */}
-      <div className="panel mb-5">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white">Config Files</h3>
-          <div className="flex gap-2">
-            {attachedFiles.length > 0 && (
-              <button
-                onClick={handleSyncFiles}
-                disabled={syncing}
-                className="btn btn-secondary"
-              >
-                {syncing ? 'Syncing...' : 'Sync to Server'}
-              </button>
-            )}
-            <button onClick={openAttachFile} className="btn btn-ghost">
-              Attach File
-            </button>
-          </div>
-        </div>
-
-        {/* Sync Results */}
-        {syncResults && (
-          <div className="mb-4 p-3 bg-slate-800/50 rounded-lg border border-slate-700">
-            <p className="text-sm text-slate-400 mb-2">Sync Results:</p>
-            <div className="space-y-1">
-              {syncResults.map((result, i) => (
-                <div key={i} className="flex items-center gap-2 text-sm">
-                  {result.success ? (
-                    <span className="text-green-400">✓</span>
-                  ) : (
-                    <span className="text-red-400">✕</span>
-                  )}
-                  <span className="text-white">{result.file}</span>
-                  <span className="text-slate-500">→</span>
-                  <code className="text-slate-400 text-xs">{result.targetPath}</code>
-                  {result.error && (
-                    <span className="text-red-400 text-xs">({result.error})</span>
-                  )}
-                </div>
-              ))}
-            </div>
-            <button
-              onClick={() => setSyncResults(null)}
-              className="mt-2 text-xs text-slate-400 hover:text-white"
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
-
-        {attachedFiles.length > 0 ? (
-          <div className="space-y-2">
-            {attachedFiles.map((file) => (
-              <div
-                key={file.id}
-                className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg"
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-white font-medium">{file.configFile.name}</span>
-                    <span className="text-xs text-slate-500">({file.configFile.filename})</span>
-                    {file.configFile.isBinary && (
-                      <span className="px-1.5 py-0.5 text-xs bg-purple-900/30 text-purple-400 rounded" title={file.configFile.mimeType || 'Binary file'}>
-                        binary
-                      </span>
-                    )}
-                  </div>
-                  {editingMountPath === file.configFileId ? (
-                    <div className="flex items-center gap-2 mt-1">
-                      <input
-                        type="text"
-                        value={editMountPathValue}
-                        onChange={(e) => setEditMountPathValue(e.target.value)}
-                        onKeyDown={(e) => handleMountPathKeyDown(e, file.configFileId)}
-                        onBlur={() => saveMountPath(file.configFileId)}
-                        disabled={savingMountPath}
-                        autoFocus
-                        className="flex-1 bg-slate-900 border border-primary-500 rounded px-2 py-0.5 text-green-400 font-mono text-sm focus:outline-none focus:ring-1 focus:ring-primary-500"
-                      />
-                    </div>
-                  ) : (
-                    <code
-                      className="text-sm text-green-400 cursor-pointer hover:text-green-300 group flex items-center gap-1"
-                      onClick={() => startEditMountPath(file.configFileId, file.targetPath)}
-                      title="Click to edit mount path"
-                    >
-                      {file.targetPath}
-                      <svg className="w-3 h-3 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                      </svg>
-                    </code>
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  {!file.configFile.isBinary && (
-                    <button
-                      onClick={() => handleViewFileContent(file.configFileId, file.configFile.name, file.configFile.filename)}
-                      className="p-1 text-slate-400 hover:text-primary-400"
-                      title="View Content"
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                      </svg>
-                    </button>
-                  )}
-                  <button
-                    onClick={() => handleDetachFile(file.configFileId)}
-                    className="p-1 text-slate-400 hover:text-red-400"
-                    title="Detach"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-slate-400 text-sm">
-            No config files attached. Attach files to sync docker-compose, Caddyfile, certificates, etc.
-          </p>
-        )}
-      </div>
 
       {/* Deployment History */}
       <div className="panel">
