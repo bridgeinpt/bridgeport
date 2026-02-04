@@ -538,6 +538,55 @@ POST   /api/settings/system/reset             # Reset to defaults
 - **Audit**: All sensitive actions logged
 - **Secret Reveal Control**: Per-environment and per-secret visibility restrictions
 
+## Backing Up BridgePort
+
+All BridgePort data is stored in a single SQLite database file, including:
+
+- Server, service, and environment configurations
+- Config files (text and binary, stored as base64)
+- Secrets and SSH keys (encrypted)
+- Audit logs and metrics history
+- User accounts and backup schedules
+
+### What to Backup
+
+1. **Database file** - Location defined by `DATABASE_URL` (e.g., `/data/bridgeport.db`)
+2. **MASTER_KEY** - Store securely and separately (password manager, secrets vault)
+
+> **Warning**: Without the `MASTER_KEY`, encrypted data (secrets, SSH keys, registry credentials) cannot be decrypted. The database alone is not sufficient for a full restore.
+
+### Backup Methods
+
+**Simple file copy** (while BridgePort is stopped):
+```bash
+docker compose stop
+cp /opt/bridgeport/data/bridgeport.db /backups/bridgeport-$(date +%Y%m%d).db
+docker compose start
+```
+
+**SQLite online backup** (no downtime):
+```bash
+sqlite3 /opt/bridgeport/data/bridgeport.db ".backup '/backups/bridgeport-$(date +%Y%m%d).db'"
+```
+
+**Automated with cron**:
+```bash
+0 2 * * * sqlite3 /opt/bridgeport/data/bridgeport.db ".backup '/backups/bridgeport-$(date +\%Y\%m\%d).db'"
+```
+
+### Restoring
+
+1. Stop BridgePort
+2. Replace the database file with your backup
+3. Ensure `MASTER_KEY` in `.env` matches the key used when the backup was created
+4. Start BridgePort
+
+```bash
+docker compose stop
+cp /backups/bridgeport-20250101.db /opt/bridgeport/data/bridgeport.db
+docker compose start
+```
+
 ## CLI Tool
 
 BridgePort includes a command-line interface for managing infrastructure from the terminal.
