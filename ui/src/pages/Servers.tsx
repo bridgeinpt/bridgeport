@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useAppStore } from '../lib/store';
-import { listServers, checkServerHealth, discoverContainers, createServer, type Server } from '../lib/api';
+import { useAppStore } from '../lib/store.js';
+import { listServers, checkServerHealth, discoverContainers, createServer, type Server } from '../lib/api.js';
 import { formatDistanceToNow } from 'date-fns';
-import { Modal } from '../components/Modal';
-import Pagination from '../components/Pagination';
-import { usePagination } from '../hooks/usePagination';
+import { Modal } from '../components/Modal.js';
+import Pagination from '../components/Pagination.js';
+import { usePagination } from '../hooks/usePagination.js';
+import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
+import { EmptyState } from '../components/EmptyState.js';
 
 export default function Servers() {
   const { selectedEnvironment } = useAppStore();
@@ -96,18 +98,7 @@ export default function Servers() {
   } = usePagination({ data: servers, defaultPageSize: 25 });
 
   if (loading) {
-    return (
-      <div className="p-6">
-        <div className="animate-pulse">
-          <div className="h-7 w-32 bg-slate-700 rounded mb-5"></div>
-          <div className="space-y-4">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="h-20 bg-slate-800 rounded-lg"></div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
+    return <LoadingSkeleton rows={3} rowHeight="h-20" />;
   }
 
   return (
@@ -276,10 +267,10 @@ export default function Servers() {
         ))}
 
         {servers.length === 0 && (
-          <div className="panel text-center py-12">
-            <p className="text-slate-400">No servers configured</p>
-            <button onClick={() => setShowCreate(true)} className="btn btn-primary mt-4">Add First Server</button>
-          </div>
+          <EmptyState
+            message="No servers configured"
+            action={{ label: 'Add First Server', onClick: () => setShowCreate(true) }}
+          />
         )}
         {servers.length > 0 && (
           <Pagination

@@ -1,14 +1,16 @@
 import { useEffect, useState, useMemo, lazy, Suspense } from 'react';
 import { Link } from 'react-router-dom';
-import { useAppStore } from '../lib/store';
-import { getEnvironment, deployService, getDependencyGraph, type Service, type ExposedPort, type DependencyGraphNode, type DependencyGraphEdge } from '../lib/api';
+import { useAppStore } from '../lib/store.js';
+import { getEnvironment, deployService, getDependencyGraph, type Service, type ExposedPort, type DependencyGraphNode, type DependencyGraphEdge } from '../lib/api.js';
 import { formatDistanceToNow } from 'date-fns';
-import { getContainerStatusColor, getHealthStatusColor } from '../lib/status';
-import { Modal } from '../components/Modal';
-import { CheckIcon, WarningIcon, RefreshIcon } from '../components/Icons';
-import { useToast } from '../components/Toast';
-import Pagination from '../components/Pagination';
-import { usePagination } from '../hooks/usePagination';
+import { getContainerStatusColor, getHealthStatusColor } from '../lib/status.js';
+import { RefreshIcon } from '../components/Icons.js';
+import { useToast } from '../components/Toast.js';
+import Pagination from '../components/Pagination.js';
+import { usePagination } from '../hooks/usePagination.js';
+import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
+import { EmptyState } from '../components/EmptyState.js';
+import { OperationResultsModal, type OperationResult } from '../components/OperationResultsModal.js';
 
 // Lazy load DependencyFlow to avoid loading @xyflow/react (~80KB) until needed
 const DependencyFlow = lazy(() =>
@@ -17,15 +19,6 @@ const DependencyFlow = lazy(() =>
 
 interface ServiceWithServer extends Service {
   serverName: string;
-}
-
-interface DeployResult {
-  serviceId: string;
-  serviceName: string;
-  serverName: string;
-  imageTag: string;
-  success: boolean;
-  error?: string;
 }
 
 function parseExposedPorts(portsJson: string | null): ExposedPort[] {
@@ -59,7 +52,7 @@ export default function Services() {
 
   // Bulk deploy state
   const [bulkDeploying, setBulkDeploying] = useState(false);
-  const [deployResults, setDeployResults] = useState<DeployResult[] | null>(null);
+  const [deployResults, setDeployResults] = useState<OperationResult[] | null>(null);
   const [showDeployResults, setShowDeployResults] = useState(false);
 
   // Dependency graph data
@@ -126,19 +119,19 @@ export default function Services() {
         imageTag: service.latestAvailableTag!,
         pullImage: true,
       }).then(
-        () => ({
-          serviceId: service.id,
-          serviceName: service.name,
-          serverName: service.serverName,
-          imageTag: service.latestAvailableTag!,
-          success: true as const,
+        (): OperationResult => ({
+          id: service.id,
+          label: service.name,
+          sublabel: service.serverName,
+          detail: service.latestAvailableTag!,
+          success: true,
         }),
-        (err) => ({
-          serviceId: service.id,
-          serviceName: service.name,
-          serverName: service.serverName,
-          imageTag: service.latestAvailableTag!,
-          success: false as const,
+        (err): OperationResult => ({
+          id: service.id,
+          label: service.name,
+          sublabel: service.serverName,
+          detail: service.latestAvailableTag!,
+          success: false,
           error: err instanceof Error ? err.message : 'Deploy failed',
         })
       )
@@ -180,18 +173,7 @@ export default function Services() {
   } = usePagination({ data: filteredServices, defaultPageSize: 25 });
 
   if (loading) {
-    return (
-      <div className="p-6">
-        <div className="animate-pulse">
-          <div className="h-7 w-32 bg-slate-700 rounded mb-5"></div>
-          <div className="space-y-4">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="h-20 bg-slate-800 rounded-lg"></div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
+    return <LoadingSkeleton rows={3} rowHeight="h-20" />;
   }
 
   return (
@@ -251,89 +233,17 @@ export default function Services() {
       </div>
 
       {/* Bulk Deploy Results Modal */}
-      <Modal
+      <OperationResultsModal
         isOpen={showDeployResults}
         onClose={() => {
           setShowDeployResults(false);
           setDeployResults(null);
         }}
         title="Bulk Deploy"
-        size="md"
-      >
-        {deployResults === null ? (
-          <div className="flex flex-col items-center justify-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500 mb-4"></div>
-            <p className="text-slate-400">Deploying {servicesWithUpdates.length} services...</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {/* Summary */}
-            <div className={`p-3 rounded-lg ${
-              deployResults.every(r => r.success)
-                ? 'bg-green-500/10 border border-green-500/30'
-                : deployResults.some(r => r.success)
-                ? 'bg-yellow-500/10 border border-yellow-500/30'
-                : 'bg-red-500/10 border border-red-500/30'
-            }`}>
-              <div className="flex items-center gap-2">
-                {deployResults.every(r => r.success) ? (
-                  <CheckIcon className="w-5 h-5 text-green-400" />
-                ) : (
-                  <WarningIcon className="w-5 h-5 text-yellow-400" />
-                )}
-                <span className={
-                  deployResults.every(r => r.success) ? 'text-green-400' :
-                  deployResults.some(r => r.success) ? 'text-yellow-400' : 'text-red-400'
-                }>
-                  {deployResults.filter(r => r.success).length} of {deployResults.length} deployed successfully
-                </span>
-              </div>
-            </div>
-
-            {/* Results List */}
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {deployResults.map((result) => (
-                <div
-                  key={result.serviceId}
-                  className={`p-2 rounded-lg text-sm ${
-                    result.success ? 'bg-slate-800/50' : 'bg-red-500/10'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="text-white">{result.serviceName}</span>
-                      <span className="text-slate-500 mx-2">on</span>
-                      <span className="text-slate-400">{result.serverName}</span>
-                      <span className="text-slate-500 mx-2">→</span>
-                      <span className="font-mono text-primary-400">{result.imageTag}</span>
-                    </div>
-                    {result.success ? (
-                      <CheckIcon className="w-4 h-4 text-green-400" />
-                    ) : (
-                      <WarningIcon className="w-4 h-4 text-red-400" />
-                    )}
-                  </div>
-                  {result.error && (
-                    <p className="text-red-400 text-xs mt-1">{result.error}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            <div className="flex justify-end">
-              <button
-                onClick={() => {
-                  setShowDeployResults(false);
-                  setDeployResults(null);
-                }}
-                className="btn btn-primary"
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        )}
-      </Modal>
+        loadingMessage="Deploying services..."
+        loadingCount={servicesWithUpdates.length}
+        results={deployResults}
+      />
 
       {activeTab === 'dependencies' ? (
         <Suspense
@@ -474,12 +384,10 @@ export default function Services() {
             />
           </div>
         ) : (
-          <div className="text-center py-12">
-            <p className="text-slate-400">No services discovered</p>
-            <p className="text-sm text-slate-500 mt-2">
-              Go to a server and click "Discover Containers" to find services
-            </p>
-          </div>
+          <EmptyState
+            message="No services discovered"
+            description="Go to a server and click 'Discover Containers' to find services"
+          />
         )}
       </div>
       )}

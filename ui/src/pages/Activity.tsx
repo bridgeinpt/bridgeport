@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
-import { useAppStore } from '../lib/store';
-import { getAuditLogs, type AuditLog } from '../lib/api';
+import { useAppStore } from '../lib/store.js';
+import { getAuditLogs, type AuditLog } from '../lib/api.js';
 import { formatDistanceToNow } from 'date-fns';
+import { ChevronDownIcon } from '../components/Icons.js';
+import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
 
 const RESOURCE_TYPES = [
   { value: '', label: 'All Types' },
@@ -52,18 +54,7 @@ export default function Activity() {
   const totalPages = Math.ceil(total / limit);
 
   if (loading && logs.length === 0) {
-    return (
-      <div className="p-8">
-        <div className="animate-pulse">
-          <div className="h-8 w-48 bg-slate-700 rounded mb-8"></div>
-          <div className="space-y-4">
-            {[1, 2, 3, 4, 5].map((i) => (
-              <div key={i} className="h-16 bg-slate-800 rounded-lg"></div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
+    return <LoadingSkeleton rows={5} rowHeight="h-16" headerWidth="w-48" />;
   }
 
   return (
@@ -165,7 +156,7 @@ export default function Activity() {
                             }
                             className="text-slate-400 hover:text-white"
                           >
-                            <ChevronIcon
+                            <ChevronDownIcon
                               className={`w-5 h-5 transition-transform ${
                                 expandedLog === log.id ? 'rotate-180' : ''
                               }`}
@@ -227,13 +218,5 @@ export default function Activity() {
         )}
       </div>
     </div>
-  );
-}
-
-function ChevronIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-    </svg>
   );
 }

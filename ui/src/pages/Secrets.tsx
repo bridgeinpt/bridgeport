@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useAppStore, useAuthStore, isAdmin } from '../lib/store';
+import { useAppStore, useAuthStore, isAdmin } from '../lib/store.js';
 import {
   listSecrets,
   createSecret,
@@ -10,13 +10,15 @@ import {
   getEnvironmentSettings,
   updateEnvironmentSettings,
   type Secret,
-} from '../lib/api';
+} from '../lib/api.js';
 import { formatDistanceToNow } from 'date-fns';
-import { Modal } from '../components/Modal';
-import { ConfirmDialog } from '../components/ConfirmDialog';
-import { LockIcon, LinkIcon, WarningIcon } from '../components/Icons';
-import Pagination from '../components/Pagination';
-import { usePagination } from '../hooks/usePagination';
+import { Modal } from '../components/Modal.js';
+import { ConfirmDialog } from '../components/ConfirmDialog.js';
+import { LockIcon, LinkIcon, WarningIcon } from '../components/Icons.js';
+import Pagination from '../components/Pagination.js';
+import { usePagination } from '../hooks/usePagination.js';
+import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
+import { EmptyState } from '../components/EmptyState.js';
 
 export default function Secrets() {
   const { selectedEnvironment } = useAppStore();
@@ -163,18 +165,7 @@ export default function Secrets() {
   } = usePagination({ data: secrets, defaultPageSize: 25 });
 
   if (loading) {
-    return (
-      <div className="p-6">
-        <div className="animate-pulse">
-          <div className="h-7 w-32 bg-slate-700 rounded mb-5"></div>
-          <div className="space-y-4">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="h-16 bg-slate-800 rounded-lg"></div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
+    return <LoadingSkeleton rows={3} rowHeight="h-16" />;
   }
 
   // Find unused secrets for the warning banner
@@ -488,15 +479,10 @@ export default function Secrets() {
         ))}
 
         {secrets.length === 0 && (
-          <div className="panel text-center py-12">
-            <p className="text-slate-400">No secrets configured</p>
-            <button
-              onClick={() => setShowCreate(true)}
-              className="btn btn-primary mt-4"
-            >
-              Add First Secret
-            </button>
-          </div>
+          <EmptyState
+            message="No secrets configured"
+            action={{ label: 'Add First Secret', onClick: () => setShowCreate(true) }}
+          />
         )}
         {secrets.length > 0 && (
           <Pagination

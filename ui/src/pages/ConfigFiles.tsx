@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useAppStore } from '../lib/store';
+import { useAppStore } from '../lib/store.js';
 import {
   listConfigFiles,
   getConfigFile,
@@ -13,14 +13,17 @@ import {
   type ConfigFile,
   type FileHistoryEntry,
   type ConfigFileSyncResult,
-} from '../lib/api';
+} from '../lib/api.js';
 import { formatDistanceToNow, format } from 'date-fns';
-import { Modal } from '../components/Modal';
-import { ConfirmDialog } from '../components/ConfirmDialog';
-import { getSyncStatusColor } from '../lib/status';
-import { RefreshIcon, CheckIcon, WarningIcon } from '../components/Icons';
-import Pagination from '../components/Pagination';
-import { usePagination } from '../hooks/usePagination';
+import { Modal } from '../components/Modal.js';
+import { ConfirmDialog } from '../components/ConfirmDialog.js';
+import { getSyncStatusColor } from '../lib/status.js';
+import { RefreshIcon } from '../components/Icons.js';
+import Pagination from '../components/Pagination.js';
+import { usePagination } from '../hooks/usePagination.js';
+import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
+import { EmptyState } from '../components/EmptyState.js';
+import { OperationResultsModal, type OperationResult } from '../components/OperationResultsModal.js';
 
 interface ServiceOption {
   id: string;
@@ -60,7 +63,7 @@ export default function ConfigFiles() {
   const [uploadDescription, setUploadDescription] = useState('');
   const [uploading, setUploading] = useState(false);
   const [syncingFile, setSyncingFile] = useState<ConfigFile | null>(null);
-  const [syncResults, setSyncResults] = useState<ConfigFileSyncResult[] | null>(null);
+  const [syncResults, setSyncResults] = useState<OperationResult[] | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<ConfigFile | null>(null);
 
   useEffect(() => {
@@ -147,15 +150,22 @@ export default function ConfigFiles() {
     setSyncResults(null);
     try {
       const { results } = await syncConfigFileToAll(file.id);
-      setSyncResults(results);
+      // Transform ConfigFileSyncResult to OperationResult
+      const operationResults: OperationResult[] = results.map((r: ConfigFileSyncResult) => ({
+        id: r.serviceId || r.serviceName,
+        label: r.serverName,
+        sublabel: r.serviceName,
+        detail: r.targetPath,
+        success: r.success,
+        error: r.error,
+      }));
+      setSyncResults(operationResults);
       // Reload config files to update sync status
       await loadConfigFiles();
     } catch (err) {
       setSyncResults([{
-        serviceId: '',
-        serviceName: '',
-        serverName: '',
-        targetPath: '',
+        id: 'error',
+        label: 'Sync failed',
         success: false,
         error: err instanceof Error ? err.message : 'Sync failed',
       }]);
@@ -268,18 +278,7 @@ export default function ConfigFiles() {
   }
 
   if (loading) {
-    return (
-      <div className="p-6">
-        <div className="animate-pulse">
-          <div className="h-7 w-48 bg-slate-700 rounded mb-5"></div>
-          <div className="space-y-4">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="h-24 bg-slate-800 rounded-lg"></div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
+    return <LoadingSkeleton rows={3} rowHeight="h-24" headerWidth="w-48" />;
   }
 
   return (
@@ -736,87 +735,16 @@ export default function ConfigFiles() {
       />
 
       {/* Sync Results Modal */}
-      <Modal
+      <OperationResultsModal
         isOpen={!!syncingFile}
         onClose={() => {
           setSyncingFile(null);
           setSyncResults(null);
         }}
         title={`Sync: ${syncingFile?.name || ''}`}
-        size="md"
-      >
-        {syncResults === null ? (
-          <div className="flex flex-col items-center justify-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500 mb-4"></div>
-            <p className="text-slate-400">Syncing to all attached services...</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {/* Summary */}
-            <div className={`p-3 rounded-lg ${
-              syncResults.every(r => r.success)
-                ? 'bg-green-500/10 border border-green-500/30'
-                : syncResults.some(r => r.success)
-                ? 'bg-yellow-500/10 border border-yellow-500/30'
-                : 'bg-red-500/10 border border-red-500/30'
-            }`}>
-              <div className="flex items-center gap-2">
-                {syncResults.every(r => r.success) ? (
-                  <CheckIcon className="w-5 h-5 text-green-400" />
-                ) : (
-                  <WarningIcon className="w-5 h-5 text-yellow-400" />
-                )}
-                <span className={
-                  syncResults.every(r => r.success) ? 'text-green-400' :
-                  syncResults.some(r => r.success) ? 'text-yellow-400' : 'text-red-400'
-                }>
-                  {syncResults.filter(r => r.success).length} of {syncResults.length} synced successfully
-                </span>
-              </div>
-            </div>
-
-            {/* Results List */}
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {syncResults.map((result, i) => (
-                <div
-                  key={i}
-                  className={`p-2 rounded-lg text-sm ${
-                    result.success ? 'bg-slate-800/50' : 'bg-red-500/10'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="text-white">{result.serverName}</span>
-                      <span className="text-slate-500"> / </span>
-                      <span className="text-primary-400">{result.serviceName}</span>
-                    </div>
-                    {result.success ? (
-                      <CheckIcon className="w-4 h-4 text-green-400" />
-                    ) : (
-                      <WarningIcon className="w-4 h-4 text-red-400" />
-                    )}
-                  </div>
-                  {result.error && (
-                    <p className="text-red-400 text-xs mt-1">{result.error}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            <div className="flex justify-end">
-              <button
-                onClick={() => {
-                  setSyncingFile(null);
-                  setSyncResults(null);
-                }}
-                className="btn btn-primary"
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        )}
-      </Modal>
+        loadingMessage="Syncing to all attached services..."
+        results={syncResults}
+      />
 
       {/* Filters */}
       <div className="mb-5 flex items-center gap-6 flex-wrap">
@@ -952,14 +880,12 @@ export default function ConfigFiles() {
         )}
 
         {configFiles.length === 0 && (
-          <div className="col-span-full panel text-center py-12">
-            <p className="text-slate-400">No config files yet</p>
-            <p className="text-slate-500 text-sm mt-2">
-              Store docker-compose files, Caddyfiles, certificates, and more
-            </p>
-            <button onClick={() => setShowCreate(true)} className="btn btn-primary mt-4">
-              Create First Config File
-            </button>
+          <div className="col-span-full">
+            <EmptyState
+              message="No config files yet"
+              description="Store docker-compose files, Caddyfiles, certificates, and more"
+              action={{ label: 'Create First Config File', onClick: () => setShowCreate(true) }}
+            />
           </div>
         )}
       </div>

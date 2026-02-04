@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useAppStore } from '../lib/store';
-import { useToast } from '../components/Toast';
+import { useAppStore } from '../lib/store.js';
+import { useToast } from '../components/Toast.js';
 import {
   listDatabases,
   createDatabase,
@@ -13,10 +13,13 @@ import {
   type Database,
   type DatabaseInput,
   type Server,
-} from '../lib/api';
+} from '../lib/api.js';
 import { formatDistanceToNow } from 'date-fns';
-import Pagination from '../components/Pagination';
-import { usePagination } from '../hooks/usePagination';
+import Pagination from '../components/Pagination.js';
+import { usePagination } from '../hooks/usePagination.js';
+import { DatabaseIcon } from '../components/Icons.js';
+import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
+import { EmptyState } from '../components/EmptyState.js';
 
 const DATABASE_TYPES = [
   { value: 'postgres', label: 'PostgreSQL' },
@@ -245,18 +248,7 @@ export default function Databases() {
   }
 
   if (loading) {
-    return (
-      <div className="p-6">
-        <div className="animate-pulse">
-          <div className="h-7 w-48 bg-slate-700 rounded mb-5"></div>
-          <div className="space-y-4">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="h-24 bg-slate-800 rounded-lg"></div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
+    return <LoadingSkeleton rows={3} rowHeight="h-24" headerWidth="w-48" />;
   }
 
   return (
@@ -741,16 +733,12 @@ export default function Databases() {
 
       {/* Databases List */}
       {databases.length === 0 ? (
-        <div className="panel text-center py-12">
-          <DatabaseIcon className="w-12 h-12 text-slate-500 mx-auto mb-4" />
-          <p className="text-slate-400 mb-4">No databases configured</p>
-          <p className="text-slate-500 text-sm mb-4">
-            Add a database to start managing backups
-          </p>
-          <button onClick={() => setShowCreate(true)} className="btn btn-primary">
-            Add Your First Database
-          </button>
-        </div>
+        <EmptyState
+          icon={DatabaseIcon}
+          message="No databases configured"
+          description="Add a database to start managing backups"
+          action={{ label: 'Add Your First Database', onClick: () => setShowCreate(true) }}
+        />
       ) : (
         <div className="space-y-4">
           {paginatedData.map((db) => (
@@ -865,18 +853,5 @@ export default function Databases() {
         </div>
       )}
     </div>
-  );
-}
-
-function DatabaseIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"
-      />
-    </svg>
   );
 }

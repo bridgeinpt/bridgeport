@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useAppStore } from '../lib/store';
-import { useToast } from '../components/Toast';
+import { useAppStore } from '../lib/store.js';
+import { useToast } from '../components/Toast.js';
 import {
   listRegistryConnections,
   createRegistryConnection,
@@ -14,10 +14,13 @@ import {
   type RegistryConnection,
   type RegistryConnectionInput,
   type RegistryService,
-} from '../lib/api';
+} from '../lib/api.js';
 import { formatDistanceToNow } from 'date-fns';
-import Pagination from '../components/Pagination';
-import { usePagination } from '../hooks/usePagination';
+import Pagination from '../components/Pagination.js';
+import { usePagination } from '../hooks/usePagination.js';
+import { RegistryIcon } from '../components/Icons.js';
+import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
+import { EmptyState } from '../components/EmptyState.js';
 
 const REGISTRY_TYPES = [
   { value: 'digitalocean', label: 'DigitalOcean', url: 'https://api.digitalocean.com/v2/registry' },
@@ -277,23 +280,14 @@ export default function Registries() {
       </div>
 
       {loading ? (
-        <div className="panel">
-          <div className="animate-pulse space-y-4">
-            <div className="h-12 bg-slate-700 rounded"></div>
-            <div className="h-12 bg-slate-700 rounded"></div>
-          </div>
-        </div>
+        <LoadingSkeleton rows={2} rowHeight="h-12" />
       ) : registries.length === 0 ? (
-        <div className="panel text-center py-12">
-          <RegistryIcon className="w-12 h-12 text-slate-500 mx-auto mb-4" />
-          <p className="text-slate-400 mb-4">No registry connections configured</p>
-          <p className="text-slate-500 text-sm mb-4">
-            Connect a container registry to enable automatic update checking for services
-          </p>
-          <button onClick={openCreate} className="btn btn-primary">
-            Add Your First Registry
-          </button>
-        </div>
+        <EmptyState
+          icon={RegistryIcon}
+          message="No registry connections configured"
+          description="Connect a container registry to enable automatic update checking for services"
+          action={{ label: 'Add Your First Registry', onClick: openCreate }}
+        />
       ) : (
         <div className="space-y-4">
           {paginatedData.map((registry) => (
@@ -654,18 +648,5 @@ export default function Registries() {
         </div>
       )}
     </div>
-  );
-}
-
-function RegistryIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
-      />
-    </svg>
   );
 }
