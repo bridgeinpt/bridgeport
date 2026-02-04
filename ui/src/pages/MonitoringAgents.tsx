@@ -8,6 +8,7 @@ import {
   testServerSSH,
   updateServerMetricsMode,
   regenerateAgentToken,
+  removeAgent,
   type AgentInfo,
   type AgentEvent,
   type MetricsMode,
@@ -37,6 +38,7 @@ export default function MonitoringAgents() {
   const [testResults, setTestResults] = useState<Record<string, { success: boolean; durationMs: number; error?: string }>>({});
   const [changingMode, setChangingMode] = useState<string | null>(null);
   const [regenerating, setRegenerating] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
   const [agentEvents, setAgentEvents] = useState<AgentEvent[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
@@ -123,6 +125,26 @@ export default function MonitoringAgents() {
       // Error is handled by API client
     } finally {
       setRegenerating(null);
+    }
+  };
+
+  const handleRemoveAgent = async (serverId: string, serverName: string) => {
+    if (!confirm(`This will stop and remove the monitoring agent from ${serverName}. Continue?`)) {
+      return;
+    }
+    setRemoving(serverId);
+    try {
+      await removeAgent(serverId);
+      await fetchData();
+      // Close expanded row if this agent was expanded
+      if (expandedAgent === serverId) {
+        setExpandedAgent(null);
+        setAgentEvents([]);
+      }
+    } catch (e) {
+      // Error is handled by API client
+    } finally {
+      setRemoving(null);
     }
   };
 
@@ -418,14 +440,24 @@ export default function MonitoringAgents() {
                       </td>
                       <td className="py-3">
                         {agent.metricsMode === 'agent' && (
-                          <button
-                            onClick={() => handleRegenerateToken(agent.id)}
-                            disabled={regenerating === agent.id}
-                            className="btn btn-secondary px-2 py-1 text-xs"
-                            title="Regenerate token and redeploy agent"
-                          >
-                            {regenerating === agent.id ? 'Regenerating...' : 'Regenerate Token'}
-                          </button>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleRegenerateToken(agent.id)}
+                              disabled={regenerating === agent.id || removing === agent.id}
+                              className="btn btn-secondary px-2 py-1 text-xs"
+                              title="Regenerate token and redeploy agent"
+                            >
+                              {regenerating === agent.id ? 'Regenerating...' : 'Regenerate Token'}
+                            </button>
+                            <button
+                              onClick={() => handleRemoveAgent(agent.id, agent.name)}
+                              disabled={removing === agent.id || regenerating === agent.id}
+                              className="btn btn-danger px-2 py-1 text-xs"
+                              title="Stop and remove agent"
+                            >
+                              {removing === agent.id ? 'Removing...' : 'Remove'}
+                            </button>
+                          </div>
                         )}
                       </td>
                     </tr>
