@@ -34,9 +34,34 @@ export interface SSHClientOptions {
   privateKey?: string | Buffer; // Direct key content (takes precedence over path)
 }
 
-// Check if hostname refers to localhost
+/**
+ * Docker host gateway IPs that should be treated as remote SSH targets, not localhost.
+ * When BridgePort runs in a container and needs to manage its host, it connects
+ * via the Docker bridge gateway IP.
+ */
+const HOST_GATEWAY_IPS = [
+  '172.17.0.1',           // Default Docker bridge network gateway (Linux)
+  'host.docker.internal', // Docker Desktop (Mac/Windows) and Linux with extra_hosts
+];
+
+/**
+ * Check if hostname refers to localhost.
+ * Docker host gateway IPs (172.17.0.1, host.docker.internal) are NOT considered localhost
+ * because they represent the container's host machine accessible via SSH.
+ */
 export function isLocalhost(hostname: string): boolean {
+  // Host gateway IPs should use SSH, not local execution
+  if (HOST_GATEWAY_IPS.includes(hostname)) {
+    return false;
+  }
   return hostname === '127.0.0.1' || hostname === 'localhost' || hostname === '::1';
+}
+
+/**
+ * Check if hostname is a Docker host gateway (for connecting to host from container)
+ */
+export function isHostGateway(hostname: string): boolean {
+  return HOST_GATEWAY_IPS.includes(hostname);
 }
 
 // Local command execution (for localhost without SSH)

@@ -1,16 +1,19 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppStore } from '../lib/store.js';
-import { listServers, checkServerHealth, discoverContainers, createServer, type Server } from '../lib/api.js';
+import { listServers, checkServerHealth, discoverContainers, createServer, getHostInfo, registerHost, type Server, type HostInfo } from '../lib/api.js';
 import { formatDistanceToNow } from 'date-fns';
 import { Modal } from '../components/Modal.js';
 import Pagination from '../components/Pagination.js';
 import { usePagination } from '../hooks/usePagination.js';
 import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
 import { EmptyState } from '../components/EmptyState.js';
+import { Alert } from '../components/Alert.js';
+import { useToast } from '../components/Toast.js';
 
 export default function Servers() {
   const { selectedEnvironment } = useAppStore();
+  const toast = useToast();
   const [servers, setServers] = useState<Server[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -20,15 +23,39 @@ export default function Servers() {
   const [newHostname, setNewHostname] = useState('');
   const [newPublicIp, setNewPublicIp] = useState('');
   const [newTags, setNewTags] = useState('');
+  const [hostInfo, setHostInfo] = useState<HostInfo | null>(null);
+  const [hostBannerDismissed, setHostBannerDismissed] = useState(false);
+  const [registeringHost, setRegisteringHost] = useState(false);
 
   useEffect(() => {
     if (selectedEnvironment?.id) {
       setLoading(true);
-      listServers(selectedEnvironment.id)
-        .then(({ servers }) => setServers(servers))
+      Promise.all([
+        listServers(selectedEnvironment.id),
+        getHostInfo(selectedEnvironment.id).catch(() => null),
+      ])
+        .then(([serversRes, hostInfoRes]) => {
+          setServers(serversRes.servers);
+          setHostInfo(hostInfoRes);
+        })
         .finally(() => setLoading(false));
     }
   }, [selectedEnvironment?.id]);
+
+  const handleRegisterHost = async () => {
+    if (!selectedEnvironment?.id || !hostInfo?.detected) return;
+    setRegisteringHost(true);
+    try {
+      const { server } = await registerHost(selectedEnvironment.id);
+      setServers((prev) => [...prev, server]);
+      setHostInfo((prev) => prev ? { ...prev, registered: true, serverId: server.id } : null);
+      toast.success('Host server registered successfully');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to register host');
+    } finally {
+      setRegisteringHost(false);
+    }
+  };
 
   const handleHealthCheck = async (serverId: string) => {
     setActionLoading(serverId);
@@ -109,6 +136,47 @@ export default function Servers() {
         </p>
         <button onClick={() => setShowCreate(true)} className="btn btn-primary">Add Server</button>
       </div>
+
+      {/* Host Detection Banner */}
+      {hostInfo?.detected && !hostInfo.registered && !hostBannerDismissed && (
+        <Alert
+          variant={hostInfo.sshReachable ? 'info' : 'warning'}
+          className="mb-4"
+          onDismiss={() => setHostBannerDismissed(true)}
+        >
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">
+                {hostInfo.sshReachable
+                  ? 'Docker host detected and reachable'
+                  : 'Docker host detected but SSH not reachable'}
+              </p>
+              <p className="text-sm opacity-80 mt-0.5">
+                {hostInfo.sshReachable ? (
+                  <>
+                    Gateway IP: <code className="bg-black/20 px-1 rounded">{hostInfo.gatewayIp}</code>.
+                    Add it to manage services on this machine.
+                  </>
+                ) : (
+                  <>
+                    {hostInfo.sshError || 'SSH connection failed'}.
+                    Ensure SSH is configured and the host allows connections from the container network.
+                  </>
+                )}
+              </p>
+            </div>
+            {hostInfo.sshReachable && (
+              <button
+                onClick={handleRegisterHost}
+                disabled={registeringHost}
+                className="btn btn-primary btn-sm whitespace-nowrap"
+              >
+                {registeringHost ? 'Adding...' : 'Add Host Server'}
+              </button>
+            )}
+          </div>
+        </Alert>
+      )}
 
       {/* Create Server Modal */}
       <Modal
@@ -211,12 +279,19 @@ export default function Servers() {
                   }`}
                 />
                 <div>
-                  <Link
-                    to={`/servers/${server.id}`}
-                    className="text-lg font-semibold text-white hover:text-primary-400"
-                  >
-                    {server.name}
-                  </Link>
+                  <div className="flex items-center gap-2">
+                    <Link
+                      to={`/servers/${server.id}`}
+                      className="text-lg font-semibold text-white hover:text-primary-400"
+                    >
+                      {server.name}
+                    </Link>
+                    {server.serverType === 'host' && (
+                      <span className="px-1.5 py-0.5 bg-purple-500/20 text-purple-400 text-xs font-medium rounded">
+                        Host
+                      </span>
+                    )}
+                  </div>
                   <div className="flex items-center gap-4 mt-1 text-sm text-slate-400">
                     <span className="font-mono">{server.hostname}</span>
                     {server.publicIp && (

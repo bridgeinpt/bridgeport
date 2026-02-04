@@ -207,6 +207,43 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
     }
   );
 
+  // Delete SSH key for environment (admin only)
+  fastify.delete(
+    '/api/environments/:id/ssh',
+    { preHandler: [fastify.authenticate, requireAdmin] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      const environment = await prisma.environment.findUnique({
+        where: { id },
+      });
+
+      if (!environment) {
+        return reply.code(404).send({ error: 'Environment not found' });
+      }
+
+      await prisma.environment.update({
+        where: { id },
+        data: {
+          sshPrivateKey: null,
+          sshUser: 'root',
+        },
+      });
+
+      await logAudit({
+        action: 'update',
+        resourceType: 'environment',
+        resourceId: id,
+        resourceName: environment.name,
+        details: { sshKeyDeleted: true },
+        userId: request.authUser!.id,
+        environmentId: id,
+      });
+
+      return { success: true, message: 'SSH key removed' };
+    }
+  );
+
   // Get SSH key for CLI access (admin only)
   // This endpoint returns the actual private key for CLI tools to use
   fastify.get(

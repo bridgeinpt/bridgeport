@@ -12,6 +12,7 @@ import {
 } from '../services/servers.js';
 import { logAudit } from '../services/audit.js';
 import { deployAgent, removeAgent, checkAgentStatus } from '../services/agent-deploy.js';
+import { getHostInfo, registerHostServer } from '../services/host-detection.js';
 import { prisma } from '../lib/db.js';
 
 const createServerSchema = z.object({
@@ -47,6 +48,10 @@ const importTerraformSchema = z.object({
       ).optional(),
     })
   ),
+});
+
+const registerHostSchema = z.object({
+  name: z.string().min(1).default('host'),
 });
 
 export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
@@ -411,6 +416,53 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
           agentToken: updated.agentToken,
         },
       };
+    }
+  );
+
+  // Get host detection info for environment
+  // Detects Docker host gateway and checks SSH reachability
+  fastify.get(
+    '/api/environments/:envId/host-info',
+    { preHandler: [fastify.authenticate] },
+    async (request) => {
+      const { envId } = request.params as { envId: string };
+      const hostInfo = await getHostInfo(envId);
+      return hostInfo;
+    }
+  );
+
+  // Register Docker host as a server
+  // Creates a server entry for managing the host machine from inside a container
+  fastify.post(
+    '/api/environments/:envId/servers/register-host',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { envId } = request.params as { envId: string };
+      const body = registerHostSchema.safeParse(request.body || {});
+
+      if (!body.success) {
+        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
+      }
+
+      const result = await registerHostServer(envId, body.data.name);
+
+      if (!result.success) {
+        return reply.code(400).send({ error: result.error });
+      }
+
+      const server = await getServer(result.serverId!);
+
+      await logAudit({
+        action: 'create',
+        resourceType: 'server',
+        resourceId: result.serverId!,
+        resourceName: body.data.name,
+        details: { type: 'host', hostname: server?.hostname },
+        userId: request.authUser!.id,
+        environmentId: envId,
+      });
+
+      return { server, success: true };
     }
   );
 }

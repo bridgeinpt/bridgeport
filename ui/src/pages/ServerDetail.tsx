@@ -470,6 +470,11 @@ export default function ServerDetail() {
               }`}
             />
             <h1 className="text-xl font-bold text-white">{server.name}</h1>
+            {server.serverType === 'host' && (
+              <span className="px-2 py-0.5 bg-purple-500/20 text-purple-400 text-sm font-medium rounded">
+                Host Server
+              </span>
+            )}
           </div>
           <p className="text-slate-400 mt-1">
             {server.hostname}
@@ -775,6 +780,32 @@ export default function ServerDetail() {
             {agentStatus?.metricsMode === 'ssh' && 'Click "Collect Now" to gather metrics.'}
             {agentStatus?.metricsMode === 'agent' && !agentStatus.installed && 'Deploy the agent to start collecting metrics.'}
           </p>
+        )}
+
+        {/* Agent Extraction Helper for Host Servers */}
+        {server.serverType === 'host' && agentStatus?.metricsMode === 'agent' && (
+          <div className="mt-6 p-4 bg-purple-500/10 border border-purple-500/30 rounded-lg">
+            <h4 className="text-sm font-medium text-purple-400 mb-2">
+              Manual Agent Setup (Alternative)
+            </h4>
+            <p className="text-sm text-slate-400 mb-3">
+              For host servers, you can also manually extract and run the agent binary:
+            </p>
+            <div className="space-y-2">
+              <div>
+                <p className="text-xs text-slate-500 mb-1">1. Extract agent from container:</p>
+                <code className="block px-3 py-2 bg-slate-900 rounded text-xs text-slate-300 font-mono overflow-x-auto">
+                  docker cp bridgeport:/app/agent/bridgeport-agent ./bridgeport-agent && chmod +x ./bridgeport-agent
+                </code>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 mb-1">2. Run on host:</p>
+                <code className="block px-3 py-2 bg-slate-900 rounded text-xs text-slate-300 font-mono overflow-x-auto">
+                  ./bridgeport-agent --server http://localhost:3000 --token {agentToken ? agentToken : '<your-token>'}
+                </code>
+              </div>
+            </div>
+          </div>
         )}
       </div>
 

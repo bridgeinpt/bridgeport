@@ -1,3 +1,19 @@
+# BridgePort Docker Compose Configuration
+#
+# Host Server Management:
+# To manage Docker containers on the host machine (where BridgePort runs),
+# the host must have SSH enabled and allow connections from the Docker network.
+# BridgePort auto-detects the Docker gateway IP (172.17.0.1 or host.docker.internal)
+# and can SSH to the host like any other server.
+#
+# Requirements for host management:
+# 1. SSH server running on host (sshd)
+# 2. Firewall allows connections from 172.17.0.0/16
+# 3. SSH key authorized in host's ~/.ssh/authorized_keys
+#
+# Alternative: For monitoring-only, extract the agent from the container:
+#   docker cp bridgeport:/app/agent/bridgeport-agent ./bridgeport-agent
+
 services:
   bridgeport:
     image: registry.digitalocean.com/bios-registry/bridgeport:latest
@@ -17,6 +33,8 @@ services:
     volumes:
       - ./data:/data
       - /root/.ssh/bios-infra:/app/.ssh/bios-infra:ro
+      # SSH keys can also be configured via the UI (Settings > SSH Configuration)
+      # The UI-configured key is encrypted and stored in the database
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 30s

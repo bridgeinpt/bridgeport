@@ -72,6 +72,7 @@ model Server {
   publicIp      String? // Reserved IP if applicable
   tags          String // JSON array of tags
   status        String    @default("unknown") // healthy, unhealthy, unknown
+  serverType    String    @default("remote") // "remote" | "host" - host servers connect via Docker gateway
   lastCheckedAt DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt

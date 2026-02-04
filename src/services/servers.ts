@@ -95,7 +95,13 @@ export async function updateServer(
 export async function getServer(serverId: string): Promise<ServerWithServices | null> {
   return prisma.server.findUnique({
     where: { id: serverId },
-    include: { services: true },
+    include: {
+      services: {
+        include: {
+          containerImage: true,
+        },
+      },
+    },
   });
 }
 

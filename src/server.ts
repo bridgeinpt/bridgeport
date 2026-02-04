@@ -12,6 +12,7 @@ import { initializeDatabase, disconnectDatabase } from './lib/db.js';
 import authenticatePlugin from './plugins/authenticate.js';
 import { authRoutes } from './routes/auth.js';
 import { bootstrapAdminUser } from './services/auth.js';
+import { bootstrapManagementEnvironment } from './services/host-detection.js';
 import { startScheduler, stopScheduler } from './lib/scheduler.js';
 import { environmentRoutes } from './routes/environments.js';
 import { serverRoutes } from './routes/servers.js';
@@ -71,6 +72,9 @@ async function buildServer() {
 
   // Bootstrap admin user from env vars (if configured and no users exist)
   await bootstrapAdminUser(config.ADMIN_EMAIL, config.ADMIN_PASSWORD);
+
+  // Bootstrap management environment with host server
+  await bootstrapManagementEnvironment();
 
   // Initialize notification types
   await initializeNotificationTypes();

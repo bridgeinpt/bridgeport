@@ -8,11 +8,14 @@ import {
   listDatabases,
   getSchedulerConfig,
   updateSchedulerConfig,
+  getSshStatus,
   type Server,
   type Database,
   type SchedulerConfig,
+  type SshStatus,
 } from '../lib/api';
 import { useToast } from '../components/Toast';
+import { SshKeyModal } from '../components/SshKeyModal';
 
 interface EnvironmentSettings {
   allowSecretReveal: boolean;
@@ -44,6 +47,9 @@ export default function Settings() {
   const [schedulerConfig, setSchedulerConfig] = useState<SchedulerConfig | null>(null);
   const [monitoringExpanded, setMonitoringExpanded] = useState(false);
   const [savingScheduler, setSavingScheduler] = useState(false);
+  const [sshStatus, setSshStatus] = useState<SshStatus | null>(null);
+  const [sshModalOpen, setSshModalOpen] = useState(false);
+  const [servers, setServers] = useState<Server[]>([]);
 
   useEffect(() => {
     if (selectedEnvironment?.id) {
@@ -55,15 +61,18 @@ export default function Settings() {
     if (!selectedEnvironment?.id) return;
     setLoading(true);
     try {
-      const [settingsRes, serversRes, databasesRes, schedulerRes] = await Promise.all([
+      const [settingsRes, serversRes, databasesRes, schedulerRes, sshRes] = await Promise.all([
         getEnvironmentSettings(selectedEnvironment.id),
         listServers(selectedEnvironment.id),
         listDatabases(selectedEnvironment.id),
         getSchedulerConfig(selectedEnvironment.id),
+        getSshStatus(selectedEnvironment.id),
       ]);
 
       setSettings(settingsRes.settings);
       setSchedulerConfig(schedulerRes.config);
+      setSshStatus(sshRes);
+      setServers(serversRes.servers);
 
       // Calculate module status
       const servers = serversRes.servers as Array<Server & { metricsMode?: string }>;
@@ -301,6 +310,66 @@ export default function Settings() {
           )}
         </div>
       </div>
+
+      {/* SSH Configuration */}
+      <div className="card mb-6">
+        <h3 className="text-lg font-semibold text-white mb-4">SSH Configuration</h3>
+        <div className="p-4 bg-slate-800 rounded-lg">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium text-white">SSH Key</p>
+              <p className="text-sm text-slate-400">
+                {sshStatus?.configured ? (
+                  <>
+                    Configured (user: <span className="text-white">{sshStatus.sshUser}</span>)
+                  </>
+                ) : (
+                  'Not configured. Required for SSH-based operations.'
+                )}
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className={`px-2 py-1 rounded text-xs font-medium ${
+                sshStatus?.configured
+                  ? 'bg-green-500/20 text-green-400'
+                  : 'bg-yellow-500/20 text-yellow-400'
+              }`}>
+                {sshStatus?.configured ? 'Configured' : 'Not Set'}
+              </span>
+              {isAdmin(user) && (
+                <button
+                  onClick={() => setSshModalOpen(true)}
+                  className="btn btn-secondary btn-sm"
+                >
+                  {sshStatus?.configured ? 'Update' : 'Configure'}
+                </button>
+              )}
+            </div>
+          </div>
+          {!sshStatus?.configured && (
+            <p className="text-xs text-slate-500 mt-3">
+              SSH access is required for server health checks, deployments, metrics collection, and agent deployment.
+            </p>
+          )}
+        </div>
+        {!isAdmin(user) && (
+          <p className="text-sm text-slate-500 mt-4">
+            Only administrators can configure SSH settings.
+          </p>
+        )}
+      </div>
+
+      {/* SSH Key Modal */}
+      <SshKeyModal
+        isOpen={sshModalOpen}
+        onClose={() => setSshModalOpen(false)}
+        onUpdate={() => {
+          loadData();
+          setSshModalOpen(false);
+        }}
+        currentSshUser={sshStatus?.sshUser || 'root'}
+        testServerId={servers.length > 0 ? servers[0].id : undefined}
+      />
 
       {/* Monitoring Settings */}
       <div className="card mb-6">

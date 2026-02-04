@@ -63,7 +63,11 @@ services:
       - .env
     volumes:
       - ./data:/data
+      # Optional: Mount SSH key for host management (set via UI instead if preferred)
+      # - ~/.ssh/id_rsa:/root/.ssh/id_rsa:ro
 ```
+
+> **Note**: SSH keys for server access should be configured via the Settings page in the UI. The key is encrypted and stored in the database. The file mount above is only needed if you prefer to use a file-based key.
 
 Start (admin user created automatically on first boot):
 
@@ -167,6 +171,33 @@ Physical or virtual machines registered in an environment. BridgePort connects v
 - Sync configuration files
 - Check health status
 - Collect metrics (if SSH polling enabled)
+
+#### Managing the Docker Host
+
+When BridgePort runs inside a Docker container, it can manage services on its host machine using SSH through the Docker gateway IP. This allows full management capabilities including deployments, config syncing, and metrics collection.
+
+**Prerequisites:**
+1. SSH server running on the host
+2. SSH connections allowed from Docker network (`172.17.0.0/16`)
+3. The same SSH key used for remote servers authorized on the host
+
+**Setup:**
+1. Go to **Servers** page - a detection banner appears if the host is reachable
+2. Click **Add Host Server** to register it
+3. The host is now manageable like any other server
+
+**Alternative: Agent-Only Monitoring**
+
+For monitoring-only (no deployment capabilities), you can extract and run the agent manually:
+
+```bash
+# Extract agent from BridgePort container
+docker cp bridgeport:/app/agent/bridgeport-agent ./bridgeport-agent
+chmod +x ./bridgeport-agent
+
+# Run on host (get token from BridgePort UI after adding server)
+./bridgeport-agent --server http://localhost:3000 --token <your-token>
+```
 
 ### Services
 Docker containers running on servers. For each service you can:

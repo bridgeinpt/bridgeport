@@ -244,6 +244,47 @@ export const updateEnvironmentSettings = (id: string, settings: Partial<Environm
 export const listSpacesBuckets = (id: string) =>
   api.get<{ buckets: string[] }>(`/environments/${id}/spaces/buckets`);
 
+// SSH Configuration
+export interface SshStatus {
+  configured: boolean;
+  sshUser: string;
+}
+
+export interface SshSettingsInput {
+  sshPrivateKey: string;
+  sshUser?: string;
+}
+
+export const getSshStatus = (envId: string) =>
+  api.get<SshStatus>(`/environments/${envId}/ssh`);
+
+export const updateSshSettings = (envId: string, data: SshSettingsInput) =>
+  api.put<{ success: boolean; message: string }>(`/environments/${envId}/ssh`, data);
+
+export const deleteSshKey = (envId: string) =>
+  api.delete<{ success: boolean; message: string }>(`/environments/${envId}/ssh`);
+
+// Host Detection (for managing Docker host from container)
+export interface HostInfo {
+  detected: boolean;
+  gatewayIp: string | null;
+  sshReachable: boolean;
+  sshError?: string;
+  registered: boolean;
+  serverId?: string;
+  serverName?: string;
+}
+
+export const getHostInfo = (envId: string) =>
+  api.get<HostInfo>(`/environments/${envId}/host-info`);
+
+export interface RegisterHostInput {
+  name?: string;
+}
+
+export const registerHost = (envId: string, data: RegisterHostInput = {}) =>
+  api.post<{ server: Server; success: boolean }>(`/environments/${envId}/servers/register-host`, data);
+
 // Servers
 export const listServers = (envId: string) =>
   api.get<{ servers: Server[] }>(`/environments/${envId}/servers`);
@@ -416,6 +457,7 @@ export interface Server {
   publicIp: string | null;
   tags: string;
   status: string;
+  serverType: 'remote' | 'host';
   lastCheckedAt: string | null;
   environmentId: string;
 }
