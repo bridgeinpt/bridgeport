@@ -24,6 +24,7 @@ const updateSettingsSchema = z.object({
   agentStaleThresholdMs: z.number().int().min(60000).max(600000).optional(),
   agentOfflineThresholdMs: z.number().int().min(120000).max(900000).optional(),
   doRegistryToken: z.string().nullable().optional().or(z.literal('')),
+  auditLogRetentionDays: z.number().int().min(0).max(3650).optional(), // 0 = forever, max 10 years
 });
 
 /**

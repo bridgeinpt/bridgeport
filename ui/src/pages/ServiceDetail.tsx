@@ -862,6 +862,10 @@ export default function ServiceDetail() {
               <dt className="text-slate-400">Container</dt>
               <dd className="text-white font-mono">{service.containerName}</dd>
             </div>
+            <div>
+              <dt className="text-slate-400">Type</dt>
+              <dd className="text-white">{service.serviceType?.displayName || 'Generic'}</dd>
+            </div>
             {/* Exposed Ports */}
             <div>
               <dt className="text-slate-400">Ports</dt>

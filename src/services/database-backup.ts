@@ -526,15 +526,23 @@ async function executeBackup(backupId: string): Promise<void> {
 
     // For SQLite + Spaces, download the dump from server before disconnecting
     if (sqliteServerTempPath && tempPath) {
-      const downloadResult = await client.exec(`cat "${sqliteServerTempPath}" | base64`);
-      if (downloadResult.code !== 0) {
-        throw new Error(`Failed to download backup from server: ${downloadResult.stderr}`);
+      // Check if server and local paths are the same (localhost case)
+      const isLocalExecution = client instanceof LocalClient;
+
+      if (isLocalExecution && sqliteServerTempPath === tempPath) {
+        // Paths are the same on localhost - file is already in place, no need to download
+        // Don't delete since we need it for S3 upload
+      } else {
+        const downloadResult = await client.exec(`cat "${sqliteServerTempPath}" | base64`);
+        if (downloadResult.code !== 0) {
+          throw new Error(`Failed to download backup from server: ${downloadResult.stderr}`);
+        }
+        const fileContent = Buffer.from(downloadResult.stdout.trim(), 'base64');
+        const { writeFile } = await import('fs/promises');
+        await writeFile(tempPath, fileContent);
+        // Clean up server temp file (only if different from local temp)
+        await client.exec(`rm -f "${sqliteServerTempPath}"`);
       }
-      const fileContent = Buffer.from(downloadResult.stdout.trim(), 'base64');
-      const { writeFile } = await import('fs/promises');
-      await writeFile(tempPath, fileContent);
-      // Clean up server temp file
-      await client.exec(`rm -f "${sqliteServerTempPath}"`);
     }
 
     client.disconnect();

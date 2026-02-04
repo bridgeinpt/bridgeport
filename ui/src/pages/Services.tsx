@@ -301,6 +301,7 @@ export default function Services() {
                 <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
                   <th className="pb-3 font-medium">Service</th>
                   <th className="pb-3 font-medium">Server</th>
+                  <th className="pb-3 font-medium">Type</th>
                   <th className="pb-3 font-medium">Image</th>
                   <th className="pb-3 font-medium">Ports</th>
                   <th className="pb-3 font-medium">Container</th>
@@ -357,6 +358,9 @@ export default function Services() {
                         >
                           {service.serverName}
                         </Link>
+                      </td>
+                      <td className="py-4 text-sm text-slate-400">
+                        {service.serviceType?.displayName || 'Generic'}
                       </td>
                       <td className="py-4 font-mono text-sm">
                         <span className="text-slate-400">

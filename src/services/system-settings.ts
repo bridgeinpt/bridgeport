@@ -21,6 +21,7 @@ export const SYSTEM_SETTINGS_DEFAULTS = {
   agentStaleThresholdMs: 180000,
   agentOfflineThresholdMs: 300000,
   doRegistryToken: null as string | null,
+  auditLogRetentionDays: 90,
 };
 
 /**
@@ -79,6 +80,7 @@ export async function resetSystemSettings(): Promise<SystemSettings> {
       agentStaleThresholdMs: SYSTEM_SETTINGS_DEFAULTS.agentStaleThresholdMs,
       agentOfflineThresholdMs: SYSTEM_SETTINGS_DEFAULTS.agentOfflineThresholdMs,
       doRegistryToken: null,
+      auditLogRetentionDays: SYSTEM_SETTINGS_DEFAULTS.auditLogRetentionDays,
     },
   });
   return cachedSettings;

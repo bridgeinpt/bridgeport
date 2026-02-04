@@ -16,6 +16,7 @@ interface FormData {
   agentStaleThresholdSec: number;
   agentOfflineThresholdSec: number;
   doRegistryToken: string;
+  auditLogRetentionDays: number;
 }
 
 interface Defaults {
@@ -31,6 +32,7 @@ interface Defaults {
   defaultLogLines: number;
   agentStaleThresholdMs: number;
   agentOfflineThresholdMs: number;
+  auditLogRetentionDays: number;
 }
 
 function msToSec(ms: number): number {
@@ -58,6 +60,102 @@ function formatDelaysMs(delaysSec: string): string {
   return JSON.stringify(delays);
 }
 
+// Collapsible section component
+function SettingsSection({
+  title,
+  icon,
+  children,
+  defaultExpanded = false,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+  defaultExpanded?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+
+  return (
+    <section className="card overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between p-5 hover:bg-slate-800/50 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <div className="text-slate-400">{icon}</div>
+          <h2 className="text-lg font-semibold text-white">{title}</h2>
+        </div>
+        <svg
+          className={`w-5 h-5 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {expanded && <div className="px-5 pb-5 pt-0">{children}</div>}
+    </section>
+  );
+}
+
+// Icons
+function SSHIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className || "w-5 h-5"} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+    </svg>
+  );
+}
+
+function WebhookIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className || "w-5 h-5"} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+    </svg>
+  );
+}
+
+function RegistryIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className || "w-5 h-5"} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+    </svg>
+  );
+}
+
+function AgentIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className || "w-5 h-5"} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+    </svg>
+  );
+}
+
+function DatabaseIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className || "w-5 h-5"} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+    </svg>
+  );
+}
+
+function LimitsIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className || "w-5 h-5"} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+    </svg>
+  );
+}
+
+function RetentionIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className || "w-5 h-5"} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  );
+}
+
 export default function SystemSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -80,6 +178,7 @@ export default function SystemSettings() {
     agentStaleThresholdSec: 180,
     agentOfflineThresholdSec: 300,
     doRegistryToken: '',
+    auditLogRetentionDays: 90,
   });
   const [doRegistryTokenSet, setDoRegistryTokenSet] = useState(false);
 
@@ -108,6 +207,7 @@ export default function SystemSettings() {
         agentStaleThresholdSec: msToSec(settings.agentStaleThresholdMs),
         agentOfflineThresholdSec: msToSec(settings.agentOfflineThresholdMs),
         doRegistryToken: '',
+        auditLogRetentionDays: settings.auditLogRetentionDays,
       });
       setDoRegistryTokenSet(settings.doRegistryTokenSet);
     } catch (err) {
@@ -138,6 +238,7 @@ export default function SystemSettings() {
         agentCallbackUrl: formData.agentCallbackUrl || null,
         agentStaleThresholdMs: secToMs(formData.agentStaleThresholdSec),
         agentOfflineThresholdMs: secToMs(formData.agentOfflineThresholdSec),
+        auditLogRetentionDays: formData.auditLogRetentionDays,
       };
       // Only include doRegistryToken if it was changed (non-empty)
       if (formData.doRegistryToken) {
@@ -181,6 +282,7 @@ export default function SystemSettings() {
         agentStaleThresholdSec: msToSec(settings.agentStaleThresholdMs),
         agentOfflineThresholdSec: msToSec(settings.agentOfflineThresholdMs),
         doRegistryToken: '',
+        auditLogRetentionDays: settings.auditLogRetentionDays,
       });
       setDoRegistryTokenSet(settings.doRegistryTokenSet);
 
@@ -225,10 +327,9 @@ export default function SystemSettings() {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-8">
+      <form onSubmit={handleSubmit} className="space-y-4">
         {/* SSH Configuration */}
-        <section className="card p-5">
-          <h2 className="text-lg font-semibold text-white mb-4">SSH Configuration</h2>
+        <SettingsSection title="SSH Configuration" icon={<SSHIcon />}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm text-slate-400 mb-1">
@@ -265,11 +366,10 @@ export default function SystemSettings() {
               </p>
             </div>
           </div>
-        </section>
+        </SettingsSection>
 
         {/* Webhook Delivery */}
-        <section className="card p-5">
-          <h2 className="text-lg font-semibold text-white mb-4">Webhook Delivery</h2>
+        <SettingsSection title="Webhook Delivery" icon={<WebhookIcon />}>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm text-slate-400 mb-1">Max Retries</label>
@@ -319,11 +419,10 @@ export default function SystemSettings() {
               </p>
             </div>
           </div>
-        </section>
+        </SettingsSection>
 
         {/* Registry Configuration */}
-        <section className="card p-5">
-          <h2 className="text-lg font-semibold text-white mb-4">Registry Configuration</h2>
+        <SettingsSection title="Registry Configuration" icon={<RegistryIcon />}>
           <div>
             <label className="block text-sm text-slate-400 mb-1">
               DigitalOcean Registry Token
@@ -347,11 +446,10 @@ export default function SystemSettings() {
               Leave empty to keep current value. Falls back to DO_REGISTRY_TOKEN env var if not set.
             </p>
           </div>
-        </section>
+        </SettingsSection>
 
         {/* Agent Configuration */}
-        <section className="card p-5">
-          <h2 className="text-lg font-semibold text-white mb-4">Agent Configuration</h2>
+        <SettingsSection title="Agent Configuration" icon={<AgentIcon />}>
           <p className="text-slate-400 text-sm mb-4">
             Configure monitoring agents that push metrics from servers
           </p>
@@ -410,11 +508,10 @@ export default function SystemSettings() {
               </div>
             </div>
           </div>
-        </section>
+        </SettingsSection>
 
         {/* Database Backup */}
-        <section className="card p-5">
-          <h2 className="text-lg font-semibold text-white mb-4">Database Backup</h2>
+        <SettingsSection title="Database Backup" icon={<DatabaseIcon />}>
           <div>
             <label className="block text-sm text-slate-400 mb-1">
               pg_dump Timeout
@@ -432,11 +529,10 @@ export default function SystemSettings() {
               Max time for database backup execution (default: {defaults ? msToSec(defaults.pgDumpTimeoutMs) : 300}s / {defaults ? msToSec(defaults.pgDumpTimeoutMs) / 60 : 5} min)
             </p>
           </div>
-        </section>
+        </SettingsSection>
 
         {/* Limits */}
-        <section className="card p-5">
-          <h2 className="text-lg font-semibold text-white mb-4">Limits</h2>
+        <SettingsSection title="Limits" icon={<LimitsIcon />}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm text-slate-400 mb-1">
@@ -507,7 +603,30 @@ export default function SystemSettings() {
               </p>
             </div>
           </div>
-        </section>
+        </SettingsSection>
+
+        {/* Retention Policies */}
+        <SettingsSection title="Retention Policies" icon={<RetentionIcon />}>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">
+                Audit Log Retention
+                <span className="text-slate-500 ml-1">(days)</span>
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={3650}
+                value={formData.auditLogRetentionDays}
+                onChange={(e) => updateField('auditLogRetentionDays', parseInt(e.target.value) || 90)}
+                className="input w-full"
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                Days to keep audit logs (default: {defaults?.auditLogRetentionDays || 90} days, 0 = keep forever)
+              </p>
+            </div>
+          </div>
+        </SettingsSection>
 
         {/* Actions */}
         <div className="flex items-center justify-between pt-4">

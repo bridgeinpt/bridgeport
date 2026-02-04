@@ -730,6 +730,9 @@ model SystemSettings {
   // Registry Configuration
   doRegistryToken String? // DigitalOcean registry API token
 
+  // Retention Policies
+  auditLogRetentionDays Int @default(90) // Days to keep audit logs (0 = forever)
+
   updatedAt DateTime @updatedAt
 }
 

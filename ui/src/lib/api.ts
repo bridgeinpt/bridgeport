@@ -1584,6 +1584,7 @@ export interface SystemSettings {
   agentOfflineThresholdMs: number;
   doRegistryToken: string | null; // Masked value (last 4 chars) or null
   doRegistryTokenSet: boolean;
+  auditLogRetentionDays: number;
   updatedAt: string;
 }
 
@@ -1600,6 +1601,7 @@ export interface SystemSettingsDefaults {
   defaultLogLines: number;
   agentStaleThresholdMs: number;
   agentOfflineThresholdMs: number;
+  auditLogRetentionDays: number;
 }
 
 export interface SystemSettingsInput {
@@ -1617,6 +1619,7 @@ export interface SystemSettingsInput {
   agentStaleThresholdMs?: number;
   agentOfflineThresholdMs?: number;
   doRegistryToken?: string | null;
+  auditLogRetentionDays?: number;
 }
 
 export const getSystemSettings = () =>
