@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppStore } from '../lib/store';
-import { getEnvironment, deployService, getDependencyGraph, type Service, type ExposedPort, type DependencyGraphNode } from '../lib/api';
+import { getEnvironment, deployService, getDependencyGraph, type Service, type ExposedPort, type DependencyGraphNode, type DependencyGraphEdge } from '../lib/api';
 import { formatDistanceToNow } from 'date-fns';
 import { getContainerStatusColor, getHealthStatusColor } from '../lib/status';
 import { Modal } from '../components/Modal';
@@ -9,6 +9,7 @@ import { CheckIcon, WarningIcon, RefreshIcon } from '../components/Icons';
 import { useToast } from '../components/Toast';
 import Pagination from '../components/Pagination';
 import { usePagination } from '../hooks/usePagination';
+import { DependencyFlow } from '../components/DependencyFlow';
 
 interface ServiceWithServer extends Service {
   serverName: string;
@@ -43,19 +44,25 @@ function formatPorts(ports: ExposedPort[], maxDisplay = 2): string {
   return displayed.join(', ');
 }
 
+type TabType = 'list' | 'dependencies';
+
 export default function Services() {
   const { selectedEnvironment, servicesShowUpdatesOnly, setServicesShowUpdatesOnly } = useAppStore();
   const toast = useToast();
   const [services, setServices] = useState<ServiceWithServer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<TabType>('list');
 
   // Bulk deploy state
   const [bulkDeploying, setBulkDeploying] = useState(false);
   const [deployResults, setDeployResults] = useState<DeployResult[] | null>(null);
   const [showDeployResults, setShowDeployResults] = useState(false);
 
-  // Dependency graph nodes for indicators
+  // Dependency graph data
   const [dependencyNodes, setDependencyNodes] = useState<Map<string, DependencyGraphNode>>(new Map());
+  const [graphNodes, setGraphNodes] = useState<DependencyGraphNode[]>([]);
+  const [graphEdges, setGraphEdges] = useState<DependencyGraphEdge[]>([]);
+  const [deploymentOrder, setDeploymentOrder] = useState<string[][]>([]);
 
   useEffect(() => {
     if (selectedEnvironment?.id) {
@@ -75,6 +82,11 @@ export default function Services() {
             });
           });
           setServices(allServices);
+
+          // Store full graph data for visualization
+          setGraphNodes(graph.nodes);
+          setGraphEdges(graph.edges);
+          setDeploymentOrder(graph.deploymentOrder);
 
           // Build map of dependency nodes
           const nodeMap = new Map<string, DependencyGraphNode>();
@@ -180,11 +192,36 @@ export default function Services() {
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-5">
-        <p className="text-slate-400">
-          All services in {selectedEnvironment?.name}
-        </p>
+        <div className="flex items-center gap-6">
+          <p className="text-slate-400">
+            All services in {selectedEnvironment?.name}
+          </p>
+          {/* Tabs */}
+          <div className="flex border border-slate-700 rounded-lg overflow-hidden">
+            <button
+              onClick={() => setActiveTab('list')}
+              className={`px-4 py-1.5 text-sm font-medium transition-colors ${
+                activeTab === 'list'
+                  ? 'bg-slate-700 text-white'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              List
+            </button>
+            <button
+              onClick={() => setActiveTab('dependencies')}
+              className={`px-4 py-1.5 text-sm font-medium transition-colors ${
+                activeTab === 'dependencies'
+                  ? 'bg-slate-700 text-white'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
+            >
+              Dependencies
+            </button>
+          </div>
+        </div>
         <div className="flex items-center gap-4">
-          {servicesWithUpdates.length > 0 && (
+          {activeTab === 'list' && servicesWithUpdates.length > 0 && (
             <>
               <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer">
                 <input
@@ -293,6 +330,13 @@ export default function Services() {
         )}
       </Modal>
 
+      {activeTab === 'dependencies' ? (
+        <DependencyFlow
+          nodes={graphNodes}
+          edges={graphEdges}
+          deploymentOrder={deploymentOrder}
+        />
+      ) : (
       <div className="panel">
         {filteredServices.length > 0 ? (
           <div className="overflow-x-auto">
@@ -425,6 +469,7 @@ export default function Services() {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }
