@@ -692,13 +692,13 @@ async function runAgentStalenessCheck(): Promise<void> {
       }
     }
 
-    // Check for agents that never connected (waiting/deploying with no push)
+    // Check for agents that never connected (waiting/deploying/stale with no push)
     // These should be marked offline if they've been waiting too long
     const waitingServers = await prisma.server.findMany({
       where: {
         metricsMode: 'agent',
         lastAgentPushAt: null, // Never received a push
-        agentStatus: { in: ['waiting', 'deploying'] },
+        agentStatus: { in: ['waiting', 'deploying', 'stale'] },
         agentStatusChangedAt: { not: null }, // Has a status change time to check against
       },
       select: {
