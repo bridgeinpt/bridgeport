@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useAppStore, useAuthStore, isAdmin } from '../lib/store.js';
+import { useAppStore } from '../lib/store.js';
 import {
   listSecrets,
   createSecret,
@@ -8,7 +8,6 @@ import {
   updateSecret,
   deleteSecret,
   getEnvironmentSettings,
-  updateEnvironmentSettings,
   type Secret,
 } from '../lib/api.js';
 import { formatDistanceToNow } from 'date-fns';
@@ -22,7 +21,6 @@ import { EmptyState } from '../components/EmptyState.js';
 
 export default function Secrets() {
   const { selectedEnvironment } = useAppStore();
-  const { user } = useAuthStore();
   const [secrets, setSecrets] = useState<Secret[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -38,9 +36,8 @@ export default function Secrets() {
   const [deleteConfirm, setDeleteConfirm] = useState<Secret | null>(null);
   const [expandedUsage, setExpandedUsage] = useState<Record<string, boolean>>({});
 
-  // Environment settings
+  // Environment settings (for reveal permission check)
   const [allowSecretReveal, setAllowSecretReveal] = useState(true);
-  const [updatingSettings, setUpdatingSettings] = useState(false);
 
   useEffect(() => {
     if (selectedEnvironment?.id) {
@@ -131,20 +128,6 @@ export default function Secrets() {
     setDeleteConfirm(null);
   };
 
-  const handleToggleAllowReveal = async () => {
-    if (!selectedEnvironment?.id) return;
-
-    setUpdatingSettings(true);
-    try {
-      const { settings } = await updateEnvironmentSettings(selectedEnvironment.id, {
-        allowSecretReveal: !allowSecretReveal,
-      });
-      setAllowSecretReveal(settings.allowSecretReveal);
-    } finally {
-      setUpdatingSettings(false);
-    }
-  };
-
   const canReveal = (secret: Secret) => {
     return allowSecretReveal && !secret.neverReveal;
   };
@@ -181,36 +164,6 @@ export default function Secrets() {
           Add Secret
         </button>
       </div>
-
-      {/* Environment Settings (Admin only) */}
-      {isAdmin(user) && (
-        <div className="panel mb-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="font-medium text-white">Secret Reveal Setting</h3>
-              <p className="text-sm text-slate-400">
-                {allowSecretReveal
-                  ? 'Secrets can be revealed in this environment'
-                  : 'Secret reveal is disabled for this environment'}
-              </p>
-            </div>
-            <button
-              onClick={handleToggleAllowReveal}
-              disabled={updatingSettings}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                allowSecretReveal ? 'bg-primary-600' : 'bg-slate-600'
-              }`}
-              aria-label={allowSecretReveal ? 'Disable secret reveal' : 'Enable secret reveal'}
-            >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                  allowSecretReveal ? 'translate-x-6' : 'translate-x-1'
-                }`}
-              />
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Unused Secrets Warning */}
       {unusedSecrets.length > 0 && (
