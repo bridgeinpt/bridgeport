@@ -253,6 +253,13 @@ func getFileDescriptors() (int, int, error) {
 	allocated, _ := strconv.Atoi(fields[0])
 	maximum, _ := strconv.Atoi(fields[2])
 
+	// Cap maximum to max int32 to avoid database overflow issues
+	// When kernel reports "unlimited", it can be a huge number close to max int64
+	const maxSafeValue = 2147483647
+	if maximum > maxSafeValue || maximum < 0 {
+		maximum = maxSafeValue
+	}
+
 	return allocated, maximum, nil
 }
 
