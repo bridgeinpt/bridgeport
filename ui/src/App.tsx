@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './lib/store';
 import { api } from './lib/api';
 import Layout from './components/Layout';
+import AdminLayout from './components/AdminLayout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Servers from './pages/Servers';
@@ -10,10 +11,7 @@ import Services from './pages/Services';
 import ServiceDetail from './pages/ServiceDetail';
 import Secrets from './pages/Secrets';
 import ConfigFiles from './pages/ConfigFiles';
-import Activity from './pages/Activity';
-import About from './pages/About';
 import Registries from './pages/Registries';
-import Users from './pages/Users';
 import Databases from './pages/Databases';
 import DatabaseDetail from './pages/DatabaseDetail';
 import Monitoring from './pages/Monitoring';
@@ -23,14 +21,18 @@ import MonitoringDataStores from './pages/MonitoringDataStores';
 import DataStoreDetail from './pages/DataStoreDetail';
 import Settings from './pages/Settings';
 import Notifications from './pages/Notifications';
-import NotificationSettings from './pages/admin/NotificationSettings';
 import ContainerImages from './pages/ContainerImages';
 import DeploymentPlans from './pages/DeploymentPlans';
 import DeploymentPlanDetail from './pages/DeploymentPlanDetail';
-import ServiceTypes from './pages/settings/ServiceTypes';
-import GlobalSpaces from './pages/settings/GlobalSpaces';
-import SystemSettings from './pages/settings/SystemSettings';
-import CliDownloads from './pages/settings/CliDownloads';
+
+// Admin pages
+import AdminSystemSettings from './pages/admin/SystemSettings';
+import AdminServiceTypes from './pages/admin/ServiceTypes';
+import AdminStorage from './pages/admin/Storage';
+import AdminUsers from './pages/admin/Users';
+import AdminAudit from './pages/admin/Audit';
+import AdminNotificationSettings from './pages/admin/NotificationSettings';
+import AdminAbout from './pages/admin/About';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { token } = useAuthStore();
@@ -49,6 +51,29 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+
+      {/* Admin Routes */}
+      <Route
+        path="/admin/*"
+        element={
+          <ProtectedRoute>
+            <AdminLayout>
+              <Routes>
+                <Route index element={<Navigate to="/admin/system" replace />} />
+                <Route path="system" element={<AdminSystemSettings />} />
+                <Route path="service-types" element={<AdminServiceTypes />} />
+                <Route path="storage" element={<AdminStorage />} />
+                <Route path="users" element={<AdminUsers />} />
+                <Route path="audit" element={<AdminAudit />} />
+                <Route path="notifications" element={<AdminNotificationSettings />} />
+                <Route path="about" element={<AdminAbout />} />
+              </Routes>
+            </AdminLayout>
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Main App Routes */}
       <Route
         path="/*"
         element={
@@ -73,16 +98,8 @@ export default function App() {
                 <Route path="/deployment-plans/:id" element={<DeploymentPlanDetail />} />
                 <Route path="/databases" element={<Databases />} />
                 <Route path="/databases/:id" element={<DatabaseDetail />} />
-                <Route path="/activity" element={<Activity />} />
                 <Route path="/notifications" element={<Notifications />} />
-                <Route path="/users" element={<Users />} />
                 <Route path="/settings" element={<Settings />} />
-                <Route path="/settings/system" element={<SystemSettings />} />
-                <Route path="/settings/service-types" element={<ServiceTypes />} />
-                <Route path="/settings/spaces" element={<GlobalSpaces />} />
-                <Route path="/settings/cli" element={<CliDownloads />} />
-                <Route path="/settings/notifications" element={<NotificationSettings />} />
-                <Route path="/about" element={<About />} />
               </Routes>
             </Layout>
           </ProtectedRoute>

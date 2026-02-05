@@ -12,7 +12,7 @@ import {
 } from '../../lib/api';
 import { useToast } from '../../components/Toast';
 
-export default function GlobalSpaces() {
+export default function Storage() {
   const { user } = useAuthStore();
   const toast = useToast();
   const [config, setConfig] = useState<GlobalSpacesConfig | null>(null);

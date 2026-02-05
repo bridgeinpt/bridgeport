@@ -1,6 +1,5 @@
-import { Link } from 'react-router-dom';
-import { useAuthStore, isAdmin } from '../lib/store';
-import { UserIcon, LogoutIcon, SettingsIcon } from './Icons';
+import { useAuthStore } from '../lib/store';
+import { UserIcon, LogoutIcon } from './Icons';
 import NotificationBell from './NotificationBell';
 import Breadcrumbs from './Breadcrumbs';
 
@@ -18,12 +17,12 @@ function TerminalIcon({ className }: { className?: string }) {
   );
 }
 
-interface TopBarProps {
+interface AdminTopBarProps {
   onOpenAccount: () => void;
   onOpenCLI: () => void;
 }
 
-export default function TopBar({ onOpenAccount, onOpenCLI }: TopBarProps) {
+export default function AdminTopBar({ onOpenAccount, onOpenCLI }: AdminTopBarProps) {
   const { user, logout } = useAuthStore();
 
   return (
@@ -52,16 +51,7 @@ export default function TopBar({ onOpenAccount, onOpenCLI }: TopBarProps) {
 
         {/* Action buttons */}
         <div className="flex items-center gap-1">
-          {isAdmin(user) && (
-            <Link
-              to="/admin"
-              className="icon-btn"
-              title="Admin Settings"
-              aria-label="Admin Settings"
-            >
-              <SettingsIcon className="w-4 h-4" />
-            </Link>
-          )}
+          <NotificationBell />
           <button
             onClick={onOpenCLI}
             className="icon-btn"
@@ -70,7 +60,6 @@ export default function TopBar({ onOpenAccount, onOpenCLI }: TopBarProps) {
           >
             <TerminalIcon className="w-4 h-4" />
           </button>
-          <NotificationBell />
           <button
             onClick={onOpenAccount}
             className="icon-btn"

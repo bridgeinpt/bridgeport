@@ -10,21 +10,22 @@ const routeNames: Record<string, string> = {
   'config-files': 'Config Files',
   'registries': 'Registries',
   'databases': 'Databases',
-  'activity': 'Audit Logs',
-  'users': 'Users',
   'settings': 'Settings',
-  'about': 'About',
   'container-images': 'Container Images',
   'deployment-plans': 'Deployment Plans',
-  'admin': 'Admin',
   'notifications': 'Notifications',
   'monitoring': 'Monitoring',
   'health': 'Health Checks',
   'agents': 'Agents & SSH',
+  'data-stores': 'Data Stores',
+  // Admin routes
+  'admin': 'Admin',
   'system': 'System',
   'service-types': 'Service Types',
-  'spaces': 'Spaces',
-  'cli': 'CLI Tool',
+  'storage': 'Storage',
+  'users': 'Users',
+  'audit': 'Audit',
+  'about': 'About',
 };
 
 interface Crumb {

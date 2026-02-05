@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useAuthStore, useAppStore, isAdmin } from '../lib/store';
 import { listEnvironments, type Environment } from '../lib/api';
 import { AccountModal } from './AccountModal';
+import { CLIModal } from './CLIModal';
 import {
   HomeIcon,
   ServerIcon,
@@ -11,8 +12,6 @@ import {
   FileIcon,
   RegistryIcon,
   DatabaseIcon,
-  ActivityIcon,
-  UsersIcon,
   SettingsIcon,
   ChevronDownIcon,
   ChevronRightIcon,
@@ -20,23 +19,8 @@ import {
   ChartIcon,
   HeartPulseIcon,
   NetworkIcon,
-  CogIcon,
 } from './Icons';
 import TopBar from './TopBar';
-
-// Inline bell icon for navigation (without import conflict)
-function NavBellIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-      />
-    </svg>
-  );
-}
 
 interface NavItem {
   name: string;
@@ -48,7 +32,6 @@ interface NavItem {
 interface NavGroup {
   name: string;
   items: NavItem[];
-  isGlobal?: boolean; // Not dependent on selected environment
 }
 
 // Inline icons for orchestration features
@@ -73,45 +56,6 @@ function PlanIcon({ className }: { className?: string }) {
         strokeLinejoin="round"
         strokeWidth={2}
         d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"
-      />
-    </svg>
-  );
-}
-
-function CommandIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-      />
-    </svg>
-  );
-}
-
-function TerminalIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-      />
-    </svg>
-  );
-}
-
-function CloudIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"
       />
     </svg>
   );
@@ -147,7 +91,6 @@ const navigationGroups: NavGroup[] = [
     name: 'Data',
     items: [
       { name: 'Databases', href: '/databases', icon: DatabaseIcon },
-      { name: 'Audit Logs', href: '/activity', icon: ActivityIcon },
     ],
   },
   {
@@ -158,23 +101,8 @@ const navigationGroups: NavGroup[] = [
       { name: 'Environment', href: '/settings', icon: SettingsIcon },
     ],
   },
-  {
-    name: 'Global Settings',
-    isGlobal: true,
-    items: [
-      { name: 'System', href: '/settings/system', icon: CogIcon, adminOnly: true },
-      { name: 'Service Types', href: '/settings/service-types', icon: CommandIcon, adminOnly: true },
-      { name: 'Spaces', href: '/settings/spaces', icon: CloudIcon, adminOnly: true },
-      { name: 'CLI Tool', href: '/settings/cli', icon: TerminalIcon },
-      { name: 'Users', href: '/users', icon: UsersIcon, adminOnly: true },
-      { name: 'Notifications', href: '/settings/notifications', icon: NavBellIcon, adminOnly: true },
-    ],
-  },
 ];
 
-// Separate environment-dependent and global navigation groups
-const envDependentGroups = navigationGroups.filter(g => !g.isGlobal);
-const globalGroups = navigationGroups.filter(g => g.isGlobal);
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
@@ -182,6 +110,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const { selectedEnvironment, setSelectedEnvironment, clearSelectedEnvironment, sidebarCollapsed, toggleSidebar, collapsedGroups, toggleGroup } = useAppStore();
   const [environments, setEnvironments] = useState<Environment[]>([]);
   const [showAccountModal, setShowAccountModal] = useState(false);
+  const [showCLIModal, setShowCLIModal] = useState(false);
 
   useEffect(() => {
     listEnvironments().then(({ environments }) => {
@@ -254,10 +183,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
         )}
 
-        <nav className="flex-1 p-2 overflow-y-auto min-h-0 flex flex-col">
-          {/* Environment-dependent navigation */}
-          <div className="space-y-3 flex-1">
-            {envDependentGroups.map((group) => {
+        <nav className="flex-1 p-2 overflow-y-auto min-h-0">
+          <div className="space-y-3">
+            {navigationGroups.map((group) => {
               const visibleItems = group.items.filter(
                 (item) => !item.adminOnly || isAdmin(user)
               );
@@ -315,74 +243,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               );
             })}
           </div>
-
-          {/* Visual separator for global settings */}
-          {globalGroups.some(g => g.items.some(item => !item.adminOnly || isAdmin(user))) && (
-            <>
-              <div className="my-3 border-t border-slate-700/50" />
-
-              {/* Global navigation (not environment-dependent) */}
-              <div className="space-y-3">
-                {globalGroups.map((group) => {
-                  const visibleItems = group.items.filter(
-                    (item) => !item.adminOnly || isAdmin(user)
-                  );
-                  if (visibleItems.length === 0) return null;
-
-                  const isGroupCollapsed = collapsedGroups.includes(group.name);
-
-                  return (
-                    <div key={group.name}>
-                      {/* Group header - hidden when sidebar collapsed */}
-                      {!sidebarCollapsed && (
-                        <button
-                          onClick={() => toggleGroup(group.name)}
-                          aria-label={`${isGroupCollapsed ? 'Expand' : 'Collapse'} ${group.name} navigation`}
-                          aria-expanded={!isGroupCollapsed}
-                          className="flex items-center justify-between w-full text-[10px] text-slate-500 uppercase tracking-wider font-medium mb-1 px-2 hover:text-slate-400 transition-colors"
-                        >
-                          <span>{group.name}</span>
-                          {isGroupCollapsed ? (
-                            <ChevronRightIcon className="w-3 h-3" />
-                          ) : (
-                            <ChevronDownIcon className="w-3 h-3" />
-                          )}
-                        </button>
-                      )}
-                      {(!isGroupCollapsed || sidebarCollapsed) && (
-                        <div className="space-y-0.5">
-                          {visibleItems.map((item) => {
-                            const isActive = location.pathname === item.href;
-                            return (
-                              <Link
-                                key={item.name}
-                                to={item.href}
-                                className={`relative flex items-center gap-2 px-2 py-1.5 rounded transition-colors ${
-                                  isActive
-                                    ? 'bg-slate-800 text-white'
-                                    : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-                                } ${sidebarCollapsed ? 'justify-center' : ''}`}
-                                title={sidebarCollapsed ? item.name : undefined}
-                              >
-                                {/* Burgundy accent stripe for active items */}
-                                {isActive && (
-                                  <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-brand-600 rounded-r" />
-                                )}
-                                <item.icon className="w-4 h-4 flex-shrink-0" />
-                                {!sidebarCollapsed && (
-                                  <span className="text-sm">{item.name}</span>
-                                )}
-                              </Link>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
         </nav>
 
         {/* Collapse toggle at bottom */}
@@ -401,7 +261,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       {/* Main content area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top bar */}
-        <TopBar onOpenAccount={() => setShowAccountModal(true)} />
+        <TopBar
+          onOpenAccount={() => setShowAccountModal(true)}
+          onOpenCLI={() => setShowCLIModal(true)}
+        />
 
         {/* Main content */}
         <main className="flex-1 overflow-auto">
@@ -414,6 +277,9 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
       {/* Account Modal */}
       <AccountModal isOpen={showAccountModal} onClose={() => setShowAccountModal(false)} />
+
+      {/* CLI Modal */}
+      <CLIModal isOpen={showCLIModal} onClose={() => setShowCLIModal(false)} />
     </div>
   );
 }

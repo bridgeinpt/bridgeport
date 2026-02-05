@@ -178,4 +178,3 @@ function FileIcon({ className }: { className?: string }) {
     </svg>
   );
 }
-

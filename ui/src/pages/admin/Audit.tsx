@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { useAppStore } from '../lib/store.js';
-import { getAuditLogs, type AuditLog } from '../lib/api.js';
+import { useAppStore } from '../../lib/store';
+import { getAuditLogs, listEnvironments, type AuditLog, type Environment } from '../../lib/api';
 import { formatDistanceToNow } from 'date-fns';
-import { ChevronDownIcon } from '../components/Icons.js';
-import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
+import { ChevronDownIcon } from '../../components/Icons';
+import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 
 const RESOURCE_TYPES = [
   { value: '', label: 'All Types' },
@@ -27,8 +27,8 @@ const ACTION_COLORS: Record<string, string> = {
   import: 'bg-teal-500/20 text-teal-400',
 };
 
-export default function Activity() {
-  const { selectedEnvironment, activityResourceTypeFilter, setActivityResourceTypeFilter } = useAppStore();
+export default function Audit() {
+  const { activityResourceTypeFilter, setActivityResourceTypeFilter } = useAppStore();
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -36,10 +36,21 @@ export default function Activity() {
   const [page, setPage] = useState(0);
   const limit = 20;
 
+  // Filters for admin view
+  const [environments, setEnvironments] = useState<Environment[]>([]);
+  const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<string>('');
+
+  // Load environments on mount
+  useEffect(() => {
+    listEnvironments().then((envsRes) => {
+      setEnvironments(envsRes.environments);
+    });
+  }, []);
+
   useEffect(() => {
     setLoading(true);
     getAuditLogs({
-      environmentId: selectedEnvironment?.id,
+      environmentId: selectedEnvironmentId || undefined,
       resourceType: activityResourceTypeFilter || undefined,
       limit,
       offset: page * limit,
@@ -49,7 +60,7 @@ export default function Activity() {
         setTotal(total);
       })
       .finally(() => setLoading(false));
-  }, [selectedEnvironment?.id, activityResourceTypeFilter, page]);
+  }, [selectedEnvironmentId, activityResourceTypeFilter, page]);
 
   const totalPages = Math.ceil(total / limit);
 
@@ -61,24 +72,42 @@ export default function Activity() {
     <div className="p-6">
       <div className="flex items-center justify-between mb-5">
         <p className="text-slate-400">
-          Track all actions performed in {selectedEnvironment?.name || 'all environments'}
+          Track all actions performed across all environments
         </p>
-        <div className="flex items-center gap-4">
-          <select
-            value={activityResourceTypeFilter}
-            onChange={(e) => {
-              setActivityResourceTypeFilter(e.target.value);
-              setPage(0);
-            }}
-            className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white"
-          >
-            {RESOURCE_TYPES.map((type) => (
-              <option key={type.value} value={type.value}>
-                {type.label}
-              </option>
-            ))}
-          </select>
-        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="flex items-center gap-4 mb-6">
+        <select
+          value={selectedEnvironmentId}
+          onChange={(e) => {
+            setSelectedEnvironmentId(e.target.value);
+            setPage(0);
+          }}
+          className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white"
+        >
+          <option value="">All Environments</option>
+          {environments.map((env) => (
+            <option key={env.id} value={env.id}>
+              {env.name}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={activityResourceTypeFilter}
+          onChange={(e) => {
+            setActivityResourceTypeFilter(e.target.value);
+            setPage(0);
+          }}
+          className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white"
+        >
+          {RESOURCE_TYPES.map((type) => (
+            <option key={type.value} value={type.value}>
+              {type.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div className="card">
@@ -88,6 +117,7 @@ export default function Activity() {
               <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
                 <th className="pb-3 font-medium">Time</th>
                 <th className="pb-3 font-medium">User</th>
+                <th className="pb-3 font-medium">Environment</th>
                 <th className="pb-3 font-medium">Action</th>
                 <th className="pb-3 font-medium">Resource</th>
                 <th className="pb-3 font-medium">Status</th>
@@ -97,7 +127,7 @@ export default function Activity() {
             <tbody className="divide-y divide-slate-700">
               {logs.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-slate-400">
+                  <td colSpan={7} className="py-8 text-center text-slate-400">
                     No activity logs found
                   </td>
                 </tr>
@@ -118,6 +148,11 @@ export default function Activity() {
                       <td className="py-3">
                         <span className="text-white">
                           {log.user?.email || 'System'}
+                        </span>
+                      </td>
+                      <td className="py-3">
+                        <span className="text-slate-400 text-sm">
+                          {log.environment?.name || '-'}
                         </span>
                       </td>
                       <td className="py-3">
@@ -167,7 +202,7 @@ export default function Activity() {
                     </tr>
                     {expandedLog === log.id && (log.details || log.error) && (
                       <tr key={`${log.id}-details`}>
-                        <td colSpan={6} className="py-4 px-4 bg-slate-800/50">
+                        <td colSpan={7} className="py-4 px-4 bg-slate-800/50">
                           {log.error && (
                             <div className="mb-2">
                               <span className="text-red-400 font-medium">Error: </span>

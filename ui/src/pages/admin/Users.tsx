@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useAuthStore, isAdmin } from '../lib/store';
+import { useAuthStore, isAdmin } from '../../lib/store';
 import {
   listUsers,
   getActiveUsers,
@@ -9,9 +9,9 @@ import {
   changeUserPassword,
   type User,
   type UserRole,
-} from '../lib/api';
+} from '../../lib/api';
 import { formatDistanceToNow } from 'date-fns';
-import { PencilIcon, TrashIcon, KeyIcon } from '../components/Icons';
+import { PencilIcon, TrashIcon, KeyIcon } from '../../components/Icons';
 
 const roleLabels: Record<UserRole, string> = {
   admin: 'Admin',
