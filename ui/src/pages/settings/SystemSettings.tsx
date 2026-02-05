@@ -8,6 +8,7 @@ interface FormData {
   activeUserWindowMin: number;
   registryMaxTags: number;
   defaultLogLines: number;
+  publicUrl: string;
   agentCallbackUrl: string;
   agentStaleThresholdSec: number;
   agentOfflineThresholdSec: number;
@@ -88,6 +89,14 @@ function RetentionIcon({ className }: { className?: string }) {
   );
 }
 
+function LinkIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className || "w-5 h-5"} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+    </svg>
+  );
+}
+
 export default function SystemSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -102,6 +111,7 @@ export default function SystemSettings() {
     activeUserWindowMin: 15,
     registryMaxTags: 50,
     defaultLogLines: 50,
+    publicUrl: '',
     agentCallbackUrl: '',
     agentStaleThresholdSec: 180,
     agentOfflineThresholdSec: 300,
@@ -125,6 +135,7 @@ export default function SystemSettings() {
         activeUserWindowMin: settings.activeUserWindowMin,
         registryMaxTags: settings.registryMaxTags,
         defaultLogLines: settings.defaultLogLines,
+        publicUrl: settings.publicUrl || '',
         agentCallbackUrl: settings.agentCallbackUrl || '',
         agentStaleThresholdSec: msToSec(settings.agentStaleThresholdMs),
         agentOfflineThresholdSec: msToSec(settings.agentOfflineThresholdMs),
@@ -151,6 +162,7 @@ export default function SystemSettings() {
         activeUserWindowMin: formData.activeUserWindowMin,
         registryMaxTags: formData.registryMaxTags,
         defaultLogLines: formData.defaultLogLines,
+        publicUrl: formData.publicUrl || null,
         agentCallbackUrl: formData.agentCallbackUrl || null,
         agentStaleThresholdMs: secToMs(formData.agentStaleThresholdSec),
         agentOfflineThresholdMs: secToMs(formData.agentOfflineThresholdSec),
@@ -184,6 +196,7 @@ export default function SystemSettings() {
         activeUserWindowMin: settings.activeUserWindowMin,
         registryMaxTags: settings.registryMaxTags,
         defaultLogLines: settings.defaultLogLines,
+        publicUrl: settings.publicUrl || '',
         agentCallbackUrl: settings.agentCallbackUrl || '',
         agentStaleThresholdSec: msToSec(settings.agentStaleThresholdMs),
         agentOfflineThresholdSec: msToSec(settings.agentOfflineThresholdMs),
@@ -271,15 +284,27 @@ export default function SystemSettings() {
           </div>
         </SettingsSection>
 
-        {/* Agent Configuration */}
-        <SettingsSection title="Agent Configuration" icon={<AgentIcon />}>
-          <p className="text-slate-400 text-sm mb-4">
-            Configure monitoring agents that push metrics from servers
-          </p>
-          <div className="space-y-4">
+        {/* URLs */}
+        <SettingsSection title="URLs" icon={<LinkIcon />}>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm text-slate-400 mb-1">
-                Callback URL
+                Public URL
+              </label>
+              <input
+                type="text"
+                value={formData.publicUrl}
+                onChange={(e) => updateField('publicUrl', e.target.value)}
+                placeholder="https://deploy.example.com"
+                className="input w-full"
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                Public URL for links in email and Slack notifications
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">
+                Agent Callback URL
                 <span className="text-amber-500 ml-1">*</span>
               </label>
               <input
@@ -290,10 +315,16 @@ export default function SystemSettings() {
                 className="input w-full"
               />
               <p className="text-xs text-slate-500 mt-1">
-                Internal URL for agents to reach BridgePort. Use the VPC IP of the BridgePort server.
+                Internal URL for agents to reach BridgePort (VPC IP).
                 <span className="text-amber-500 font-medium"> Required for agent deployment.</span>
               </p>
             </div>
+          </div>
+        </SettingsSection>
+
+        {/* Agent Configuration */}
+        <SettingsSection title="Agent Configuration" icon={<AgentIcon />}>
+          <div className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm text-slate-400 mb-1">

@@ -166,7 +166,7 @@ const navigationGroups: NavGroup[] = [
       { name: 'Spaces', href: '/settings/spaces', icon: CloudIcon, adminOnly: true },
       { name: 'CLI Tool', href: '/settings/cli', icon: TerminalIcon },
       { name: 'Users', href: '/users', icon: UsersIcon, adminOnly: true },
-      { name: 'Notifications', href: '/admin/notifications', icon: NavBellIcon, adminOnly: true },
+      { name: 'Notifications', href: '/settings/notifications', icon: NavBellIcon, adminOnly: true },
     ],
   },
 ];

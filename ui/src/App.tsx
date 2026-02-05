@@ -77,7 +77,7 @@ export default function App() {
                 <Route path="/settings/service-types" element={<ServiceTypes />} />
                 <Route path="/settings/spaces" element={<GlobalSpaces />} />
                 <Route path="/settings/cli" element={<CliDownloads />} />
-                <Route path="/admin/notifications" element={<NotificationSettings />} />
+                <Route path="/settings/notifications" element={<NotificationSettings />} />
                 <Route path="/about" element={<About />} />
               </Routes>
             </Layout>

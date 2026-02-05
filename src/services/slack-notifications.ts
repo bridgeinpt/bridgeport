@@ -494,9 +494,9 @@ export async function dispatchSlackNotification(
     new Map(channelsToNotify.map((c) => [c.id, c])).values()
   );
 
-  // Get BridgePort URL for action buttons
+  // Get BridgePort URL for action buttons (prefer publicUrl over agentCallbackUrl)
   const settings = await getSystemSettings();
-  const bridgeportUrl = settings.agentCallbackUrl || undefined;
+  const bridgeportUrl = settings.publicUrl || undefined;
 
   // Build and send message to each channel
   const results: Array<{ channelId: string; channelName: string; success: boolean; error?: string }> =
@@ -538,9 +538,9 @@ export async function testSlackChannel(
 
   const webhookUrl = decrypt(channel.webhookUrl, channel.webhookUrlNonce);
 
-  // Get BridgePort URL for action buttons
+  // Get BridgePort URL for action buttons (prefer publicUrl over agentCallbackUrl)
   const settings = await getSystemSettings();
-  const bridgeportUrl = settings.agentCallbackUrl || undefined;
+  const bridgeportUrl = settings.publicUrl || undefined;
 
   const testMessage = buildSlackMessage(
     {

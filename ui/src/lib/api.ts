@@ -1784,6 +1784,7 @@ export interface SystemSettings {
   activeUserWindowMin: number;
   registryMaxTags: number;
   defaultLogLines: number;
+  publicUrl: string | null;
   agentCallbackUrl: string | null;
   agentStaleThresholdMs: number;
   agentOfflineThresholdMs: number;
@@ -1820,6 +1821,7 @@ export interface SystemSettingsInput {
   activeUserWindowMin?: number;
   registryMaxTags?: number;
   defaultLogLines?: number;
+  publicUrl?: string | null;
   agentCallbackUrl?: string | null;
   agentStaleThresholdMs?: number;
   agentOfflineThresholdMs?: number;

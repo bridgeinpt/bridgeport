@@ -76,6 +76,7 @@ export async function resetSystemSettings(): Promise<SystemSettings> {
       activeUserWindowMin: SYSTEM_SETTINGS_DEFAULTS.activeUserWindowMin,
       registryMaxTags: SYSTEM_SETTINGS_DEFAULTS.registryMaxTags,
       defaultLogLines: SYSTEM_SETTINGS_DEFAULTS.defaultLogLines,
+      publicUrl: null,
       agentCallbackUrl: null,
       agentStaleThresholdMs: SYSTEM_SETTINGS_DEFAULTS.agentStaleThresholdMs,
       agentOfflineThresholdMs: SYSTEM_SETTINGS_DEFAULTS.agentOfflineThresholdMs,

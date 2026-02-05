@@ -719,10 +719,13 @@ model SystemSettings {
   registryMaxTags     Int @default(50)
   defaultLogLines     Int @default(50)
 
+  // URLs
+  publicUrl        String? // Public URL for links in notifications (e.g., https://deploy.bridgein.com)
+  agentCallbackUrl String? // Internal URL for agents to reach BridgePort (e.g., http://10.30.10.5:3000)
+
   // Agent Configuration
-  agentCallbackUrl        String? // Internal URL for agents to reach BridgePort (e.g., http://10.30.10.5:3000)
-  agentStaleThresholdMs   Int     @default(180000) // 3 min - mark agent as "stale"
-  agentOfflineThresholdMs Int     @default(300000) // 5 min - mark agent as "offline"
+  agentStaleThresholdMs   Int @default(180000) // 3 min - mark agent as "stale"
+  agentOfflineThresholdMs Int @default(300000) // 5 min - mark agent as "offline"
 
   // Registry Configuration
   doRegistryToken String? // DigitalOcean registry API token
