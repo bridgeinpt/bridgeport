@@ -518,7 +518,7 @@ export async function createDockerClientForServer(
 ): Promise<DockerClientForServerResult> {
   const mode = server.dockerMode as 'socket' | 'ssh';
 
-  if (mode === 'socket' && server.serverType === 'host') {
+  if (mode === 'socket') {
     // Socket mode - use local Docker socket
     // Still create SSH client for file operations if needed
     const { client: sshClient, error } = await createClientForServer(
