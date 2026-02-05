@@ -144,9 +144,13 @@ export async function checkServerHealth(serverId: string): Promise<{
         data: { status, lastCheckedAt: new Date() },
       });
 
+      if (status === 'unhealthy') {
+        const errorMsg = result.stderr?.trim() || `Command exited with code ${result.code}`;
+        return { status, error: errorMsg };
+      }
       return { status };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = error instanceof Error ? error.message : String(error) || 'Unknown error';
       await prisma.server.update({
         where: { id: serverId },
         data: { status: 'unhealthy', lastCheckedAt: new Date() },
@@ -181,9 +185,24 @@ export async function checkServerHealth(serverId: string): Promise<{
       },
     });
 
+    if (status === 'unhealthy') {
+      const errorMsg = result.stderr?.trim() || `Command exited with code ${result.code}`;
+      return { status, error: errorMsg };
+    }
     return { status };
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
+    // Extract error message - handle various error types from ssh2
+    let errorMessage = 'Unknown error';
+    if (error instanceof Error) {
+      errorMessage = error.message || error.toString();
+      // ssh2 errors may have additional info in 'level' property
+      const sshError = error as Error & { level?: string };
+      if (sshError.level) {
+        errorMessage = `${sshError.level}: ${errorMessage}`;
+      }
+    } else if (error) {
+      errorMessage = String(error);
+    }
 
     await prisma.server.update({
       where: { id: serverId },
