@@ -556,6 +556,7 @@ export async function testSlackChannel(
         defaultChannels: '[]',
         severity: 'info',
         category: 'system',
+        enabled: true,
         bounceEnabled: false,
         bounceThreshold: 3,
         bounceCooldown: 900,

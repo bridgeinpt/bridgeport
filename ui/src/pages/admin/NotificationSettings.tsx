@@ -384,7 +384,7 @@ export default function NotificationSettings() {
   // Notification type handlers
   const handleUpdateType = async (
     id: string,
-    data: { bounceEnabled?: boolean; bounceThreshold?: number; bounceCooldown?: number }
+    data: { enabled?: boolean; bounceEnabled?: boolean; bounceThreshold?: number; bounceCooldown?: number }
   ) => {
     try {
       const result = await updateAdminNotificationType(id, data);
@@ -903,85 +903,154 @@ export default function NotificationSettings() {
 
       {/* Notification Types Tab */}
       {activeTab === 'types' && (
-        <div className="card">
-          <h3 className="text-lg font-semibold text-white mb-4">Notification Types</h3>
-          <div className="space-y-3">
-            {notificationTypes.map((type) => {
-              const channels = JSON.parse(type.defaultChannels || '[]') as string[];
-              return (
-                <div key={type.id} className="p-4 bg-slate-800 rounded-lg">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-medium text-white">{type.name}</h4>
-                        <span className="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-400">
-                          {type.category}
-                        </span>
-                        <span
-                          className={`text-xs px-2 py-0.5 rounded ${
-                            type.severity === 'critical'
-                              ? 'bg-red-500/20 text-red-400'
-                              : type.severity === 'warning'
-                                ? 'bg-yellow-500/20 text-yellow-400'
-                                : 'bg-primary-500/20 text-primary-400'
-                          }`}
-                        >
-                          {type.severity}
-                        </span>
-                      </div>
-                      <p className="text-sm text-slate-400 mt-1">{type.description}</p>
-                      <div className="flex items-center gap-2 mt-2">
-                        {channels.map((ch) => (
-                          <span key={ch} className="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300">
-                            {ch}
+        <div className="space-y-6">
+          {/* System Notifications */}
+          <div className="card">
+            <h3 className="text-lg font-semibold text-white mb-2">System Notifications</h3>
+            <p className="text-sm text-slate-400 mb-4">
+              Configure which system notifications are enabled. Disabled notifications will not be sent.
+            </p>
+            <div className="space-y-3">
+              {notificationTypes.filter((t) => t.category === 'system').map((type) => {
+                const channels = JSON.parse(type.defaultChannels || '[]') as string[];
+                return (
+                  <div key={type.id} className={`p-4 bg-slate-800 rounded-lg ${!type.enabled ? 'opacity-60' : ''}`}>
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-medium text-white">{type.name}</h4>
+                          <span
+                            className={`text-xs px-2 py-0.5 rounded ${
+                              type.severity === 'critical'
+                                ? 'bg-red-500/20 text-red-400'
+                                : type.severity === 'warning'
+                                  ? 'bg-yellow-500/20 text-yellow-400'
+                                  : 'bg-primary-500/20 text-primary-400'
+                            }`}
+                          >
+                            {type.severity}
                           </span>
-                        ))}
-                      </div>
-                    </div>
-                    {type.category === 'system' && (
-                      <div className="text-sm">
-                        <label className="flex items-center gap-2 mb-2">
-                          <input
-                            type="checkbox"
-                            checked={type.bounceEnabled}
-                            onChange={(e) => handleUpdateType(type.id, { bounceEnabled: e.target.checked })}
-                            className="rounded bg-slate-700 border-slate-600 text-primary-500"
-                          />
-                          <span className="text-slate-300">Bounce logic</span>
-                        </label>
-                        {type.bounceEnabled && (
-                          <div className="flex items-center gap-2 text-xs text-slate-400">
-                            <span>Threshold:</span>
-                            <input
-                              type="number"
-                              value={type.bounceThreshold}
-                              onChange={(e) =>
-                                handleUpdateType(type.id, { bounceThreshold: parseInt(e.target.value) || 3 })
-                              }
-                              className="w-16 px-2 py-1 bg-slate-700 border border-slate-600 rounded text-white"
-                              min={1}
-                              max={100}
-                            />
-                            <span>Cooldown:</span>
-                            <input
-                              type="number"
-                              value={type.bounceCooldown}
-                              onChange={(e) =>
-                                handleUpdateType(type.id, { bounceCooldown: parseInt(e.target.value) || 900 })
-                              }
-                              className="w-20 px-2 py-1 bg-slate-700 border border-slate-600 rounded text-white"
-                              min={60}
-                              max={86400}
-                            />
-                            <span>s</span>
+                        </div>
+                        <p className="text-sm text-slate-400 mt-1">{type.description}</p>
+                        {type.enabled && (
+                          <div className="flex items-center gap-2 mt-2">
+                            {channels.map((ch) => (
+                              <span key={ch} className="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300">
+                                {ch}
+                              </span>
+                            ))}
                           </div>
                         )}
                       </div>
-                    )}
+                      <div className="flex flex-col items-end gap-3">
+                        {/* Enable/Disable Toggle */}
+                        <button
+                          onClick={() => handleUpdateType(type.id, { enabled: !type.enabled })}
+                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                            type.enabled ? 'bg-brand-600' : 'bg-slate-600'
+                          }`}
+                          title={type.enabled ? 'Disable notification' : 'Enable notification'}
+                        >
+                          <span
+                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                              type.enabled ? 'translate-x-6' : 'translate-x-1'
+                            }`}
+                          />
+                        </button>
+
+                        {/* Bounce Settings (only shown when enabled) */}
+                        {type.enabled && (
+                          <div className="text-sm">
+                            <label className="flex items-center gap-2 mb-2">
+                              <input
+                                type="checkbox"
+                                checked={type.bounceEnabled}
+                                onChange={(e) => handleUpdateType(type.id, { bounceEnabled: e.target.checked })}
+                                className="rounded bg-slate-700 border-slate-600 text-primary-500"
+                              />
+                              <span className="text-slate-300 text-xs">Bounce logic</span>
+                            </label>
+                            {type.bounceEnabled && (
+                              <div className="flex items-center gap-2 text-xs text-slate-400">
+                                <span>Threshold:</span>
+                                <input
+                                  type="number"
+                                  value={type.bounceThreshold}
+                                  onChange={(e) =>
+                                    handleUpdateType(type.id, { bounceThreshold: parseInt(e.target.value) || 3 })
+                                  }
+                                  className="w-14 px-2 py-1 bg-slate-700 border border-slate-600 rounded text-white text-xs"
+                                  min={1}
+                                  max={100}
+                                />
+                                <span>Cooldown:</span>
+                                <input
+                                  type="number"
+                                  value={type.bounceCooldown}
+                                  onChange={(e) =>
+                                    handleUpdateType(type.id, { bounceCooldown: parseInt(e.target.value) || 900 })
+                                  }
+                                  className="w-16 px-2 py-1 bg-slate-700 border border-slate-600 rounded text-white text-xs"
+                                  min={60}
+                                  max={86400}
+                                />
+                                <span>s</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Account Notifications */}
+          <div className="card">
+            <h3 className="text-lg font-semibold text-white mb-2">Account Notifications</h3>
+            <p className="text-sm text-slate-400 mb-4">
+              These notifications are controlled by individual users in their account settings.
+            </p>
+            <div className="space-y-3">
+              {notificationTypes.filter((t) => t.category === 'user').map((type) => {
+                const channels = JSON.parse(type.defaultChannels || '[]') as string[];
+                return (
+                  <div key={type.id} className="p-4 bg-slate-800 rounded-lg">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-medium text-white">{type.name}</h4>
+                          <span
+                            className={`text-xs px-2 py-0.5 rounded ${
+                              type.severity === 'critical'
+                                ? 'bg-red-500/20 text-red-400'
+                                : type.severity === 'warning'
+                                  ? 'bg-yellow-500/20 text-yellow-400'
+                                  : 'bg-primary-500/20 text-primary-400'
+                            }`}
+                          >
+                            {type.severity}
+                          </span>
+                        </div>
+                        <p className="text-sm text-slate-400 mt-1">{type.description}</p>
+                        <div className="flex items-center gap-2 mt-2">
+                          {channels.map((ch) => (
+                            <span key={ch} className="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300">
+                              {ch}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <span className="text-xs px-2 py-1 rounded bg-slate-700 text-slate-400">
+                        User-controlled
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}

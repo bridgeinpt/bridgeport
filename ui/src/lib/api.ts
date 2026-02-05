@@ -1272,6 +1272,7 @@ export interface NotificationType {
   template: string;
   defaultChannels: string;
   severity: 'info' | 'warning' | 'critical';
+  enabled: boolean;
   bounceEnabled: boolean;
   bounceThreshold: number;
   bounceCooldown: number;
@@ -1357,6 +1358,7 @@ export const updateAdminNotificationType = (
   id: string,
   data: {
     defaultChannels?: string[];
+    enabled?: boolean;
     bounceEnabled?: boolean;
     bounceThreshold?: number;
     bounceCooldown?: number;

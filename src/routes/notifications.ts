@@ -29,6 +29,7 @@ const updatePreferenceSchema = z.object({
 
 const updateTypeSchema = z.object({
   defaultChannels: z.array(z.enum(['in_app', 'email', 'webhook'])).optional(),
+  enabled: z.boolean().optional(),
   bounceEnabled: z.boolean().optional(),
   bounceThreshold: z.number().min(1).max(100).optional(),
   bounceCooldown: z.number().min(60).max(86400).optional(),

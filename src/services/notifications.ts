@@ -271,6 +271,7 @@ export async function updateNotificationType(
   id: string,
   data: {
     defaultChannels?: string[];
+    enabled?: boolean;
     bounceEnabled?: boolean;
     bounceThreshold?: number;
     bounceCooldown?: number;
@@ -280,6 +281,7 @@ export async function updateNotificationType(
   if (data.defaultChannels !== undefined) {
     updateData.defaultChannels = JSON.stringify(data.defaultChannels);
   }
+  if (data.enabled !== undefined) updateData.enabled = data.enabled;
   if (data.bounceEnabled !== undefined) updateData.bounceEnabled = data.bounceEnabled;
   if (data.bounceThreshold !== undefined) updateData.bounceThreshold = data.bounceThreshold;
   if (data.bounceCooldown !== undefined) updateData.bounceCooldown = data.bounceCooldown;
@@ -386,6 +388,11 @@ export async function sendSystemNotification(
   const notificationType = await getNotificationType(typeCode);
   if (!notificationType) {
     console.error(`[Notifications] Unknown notification type: ${typeCode}`);
+    return [];
+  }
+
+  // Check if this notification type is enabled (only for system notifications)
+  if (notificationType.category === 'system' && !notificationType.enabled) {
     return [];
   }
 

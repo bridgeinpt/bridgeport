@@ -474,6 +474,7 @@ model NotificationType {
   template        String // Message template with {{placeholders}}
   defaultChannels String  @default("[\"in_app\"]") // JSON array: ["in_app", "email", "webhook"]
   severity        String  @default("info") // "info" | "warning" | "critical"
+  enabled         Boolean @default(true) // Admin can disable system notifications
 
   // Bounce settings (for system notifications with repeated failures)
   bounceEnabled   Boolean @default(false) // Whether this type uses bounce logic
