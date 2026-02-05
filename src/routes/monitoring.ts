@@ -503,6 +503,80 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
     }
   );
 
+  // Get service metrics history for charts
+  fastify.get(
+    '/api/environments/:envId/services/metrics/history',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { envId } = request.params as { envId: string };
+      const query = metricsHistoryQuerySchema.safeParse(request.query);
+
+      if (!query.success) {
+        return reply.code(400).send({ error: 'Invalid query', details: query.error.issues });
+      }
+
+      const env = await prisma.environment.findUnique({ where: { id: envId } });
+      if (!env) {
+        return reply.code(404).send({ error: 'Environment not found' });
+      }
+
+      const { hours } = query.data;
+      const since = new Date();
+      since.setHours(since.getHours() - hours);
+
+      // Get services in this environment with their servers
+      const services = await prisma.service.findMany({
+        where: {
+          server: { environmentId: envId },
+          discoveryStatus: 'found',
+        },
+        select: { id: true, name: true, server: { select: { id: true, name: true } } },
+      });
+
+      // Get metrics for each service
+      const serviceMetrics = await Promise.all(
+        services.map(async (service) => {
+          const metrics = await prisma.serviceMetrics.findMany({
+            where: {
+              serviceId: service.id,
+              collectedAt: { gte: since },
+            },
+            orderBy: { collectedAt: 'asc' },
+            select: {
+              cpuPercent: true,
+              memoryUsedMb: true,
+              memoryLimitMb: true,
+              networkRxMb: true,
+              networkTxMb: true,
+              restartCount: true,
+              collectedAt: true,
+            },
+          });
+
+          const data = metrics.map((m) => ({
+            time: m.collectedAt.toISOString(),
+            cpu: m.cpuPercent,
+            memory: m.memoryUsedMb,
+            memoryLimit: m.memoryLimitMb,
+            networkRx: m.networkRxMb,
+            networkTx: m.networkTxMb,
+            restartCount: m.restartCount,
+          }));
+
+          return {
+            id: service.id,
+            name: service.name,
+            serverName: service.server.name,
+            serverId: service.server.id,
+            data,
+          };
+        })
+      );
+
+      return { services: serviceMetrics };
+    }
+  );
+
   // Test SSH connection for a single server
   fastify.post(
     '/api/servers/:id/test-ssh',

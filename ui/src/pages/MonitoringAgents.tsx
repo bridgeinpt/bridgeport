@@ -9,6 +9,7 @@ import {
   updateServerMetricsMode,
   regenerateAgentToken,
   removeAgent,
+  deployAgent,
   type AgentInfo,
   type AgentEvent,
   type MetricsMode,
@@ -39,6 +40,7 @@ export default function MonitoringAgents() {
   const [changingMode, setChangingMode] = useState<string | null>(null);
   const [regenerating, setRegenerating] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
+  const [updating, setUpdating] = useState<string | null>(null);
   const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
   const [agentEvents, setAgentEvents] = useState<AgentEvent[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
@@ -145,6 +147,23 @@ export default function MonitoringAgents() {
       // Error is handled by API client
     } finally {
       setRemoving(null);
+    }
+  };
+
+  const handleUpdateAgent = async (serverId: string) => {
+    setUpdating(serverId);
+    try {
+      await deployAgent(serverId);
+      await fetchData();
+      // Refresh events if this agent is expanded
+      if (expandedAgent === serverId) {
+        const { events } = await getAgentEvents(serverId);
+        setAgentEvents(events);
+      }
+    } catch (e) {
+      // Error is handled by API client
+    } finally {
+      setUpdating(null);
     }
   };
 
@@ -441,9 +460,21 @@ export default function MonitoringAgents() {
                       <td className="py-3">
                         {agent.metricsMode === 'agent' && (
                           <div className="flex gap-2">
+                            {agent.agentVersion &&
+                              bundledAgentVersion !== 'unknown' &&
+                              agent.agentVersion !== bundledAgentVersion && (
+                              <button
+                                onClick={() => handleUpdateAgent(agent.id)}
+                                disabled={updating === agent.id || regenerating === agent.id || removing === agent.id}
+                                className="btn btn-primary px-2 py-1 text-xs"
+                                title="Update agent to latest version"
+                              >
+                                {updating === agent.id ? 'Updating...' : 'Update'}
+                              </button>
+                            )}
                             <button
                               onClick={() => handleRegenerateToken(agent.id)}
-                              disabled={regenerating === agent.id || removing === agent.id}
+                              disabled={regenerating === agent.id || removing === agent.id || updating === agent.id}
                               className="btn btn-secondary px-2 py-1 text-xs"
                               title="Regenerate token and redeploy agent"
                             >
@@ -451,7 +482,7 @@ export default function MonitoringAgents() {
                             </button>
                             <button
                               onClick={() => handleRemoveAgent(agent.id, agent.name)}
-                              disabled={removing === agent.id || regenerating === agent.id}
+                              disabled={removing === agent.id || regenerating === agent.id || updating === agent.id}
                               className="btn btn-danger px-2 py-1 text-xs"
                               title="Stop and remove agent"
                             >

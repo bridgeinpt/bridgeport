@@ -7,9 +7,7 @@ import { deployService } from '../services/deploy.js';
 import { extractRepoName } from './image-utils.js';
 import {
   collectServerMetricsSSH,
-  collectServiceMetrics,
   saveServerMetrics,
-  saveServiceMetrics,
   cleanupOldMetrics,
   collectServerDataSSH,
 } from '../services/metrics.js';
@@ -524,7 +522,7 @@ async function runMetricsCollection(): Promise<void> {
           await saveServerMetrics(server.id, data.serverMetrics, 'ssh');
         }
 
-        // Save service metrics and update health
+        // Update service health status (service metrics are agent-only now)
         for (const serviceData of data.serviceData) {
           const service = server.services.find((s) => s.containerName === serviceData.containerName);
           if (!service) continue;
@@ -534,11 +532,6 @@ async function runMetricsCollection(): Promise<void> {
             where: { id: service.id },
             select: { containerStatus: true, healthStatus: true },
           });
-
-          // Save metrics
-          if (serviceData.metrics) {
-            await saveServiceMetrics(service.id, serviceData.metrics);
-          }
 
           // Update service health status
           await prisma.service.update({

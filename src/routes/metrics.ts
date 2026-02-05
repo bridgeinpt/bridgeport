@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { prisma } from '../lib/db.js';
 import {
   collectServerMetricsSSH,
-  collectServiceMetrics,
   saveServerMetrics,
   saveServiceMetrics,
   getServerMetrics,
@@ -244,27 +243,15 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: 'This server uses agent mode. Wait for agent to push metrics.' });
       }
 
-      // Collect server metrics
+      // Collect server metrics only (service metrics are agent-only now)
       const serverMetrics = await collectServerMetricsSSH(id);
       if (serverMetrics) {
         await saveServerMetrics(id, serverMetrics, 'ssh');
       }
 
-      // Collect service metrics
-      const serviceResults: Array<{ service: string; success: boolean }> = [];
-      for (const service of server.services) {
-        const serviceMetrics = await collectServiceMetrics(id, service.containerName);
-        if (serviceMetrics) {
-          await saveServiceMetrics(service.id, serviceMetrics);
-          serviceResults.push({ service: service.name, success: true });
-        } else {
-          serviceResults.push({ service: service.name, success: false });
-        }
-      }
-
       return {
         serverMetrics: serverMetrics ? 'collected' : 'failed',
-        services: serviceResults,
+        services: [], // Service metrics are now agent-only
       };
     }
   );

@@ -4,11 +4,13 @@ import { useAppStore } from '../lib/store';
 import {
   getEnvironmentMetricsSummary,
   getMetricsHistory,
+  getServiceMetricsHistory,
   getMonitoringOverview,
   getSchedulerConfig,
   type MetricsSummaryServer,
   type ServiceMetrics,
   type MetricsHistoryServer,
+  type ServiceMetricsHistoryItem,
   type MonitoringOverviewStats,
   type SchedulerConfig,
 } from '../lib/api';
@@ -42,14 +44,26 @@ function parseTags(tagsJson: string): string[] {
 }
 
 export default function Monitoring() {
-  const { selectedEnvironment, monitoringTimeRange, setMonitoringTimeRange, autoRefreshEnabled, setAutoRefreshEnabled, monitoringTagFilter, setMonitoringTagFilter } = useAppStore();
+  const {
+    selectedEnvironment,
+    monitoringTimeRange,
+    setMonitoringTimeRange,
+    autoRefreshEnabled,
+    setAutoRefreshEnabled,
+    monitoringTagFilter,
+    setMonitoringTagFilter,
+    monitoringActiveTab,
+    setMonitoringActiveTab,
+  } = useAppStore();
   const [servers, setServers] = useState<MetricsSummaryServer[]>([]);
   const [metricsHistory, setMetricsHistory] = useState<MetricsHistoryServer[]>([]);
+  const [serviceMetricsHistory, setServiceMetricsHistory] = useState<ServiceMetricsHistoryItem[]>([]);
   const [stats, setStats] = useState<MonitoringOverviewStats | null>(null);
   const [schedulerConfig, setSchedulerConfig] = useState<SchedulerConfig | null>(null);
   const [disabledMetricsExpanded, setDisabledMetricsExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [serviceMetricsLoading, setServiceMetricsLoading] = useState(false);
 
   const fetchData = async (isRefresh = false) => {
     if (!selectedEnvironment?.id) return;
@@ -73,16 +87,47 @@ export default function Monitoring() {
     }
   };
 
+  // Fetch service metrics only when services tab is active (lazy loading)
+  const fetchServiceMetrics = async () => {
+    if (!selectedEnvironment?.id) return;
+    setServiceMetricsLoading(true);
+    try {
+      const res = await getServiceMetricsHistory(selectedEnvironment.id, monitoringTimeRange);
+      setServiceMetricsHistory(res.services);
+    } finally {
+      setServiceMetricsLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchData();
   }, [selectedEnvironment?.id, monitoringTimeRange]);
 
+  // Fetch service metrics when tab switches to services
+  useEffect(() => {
+    if (monitoringActiveTab === 'services' && serviceMetricsHistory.length === 0) {
+      fetchServiceMetrics();
+    }
+  }, [monitoringActiveTab, selectedEnvironment?.id]);
+
+  // Refetch service metrics when time range changes (if on services tab)
+  useEffect(() => {
+    if (monitoringActiveTab === 'services') {
+      fetchServiceMetrics();
+    }
+  }, [monitoringTimeRange]);
+
   // Auto-refresh every 30 seconds if enabled
   useEffect(() => {
     if (!autoRefreshEnabled) return;
-    const interval = setInterval(() => fetchData(true), 30000);
+    const interval = setInterval(() => {
+      fetchData(true);
+      if (monitoringActiveTab === 'services') {
+        fetchServiceMetrics();
+      }
+    }, 30000);
     return () => clearInterval(interval);
-  }, [selectedEnvironment?.id, monitoringTimeRange, autoRefreshEnabled]);
+  }, [selectedEnvironment?.id, monitoringTimeRange, autoRefreshEnabled, monitoringActiveTab]);
 
   // Collect unique tags from all servers
   const allTags = useMemo(() => {
@@ -113,6 +158,14 @@ export default function Monitoring() {
     });
   }, [metricsHistory, tagFilterSet]);
 
+  // Filter service metrics based on selected tags (by server)
+  const filteredServiceMetricsHistory = useMemo(() => {
+    if (tagFilterSet.size === 0) return serviceMetricsHistory;
+    // Get server IDs that match the tag filter
+    const matchingServerIds = new Set(filteredServers.map((s) => s.id));
+    return serviceMetricsHistory.filter((service) => matchingServerIds.has(service.serverId));
+  }, [serviceMetricsHistory, tagFilterSet, filteredServers]);
+
   // Stable callback for tag toggle to avoid creating new closures on each render
   const handleTagToggle = useCallback(
     (tag: string) => {
@@ -124,9 +177,9 @@ export default function Monitoring() {
     [monitoringTagFilter, setMonitoringTagFilter]
   );
 
-  // Prepare chart data - combine all servers into single timeline
+  // Prepare chart data for server metrics - combine all servers into single timeline
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const prepareChartData = (metric: 'cpu' | 'memory' | 'disk' | 'load' | 'swap' | 'tcp'): any[] => {
+  const prepareServerChartData = (metric: 'cpu' | 'memory' | 'disk' | 'load' | 'swap' | 'tcp'): any[] => {
     const timeMap = new Map<string, { time: string; [key: string]: string | number | null }>();
 
     filteredMetricsHistory.forEach((server) => {
@@ -141,6 +194,29 @@ export default function Monitoring() {
         else if (metric === 'load') entry[server.name] = point.load1 ?? null;
         else if (metric === 'swap') entry[server.name] = point.swap ?? null;
         else if (metric === 'tcp') entry[server.name] = point.tcpTotal ?? null;
+      });
+    });
+
+    return Array.from(timeMap.values()).sort((a, b) =>
+      a.time.localeCompare(b.time)
+    );
+  };
+
+  // Prepare chart data for service metrics
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const prepareServiceChartData = (metric: 'cpu' | 'memory' | 'networkRx' | 'networkTx'): any[] => {
+    const timeMap = new Map<string, { time: string; [key: string]: string | number | null }>();
+
+    filteredServiceMetricsHistory.forEach((service) => {
+      service.data.forEach((point) => {
+        if (!timeMap.has(point.time)) {
+          timeMap.set(point.time, { time: point.time });
+        }
+        const entry = timeMap.get(point.time)!;
+        if (metric === 'cpu') entry[service.name] = point.cpu ?? null;
+        else if (metric === 'memory') entry[service.name] = point.memory ?? null;
+        else if (metric === 'networkRx') entry[service.name] = point.networkRx ?? null;
+        else if (metric === 'networkTx') entry[service.name] = point.networkTx ?? null;
       });
     });
 
@@ -210,6 +286,7 @@ export default function Monitoring() {
 
   const serversWithMetrics = filteredServers.filter((s) => s.latestMetrics);
   const serverNames = filteredMetricsHistory.map((s) => s.name);
+  const serviceNames = filteredServiceMetricsHistory.map((s) => s.name);
 
   return (
     <div className="p-6">
@@ -228,7 +305,12 @@ export default function Monitoring() {
             Auto: 30s
           </label>
           <button
-            onClick={() => fetchData(true)}
+            onClick={() => {
+              fetchData(true);
+              if (monitoringActiveTab === 'services') {
+                fetchServiceMetrics();
+              }
+            }}
             disabled={refreshing}
             className="btn btn-secondary"
           >
@@ -314,309 +396,371 @@ export default function Monitoring() {
         )}
       </div>
 
-      {/* Charts */}
-      {filteredMetricsHistory.length > 0 && filteredMetricsHistory.some((s) => s.data.length > 0) ? (
-        <div className="grid grid-cols-2 gap-6 mb-8">
-          {(schedulerConfig?.collectCpu ?? true) && (
-            <ChartCard title="CPU Usage" data={prepareChartData('cpu')} serverNames={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
-          )}
-          {(schedulerConfig?.collectMemory ?? true) && (
-            <ChartCard title="Memory Usage" data={prepareChartData('memory')} serverNames={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
-          )}
-          {(schedulerConfig?.collectSwap ?? true) && (
-            <ChartCard title="Swap Usage" data={prepareChartData('swap')} serverNames={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
-          )}
-          {(schedulerConfig?.collectDisk ?? true) && (
-            <ChartCard title="Disk Usage" data={prepareChartData('disk')} serverNames={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
-          )}
-          {(schedulerConfig?.collectLoad ?? true) && (
-            <ChartCard title="Load Average" data={prepareChartData('load')} serverNames={serverNames} formatTime={formatTime} domain={[0, 'auto']} />
-          )}
-          {(schedulerConfig?.collectTcp ?? true) && (
-            <ChartCard title="TCP Connections" data={prepareChartData('tcp')} serverNames={serverNames} formatTime={formatTime} domain={[0, 'auto']} />
-          )}
-        </div>
-      ) : (
-        <div className="card text-center py-8 mb-8">
-          <p className="text-slate-400">No historical metrics data available</p>
-          <p className="text-slate-500 text-sm mt-1">
-            Metrics will appear here as they are collected
-          </p>
-        </div>
-      )}
+      {/* Tabs */}
+      <div className="flex border-b border-slate-700 mb-6">
+        <button
+          onClick={() => setMonitoringActiveTab('servers')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
+            monitoringActiveTab === 'servers'
+              ? 'border-brand-600 text-white'
+              : 'border-transparent text-slate-400 hover:text-white'
+          }`}
+        >
+          Servers
+        </button>
+        <button
+          onClick={() => setMonitoringActiveTab('services')}
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
+            monitoringActiveTab === 'services'
+              ? 'border-brand-600 text-white'
+              : 'border-transparent text-slate-400 hover:text-white'
+          }`}
+        >
+          Services
+        </button>
+      </div>
 
-      {/* Current Server Metrics */}
-      {serversWithMetrics.length > 0 && (
-        <div className="mb-8">
-          <h2 className="text-lg font-semibold text-white mb-4">Current Server Metrics</h2>
-          <div className="space-y-4">
-            {serversWithMetrics.map((server) => (
-              <div key={server.id} className="card">
-                <div className="flex items-center justify-between mb-4">
-                  <Link
-                    to={`/servers/${server.id}`}
-                    className="text-lg font-semibold text-white hover:text-brand-400"
-                  >
-                    {server.name}
-                  </Link>
-                  <span className="text-xs text-slate-500">
-                    {server.latestMetrics &&
-                      formatDistanceToNow(new Date(server.latestMetrics.collectedAt), {
-                        addSuffix: true,
-                      })}
-                  </span>
-                </div>
+      {/* Tab Content */}
+      {monitoringActiveTab === 'servers' ? (
+        <>
+          {/* Server Charts */}
+          {filteredMetricsHistory.length > 0 && filteredMetricsHistory.some((s) => s.data.length > 0) ? (
+            <div className="grid grid-cols-2 gap-6 mb-8">
+              {(schedulerConfig?.collectCpu ?? true) && (
+                <ChartCard title="CPU Usage" data={prepareServerChartData('cpu')} names={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
+              )}
+              {(schedulerConfig?.collectMemory ?? true) && (
+                <ChartCard title="Memory Usage" data={prepareServerChartData('memory')} names={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
+              )}
+              {(schedulerConfig?.collectSwap ?? true) && (
+                <ChartCard title="Swap Usage" data={prepareServerChartData('swap')} names={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
+              )}
+              {(schedulerConfig?.collectDisk ?? true) && (
+                <ChartCard title="Disk Usage" data={prepareServerChartData('disk')} names={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
+              )}
+              {(schedulerConfig?.collectLoad ?? true) && (
+                <ChartCard title="Load Average" data={prepareServerChartData('load')} names={serverNames} formatTime={formatTime} domain={[0, 'auto']} />
+              )}
+              {(schedulerConfig?.collectTcp ?? true) && (
+                <ChartCard title="TCP Connections" data={prepareServerChartData('tcp')} names={serverNames} formatTime={formatTime} domain={[0, 'auto']} />
+              )}
+            </div>
+          ) : (
+            <div className="card text-center py-8 mb-8">
+              <p className="text-slate-400">No historical metrics data available</p>
+              <p className="text-slate-500 text-sm mt-1">
+                Metrics will appear here as they are collected
+              </p>
+            </div>
+          )}
 
-                {/* Primary metrics row */}
-                <div className="grid grid-cols-4 gap-4 mb-4">
-                  {(schedulerConfig?.collectCpu ?? true) && (
-                    <MetricGauge
-                      label="CPU"
-                      value={server.latestMetrics?.cpuPercent ?? undefined}
-                      max={100}
-                      unit="%"
-                      color="primary"
-                    />
-                  )}
-                  {(schedulerConfig?.collectMemory ?? true) && (
-                    <MetricGauge
-                      label="Memory"
-                      value={
-                        server.latestMetrics?.memoryTotalMb
-                          ? ((server.latestMetrics.memoryUsedMb ?? 0) /
-                              server.latestMetrics.memoryTotalMb) *
-                            100
-                          : undefined
-                      }
-                      displayValue={
-                        server.latestMetrics?.memoryUsedMb != null && server.latestMetrics?.memoryTotalMb
-                          ? `${(server.latestMetrics.memoryUsedMb / 1024).toFixed(1)}/${(server.latestMetrics.memoryTotalMb / 1024).toFixed(0)}GB`
-                          : undefined
-                      }
-                      max={100}
-                      unit="%"
-                      color="green"
-                    />
-                  )}
-                  {(schedulerConfig?.collectDisk ?? true) && (
-                    <MetricGauge
-                      label="Disk"
-                      value={
-                        server.latestMetrics?.diskTotalGb
-                          ? ((server.latestMetrics.diskUsedGb ?? 0) /
-                              server.latestMetrics.diskTotalGb) *
-                            100
-                          : undefined
-                      }
-                      displayValue={
-                        server.latestMetrics?.diskUsedGb != null && server.latestMetrics?.diskTotalGb
-                          ? `${server.latestMetrics.diskUsedGb.toFixed(0)}/${server.latestMetrics.diskTotalGb.toFixed(0)}GB`
-                          : undefined
-                      }
-                      max={100}
-                      unit="%"
-                      color="yellow"
-                    />
-                  )}
-                  {(schedulerConfig?.collectLoad ?? true) && (
-                    <MetricGauge
-                      label="Load"
-                      value={server.latestMetrics?.loadAvg1 ?? undefined}
-                      max={4}
-                      displayValue={server.latestMetrics?.loadAvg1?.toFixed(2) ?? undefined}
-                      color="purple"
-                    />
-                  )}
-                </div>
-                {/* Additional metrics row */}
-                <div className="grid grid-cols-4 gap-4">
-                  {(schedulerConfig?.collectSwap ?? true) && (
-                    <MetricGauge
-                      label="Swap"
-                      value={
-                        server.latestMetrics?.swapTotalMb && server.latestMetrics.swapTotalMb > 0
-                          ? ((server.latestMetrics.swapUsedMb ?? 0) /
-                              server.latestMetrics.swapTotalMb) *
-                            100
-                          : 0
-                      }
-                      displayValue={
-                        server.latestMetrics?.swapUsedMb != null && server.latestMetrics?.swapTotalMb
-                          ? server.latestMetrics.swapTotalMb > 0
-                            ? `${(server.latestMetrics.swapUsedMb / 1024).toFixed(1)}/${(server.latestMetrics.swapTotalMb / 1024).toFixed(0)}GB`
-                            : 'No swap'
-                          : undefined
-                      }
-                      max={100}
-                      unit="%"
-                      color="purple"
-                    />
-                  )}
-                  {(schedulerConfig?.collectFds ?? true) && (
-                    <MetricGauge
-                      label="File Descriptors"
-                      value={
-                        server.latestMetrics?.maxFds && server.latestMetrics.maxFds > 0
-                          ? ((server.latestMetrics.openFds ?? 0) /
-                              server.latestMetrics.maxFds) *
-                            100
-                          : undefined
-                      }
-                      displayValue={
-                        server.latestMetrics?.openFds != null && server.latestMetrics?.maxFds
-                          ? `${(server.latestMetrics.openFds / 1000).toFixed(1)}k/${(server.latestMetrics.maxFds / 1000).toFixed(0)}k`
-                          : undefined
-                      }
-                      max={100}
-                      unit="%"
-                      color="yellow"
-                    />
-                  )}
-                  {(schedulerConfig?.collectTcp ?? true) && (
-                    <div className="p-4 rounded-lg bg-slate-800/50">
-                      <p className="text-slate-400 text-xs mb-2">TCP Connections</p>
-                      {server.latestMetrics?.tcpTotal != null ? (
-                        <div className="text-sm">
-                          <span className="text-white font-bold text-lg">{server.latestMetrics.tcpTotal}</span>
-                          <span className="text-slate-500 text-xs ml-2">total</span>
-                          <div className="flex gap-3 mt-1 text-xs">
-                            <span className="text-green-400">{server.latestMetrics.tcpEstablished ?? 0} est</span>
-                            <span className="text-blue-400">{server.latestMetrics.tcpListen ?? 0} listen</span>
-                            <span className="text-yellow-400">{server.latestMetrics.tcpTimeWait ?? 0} tw</span>
-                          </div>
-                        </div>
-                      ) : (
-                        <p className="text-slate-500 text-sm">-</p>
+          {/* Current Server Metrics */}
+          {serversWithMetrics.length > 0 && (
+            <div className="mb-8">
+              <h2 className="text-lg font-semibold text-white mb-4">Current Server Metrics</h2>
+              <div className="space-y-4">
+                {serversWithMetrics.map((server) => (
+                  <div key={server.id} className="card">
+                    <div className="flex items-center justify-between mb-4">
+                      <Link
+                        to={`/servers/${server.id}`}
+                        className="text-lg font-semibold text-white hover:text-brand-400"
+                      >
+                        {server.name}
+                      </Link>
+                      <span className="text-xs text-slate-500">
+                        {server.latestMetrics &&
+                          formatDistanceToNow(new Date(server.latestMetrics.collectedAt), {
+                            addSuffix: true,
+                          })}
+                      </span>
+                    </div>
+
+                    {/* Primary metrics row */}
+                    <div className="grid grid-cols-4 gap-4 mb-4">
+                      {(schedulerConfig?.collectCpu ?? true) && (
+                        <MetricGauge
+                          label="CPU"
+                          value={server.latestMetrics?.cpuPercent ?? undefined}
+                          max={100}
+                          unit="%"
+                          color="primary"
+                        />
+                      )}
+                      {(schedulerConfig?.collectMemory ?? true) && (
+                        <MetricGauge
+                          label="Memory"
+                          value={
+                            server.latestMetrics?.memoryTotalMb
+                              ? ((server.latestMetrics.memoryUsedMb ?? 0) /
+                                  server.latestMetrics.memoryTotalMb) *
+                                100
+                              : undefined
+                          }
+                          displayValue={
+                            server.latestMetrics?.memoryUsedMb != null && server.latestMetrics?.memoryTotalMb
+                              ? `${(server.latestMetrics.memoryUsedMb / 1024).toFixed(1)}/${(server.latestMetrics.memoryTotalMb / 1024).toFixed(0)}GB`
+                              : undefined
+                          }
+                          max={100}
+                          unit="%"
+                          color="green"
+                        />
+                      )}
+                      {(schedulerConfig?.collectDisk ?? true) && (
+                        <MetricGauge
+                          label="Disk"
+                          value={
+                            server.latestMetrics?.diskTotalGb
+                              ? ((server.latestMetrics.diskUsedGb ?? 0) /
+                                  server.latestMetrics.diskTotalGb) *
+                                100
+                              : undefined
+                          }
+                          displayValue={
+                            server.latestMetrics?.diskUsedGb != null && server.latestMetrics?.diskTotalGb
+                              ? `${server.latestMetrics.diskUsedGb.toFixed(0)}/${server.latestMetrics.diskTotalGb.toFixed(0)}GB`
+                              : undefined
+                          }
+                          max={100}
+                          unit="%"
+                          color="yellow"
+                        />
+                      )}
+                      {(schedulerConfig?.collectLoad ?? true) && (
+                        <MetricGauge
+                          label="Load"
+                          value={server.latestMetrics?.loadAvg1 ?? undefined}
+                          max={4}
+                          displayValue={server.latestMetrics?.loadAvg1?.toFixed(2) ?? undefined}
+                          color="purple"
+                        />
                       )}
                     </div>
-                  )}
-                  <div className="p-4 rounded-lg bg-slate-800/50">
-                    <p className="text-slate-400 text-xs mb-2">Uptime</p>
-                    {server.latestMetrics?.uptime != null ? (
-                      <p className="text-white font-bold text-lg">
-                        {Math.floor(server.latestMetrics.uptime / 86400)}d {Math.floor((server.latestMetrics.uptime % 86400) / 3600)}h
-                      </p>
-                    ) : (
-                      <p className="text-slate-500 text-sm">-</p>
-                    )}
+                    {/* Additional metrics row */}
+                    <div className="grid grid-cols-4 gap-4">
+                      {(schedulerConfig?.collectSwap ?? true) && (
+                        <MetricGauge
+                          label="Swap"
+                          value={
+                            server.latestMetrics?.swapTotalMb && server.latestMetrics.swapTotalMb > 0
+                              ? ((server.latestMetrics.swapUsedMb ?? 0) /
+                                  server.latestMetrics.swapTotalMb) *
+                                100
+                              : 0
+                          }
+                          displayValue={
+                            server.latestMetrics?.swapUsedMb != null && server.latestMetrics?.swapTotalMb
+                              ? server.latestMetrics.swapTotalMb > 0
+                                ? `${(server.latestMetrics.swapUsedMb / 1024).toFixed(1)}/${(server.latestMetrics.swapTotalMb / 1024).toFixed(0)}GB`
+                                : 'No swap'
+                              : undefined
+                          }
+                          max={100}
+                          unit="%"
+                          color="purple"
+                        />
+                      )}
+                      {(schedulerConfig?.collectFds ?? true) && (
+                        <MetricGauge
+                          label="File Descriptors"
+                          value={
+                            server.latestMetrics?.maxFds && server.latestMetrics.maxFds > 0
+                              ? ((server.latestMetrics.openFds ?? 0) /
+                                  server.latestMetrics.maxFds) *
+                                100
+                              : undefined
+                          }
+                          displayValue={
+                            server.latestMetrics?.openFds != null && server.latestMetrics?.maxFds
+                              ? `${(server.latestMetrics.openFds / 1000).toFixed(1)}k/${(server.latestMetrics.maxFds / 1000).toFixed(0)}k`
+                              : undefined
+                          }
+                          max={100}
+                          unit="%"
+                          color="yellow"
+                        />
+                      )}
+                      {(schedulerConfig?.collectTcp ?? true) && (
+                        <div className="p-4 rounded-lg bg-slate-800/50">
+                          <p className="text-slate-400 text-xs mb-2">TCP Connections</p>
+                          {server.latestMetrics?.tcpTotal != null ? (
+                            <div className="text-sm">
+                              <span className="text-white font-bold text-lg">{server.latestMetrics.tcpTotal}</span>
+                              <span className="text-slate-500 text-xs ml-2">total</span>
+                              <div className="flex gap-3 mt-1 text-xs">
+                                <span className="text-green-400">{server.latestMetrics.tcpEstablished ?? 0} est</span>
+                                <span className="text-blue-400">{server.latestMetrics.tcpListen ?? 0} listen</span>
+                                <span className="text-yellow-400">{server.latestMetrics.tcpTimeWait ?? 0} tw</span>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-slate-500 text-sm">-</p>
+                          )}
+                        </div>
+                      )}
+                      <div className="p-4 rounded-lg bg-slate-800/50">
+                        <p className="text-slate-400 text-xs mb-2">Uptime</p>
+                        {server.latestMetrics?.uptime != null ? (
+                          <p className="text-white font-bold text-lg">
+                            {Math.floor(server.latestMetrics.uptime / 86400)}d {Math.floor((server.latestMetrics.uptime % 86400) / 3600)}h
+                          </p>
+                        ) : (
+                          <p className="text-slate-500 text-sm">-</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {serversWithMetrics.length === 0 && (
+            <div className="card text-center py-12 mb-8">
+              <p className="text-slate-400 mb-2">No metrics available</p>
+              <p className="text-slate-500 text-sm">
+                Enable monitoring on your servers to see resource usage.
+              </p>
+              <Link to="/servers" className="btn btn-primary mt-4">
+                Configure Servers
+              </Link>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          {/* Services Tab Content */}
+          {serviceMetricsLoading ? (
+            <div className="animate-pulse">
+              <div className="grid grid-cols-2 gap-6 mb-8">
+                {[1, 2, 3, 4].map((i) => (
+                  <div key={i} className="h-64 bg-slate-800 rounded-xl"></div>
+                ))}
+              </div>
+            </div>
+          ) : filteredServiceMetricsHistory.length > 0 && filteredServiceMetricsHistory.some((s) => s.data.length > 0) ? (
+            <>
+              {/* Service Charts */}
+              <div className="grid grid-cols-2 gap-6 mb-8">
+                <ChartCard title="CPU Usage" data={prepareServiceChartData('cpu')} names={serviceNames} formatTime={formatTime} unit="%" domain={[0, 'auto']} />
+                <ChartCard title="Memory Usage" data={prepareServiceChartData('memory')} names={serviceNames} formatTime={formatTime} unit=" MB" domain={[0, 'auto']} />
+                <ChartCard title="Network RX" data={prepareServiceChartData('networkRx')} names={serviceNames} formatTime={formatTime} unit=" MB" domain={[0, 'auto']} />
+                <ChartCard title="Network TX" data={prepareServiceChartData('networkTx')} names={serviceNames} formatTime={formatTime} unit=" MB" domain={[0, 'auto']} />
+              </div>
+
+              {/* Services Table */}
+              {servicesWithMetrics.length > 0 && (
+                <div className="card">
+                  <h2 className="text-lg font-semibold text-white mb-4">
+                    Service Resource Usage
+                  </h2>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
+                          <th className="pb-3 font-medium">Service</th>
+                          <th className="pb-3 font-medium">Server</th>
+                          <th className="pb-3 font-medium">CPU</th>
+                          <th className="pb-3 font-medium">Memory</th>
+                          <th className="pb-3 font-medium">Network I/O</th>
+                          <th className="pb-3 font-medium">Restarts</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-700">
+                        {servicesWithMetrics.map((service) => (
+                          <tr key={service.id} className="text-slate-300">
+                            <td className="py-3">
+                              <Link
+                                to={`/services/${service.id}`}
+                                className="text-white hover:text-brand-400"
+                              >
+                                {service.name}
+                              </Link>
+                            </td>
+                            <td className="py-3">
+                              <Link
+                                to={`/servers/${service.serverId}`}
+                                className="hover:text-brand-400"
+                              >
+                                {service.serverName}
+                              </Link>
+                            </td>
+                            <td className="py-3">
+                              <span
+                                className={
+                                  (service.metrics.cpuPercent || 0) > 80 ? 'text-red-400' : ''
+                                }
+                              >
+                                {service.metrics.cpuPercent?.toFixed(1) ?? '-'}%
+                              </span>
+                            </td>
+                            <td className="py-3">
+                              {service.metrics.memoryUsedMb ? (
+                                <span>
+                                  {service.metrics.memoryUsedMb.toFixed(0)}MB
+                                  {service.metrics.memoryLimitMb && (
+                                    <span className="text-slate-500">
+                                      {' '}
+                                      / {service.metrics.memoryLimitMb.toFixed(0)}MB
+                                    </span>
+                                  )}
+                                </span>
+                              ) : (
+                                '-'
+                              )}
+                            </td>
+                            <td className="py-3 text-sm font-mono">
+                              {service.metrics.networkRxMb || service.metrics.networkTxMb ? (
+                                <span>
+                                  <span className="text-green-400">
+                                    {service.metrics.networkRxMb?.toFixed(1) ?? '0'}
+                                  </span>
+                                  /
+                                  <span className="text-blue-400">
+                                    {service.metrics.networkTxMb?.toFixed(1) ?? '0'}
+                                  </span>
+                                  MB
+                                </span>
+                              ) : (
+                                '-'
+                              )}
+                            </td>
+                            <td className="py-3">
+                              {service.metrics.restartCount != null ? (
+                                <span
+                                  className={service.metrics.restartCount > 0 ? 'text-yellow-400' : ''}
+                                >
+                                  {service.metrics.restartCount}
+                                </span>
+                              ) : (
+                                '-'
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {serversWithMetrics.length === 0 && (
-        <div className="card text-center py-12 mb-8">
-          <p className="text-slate-400 mb-2">No metrics available</p>
-          <p className="text-slate-500 text-sm">
-            Enable monitoring on your servers to see resource usage.
-          </p>
-          <Link to="/servers" className="btn btn-primary mt-4">
-            Configure Servers
-          </Link>
-        </div>
-      )}
-
-      {/* Services Table */}
-      {servicesWithMetrics.length > 0 && (
-        <div className="card">
-          <h2 className="text-lg font-semibold text-white mb-4">
-            Service Resource Usage
-          </h2>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
-                  <th className="pb-3 font-medium">Service</th>
-                  <th className="pb-3 font-medium">Server</th>
-                  <th className="pb-3 font-medium">CPU</th>
-                  <th className="pb-3 font-medium">Memory</th>
-                  <th className="pb-3 font-medium">Network I/O</th>
-                  <th className="pb-3 font-medium">Restarts</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-700">
-                {servicesWithMetrics.map((service) => (
-                  <tr key={service.id} className="text-slate-300">
-                    <td className="py-3">
-                      <Link
-                        to={`/services/${service.id}`}
-                        className="text-white hover:text-brand-400"
-                      >
-                        {service.name}
-                      </Link>
-                    </td>
-                    <td className="py-3">
-                      <Link
-                        to={`/servers/${service.serverId}`}
-                        className="hover:text-brand-400"
-                      >
-                        {service.serverName}
-                      </Link>
-                    </td>
-                    <td className="py-3">
-                      <span
-                        className={
-                          (service.metrics.cpuPercent || 0) > 80 ? 'text-red-400' : ''
-                        }
-                      >
-                        {service.metrics.cpuPercent?.toFixed(1) ?? '-'}%
-                      </span>
-                    </td>
-                    <td className="py-3">
-                      {service.metrics.memoryUsedMb ? (
-                        <span>
-                          {service.metrics.memoryUsedMb.toFixed(0)}MB
-                          {service.metrics.memoryLimitMb && (
-                            <span className="text-slate-500">
-                              {' '}
-                              / {service.metrics.memoryLimitMb.toFixed(0)}MB
-                            </span>
-                          )}
-                        </span>
-                      ) : (
-                        '-'
-                      )}
-                    </td>
-                    <td className="py-3 text-sm font-mono">
-                      {service.metrics.networkRxMb || service.metrics.networkTxMb ? (
-                        <span>
-                          <span className="text-green-400">
-                            {service.metrics.networkRxMb?.toFixed(1) ?? '0'}
-                          </span>
-                          /
-                          <span className="text-blue-400">
-                            {service.metrics.networkTxMb?.toFixed(1) ?? '0'}
-                          </span>
-                          MB
-                        </span>
-                      ) : (
-                        '-'
-                      )}
-                    </td>
-                    <td className="py-3">
-                      {service.metrics.restartCount != null ? (
-                        <span
-                          className={service.metrics.restartCount > 0 ? 'text-yellow-400' : ''}
-                        >
-                          {service.metrics.restartCount}
-                        </span>
-                      ) : (
-                        '-'
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+              )}
+            </>
+          ) : (
+            <div className="card text-center py-12">
+              <p className="text-slate-400 mb-2">No service metrics available</p>
+              <p className="text-slate-500 text-sm">
+                Deploy a monitoring agent to collect service metrics.
+              </p>
+              <Link to="/monitoring/agents#agents" className="btn btn-primary mt-4">
+                Configure Agents
+              </Link>
+            </div>
+          )}
+        </>
       )}
 
       {/* Disabled Metrics Section */}
-      {schedulerConfig && (() => {
+      {schedulerConfig && monitoringActiveTab === 'servers' && (() => {
         const disabledMetrics: string[] = [];
         if (!schedulerConfig.collectCpu) disabledMetrics.push('CPU');
         if (!schedulerConfig.collectMemory) disabledMetrics.push('Memory');
@@ -716,14 +860,14 @@ const StatCard = memo(function StatCard({ label, value, color }: StatCardProps) 
 interface ChartCardProps {
   title: string;
   data: Record<string, unknown>[];
-  serverNames: string[];
+  names: string[];
   formatTime: (time: string) => string;
   unit?: string;
   domain?: [number | 'auto', number | 'auto'];
 }
 
 // Memoized to prevent expensive Recharts re-renders during auto-refresh
-const ChartCard = memo(function ChartCard({ title, data, serverNames, formatTime, unit, domain }: ChartCardProps) {
+const ChartCard = memo(function ChartCard({ title, data, names, formatTime, unit, domain }: ChartCardProps) {
   if (data.length === 0) {
     return (
       <div className="card">
@@ -765,7 +909,7 @@ const ChartCard = memo(function ChartCard({ title, data, serverNames, formatTime
             formatter={(value: number) => [`${value?.toFixed(1)}${unit || ''}`, '']}
           />
           <Legend wrapperStyle={{ fontSize: 12 }} />
-          {serverNames.map((name, i) => (
+          {names.map((name, i) => (
             <Line
               key={name}
               type="monotone"

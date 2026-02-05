@@ -1948,6 +1948,31 @@ export const getMetricsHistory = (envId: string, hours: number = 24, metric?: 'c
   return api.get<{ servers: MetricsHistoryServer[] }>(`/environments/${envId}/metrics/history?${params.toString()}`);
 };
 
+// Service Metrics History
+export interface ServiceMetricsHistoryDataPoint {
+  time: string;
+  cpu?: number | null;
+  memory?: number | null;
+  memoryLimit?: number | null;
+  networkRx?: number | null;
+  networkTx?: number | null;
+  restartCount?: number | null;
+}
+
+export interface ServiceMetricsHistoryItem {
+  id: string;
+  name: string;
+  serverName: string;
+  serverId: string;
+  data: ServiceMetricsHistoryDataPoint[];
+}
+
+export const getServiceMetricsHistory = (envId: string, hours: number = 24) => {
+  const params = new URLSearchParams();
+  params.append('hours', hours.toString());
+  return api.get<{ services: ServiceMetricsHistoryItem[] }>(`/environments/${envId}/services/metrics/history?${params.toString()}`);
+};
+
 // SSH Testing
 export interface SSHTestResult {
   success: boolean;
