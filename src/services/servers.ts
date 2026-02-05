@@ -1,5 +1,6 @@
 import { prisma } from '../lib/db.js';
 import { SSHClient, LocalClient, DockerSSH, isLocalhost, createClientForServer } from '../lib/ssh.js';
+import { createDockerClientForServer } from '../lib/docker.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 import { parseRegistryFromImage } from '../lib/image-utils.js';
 import { checkServiceUpdate } from '../lib/scheduler.js';
@@ -288,21 +289,26 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
     where: { environmentId: server.environmentId },
   });
 
-  // Create appropriate client based on hostname
-  const { client, error: clientError } = await createClientForServer(
-    server.hostname,
-    server.environmentId,
+  // Create appropriate Docker client based on server's dockerMode
+  const { dockerClient, sshClient, error: clientError, needsConnect } = await createDockerClientForServer(
+    {
+      hostname: server.hostname,
+      dockerMode: server.dockerMode,
+      serverType: server.serverType,
+      environmentId: server.environmentId,
+    },
     getEnvironmentSshKey
   );
-  if (!client) {
-    throw new Error(clientError || 'Failed to create SSH client');
+
+  if (!dockerClient) {
+    throw new Error(clientError || 'Failed to create Docker client');
   }
 
-  const docker = new DockerSSH(client);
-
   try {
-    await client.connect();
-    const containers = await docker.listContainers();
+    if (needsConnect && sshClient) {
+      await sshClient.connect();
+    }
+    const containers = await dockerClient.listContainers();
 
     const services: Service[] = [];
     const foundContainerNames = new Set<string>();
@@ -311,7 +317,7 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
       foundContainerNames.add(container.name);
 
       // Get comprehensive container info including ports
-      const containerInfo = await docker.getContainerInfo(container.name);
+      const containerInfo = await dockerClient.getContainerInfo(container.name);
 
       // Check if service already exists
       const existing = await prisma.service.findUnique({
@@ -422,7 +428,9 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
 
     return { services, missing };
   } finally {
-    client.disconnect();
+    if (sshClient) {
+      sshClient.disconnect();
+    }
   }
 }
 

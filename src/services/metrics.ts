@@ -1,5 +1,6 @@
 import { prisma } from '../lib/db.js';
 import { SSHClient, LocalClient, DockerSSH, isLocalhost, type CommandClient } from '../lib/ssh.js';
+import { createDockerClientForServer, type DockerClient } from '../lib/docker.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 import { determineHealthStatus, determineOverallStatus, type UrlHealthResult } from './servers.js';
 
@@ -256,8 +257,9 @@ export interface CombinedServerData {
 }
 
 /**
- * Collect all server data (metrics + health) in a single SSH session.
- * This reduces duplicate SSH connections for SSH-mode servers.
+ * Collect all server data (metrics + health) in a single session.
+ * For socket mode: uses Docker API for container data, SSH/local for system metrics
+ * For SSH mode: uses SSH for everything
  */
 export async function collectServerDataSSH(serverId: string): Promise<CombinedServerData | null> {
   const server = await prisma.server.findUnique({
@@ -273,33 +275,48 @@ export async function collectServerDataSSH(serverId: string): Promise<CombinedSe
 
   if (!server) return null;
 
-  // Create appropriate client based on hostname
-  let client: CommandClient;
-  if (isLocalhost(server.hostname)) {
-    client = new LocalClient();
-  } else {
-    const sshCreds = await getEnvironmentSshKey(server.environmentId);
-    if (!sshCreds) return null;
-    client = new SSHClient({
+  // Create Docker client and SSH client based on server's dockerMode
+  const { dockerClient, sshClient, needsConnect } = await createDockerClientForServer(
+    {
       hostname: server.hostname,
-      username: sshCreds.username,
-      privateKey: sshCreds.privateKey,
-    });
+      dockerMode: server.dockerMode,
+      serverType: server.serverType,
+      environmentId: server.environmentId,
+    },
+    getEnvironmentSshKey
+  );
+
+  // For socket mode on host servers, we can use local commands for system metrics
+  // For SSH mode, we need the SSH client for everything
+  let systemClient: CommandClient;
+  if (server.dockerMode === 'socket' && server.serverType === 'host') {
+    // Socket mode: use local execution for system metrics
+    systemClient = new LocalClient();
+  } else if (sshClient) {
+    // SSH mode: use SSH client
+    systemClient = sshClient;
+  } else {
+    // Fallback to local if no SSH client
+    systemClient = new LocalClient();
   }
 
-  const docker = new DockerSSH(client);
+  // For URL health checks, we need DockerSSH wrapper
+  const dockerSSH = sshClient ? new DockerSSH(sshClient) : null;
 
   try {
-    await client.connect();
+    // Connect SSH client if needed
+    if (needsConnect && sshClient) {
+      await sshClient.connect();
+    }
 
-    // Server is healthy if we can connect
+    // Server is healthy if we can connect or if socket mode (no connection needed)
     const serverHealth: { status: 'healthy' | 'unhealthy' } = { status: 'healthy' };
 
-    // Collect server metrics
+    // Collect server metrics using system client
     const serverMetrics: ServerMetricsData = {};
 
     // CPU usage
-    const cpuResult = await client.exec("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'");
+    const cpuResult = await systemClient.exec("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'");
     if (cpuResult.code === 0 && cpuResult.stdout) {
       const cpuValue = parseFloat(cpuResult.stdout.trim());
       if (!isNaN(cpuValue)) {
@@ -308,7 +325,7 @@ export async function collectServerDataSSH(serverId: string): Promise<CombinedSe
     }
 
     // Memory
-    const memResult = await client.exec("free -m | awk '/^Mem:/ {print $2, $3}'");
+    const memResult = await systemClient.exec("free -m | awk '/^Mem:/ {print $2, $3}'");
     if (memResult.code === 0 && memResult.stdout) {
       const [total, used] = memResult.stdout.trim().split(/\s+/).map(Number);
       if (!isNaN(total) && !isNaN(used)) {
@@ -318,7 +335,7 @@ export async function collectServerDataSSH(serverId: string): Promise<CombinedSe
     }
 
     // Disk
-    const diskResult = await client.exec("df -BG / | awk 'NR==2 {gsub(/G/,\"\"); print $2, $3}'");
+    const diskResult = await systemClient.exec("df -BG / | awk 'NR==2 {gsub(/G/,\"\"); print $2, $3}'");
     if (diskResult.code === 0 && diskResult.stdout) {
       const [total, used] = diskResult.stdout.trim().split(/\s+/).map(Number);
       if (!isNaN(total) && !isNaN(used)) {
@@ -328,7 +345,7 @@ export async function collectServerDataSSH(serverId: string): Promise<CombinedSe
     }
 
     // Load average
-    const loadResult = await client.exec("cat /proc/loadavg | awk '{print $1, $2, $3}'");
+    const loadResult = await systemClient.exec("cat /proc/loadavg | awk '{print $1, $2, $3}'");
     if (loadResult.code === 0 && loadResult.stdout) {
       const [load1, load5, load15] = loadResult.stdout.trim().split(/\s+/).map(Number);
       if (!isNaN(load1)) serverMetrics.loadAvg1 = load1;
@@ -337,7 +354,7 @@ export async function collectServerDataSSH(serverId: string): Promise<CombinedSe
     }
 
     // Uptime
-    const uptimeResult = await client.exec("cat /proc/uptime | awk '{print int($1)}'");
+    const uptimeResult = await systemClient.exec("cat /proc/uptime | awk '{print int($1)}'");
     if (uptimeResult.code === 0 && uptimeResult.stdout) {
       const uptime = parseInt(uptimeResult.stdout.trim());
       if (!isNaN(uptime)) {
@@ -348,85 +365,30 @@ export async function collectServerDataSSH(serverId: string): Promise<CombinedSe
     // Collect service metrics and health for all containers
     const serviceData: ServiceHealthData[] = [];
 
-    for (const service of server.services) {
-      const metrics: ServiceMetricsData = {};
+    if (dockerClient) {
+      for (const service of server.services) {
+        // Get container health and stats using Docker client
+        const containerHealth = await dockerClient.getContainerHealth(service.containerName);
+        const metrics = await dockerClient.getContainerStats(service.containerName);
 
-      // Get container health status
-      const containerHealth = await docker.getContainerHealth(service.containerName);
-
-      // Check URL health if configured
-      let urlHealth: UrlHealthResult | null = null;
-      if (service.healthCheckUrl) {
-        urlHealth = await docker.checkUrl(service.healthCheckUrl);
-      }
-
-      // Get container stats
-      const statsResult = await client.exec(
-        `docker stats --no-stream --format '{{json .}}' ${service.containerName} 2>/dev/null`
-      );
-
-      if (statsResult.code === 0 && statsResult.stdout) {
-        try {
-          const stats = JSON.parse(statsResult.stdout.trim());
-
-          if (stats.CPUPerc) {
-            const cpu = parseFloat(stats.CPUPerc.replace('%', ''));
-            if (!isNaN(cpu)) metrics.cpuPercent = cpu;
-          }
-
-          if (stats.MemUsage) {
-            const memMatch = stats.MemUsage.match(/([\d.]+)([KMG]i?B)\s*\/\s*([\d.]+)([KMG]i?B)/i);
-            if (memMatch) {
-              const [, usedVal, usedUnit, limitVal, limitUnit] = memMatch;
-              metrics.memoryUsedMb = convertToMb(parseFloat(usedVal), usedUnit);
-              metrics.memoryLimitMb = convertToMb(parseFloat(limitVal), limitUnit);
-            }
-          }
-
-          if (stats.NetIO) {
-            const netMatch = stats.NetIO.match(/([\d.]+)([KMG]?B)\s*\/\s*([\d.]+)([KMG]?B)/i);
-            if (netMatch) {
-              const [, rxVal, rxUnit, txVal, txUnit] = netMatch;
-              metrics.networkRxMb = convertToMb(parseFloat(rxVal), rxUnit);
-              metrics.networkTxMb = convertToMb(parseFloat(txVal), txUnit);
-            }
-          }
-
-          if (stats.BlockIO) {
-            const blockMatch = stats.BlockIO.match(/([\d.]+)([KMG]?B)\s*\/\s*([\d.]+)([KMG]?B)/i);
-            if (blockMatch) {
-              const [, readVal, readUnit, writeVal, writeUnit] = blockMatch;
-              metrics.blockReadMb = convertToMb(parseFloat(readVal), readUnit);
-              metrics.blockWriteMb = convertToMb(parseFloat(writeVal), writeUnit);
-            }
-          }
-        } catch {
-          // JSON parse failed
+        // Check URL health if configured (requires SSH/local for curl)
+        let urlHealth: UrlHealthResult | null = null;
+        if (service.healthCheckUrl && dockerSSH) {
+          urlHealth = await dockerSSH.checkUrl(service.healthCheckUrl);
         }
+
+        // Determine health and overall status
+        const healthStatus = determineHealthStatus(containerHealth.health, containerHealth.running, urlHealth);
+        const overallStatus = determineOverallStatus(containerHealth.state, containerHealth.running, healthStatus);
+
+        serviceData.push({
+          containerName: service.containerName,
+          metrics: Object.keys(metrics).length > 0 ? metrics : null,
+          containerStatus: containerHealth.state,
+          healthStatus,
+          overallStatus,
+        });
       }
-
-      // Get restart count
-      const inspectResult = await client.exec(
-        `docker inspect --format '{{.RestartCount}}' ${service.containerName} 2>/dev/null`
-      );
-      if (inspectResult.code === 0 && inspectResult.stdout) {
-        const restarts = parseInt(inspectResult.stdout.trim());
-        if (!isNaN(restarts)) {
-          metrics.restartCount = restarts;
-        }
-      }
-
-      // Determine health and overall status
-      const healthStatus = determineHealthStatus(containerHealth.health, containerHealth.running, urlHealth);
-      const overallStatus = determineOverallStatus(containerHealth.state, containerHealth.running, healthStatus);
-
-      serviceData.push({
-        containerName: service.containerName,
-        metrics: Object.keys(metrics).length > 0 ? metrics : null,
-        containerStatus: containerHealth.state,
-        healthStatus,
-        overallStatus,
-      });
     }
 
     return {
@@ -443,6 +405,8 @@ export async function collectServerDataSSH(serverId: string): Promise<CombinedSe
       serviceData: [],
     };
   } finally {
-    client.disconnect();
+    if (sshClient) {
+      sshClient.disconnect();
+    }
   }
 }

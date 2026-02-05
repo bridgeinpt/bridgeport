@@ -1,15 +1,17 @@
 # BridgePort Docker Compose Configuration
 #
 # Host Server Management:
-# To manage Docker containers on the host machine (where BridgePort runs),
-# the host must have SSH enabled and allow connections from the Docker network.
-# BridgePort auto-detects the Docker gateway IP (172.17.0.1 or host.docker.internal)
-# and can SSH to the host like any other server.
+# BridgePort can manage Docker containers on the host machine in two ways:
 #
-# Requirements for host management:
-# 1. SSH server running on host (sshd)
-# 2. Firewall allows connections from 172.17.0.0/16
-# 3. SSH key authorized in host's ~/.ssh/authorized_keys
+# Option 1: Docker Socket (Recommended for host management)
+# - Mount the Docker socket to allow direct Docker API access
+# - No SSH setup required, simpler configuration
+# - Uncomment the socket volume mount below
+#
+# Option 2: SSH (For remote servers or when socket not available)
+# - SSH server running on host (sshd)
+# - Firewall allows connections from 172.17.0.0/16
+# - SSH key authorized in host's ~/.ssh/authorized_keys
 #
 # Alternative: For monitoring-only, extract the agent from the container:
 #   docker cp bridgeport:/app/agent/bridgeport-agent ./bridgeport-agent
@@ -30,6 +32,11 @@ services:
     user: "1000:1000"  # Run as node user (non-root)
     volumes:
       - ./data:/data
+      # Docker socket mount (optional - for host container management)
+      # Uncomment to enable socket mode for managing containers on this host.
+      # Security note: This gives BridgePort full access to the Docker daemon.
+      # - /var/run/docker.sock:/var/run/docker.sock
+      #
       # SSH keys are configured via the UI per environment (Settings > SSH)
       # Each environment has its own SSH key for security isolation
       # Keys are encrypted and stored in the BridgePort database

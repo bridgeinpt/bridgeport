@@ -1,6 +1,7 @@
 import path from 'path';
 import { prisma } from '../lib/db.js';
 import { DockerSSH, createClientForServer, type CommandClient } from '../lib/ssh.js';
+import { createDockerClientForServer, type DockerClient } from '../lib/docker.js';
 import { registryClient } from '../lib/registry.js';
 import { generateDeploymentArtifacts, saveDeploymentArtifacts } from './compose.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
@@ -68,30 +69,44 @@ export async function deployService(
 
     log(`Starting deployment of ${service.name} with tag ${imageTag}`);
 
-    // Create appropriate client based on hostname
-    const { client, error: clientError } = await createClientForServer(
-      service.server.hostname,
-      service.server.environmentId,
+    // Create appropriate Docker client based on server's dockerMode
+    const { dockerClient, sshClient, error: clientError, mode, needsConnect } = await createDockerClientForServer(
+      {
+        hostname: service.server.hostname,
+        dockerMode: service.server.dockerMode,
+        serverType: service.server.serverType,
+        environmentId: service.server.environmentId,
+      },
       getEnvironmentSshKey
     );
-    if (!client) {
-      throw new Error(clientError || 'Failed to create SSH client');
+
+    if (!dockerClient) {
+      throw new Error(clientError || 'Failed to create Docker client');
     }
 
-    const docker = new DockerSSH(client);
+    // Connect SSH client if needed (for file operations or SSH-mode Docker)
+    if (needsConnect && sshClient) {
+      await sshClient.connect();
+    }
 
-    await client.connect();
-    log(`Connected to ${service.server.name} (${service.server.hostname})`);
+    // For compose operations, we still need the DockerSSH wrapper (uses SSH for compose commands)
+    // TODO: In the future, could add compose support to socket mode
+    const dockerSSH = sshClient ? new DockerSSH(sshClient) : null;
+
+    log(`Connected to ${service.server.name} (${mode} mode)`);
 
     // Determine deploy directory (use path.dirname to properly handle any path)
     const deployDir = service.composePath
       ? path.dirname(service.composePath)
       : `/opt/${service.name}`;
 
-    await client.exec(`mkdir -p ${deployDir}`);
+    // File operations require SSH client (even in socket mode)
+    if (sshClient) {
+      await sshClient.exec(`mkdir -p ${deployDir}`);
+    }
 
     // Generate deployment artifacts (compose, env, config files)
-    if (options.generateArtifacts !== false) {
+    if (options.generateArtifacts !== false && sshClient) {
       log('Generating deployment artifacts...');
 
       // Temporarily update the image tag for artifact generation
@@ -105,7 +120,7 @@ export async function deployService(
       // Upload compose file (preserve existing path if set, otherwise use generated name)
       const composePath = service.composePath || `${deployDir}/${artifacts.compose.name}`;
       log(`Writing compose file to ${composePath}`);
-      await client.exec(`cat > ${composePath} << 'COMPOSEEOF'\n${artifacts.compose.content}\nCOMPOSEEOF`);
+      await sshClient.exec(`cat > ${composePath} << 'COMPOSEEOF'\n${artifacts.compose.content}\nCOMPOSEEOF`);
 
       // Upload config files to their configured target paths
       for (const cf of artifacts.configFiles) {
@@ -114,22 +129,22 @@ export async function deployService(
 
         // Ensure target directory exists
         const cfDir = path.dirname(cfPath);
-        await client.exec(`mkdir -p "${cfDir}"`);
+        await sshClient.exec(`mkdir -p "${cfDir}"`);
 
         log(`Writing config file: ${cf.name} -> ${cfPath}`);
 
         if (cf.isBinary) {
           // Binary files: use SFTP for reliable transfer of large files
           const fileBuffer = Buffer.from(cf.content, 'base64');
-          await client.writeFile(cfPath, fileBuffer);
+          await sshClient.writeFile(cfPath, fileBuffer);
         } else {
           // Text files: use heredoc
-          await client.exec(`cat > "${cfPath}" << 'CFEOF'\n${cf.content}\nCFEOF`);
+          await sshClient.exec(`cat > "${cfPath}" << 'CFEOF'\n${cf.content}\nCFEOF`);
         }
 
         // Set restrictive permissions for .env files (contain secrets)
         if (cf.name.endsWith('.env')) {
-          await client.exec(`chmod 600 "${cfPath}"`);
+          await sshClient.exec(`chmod 600 "${cfPath}"`);
         }
       }
 
@@ -152,24 +167,25 @@ export async function deployService(
       const imageName = service.containerImage.imageName;
       const fullImage = `${imageName}:${imageTag}`;
       log(`Pulling image: ${fullImage}`);
-      await docker.pullImage(fullImage);
+      await dockerClient.pullImage(fullImage);
       log('Image pulled successfully');
     }
 
     // Deploy using compose or direct container
-    if (service.composePath) {
+    if (service.composePath && dockerSSH) {
+      // Compose operations still require SSH (docker compose commands)
       log(`Running docker compose up for ${service.composePath}`);
-      await docker.composePull(service.composePath, service.containerName);
-      await docker.composeUp(service.composePath, service.containerName);
+      await dockerSSH.composePull(service.composePath, service.containerName);
+      await dockerSSH.composeUp(service.composePath, service.containerName);
       log('Compose up completed');
     } else {
       log(`Restarting container: ${service.containerName}`);
-      await docker.restartContainer(service.containerName);
+      await dockerClient.restartContainer(service.containerName);
       log('Container restarted');
     }
 
     // Verify container is running
-    const containers = await docker.listContainers();
+    const containers = await dockerClient.listContainers();
     const container = containers.find((c) => c.name === service.containerName);
 
     if (!container || container.state !== 'running') {
@@ -178,7 +194,9 @@ export async function deployService(
 
     log(`Container ${service.containerName} is running`);
 
-    client.disconnect();
+    if (sshClient) {
+      sshClient.disconnect();
+    }
 
     // Update service record
     await prisma.service.update({
@@ -296,23 +314,30 @@ export async function getContainerLogs(
     include: { server: true },
   });
 
-  // Create appropriate client based on hostname
-  const { client, error: clientError } = await createClientForServer(
-    service.server.hostname,
-    service.server.environmentId,
+  // Create appropriate Docker client based on server's dockerMode
+  const { dockerClient, sshClient, error: clientError, needsConnect } = await createDockerClientForServer(
+    {
+      hostname: service.server.hostname,
+      dockerMode: service.server.dockerMode,
+      serverType: service.server.serverType,
+      environmentId: service.server.environmentId,
+    },
     getEnvironmentSshKey
   );
-  if (!client) {
-    throw new Error(clientError || 'Failed to create SSH client');
+
+  if (!dockerClient) {
+    throw new Error(clientError || 'Failed to create Docker client');
   }
 
-  const docker = new DockerSSH(client);
-
   try {
-    await client.connect();
-    return await docker.containerLogs(service.containerName, { tail });
+    if (needsConnect && sshClient) {
+      await sshClient.connect();
+    }
+    return await dockerClient.getContainerLogs(service.containerName, { tail });
   } finally {
-    client.disconnect();
+    if (sshClient) {
+      sshClient.disconnect();
+    }
   }
 }
 

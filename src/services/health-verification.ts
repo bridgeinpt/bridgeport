@@ -1,5 +1,6 @@
 import { prisma } from '../lib/db.js';
 import { DockerSSH, createClientForServer } from '../lib/ssh.js';
+import { createDockerClientForServer } from '../lib/docker.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 import { determineHealthStatus, determineOverallStatus, type UrlHealthResult } from './servers.js';
 
@@ -62,14 +63,18 @@ export async function verifyServiceHealth(
     await sleep(waitMs);
   }
 
-  // Create SSH client
-  const { client, error: clientError } = await createClientForServer(
-    service.server.hostname,
-    service.server.environmentId,
+  // Create Docker client based on server's dockerMode
+  const { dockerClient, sshClient, error: clientError, needsConnect } = await createDockerClientForServer(
+    {
+      hostname: service.server.hostname,
+      dockerMode: service.server.dockerMode,
+      serverType: service.server.serverType,
+      environmentId: service.server.environmentId,
+    },
     getEnvironmentSshKey
   );
 
-  if (!client) {
+  if (!dockerClient) {
     log(`ERROR: Failed to create client: ${clientError}`);
     return {
       healthy: false,
@@ -80,10 +85,13 @@ export async function verifyServiceHealth(
     };
   }
 
-  const docker = new DockerSSH(client);
+  // For URL health checks, we still need the DockerSSH wrapper
+  const dockerSSH = sshClient ? new DockerSSH(sshClient) : null;
 
   try {
-    await client.connect();
+    if (needsConnect && sshClient) {
+      await sshClient.connect();
+    }
     log(`Connected to ${service.server.name}`);
 
     let attempt = 0;
@@ -96,13 +104,13 @@ export async function verifyServiceHealth(
       log(`Health check attempt ${attempt}/${maxRetries}`);
 
       // Get container health
-      const containerHealth = await docker.getContainerHealth(service.containerName);
+      const containerHealth = await dockerClient.getContainerHealth(service.containerName);
       lastContainerStatus = containerHealth.state;
 
-      // Check URL health if configured
+      // Check URL health if configured (requires SSH for curl command)
       let urlHealth: UrlHealthResult | null = null;
-      if (service.healthCheckUrl) {
-        urlHealth = await docker.checkUrl(service.healthCheckUrl);
+      if (service.healthCheckUrl && dockerSSH) {
+        urlHealth = await dockerSSH.checkUrl(service.healthCheckUrl);
         lastUrlCheck = urlHealth;
         log(`URL check (${service.healthCheckUrl}): ${urlHealth.success ? 'success' : 'failed'} - ${urlHealth.statusCode || urlHealth.error}`);
       }
@@ -211,7 +219,9 @@ export async function verifyServiceHealth(
       logs,
     };
   } finally {
-    client.disconnect();
+    if (sshClient) {
+      sshClient.disconnect();
+    }
   }
 }
 
@@ -230,25 +240,32 @@ export async function quickHealthCheck(
     },
   });
 
-  const { client, error: clientError } = await createClientForServer(
-    service.server.hostname,
-    service.server.environmentId,
+  const { dockerClient, sshClient, needsConnect } = await createDockerClientForServer(
+    {
+      hostname: service.server.hostname,
+      dockerMode: service.server.dockerMode,
+      serverType: service.server.serverType,
+      environmentId: service.server.environmentId,
+    },
     getEnvironmentSshKey
   );
 
-  if (!client) {
+  if (!dockerClient) {
     return { containerStatus: 'unknown', healthStatus: 'unknown', running: false };
   }
 
-  const docker = new DockerSSH(client);
+  // For URL health checks, we need the DockerSSH wrapper
+  const dockerSSH = sshClient ? new DockerSSH(sshClient) : null;
 
   try {
-    await client.connect();
-    const containerHealth = await docker.getContainerHealth(service.containerName);
+    if (needsConnect && sshClient) {
+      await sshClient.connect();
+    }
+    const containerHealth = await dockerClient.getContainerHealth(service.containerName);
 
     let urlHealth: UrlHealthResult | null = null;
-    if (service.healthCheckUrl) {
-      urlHealth = await docker.checkUrl(service.healthCheckUrl);
+    if (service.healthCheckUrl && dockerSSH) {
+      urlHealth = await dockerSSH.checkUrl(service.healthCheckUrl);
     }
 
     const healthStatus = determineHealthStatus(
@@ -265,6 +282,8 @@ export async function quickHealthCheck(
   } catch {
     return { containerStatus: 'unknown', healthStatus: 'unknown', running: false };
   } finally {
-    client.disconnect();
+    if (sshClient) {
+      sshClient.disconnect();
+    }
   }
 }

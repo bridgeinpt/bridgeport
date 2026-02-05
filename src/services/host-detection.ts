@@ -2,6 +2,7 @@ import { readFile } from 'fs/promises';
 import { SSHClient } from '../lib/ssh.js';
 import { prisma } from '../lib/db.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
+import { isDockerSocketAvailable } from '../lib/docker.js';
 
 /**
  * Known Docker gateway IPs that indicate "connect to host from inside container"
@@ -200,19 +201,13 @@ export async function getHostInfo(environmentId: string): Promise<HostInfo> {
 }
 
 /**
- * Register the Docker host as a server in BridgePort
+ * Register the Docker host as a server in BridgePort.
+ * User-registered host servers always use SSH mode.
  */
 export async function registerHostServer(
   environmentId: string,
   name: string = 'host'
 ): Promise<{ success: boolean; serverId?: string; error?: string }> {
-  // Detect gateway IP
-  const gatewayIp = await detectHostGateway();
-
-  if (!gatewayIp) {
-    return { success: false, error: 'Could not detect Docker host gateway' };
-  }
-
   // Check if already registered
   const existing = await prisma.server.findFirst({
     where: {
@@ -228,7 +223,14 @@ export async function registerHostServer(
     };
   }
 
-  // Verify SSH connectivity first
+  // Detect gateway IP
+  const gatewayIp = await detectHostGateway();
+
+  if (!gatewayIp) {
+    return { success: false, error: 'Could not detect Docker host gateway' };
+  }
+
+  // Verify SSH connectivity
   const sshCreds = await getEnvironmentSshKey(environmentId);
   if (!sshCreds) {
     return { success: false, error: 'SSH key not configured for this environment' };
@@ -242,13 +244,14 @@ export async function registerHostServer(
     };
   }
 
-  // Create the host server
+  // Create the host server (user-registered servers use SSH mode)
   const server = await prisma.server.create({
     data: {
       name,
       hostname: gatewayIp,
       tags: JSON.stringify(['host']),
       serverType: 'host',
+      dockerMode: 'ssh',
       status: 'healthy',
       environmentId,
     },
@@ -258,9 +261,10 @@ export async function registerHostServer(
 }
 
 /**
- * Bootstrap the management environment with a host server.
- * Called on startup to ensure a "management" environment exists with a "host" server.
- * This runs without SSH verification since SSH keys may not be configured yet.
+ * Bootstrap the management environment with a localhost server.
+ * Called on startup to ensure a "management" environment exists.
+ * If Docker socket is available, creates a "localhost" server using socket mode.
+ * This is the only server that uses socket mode - user-registered servers use SSH.
  */
 export async function bootstrapManagementEnvironment(): Promise<void> {
   // Check if management environment exists
@@ -278,35 +282,50 @@ export async function bootstrapManagementEnvironment(): Promise<void> {
     console.log('Management environment created');
   }
 
-  // Check if host server already exists in management environment
-  const existingHost = await prisma.server.findFirst({
+  // Check if localhost server already exists in management environment
+  const existingLocalhost = await prisma.server.findFirst({
     where: {
       environmentId: managementEnv.id,
-      serverType: 'host',
+      name: 'localhost',
     },
   });
 
-  if (existingHost) {
-    return; // Host server already exists
-  }
-
-  // Detect gateway IP
-  const gatewayIp = await detectHostGateway();
-  if (!gatewayIp) {
-    console.log('Could not detect Docker host gateway - skipping host server creation');
+  if (existingLocalhost) {
+    // Localhost server already exists, check if socket is now available
+    if (existingLocalhost.dockerMode === 'ssh') {
+      const socketAvailable = await isDockerSocketAvailable();
+      if (socketAvailable) {
+        console.log('Docker socket now available - upgrading localhost server to socket mode');
+        await prisma.server.update({
+          where: { id: existingLocalhost.id },
+          data: { dockerMode: 'socket', status: 'healthy' },
+        });
+      }
+    }
     return;
   }
 
-  console.log(`Creating host server with gateway IP: ${gatewayIp}`);
+  // Check Docker socket availability - only create localhost if socket is available
+  const dockerSocketAvailable = await isDockerSocketAvailable();
+
+  if (!dockerSocketAvailable) {
+    console.log('Docker socket not available - skipping localhost server creation');
+    console.log('Mount /var/run/docker.sock to enable local container management');
+    return;
+  }
+
+  // Create localhost server with socket mode
+  console.log('Creating localhost server with Docker socket mode');
   await prisma.server.create({
     data: {
-      name: 'host',
-      hostname: gatewayIp,
-      tags: JSON.stringify(['host']),
+      name: 'localhost',
+      hostname: 'localhost',
+      tags: JSON.stringify(['localhost']),
       serverType: 'host',
-      status: 'unknown', // Will become healthy once SSH is configured and tested
+      dockerMode: 'socket',
+      status: 'healthy',
       environmentId: managementEnv.id,
     },
   });
-  console.log('Host server created in management environment');
+  console.log('Localhost server created in management environment (socket mode)');
 }
