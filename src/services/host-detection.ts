@@ -202,7 +202,8 @@ export async function getHostInfo(environmentId: string): Promise<HostInfo> {
 
 /**
  * Register the Docker host as a server in BridgePort.
- * User-registered host servers always use SSH mode.
+ * Uses socket mode if Docker socket is available (preferred for host),
+ * otherwise falls back to SSH mode.
  */
 export async function registerHostServer(
   environmentId: string,
@@ -230,7 +231,27 @@ export async function registerHostServer(
     return { success: false, error: 'Could not detect Docker host gateway' };
   }
 
-  // Verify SSH connectivity
+  // Check if Docker socket is available (preferred for host server)
+  const socketAvailable = await isDockerSocketAvailable();
+
+  if (socketAvailable) {
+    // Use socket mode - no SSH required for Docker operations
+    const server = await prisma.server.create({
+      data: {
+        name,
+        hostname: gatewayIp,
+        tags: JSON.stringify(['host']),
+        serverType: 'host',
+        dockerMode: 'socket',
+        status: 'healthy',
+        environmentId,
+      },
+    });
+
+    return { success: true, serverId: server.id };
+  }
+
+  // Fall back to SSH mode
   const sshCreds = await getEnvironmentSshKey(environmentId);
   if (!sshCreds) {
     return { success: false, error: 'SSH key not configured for this environment' };
@@ -244,7 +265,6 @@ export async function registerHostServer(
     };
   }
 
-  // Create the host server (user-registered servers use SSH mode)
   const server = await prisma.server.create({
     data: {
       name,

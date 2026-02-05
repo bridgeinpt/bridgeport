@@ -55,6 +55,7 @@ export interface ServerInput {
   hostname: string;
   publicIp?: string | null;
   tags?: string[];
+  dockerMode?: 'socket' | 'ssh';
 }
 
 export interface ServerWithServices extends Server {
@@ -86,6 +87,7 @@ export async function updateServer(
   if (input.hostname) updateData.hostname = input.hostname;
   if (input.publicIp !== undefined) updateData.publicIp = input.publicIp || null;
   if (input.tags) updateData.tags = JSON.stringify(input.tags);
+  if (input.dockerMode) updateData.dockerMode = input.dockerMode;
 
   return prisma.server.update({
     where: { id: serverId },

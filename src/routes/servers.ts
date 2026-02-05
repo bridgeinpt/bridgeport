@@ -29,6 +29,7 @@ const updateServerSchema = z.object({
   hostname: z.string().min(1).optional(),
   publicIp: z.string().nullable().optional(),
   tags: z.array(z.string()).optional(),
+  dockerMode: z.enum(['socket', 'ssh']).optional(),
 });
 
 const importTerraformSchema = z.object({
