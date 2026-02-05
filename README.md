@@ -66,9 +66,12 @@ services:
       # Optional: Mount Docker socket for host container management
       # This creates a "localhost" server automatically on startup
       # - /var/run/docker.sock:/var/run/docker.sock
+    # Required if mounting Docker socket - add docker group for permissions
+    # group_add:
+    #   - "999"  # Run: stat -c '%g' /var/run/docker.sock to get your docker group ID
 ```
 
-> **Note**: Mounting the Docker socket is the recommended way to manage containers on the host machine. If you can't mount the socket, you can use SSH instead (configure keys via Settings page in the UI).
+> **Note**: Mounting the Docker socket is the recommended way to manage containers on the host machine. You must also add the docker group ID via `group_add` for permission to access the socket. If you can't mount the socket, you can use SSH instead (configure keys via Settings page in the UI).
 
 Start (admin user created automatically on first boot):
 
@@ -184,12 +187,23 @@ Mount the Docker socket to give BridgePort direct Docker API access. This is the
 
 ```yaml
 # In your docker-compose.yml
-volumes:
-  - ./data:/data
-  - /var/run/docker.sock:/var/run/docker.sock
+services:
+  bridgeport:
+    # ... other config ...
+    group_add:
+      - "999"  # Docker group ID - find with: stat -c '%g' /var/run/docker.sock
+    volumes:
+      - ./data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
 ```
 
-When the socket is mounted, BridgePort automatically creates a "localhost" server in the management environment on startup. This server uses socket mode for all Docker operations.
+**Important**: The `group_add` is required for the container to have permission to access the Docker socket. Find your docker group ID:
+
+```bash
+stat -c '%g' /var/run/docker.sock  # Usually 999 or 998
+```
+
+When the socket is mounted and accessible, BridgePort automatically creates a "localhost" server in the management environment on startup. This server uses socket mode for all Docker operations.
 
 > **Security Note**: Mounting the Docker socket gives BridgePort full access to the Docker daemon, equivalent to root access on the host. Only use this in trusted environments.
 
