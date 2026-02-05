@@ -79,6 +79,15 @@ services:
 
 > **Note**: Mounting the Docker socket is the recommended way to manage containers on the host machine. You must also add the docker group ID via `group_add` for permission to access the socket. If you can't mount the socket, you can use SSH instead (configure keys via Settings page in the UI).
 
+For a production setup with Caddy as a reverse proxy, see `docker/docker-compose.yml`. When using Caddy, add a health endpoint to your Caddyfile:
+
+```
+# Health check endpoint
+:80 {
+    respond /health 200
+}
+```
+
 Start (admin user created automatically on first boot):
 
 ```bash
