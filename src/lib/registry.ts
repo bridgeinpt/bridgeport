@@ -154,6 +154,10 @@ export class DockerHubClient implements RegistryClient {
     this.password = options.password;
   }
 
+  private hasCredentials(): boolean {
+    return !!(this.token || (this.username && this.password));
+  }
+
   private async authenticate(): Promise<string> {
     if (this.authToken) return this.authToken;
 
@@ -219,8 +223,13 @@ export class DockerHubClient implements RegistryClient {
   }
 
   async listTags(repo: string): Promise<RegistryTag[]> {
-    // Repo might be just name or user/name
-    const fullRepo = repo.includes('/') ? repo : `${this.username}/${repo}`;
+    // Repo might be:
+    // - just name (official image) -> library/name
+    // - user/name -> user/name as-is
+    const fullRepo = repo.includes('/') ? repo : `library/${repo}`;
+
+    // Official images (library/*) are public, don't need auth
+    const needsAuth = !fullRepo.startsWith('library/') && this.hasCredentials();
 
     const data = await this.fetch<{
       results: Array<{
@@ -229,7 +238,7 @@ export class DockerHubClient implements RegistryClient {
         full_size: number;
         last_updated: string;
       }>;
-    }>(`https://hub.docker.com/v2/repositories/${fullRepo}/tags?page_size=100`);
+    }>(`https://hub.docker.com/v2/repositories/${fullRepo}/tags?page_size=100`, needsAuth);
 
     return data.results.map((t) => ({
       tag: t.name,
