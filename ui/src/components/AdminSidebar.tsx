@@ -3,7 +3,6 @@ import {
   CogIcon,
   UsersIcon,
   ActivityIcon,
-  SettingsIcon,
   InfoIcon,
 } from './Icons';
 
@@ -67,13 +66,13 @@ interface NavItem {
 }
 
 const navigationItems: NavItem[] = [
+  { name: 'About', href: '/admin/about', icon: InfoIcon },
   { name: 'System', href: '/admin/system', icon: CogIcon },
   { name: 'Service Types', href: '/admin/service-types', icon: CommandIcon },
   { name: 'Storage', href: '/admin/storage', icon: CloudIcon },
   { name: 'Users', href: '/admin/users', icon: UsersIcon },
   { name: 'Audit', href: '/admin/audit', icon: ActivityIcon },
   { name: 'Notifications', href: '/admin/notifications', icon: BellIcon },
-  { name: 'About', href: '/admin/about', icon: InfoIcon },
 ];
 
 export default function AdminSidebar() {
@@ -81,14 +80,10 @@ export default function AdminSidebar() {
 
   return (
     <aside className="bg-slate-900 border-r border-slate-700 flex flex-col flex-shrink-0 w-56">
-      {/* Logo area with gear badge */}
+      {/* Logo area */}
       <div className="h-12 flex items-center justify-center border-b border-slate-700 flex-shrink-0">
-        <Link to="/" className="flex items-center relative" title="Back to App">
+        <Link to="/" className="flex items-center" title="Back to App">
           <img src="/logo.svg" alt="BridgePort" className="h-12" />
-          {/* Gear badge overlay */}
-          <div className="absolute -bottom-0.5 -right-1 bg-slate-800 rounded-full p-0.5 border border-slate-700">
-            <SettingsIcon className="w-3 h-3 text-primary-400" />
-          </div>
         </Link>
       </div>
 
@@ -105,7 +100,7 @@ export default function AdminSidebar() {
 
       {/* Admin label */}
       <div className="px-4 py-3 flex-shrink-0">
-        <span className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">
+        <span className="text-[10px] text-brand-600 uppercase tracking-wider font-medium">
           Admin Settings
         </span>
       </div>

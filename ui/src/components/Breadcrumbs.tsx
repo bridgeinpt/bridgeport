@@ -37,6 +37,7 @@ interface Crumb {
 export default function Breadcrumbs() {
   const location = useLocation();
   const pathSegments = location.pathname.split('/').filter(Boolean);
+  const isAdminSection = pathSegments[0] === 'admin';
 
   // Build breadcrumbs from path segments
   const crumbs: Crumb[] = [];
@@ -70,9 +71,14 @@ export default function Breadcrumbs() {
     return null;
   }
 
+  // Link styling based on section
+  const linkClass = isAdminSection
+    ? 'text-brand-600 hover:text-brand-500 transition-colors'
+    : 'hover:text-white transition-colors';
+
   return (
     <nav aria-label="Breadcrumb" className="flex items-center text-sm text-slate-400">
-      <Link to="/" className="hover:text-white transition-colors">
+      <Link to="/" className={linkClass}>
         Dashboard
       </Link>
       {crumbs.map((crumb) => (
@@ -81,7 +87,7 @@ export default function Breadcrumbs() {
           {crumb.isLast ? (
             <span className="text-white">{crumb.name}</span>
           ) : (
-            <Link to={crumb.href} className="hover:text-white transition-colors">
+            <Link to={crumb.href} className={linkClass}>
               {crumb.name}
             </Link>
           )}

@@ -59,7 +59,7 @@ export default function App() {
           <ProtectedRoute>
             <AdminLayout>
               <Routes>
-                <Route index element={<Navigate to="/admin/system" replace />} />
+                <Route index element={<Navigate to="/admin/about" replace />} />
                 <Route path="system" element={<AdminSystemSettings />} />
                 <Route path="service-types" element={<AdminServiceTypes />} />
                 <Route path="storage" element={<AdminStorage />} />
