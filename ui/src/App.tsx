@@ -19,6 +19,8 @@ import DatabaseDetail from './pages/DatabaseDetail';
 import Monitoring from './pages/Monitoring';
 import MonitoringHealth from './pages/MonitoringHealth';
 import MonitoringAgents from './pages/MonitoringAgents';
+import MonitoringDataStores from './pages/MonitoringDataStores';
+import DataStoreDetail from './pages/DataStoreDetail';
 import Settings from './pages/Settings';
 import Notifications from './pages/Notifications';
 import NotificationSettings from './pages/admin/NotificationSettings';
@@ -57,6 +59,8 @@ export default function App() {
                 <Route path="/monitoring" element={<Monitoring />} />
                 <Route path="/monitoring/health" element={<MonitoringHealth />} />
                 <Route path="/monitoring/agents" element={<MonitoringAgents />} />
+                <Route path="/monitoring/data-stores" element={<MonitoringDataStores />} />
+                <Route path="/data-stores/:id" element={<DataStoreDetail />} />
                 <Route path="/servers" element={<Servers />} />
                 <Route path="/servers/:id" element={<ServerDetail />} />
                 <Route path="/services" element={<Services />} />

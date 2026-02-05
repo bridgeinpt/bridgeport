@@ -2176,3 +2176,214 @@ export const updateSlackRoutings = (
 export const deleteSlackRouting = (typeId: string, channelId: string) =>
   api.delete<{ success: boolean }>(`/admin/slack/routing/${typeId}/${channelId}`);
 
+// ==================== Data Store Monitoring ====================
+
+export type DataStoreType = 'redis' | 'postgres' | 'sqlite';
+export type DataStoreStatus = 'connected' | 'error' | 'unknown';
+
+export interface DataStore {
+  id: string;
+  name: string;
+  type: DataStoreType;
+  environmentId: string;
+  databaseId: string | null;
+  host: string | null;
+  port: number | null;
+  hasCredentials: boolean;
+  databaseName: string | null;
+  redisDb: number | null;
+  serverId: string | null;
+  filePath: string | null;
+  enabled: boolean;
+  collectionIntervalSec: number;
+  status: DataStoreStatus;
+  lastCollectedAt: string | null;
+  lastError: string | null;
+  isCluster: boolean;
+  clusterNodes: string | null;
+  createdAt: string;
+  updatedAt: string;
+  server?: { id: string; name: string; hostname: string } | null;
+  database?: { id: string; name: string } | null;
+  latestMetrics?: {
+    collectedAt: string;
+    metrics: RedisMetrics | PostgresMetrics | SqliteMetrics;
+  } | null;
+}
+
+export interface DataStoreInput {
+  name: string;
+  type: DataStoreType;
+  host?: string;
+  port?: number;
+  password?: string;
+  username?: string;
+  databaseName?: string;
+  redisDb?: number;
+  serverId?: string;
+  filePath?: string;
+  databaseId?: string;
+  enabled?: boolean;
+  collectionIntervalSec?: number;
+  isCluster?: boolean;
+  clusterNodes?: string[];
+}
+
+// Redis Metrics
+export interface RedisMetrics {
+  hitRate: number | null;
+  keyspaceHits: number;
+  keyspaceMisses: number;
+  usedMemoryBytes: number;
+  maxMemoryBytes: number | null;
+  memoryUsagePercent: number | null;
+  evictedKeys: number;
+  connectedClients: number;
+  blockedClients: number;
+  opsPerSec: number;
+  memFragmentationRatio: number | null;
+  totalKeys: number;
+  keysWithExpiry: number;
+  avgTtlMs: number | null;
+  usedCpuSys: number;
+  usedCpuUser: number;
+  rejectedConnections: number;
+  rdbLastSaveTime: string | null;
+  rdbChangesPending: number;
+  aofEnabled: boolean;
+  aofCurrentSize: number | null;
+  role: string;
+  connectedSlaves: number;
+  masterLinkStatus: string | null;
+  replicationOffset: number | null;
+  cluster?: {
+    state: string;
+    slotsAssigned: number;
+    slotsOk: number;
+    slotsPfail: number;
+    slotsFail: number;
+    knownNodes: number;
+    clusterSize: number;
+  };
+  redisVersion: string;
+  uptimeSeconds: number;
+}
+
+// PostgreSQL Metrics
+export interface PostgresMetrics {
+  activeConnections: number;
+  idleConnections: number;
+  maxConnections: number;
+  connectionUsagePercent: number;
+  databaseSizeBytes: number;
+  cacheHitRatio: number | null;
+  transactionsCommitted: number;
+  transactionsRolledBack: number;
+  tuplesReturned: number;
+  tuplesFetched: number;
+  tuplesInserted: number;
+  tuplesUpdated: number;
+  tuplesDeleted: number;
+  deadlocks: number;
+  tempFilesBytes: number;
+  tempFilesCount: number;
+  checkpointsWritten: number;
+  checkpointsRequested: number;
+  replication?: {
+    isReplica: boolean;
+    replayLagBytes: number | null;
+    replayLagSeconds: number | null;
+    state: string | null;
+  };
+  tableHealth?: {
+    totalTables: number;
+    totalDeadTuples: number;
+    tablesNeedingVacuum: number;
+  };
+  longRunningQueries: Array<{
+    pid: number;
+    duration: string;
+    state: string;
+    query: string;
+  }>;
+  postgresVersion: string;
+  uptimeSeconds: number | null;
+}
+
+// SQLite Metrics
+export interface SqliteMetrics {
+  fileSizeBytes: number;
+  pageCount: number;
+  pageSize: number;
+  freePages: number;
+  usedPages: number;
+  fragmentationPercent: number;
+  walEnabled: boolean;
+  walSizeBytes: number | null;
+  journalMode: string;
+  autoVacuum: string;
+  cacheSize: number;
+  busyTimeout: number;
+  integrityOk: boolean | null;
+  integrityMessage: string | null;
+  tableCount: number;
+  indexCount: number;
+  tables: Array<{
+    name: string;
+    rowCount: number | null;
+    sizeEstimate: number | null;
+  }>;
+}
+
+export interface DataStoreTestResult {
+  success: boolean;
+  message: string;
+  details?: Record<string, unknown>;
+}
+
+export interface DataStoreMetricsEntry {
+  id: string;
+  collectedAt: string;
+  metrics: RedisMetrics | PostgresMetrics | SqliteMetrics;
+}
+
+export interface ClusterDiscoveryResult {
+  isCluster: boolean;
+  nodes?: string[];
+  message: string;
+}
+
+// Data Store API methods
+export const listDataStores = (envId: string) =>
+  api.get<{ dataStores: DataStore[] }>(`/environments/${envId}/data-stores`);
+
+export const createDataStore = (envId: string, data: DataStoreInput) =>
+  api.post<{ dataStore: DataStore }>(`/environments/${envId}/data-stores`, data);
+
+export const getDataStore = (id: string) =>
+  api.get<{ dataStore: DataStore }>(`/data-stores/${id}`);
+
+export const updateDataStore = (id: string, data: Partial<DataStoreInput>) =>
+  api.patch<{ dataStore: DataStore }>(`/data-stores/${id}`, data);
+
+export const deleteDataStore = (id: string) =>
+  api.delete<{ success: boolean }>(`/data-stores/${id}`);
+
+export const testDataStoreConnection = (id: string) =>
+  api.post<DataStoreTestResult>(`/data-stores/${id}/test-connection`);
+
+export const getDataStoreMetrics = (id: string, from?: string, to?: string, limit?: number) => {
+  const params = new URLSearchParams();
+  if (from) params.append('from', from);
+  if (to) params.append('to', to);
+  if (limit) params.append('limit', limit.toString());
+  const query = params.toString();
+  return api.get<{ metrics: DataStoreMetricsEntry[] }>(`/data-stores/${id}/metrics${query ? `?${query}` : ''}`);
+};
+
+export const collectDataStoreMetricsNow = (id: string) =>
+  api.post<{ success: boolean; metrics: DataStoreMetricsEntry }>(`/data-stores/${id}/collect`);
+
+export const discoverRedisCluster = (id: string) =>
+  api.post<ClusterDiscoveryResult>(`/data-stores/${id}/discover-cluster`);
+

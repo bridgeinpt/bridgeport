@@ -18,6 +18,7 @@ import { buildDeploymentPlan, executePlan } from '../services/orchestration.js';
 import { logHealthCheck, cleanupHealthCheckLogs } from '../routes/monitoring.js';
 import { getSystemSettings } from '../services/system-settings.js';
 import { logAgentEvent } from '../services/agent-events.js';
+import { runDataStoreMetricsCollection, cleanupOldDataStoreMetrics } from '../services/data-store-collector.js';
 
 interface SchedulerConfig {
   serverHealthIntervalMs: number;
@@ -26,6 +27,7 @@ interface SchedulerConfig {
   updateCheckIntervalMs: number;
   metricsIntervalMs: number;
   backupCheckIntervalMs: number;
+  dataStoreMetricsIntervalMs: number;
   metricsRetentionDays: number;
   notificationRetentionDays: number;
   healthLogRetentionDays: number;
@@ -38,6 +40,7 @@ const DEFAULT_CONFIG: SchedulerConfig = {
   updateCheckIntervalMs: 30 * 60 * 1000, // 30 minutes
   metricsIntervalMs: 5 * 60 * 1000, // 5 minutes
   backupCheckIntervalMs: 60 * 1000, // 1 minute
+  dataStoreMetricsIntervalMs: 60 * 1000, // 1 minute (individual intervals are per-data-store)
   metricsRetentionDays: 7,
   notificationRetentionDays: 30,
   healthLogRetentionDays: 30,
@@ -788,13 +791,19 @@ async function runAgentStalenessCheck(): Promise<void> {
 }
 
 /**
- * Clean up old metrics data
+ * Clean up old metrics data (server, service, and data store metrics)
  */
 async function runMetricsCleanup(retentionDays: number): Promise<void> {
   try {
     const deleted = await cleanupOldMetrics(retentionDays);
     if (deleted > 0) {
-      console.log(`[Scheduler] Cleaned up ${deleted} old metrics records`);
+      console.log(`[Scheduler] Cleaned up ${deleted} old server/service metrics records`);
+    }
+
+    // Clean up data store metrics
+    const dataStoreDeleted = await cleanupOldDataStoreMetrics(retentionDays);
+    if (dataStoreDeleted > 0) {
+      console.log(`[Scheduler] Cleaned up ${dataStoreDeleted} old data store metrics records`);
     }
   } catch (error) {
     console.error('[Scheduler] Metrics cleanup failed:', error);
@@ -847,6 +856,7 @@ export function startScheduler(config: Partial<SchedulerConfig> = {}): void {
   console.log(`  - Discovery: ${cfg.discoveryIntervalMs / 1000}s`);
   console.log(`  - Update checks: ${cfg.updateCheckIntervalMs / 1000}s`);
   console.log(`  - Metrics collection: ${cfg.metricsIntervalMs / 1000}s`);
+  console.log(`  - Data store metrics: ${cfg.dataStoreMetricsIntervalMs / 1000}s`);
   console.log(`  - Backup checks: ${cfg.backupCheckIntervalMs / 1000}s`);
   console.log(`  - Metrics retention: ${cfg.metricsRetentionDays} days`);
   console.log(`  - Health log retention: ${cfg.healthLogRetentionDays} days`);
@@ -862,6 +872,7 @@ export function startScheduler(config: Partial<SchedulerConfig> = {}): void {
   timers.set('discovery', setInterval(runDiscovery, cfg.discoveryIntervalMs));
   timers.set('updateCheck', setInterval(runUpdateChecks, cfg.updateCheckIntervalMs));
   timers.set('metrics', setInterval(runMetricsCollection, cfg.metricsIntervalMs));
+  timers.set('dataStoreMetrics', setInterval(runDataStoreMetricsCollection, cfg.dataStoreMetricsIntervalMs));
   timers.set('backupCheck', setInterval(runBackupChecks, cfg.backupCheckIntervalMs));
   timers.set('agentStaleness', setInterval(runAgentStalenessCheck, 30000)); // Every 30 seconds
   timers.set('cleanup', setInterval(() => runMetricsCleanup(cfg.metricsRetentionDays), 60 * 60 * 1000));

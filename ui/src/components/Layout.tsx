@@ -132,6 +132,7 @@ const navigationGroups: NavGroup[] = [
       { name: 'Overview', href: '/monitoring', icon: ChartIcon },
       { name: 'Health Checks', href: '/monitoring/health', icon: HeartPulseIcon },
       { name: 'Agents & SSH', href: '/monitoring/agents', icon: NetworkIcon },
+      { name: 'Data Stores', href: '/monitoring/data-stores', icon: DatabaseIcon },
     ],
   },
   {
