@@ -292,7 +292,7 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
   });
 
   // Create appropriate Docker client based on server's dockerMode
-  const { dockerClient, sshClient, error: clientError, needsConnect } = await createDockerClientForServer(
+  const { dockerClient, sshClient, error: clientError, needsConnect, mode } = await createDockerClientForServer(
     {
       hostname: server.hostname,
       dockerMode: server.dockerMode,
@@ -302,15 +302,20 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
     getEnvironmentSshKey
   );
 
+  console.log(`[Discover] Docker client mode: ${mode}, needsConnect: ${needsConnect}, hasClient: ${!!dockerClient}`);
+
   if (!dockerClient) {
     throw new Error(clientError || 'Failed to create Docker client');
   }
 
   try {
     if (needsConnect && sshClient) {
+      console.log(`[Discover] Connecting SSH client...`);
       await sshClient.connect();
     }
+    console.log(`[Discover] Listing containers...`);
     const containers = await dockerClient.listContainers();
+    console.log(`[Discover] Found ${containers.length} containers`);
 
     const services: Service[] = [];
     const foundContainerNames = new Set<string>();

@@ -302,6 +302,25 @@ export async function bootstrapManagementEnvironment(): Promise<void> {
     console.log('Management environment created');
   }
 
+  // Upgrade any host-type servers that are using SSH mode to socket mode if available
+  const socketAvailable = await isDockerSocketAvailable();
+  if (socketAvailable) {
+    const hostServersUsingSSH = await prisma.server.findMany({
+      where: {
+        serverType: 'host',
+        dockerMode: 'ssh',
+      },
+    });
+
+    for (const server of hostServersUsingSSH) {
+      console.log(`Docker socket available - upgrading host server "${server.name}" to socket mode`);
+      await prisma.server.update({
+        where: { id: server.id },
+        data: { dockerMode: 'socket', status: 'healthy' },
+      });
+    }
+  }
+
   // Check if localhost server already exists in management environment
   const existingLocalhost = await prisma.server.findFirst({
     where: {
@@ -311,17 +330,6 @@ export async function bootstrapManagementEnvironment(): Promise<void> {
   });
 
   if (existingLocalhost) {
-    // Localhost server already exists, check if socket is now available
-    if (existingLocalhost.dockerMode === 'ssh') {
-      const socketAvailable = await isDockerSocketAvailable();
-      if (socketAvailable) {
-        console.log('Docker socket now available - upgrading localhost server to socket mode');
-        await prisma.server.update({
-          where: { id: existingLocalhost.id },
-          data: { dockerMode: 'socket', status: 'healthy' },
-        });
-      }
-    }
     return;
   }
 

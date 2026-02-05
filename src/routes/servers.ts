@@ -207,6 +207,7 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
 
       try {
         const server = await getServer(id);
+        console.log(`[Discover] Server ${server?.name}: dockerMode=${server?.dockerMode}, serverType=${server?.serverType}`);
         const { services, missing } = await discoverContainers(id);
 
         await logAudit({
@@ -224,6 +225,7 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
 
         return { services, missing };
       } catch (error) {
+        console.error(`[Discover] Failed for server ${id}:`, error);
         const message = error instanceof Error ? error.message : 'Discovery failed';
         return reply.code(500).send({ error: message });
       }
