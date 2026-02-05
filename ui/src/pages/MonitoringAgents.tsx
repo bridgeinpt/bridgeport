@@ -20,7 +20,7 @@ import { formatDistanceToNow, format } from 'date-fns';
 type TabType = 'ssh' | 'agents';
 
 export default function MonitoringAgents() {
-  const { selectedEnvironment } = useAppStore();
+  const { selectedEnvironment, autoRefreshEnabled, setAutoRefreshEnabled } = useAppStore();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -51,16 +51,16 @@ export default function MonitoringAgents() {
     navigate({ hash: tab }, { replace: true });
   };
 
-  const fetchData = async () => {
+  const fetchData = async (isRefresh = false) => {
     if (!selectedEnvironment?.id) return;
-    setLoading(true);
+    if (!isRefresh) setLoading(true);
     try {
       const response = await getAgents(selectedEnvironment.id);
       setSshUser(response.sshUser);
       setAgents(response.agents);
       setBundledAgentVersion(response.bundledAgentVersion);
     } finally {
-      setLoading(false);
+      if (!isRefresh) setLoading(false);
     }
   };
 
@@ -68,6 +68,13 @@ export default function MonitoringAgents() {
     fetchData();
     setTestResults({});
   }, [selectedEnvironment?.id]);
+
+  // Auto-refresh every 30 seconds if enabled
+  useEffect(() => {
+    if (!autoRefreshEnabled) return;
+    const interval = setInterval(() => fetchData(true), 30000);
+    return () => clearInterval(interval);
+  }, [selectedEnvironment?.id, autoRefreshEnabled]);
 
   const handleTestAll = async () => {
     if (!selectedEnvironment?.id) return;
@@ -246,13 +253,24 @@ export default function MonitoringAgents() {
         <p className="text-slate-400">
           Manage SSH connections and monitoring agents
         </p>
-        <button
-          onClick={handleTestAll}
-          disabled={testingAll}
-          className="btn btn-primary"
-        >
-          {testingAll ? 'Testing...' : 'Test All'}
-        </button>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-sm text-slate-400">
+            <input
+              type="checkbox"
+              checked={autoRefreshEnabled}
+              onChange={(e) => setAutoRefreshEnabled(e.target.checked)}
+              className="rounded bg-slate-700 border-slate-600"
+            />
+            Auto: 30s
+          </label>
+          <button
+            onClick={handleTestAll}
+            disabled={testingAll}
+            className="btn btn-primary"
+          >
+            {testingAll ? 'Testing...' : 'Test All'}
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
