@@ -143,6 +143,7 @@ bridgeport/
 │   │   ├── config.ts         # Environment configuration
 │   │   ├── crypto.ts         # Encryption utilities
 │   │   ├── db.ts             # Prisma client
+│   │   ├── docker.ts         # Docker client abstraction (socket + SSH)
 │   │   ├── ssh.ts            # SSH client wrapper
 │   │   └── scheduler.ts      # Background job scheduler
 │   ├── routes/               # API routes
@@ -165,6 +166,7 @@ bridgeport/
 │   ├── services/             # Business logic
 │   │   ├── metrics.ts        # SSH metrics collection
 │   │   ├── database-backup.ts # Backup execution
+│   │   ├── host-detection.ts # Docker host detection + bootstrap
 │   │   ├── service-types.ts  # Service type utilities
 │   │   ├── system-settings.ts # Cached system settings singleton
 │   │   └── outgoing-webhooks.ts # Webhook delivery with retries
@@ -347,7 +349,7 @@ SCHEDULER_BACKUP_CHECK_INTERVAL=60  # Backup schedule check (seconds)
 ```
 User           - Authentication with role (admin/operator/viewer), lastActiveAt for session tracking
 Environment    - Logical grouping with SSH key, allowSecretReveal, schedulerConfig (per-env scheduler)
-Server         - Physical/virtual machine with metricsMode (ssh/agent/disabled)
+Server         - Physical/virtual machine with metricsMode, dockerMode (ssh/socket)
 Service        - Docker container with optional serviceTypeId
 Secret         - Encrypted key-value with neverReveal flag
 ConfigFile     - Synced configuration files (including .env files with secret placeholders)

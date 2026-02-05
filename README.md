@@ -63,11 +63,12 @@ services:
       - .env
     volumes:
       - ./data:/data
-      # Optional: Mount SSH key for host management (set via UI instead if preferred)
-      # - ~/.ssh/id_rsa:/root/.ssh/id_rsa:ro
+      # Optional: Mount Docker socket for host container management
+      # This creates a "localhost" server automatically on startup
+      # - /var/run/docker.sock:/var/run/docker.sock
 ```
 
-> **Note**: SSH keys for server access should be configured via the Settings page in the UI. The key is encrypted and stored in the database. The file mount above is only needed if you prefer to use a file-based key.
+> **Note**: Mounting the Docker socket is the recommended way to manage containers on the host machine. If you can't mount the socket, you can use SSH instead (configure keys via Settings page in the UI).
 
 Start (admin user created automatically on first boot):
 
@@ -117,6 +118,7 @@ bridgeport/
 │   │   ├── config.ts          # Environment configuration
 │   │   ├── crypto.ts          # XChaCha20-Poly1305 encryption
 │   │   ├── db.ts              # Prisma client
+│   │   ├── docker.ts          # Docker client abstraction (socket + SSH)
 │   │   ├── ssh.ts             # SSH client wrapper
 │   │   └── scheduler.ts       # Background job scheduler
 │   ├── routes/
@@ -174,17 +176,35 @@ Physical or virtual machines registered in an environment. BridgePort connects v
 
 #### Managing the Docker Host
 
-When BridgePort runs inside a Docker container, it can manage services on its host machine using SSH through the Docker gateway IP. This allows full management capabilities including deployments, config syncing, and metrics collection.
+When BridgePort runs inside a Docker container, it can manage containers on the host machine in two ways:
 
-**Prerequisites:**
+**Option 1: Docker Socket (Recommended)**
+
+Mount the Docker socket to give BridgePort direct Docker API access. This is the simplest setup - no SSH required for local container management.
+
+```yaml
+# In your docker-compose.yml
+volumes:
+  - ./data:/data
+  - /var/run/docker.sock:/var/run/docker.sock
+```
+
+When the socket is mounted, BridgePort automatically creates a "localhost" server in the management environment on startup. This server uses socket mode for all Docker operations.
+
+> **Security Note**: Mounting the Docker socket gives BridgePort full access to the Docker daemon, equivalent to root access on the host. Only use this in trusted environments.
+
+**Option 2: SSH (For remote-like setup)**
+
+If you can't mount the socket, BridgePort can manage the host via SSH through the Docker gateway IP:
+
 1. SSH server running on the host
 2. SSH connections allowed from Docker network (`172.17.0.0/16`)
-3. The same SSH key used for remote servers authorized on the host
+3. SSH key configured in the environment and authorized on the host
 
 **Setup:**
-1. Go to **Servers** page - a detection banner appears if the host is reachable
+1. Go to **Servers** page - a detection banner appears if the host is reachable via SSH
 2. Click **Add Host Server** to register it
-3. The host is now manageable like any other server
+3. The host is now manageable like any other server (using SSH mode)
 
 **Alternative: Agent-Only Monitoring**
 
