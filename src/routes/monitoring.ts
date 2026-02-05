@@ -825,6 +825,124 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
     }
   );
 
+  // Get current health status of all servers and services
+  fastify.get(
+    '/api/environments/:envId/health-status',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { envId } = request.params as { envId: string };
+
+      const env = await prisma.environment.findUnique({ where: { id: envId } });
+      if (!env) {
+        return reply.code(404).send({ error: 'Environment not found' });
+      }
+
+      // Get all servers in this environment
+      const servers = await prisma.server.findMany({
+        where: { environmentId: envId },
+        select: { id: true, name: true },
+      });
+
+      // Get all services in this environment
+      const services = await prisma.service.findMany({
+        where: { server: { environmentId: envId } },
+        select: {
+          id: true,
+          name: true,
+          server: { select: { id: true, name: true } },
+        },
+      });
+
+      // Get most recent health check log for each server
+      const serverHealthStatus = await Promise.all(
+        servers.map(async (server) => {
+          const lastLog = await prisma.healthCheckLog.findFirst({
+            where: {
+              environmentId: envId,
+              resourceType: 'server',
+              resourceId: server.id,
+            },
+            orderBy: { createdAt: 'desc' },
+            select: {
+              createdAt: true,
+              checkType: true,
+              durationMs: true,
+              status: true,
+              errorMessage: true,
+            },
+          });
+
+          let status: 'healthy' | 'unhealthy' | 'unknown' = 'unknown';
+          if (lastLog) {
+            status = lastLog.status === 'success' ? 'healthy' : 'unhealthy';
+          }
+
+          return {
+            id: server.id,
+            name: server.name,
+            type: 'server' as const,
+            status,
+            lastCheck: lastLog
+              ? {
+                  timestamp: lastLog.createdAt.toISOString(),
+                  checkType: lastLog.checkType,
+                  durationMs: lastLog.durationMs,
+                  errorMessage: lastLog.errorMessage,
+                }
+              : null,
+          };
+        })
+      );
+
+      // Get most recent health check log for each service
+      const serviceHealthStatus = await Promise.all(
+        services.map(async (service) => {
+          const lastLog = await prisma.healthCheckLog.findFirst({
+            where: {
+              environmentId: envId,
+              resourceType: 'service',
+              resourceId: service.id,
+            },
+            orderBy: { createdAt: 'desc' },
+            select: {
+              createdAt: true,
+              checkType: true,
+              durationMs: true,
+              status: true,
+              errorMessage: true,
+            },
+          });
+
+          let status: 'healthy' | 'unhealthy' | 'unknown' = 'unknown';
+          if (lastLog) {
+            status = lastLog.status === 'success' ? 'healthy' : 'unhealthy';
+          }
+
+          return {
+            id: service.id,
+            name: service.name,
+            type: 'service' as const,
+            status,
+            serverName: service.server.name,
+            lastCheck: lastLog
+              ? {
+                  timestamp: lastLog.createdAt.toISOString(),
+                  checkType: lastLog.checkType,
+                  durationMs: lastLog.durationMs,
+                  errorMessage: lastLog.errorMessage,
+                }
+              : null,
+          };
+        })
+      );
+
+      return {
+        servers: serverHealthStatus,
+        services: serviceHealthStatus,
+      };
+    }
+  );
+
   // Get agents/SSH status for all servers
   fastify.get(
     '/api/environments/:envId/agents',

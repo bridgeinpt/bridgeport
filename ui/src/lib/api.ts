@@ -1912,6 +1912,29 @@ export interface HealthCheckRunResult {
 export const runHealthChecks = (envId: string, type?: 'all' | 'servers' | 'services') =>
   api.post<{ results: HealthCheckRunResult }>(`/environments/${envId}/health-checks/run`, { type });
 
+// Health Status (current state of all resources)
+export interface ResourceHealthStatus {
+  id: string;
+  name: string;
+  type: 'server' | 'service';
+  status: 'healthy' | 'unhealthy' | 'unknown';
+  serverName?: string; // Only for services
+  lastCheck: {
+    timestamp: string;
+    checkType: string;
+    durationMs: number | null;
+    errorMessage: string | null;
+  } | null;
+}
+
+export interface HealthStatusResponse {
+  servers: ResourceHealthStatus[];
+  services: ResourceHealthStatus[];
+}
+
+export const getHealthStatus = (envId: string) =>
+  api.get<HealthStatusResponse>(`/environments/${envId}/health-status`);
+
 // Metrics History
 export interface MetricsHistoryDataPoint {
   time: string;
