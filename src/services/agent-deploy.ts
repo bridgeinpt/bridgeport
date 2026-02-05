@@ -120,6 +120,9 @@ export async function deployAgent(
     // Write chunks to a temp file, then decode
     const tempPath = '/tmp/bridgeport-agent.b64';
 
+    // Stop the agent service if it's running (prevents "Text file busy" error)
+    await client.exec('systemctl stop bridgeport-agent 2>/dev/null || true');
+
     // Clear temp file first
     await client.exec(`rm -f ${tempPath}`);
 
