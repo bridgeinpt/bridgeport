@@ -10,6 +10,7 @@ import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { Alert } from '../components/Alert.js';
 import { useToast } from '../components/Toast.js';
+import { ServerIcon } from '../components/Icons.js';
 
 export default function Servers() {
   const { selectedEnvironment } = useAppStore();
@@ -281,86 +282,90 @@ export default function Servers() {
       </Modal>
 
       <div className="space-y-4">
-        {paginatedData.map((server) => (
-          <div key={server.id} className="panel">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div
-                  className={`w-3 h-3 rounded-full ${
-                    server.status === 'healthy'
-                      ? 'bg-green-500'
-                      : server.status === 'unhealthy'
-                      ? 'bg-red-500'
-                      : 'bg-yellow-500'
-                  }`}
-                />
-                <div>
-                  <div className="flex items-center gap-2">
-                    <Link
-                      to={`/servers/${server.id}`}
-                      className="text-lg font-semibold text-white hover:text-primary-400"
-                    >
-                      {server.name}
-                    </Link>
-                    {server.serverType === 'host' && (
-                      <span className="px-1.5 py-0.5 bg-purple-500/20 text-purple-400 text-xs font-medium rounded">
-                        Host
-                      </span>
-                    )}
+        {paginatedData.map((server) => {
+          const tags = server.tags ? JSON.parse(server.tags) : [];
+          return (
+            <div key={server.id} className="panel">
+              <div className="flex items-start justify-between">
+                <div className="flex items-start gap-4">
+                  <div className="p-3 bg-slate-800 rounded-lg">
+                    <ServerIcon className="w-6 h-6 text-primary-400" />
                   </div>
-                  <div className="flex items-center gap-4 mt-1 text-sm text-slate-400">
-                    <span className="font-mono">{server.hostname}</span>
-                    {server.publicIp && (
-                      <span className="font-mono">Public: {server.publicIp}</span>
-                    )}
-                    <span>
-                      {server.lastCheckedAt
-                        ? `Checked ${formatDistanceToNow(new Date(server.lastCheckedAt), {
-                            addSuffix: true,
-                          })}`
-                        : 'Never checked'}
-                    </span>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Link
+                        to={`/servers/${server.id}`}
+                        className="text-lg font-semibold text-white hover:text-primary-400"
+                      >
+                        {server.name}
+                      </Link>
+                      <span
+                        className={`badge text-xs ${
+                          server.status === 'healthy'
+                            ? 'bg-green-500/20 text-green-400'
+                            : server.status === 'unhealthy'
+                            ? 'bg-red-500/20 text-red-400'
+                            : 'bg-yellow-500/20 text-yellow-400'
+                        }`}
+                      >
+                        {server.status || 'unknown'}
+                      </span>
+                      {server.serverType === 'host' && (
+                        <span className="badge bg-purple-500/20 text-purple-400 text-xs">
+                          Host
+                        </span>
+                      )}
+                      {tags.map((tag: string) => (
+                        <span
+                          key={tag}
+                          className="badge bg-slate-700 text-slate-300 text-xs"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                    <p className="text-slate-400 text-sm mt-1 font-mono">
+                      {server.hostname}
+                      {server.publicIp && (
+                        <span className="text-slate-500"> · Public: {server.publicIp}</span>
+                      )}
+                    </p>
+                    <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
+                      <span>
+                        {server.lastCheckedAt
+                          ? `Checked ${formatDistanceToNow(new Date(server.lastCheckedAt), { addSuffix: true })}`
+                          : 'Never checked'}
+                      </span>
+                    </div>
                   </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handleDiscover(server.id)}
-                  disabled={actionLoading === server.id}
-                  className="btn btn-ghost text-sm"
-                >
-                  {actionLoading === server.id ? 'Loading...' : 'Discover'}
-                </button>
-                <button
-                  onClick={() => handleHealthCheck(server.id)}
-                  disabled={actionLoading === server.id}
-                  className="btn btn-secondary text-sm"
-                >
-                  {actionLoading === server.id ? 'Checking...' : 'Health Check'}
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleDiscover(server.id)}
+                    disabled={actionLoading === server.id}
+                    className="btn btn-ghost text-sm"
+                  >
+                    {actionLoading === server.id ? 'Loading...' : 'Discover'}
+                  </button>
+                  <button
+                    onClick={() => handleHealthCheck(server.id)}
+                    disabled={actionLoading === server.id}
+                    className="btn btn-secondary text-sm"
+                  >
+                    {actionLoading === server.id ? 'Checking...' : 'Health Check'}
+                  </button>
+                </div>
               </div>
             </div>
-
-            {/* Tags */}
-            {server.tags && JSON.parse(server.tags).length > 0 && (
-              <div className="mt-4 flex gap-2">
-                {JSON.parse(server.tags).map((tag: string) => (
-                  <span
-                    key={tag}
-                    className="px-2 py-1 bg-slate-700 rounded text-xs text-slate-300"
-                  >
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
+          );
+        })}
 
         {servers.length === 0 && (
           <EmptyState
+            icon={ServerIcon}
             message="No servers configured"
-            action={{ label: 'Add First Server', onClick: () => setShowCreate(true) }}
+            description="Add a server to start managing your infrastructure"
+            action={{ label: 'Add Your First Server', onClick: () => setShowCreate(true) }}
           />
         )}
         {servers.length > 0 && (

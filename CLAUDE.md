@@ -464,3 +464,132 @@ Avoid overloading pages with redundant data - link to detail pages instead.
 - **Page-local state**: Only for truly ephemeral UI (modal open, hover states)
 - **Zustand store**: For anything that should survive navigation
 - **Session storage**: For dismissals that should reset on browser close
+
+### 5. List Page Patterns
+
+All list pages should follow consistent patterns for layout, navigation, and actions.
+
+#### Card Layout (Standard for most lists)
+
+Use this structure for Servers, Databases, Registries, and similar resource lists:
+
+```tsx
+<div className="panel">
+  <div className="flex items-start justify-between">
+    <div className="flex items-start gap-4">
+      {/* Icon container */}
+      <div className="p-3 bg-slate-800 rounded-lg">
+        <ResourceIcon className="w-6 h-6 text-primary-400" />
+      </div>
+      <div>
+        {/* Row 1: Name + badges */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <Link to={`/resource/${item.id}`} className="text-lg font-semibold text-white hover:text-primary-400">
+            {item.name}
+          </Link>
+          <span className="badge bg-green-500/20 text-green-400 text-xs">status</span>
+          <span className="badge bg-slate-700 text-slate-300 text-xs">type</span>
+        </div>
+        {/* Row 2: Subtitle (monospace for technical info) */}
+        <p className="text-slate-400 text-sm mt-1 font-mono">{item.technicalInfo}</p>
+        {/* Row 3: Metadata */}
+        <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
+          <span>Count info</span>
+          <span>Timestamp info</span>
+        </div>
+      </div>
+    </div>
+    {/* Action buttons */}
+    <div className="flex gap-2">
+      <button className="btn btn-ghost text-sm">Secondary</button>
+      <button className="btn btn-primary text-sm">Primary</button>
+    </div>
+  </div>
+</div>
+```
+
+#### Table Layout (For dense data like Services)
+
+Use tables when showing many columns of comparable data:
+
+```tsx
+<table className="w-full">
+  <thead>
+    <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
+      <th className="pb-3 font-medium">Name</th>
+      {/* More columns... */}
+    </tr>
+  </thead>
+  <tbody className="divide-y divide-slate-700">
+    <tr className="text-slate-300">
+      <td className="py-4">
+        <Link to={`/item/${id}`} className="text-white hover:text-primary-400 font-medium">
+          {name}
+        </Link>
+      </td>
+    </tr>
+  </tbody>
+</table>
+```
+
+#### Navigation Rules
+
+- **If page has a detail view**: Make the item name a `<Link>` - do NOT add a separate "View" button
+- **If page uses modals only**: Use action buttons (Edit, Delete) without navigation links
+- **Never have both**: A clickable name AND a "View" button (redundant)
+
+#### Action Button Conventions
+
+**Order** (left to right):
+1. Primary action (Deploy, Backup, Check Updates)
+2. Secondary actions (Edit, Test)
+3. Destructive action (Delete) - always last, always red text
+
+**Styling:**
+- Primary action: `btn btn-primary text-sm`
+- Secondary actions: `btn btn-ghost text-sm`
+- Destructive: `btn btn-ghost text-sm text-red-400 hover:text-red-300`
+
+#### Status Badges
+
+Use consistent badge styling:
+```tsx
+// Success/Healthy
+<span className="badge bg-green-500/20 text-green-400 text-xs">healthy</span>
+
+// Warning/Pending
+<span className="badge bg-yellow-500/20 text-yellow-400 text-xs">pending</span>
+
+// Error/Unhealthy
+<span className="badge bg-red-500/20 text-red-400 text-xs">unhealthy</span>
+
+// Neutral/Info
+<span className="badge bg-slate-700 text-slate-300 text-xs">type</span>
+
+// Special (e.g., Host, Default)
+<span className="badge bg-purple-500/20 text-purple-400 text-xs">Host</span>
+```
+
+#### Empty States
+
+Always use the `EmptyState` component with an icon:
+```tsx
+<EmptyState
+  icon={ResourceIcon}
+  message="No items configured"
+  description="Add an item to get started"
+  action={{ label: 'Add Your First Item', onClick: () => setShowCreate(true) }}
+/>
+```
+
+#### Pagination
+
+- Use `usePagination` hook with `defaultPageSize: 25`
+- Place `<Pagination>` component after the list
+- Only show pagination when there are items
+
+#### Reference Implementations
+
+- **Card layout**: `Databases.tsx`, `Servers.tsx`, `Registries.tsx`
+- **Table layout**: `Services.tsx`
+- **Grid layout**: `ConfigFiles.tsx` (special case for compact items)

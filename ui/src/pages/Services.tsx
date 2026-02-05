@@ -287,7 +287,6 @@ export default function Services() {
                   <th className="pb-3 font-medium">Container</th>
                   <th className="pb-3 font-medium">Health</th>
                   <th className="pb-3 font-medium">Last Checked</th>
-                  <th className="pb-3 font-medium"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-700">
@@ -373,14 +372,6 @@ export default function Services() {
                               addSuffix: true,
                             })
                           : 'Never'}
-                      </td>
-                      <td className="py-4 text-right">
-                        <Link
-                          to={`/services/${service.id}`}
-                          className="text-primary-400 hover:text-primary-300 text-sm"
-                        >
-                          View
-                        </Link>
                       </td>
                     </tr>
                   );
