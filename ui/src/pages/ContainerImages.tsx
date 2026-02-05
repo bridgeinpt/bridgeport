@@ -21,6 +21,7 @@ import {
   type RegistryConnection,
 } from '../lib/api';
 import { formatDistanceToNow, format } from 'date-fns';
+import { PencilIcon, TrashIcon } from '../components/Icons';
 
 export default function ContainerImages() {
   const { selectedEnvironment } = useAppStore();
@@ -406,15 +407,17 @@ export default function ContainerImages() {
                   </button>
                   <button
                     onClick={() => openEdit(image)}
-                    className="btn btn-ghost text-sm"
+                    className="p-1.5 text-slate-400 hover:text-white rounded"
+                    title="Edit"
                   >
-                    Edit
+                    <PencilIcon className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => handleDelete(image.id)}
-                    className="btn btn-ghost text-sm text-red-400 hover:text-red-300"
+                    className="p-1.5 text-slate-400 hover:text-red-400 rounded"
+                    title="Delete"
                   >
-                    Delete
+                    <TrashIcon className="w-4 h-4" />
                   </button>
                 </div>
               </div>

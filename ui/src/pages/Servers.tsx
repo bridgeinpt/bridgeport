@@ -10,7 +10,7 @@ import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { Alert } from '../components/Alert.js';
 import { useToast } from '../components/Toast.js';
-import { ServerIcon } from '../components/Icons.js';
+import { ServerIcon, HeartPulseIcon } from '../components/Icons.js';
 
 export default function Servers() {
   const { selectedEnvironment } = useAppStore();
@@ -339,7 +339,7 @@ export default function Servers() {
                     </div>
                   </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
                   <button
                     onClick={() => handleDiscover(server.id)}
                     disabled={actionLoading === server.id}
@@ -350,9 +350,10 @@ export default function Servers() {
                   <button
                     onClick={() => handleHealthCheck(server.id)}
                     disabled={actionLoading === server.id}
-                    className="btn btn-secondary text-sm"
+                    className="p-1.5 text-slate-400 hover:text-white rounded"
+                    title="Health Check"
                   >
-                    {actionLoading === server.id ? 'Checking...' : 'Health Check'}
+                    <HeartPulseIcon className="w-4 h-4" />
                   </button>
                 </div>
               </div>

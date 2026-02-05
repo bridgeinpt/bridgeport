@@ -11,6 +11,7 @@ import {
   type UserRole,
 } from '../lib/api';
 import { formatDistanceToNow } from 'date-fns';
+import { PencilIcon, TrashIcon, KeyIcon } from '../components/Icons';
 
 const roleLabels: Record<UserRole, string> = {
   admin: 'Admin',
@@ -424,22 +425,28 @@ export default function Users() {
                 </div>
               </div>
 
-              <div className="flex gap-1">
-                <button onClick={() => openEditModal(user)} className="btn btn-ghost text-sm">
-                  Edit
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => openEditModal(user)}
+                  className="p-1.5 text-slate-400 hover:text-white rounded"
+                  title="Edit"
+                >
+                  <PencilIcon className="w-4 h-4" />
                 </button>
                 <button
                   onClick={() => setPasswordUser(user)}
-                  className="btn btn-ghost text-sm"
+                  className="p-1.5 text-slate-400 hover:text-white rounded"
+                  title="Change Password"
                 >
-                  Password
+                  <KeyIcon className="w-4 h-4" />
                 </button>
                 {user.id !== currentUser?.id && (
                   <button
                     onClick={() => handleDelete(user)}
-                    className="btn btn-ghost text-sm text-red-400 hover:text-red-300"
+                    className="p-1.5 text-slate-400 hover:text-red-400 rounded"
+                    title="Delete"
                   >
-                    Delete
+                    <TrashIcon className="w-4 h-4" />
                   </button>
                 )}
               </div>

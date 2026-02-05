@@ -4,7 +4,7 @@ import { useAppStore } from '../lib/store.js';
 import { getEnvironment, deployService, getDependencyGraph, type Service, type ExposedPort, type DependencyGraphNode, type DependencyGraphEdge } from '../lib/api.js';
 import { formatDistanceToNow } from 'date-fns';
 import { getContainerStatusColor, getHealthStatusColor } from '../lib/status.js';
-import { RefreshIcon } from '../components/Icons.js';
+import { RefreshIcon, CubeIcon } from '../components/Icons.js';
 import { useToast } from '../components/Toast.js';
 import Pagination from '../components/Pagination.js';
 import { usePagination } from '../hooks/usePagination.js';
@@ -273,39 +273,40 @@ export default function Services() {
           />
         </Suspense>
       ) : (
-      <div className="panel">
+      <div className="space-y-4">
         {filteredServices.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
-                  <th className="pb-3 font-medium">Service</th>
-                  <th className="pb-3 font-medium">Server</th>
-                  <th className="pb-3 font-medium">Type</th>
-                  <th className="pb-3 font-medium">Image</th>
-                  <th className="pb-3 font-medium">Ports</th>
-                  <th className="pb-3 font-medium">Container</th>
-                  <th className="pb-3 font-medium">Health</th>
-                  <th className="pb-3 font-medium">Last Checked</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-700">
-                {paginatedData.map((service) => {
-                  const ports = parseExposedPorts(service.exposedPorts);
-                  const hasUpdate = service.latestAvailableTag && service.latestAvailableTag !== service.imageTag;
-                  const depNode = dependencyNodes.get(service.id);
-                  const hasDependencies = depNode && (depNode.dependencyCount > 0 || depNode.dependentCount > 0);
-                  const hasContainerImage = depNode?.containerImage;
-                  return (
-                    <tr key={service.id} className={`text-slate-300 ${hasUpdate ? 'bg-primary-900/10' : ''}`}>
-                      <td className="py-4">
-                        <div className="flex items-center gap-2">
+          <>
+            {paginatedData.map((service) => {
+              const ports = parseExposedPorts(service.exposedPorts);
+              const hasUpdate = service.latestAvailableTag && service.latestAvailableTag !== service.imageTag;
+              const depNode = dependencyNodes.get(service.id);
+              const hasDependencies = depNode && (depNode.dependencyCount > 0 || depNode.dependentCount > 0);
+              const hasContainerImage = depNode?.containerImage;
+              return (
+                <div key={service.id} className={`panel ${hasUpdate ? 'border-green-500/30' : ''}`}>
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-start gap-4">
+                      <div className="p-3 bg-slate-800 rounded-lg">
+                        <CubeIcon className="w-6 h-6 text-primary-400" />
+                      </div>
+                      <div>
+                        {/* Row 1: Name + badges */}
+                        <div className="flex items-center gap-2 flex-wrap">
                           <Link
                             to={`/services/${service.id}`}
-                            className="text-white hover:text-primary-400 font-medium"
+                            className="text-lg font-semibold text-white hover:text-primary-400"
                           >
                             {service.name}
                           </Link>
+                          <span className={`badge text-xs ${getContainerStatusColor(service.containerStatus || service.status)}`}>
+                            {service.containerStatus || service.status}
+                          </span>
+                          <span className={`badge text-xs ${getHealthStatusColor(service.healthStatus || 'unknown')}`}>
+                            {service.healthStatus || 'unknown'}
+                          </span>
+                          {hasUpdate && (
+                            <span className="badge bg-green-500/20 text-green-400 text-xs">Update available</span>
+                          )}
                           {hasContainerImage && (
                             <span
                               className="w-2 h-2 bg-primary-400 rounded-full"
@@ -326,58 +327,76 @@ export default function Services() {
                             </span>
                           )}
                         </div>
-                        <p className="text-sm text-slate-400 font-mono">
-                          {service.containerName}
+                        {/* Row 2: Server + Type + Image */}
+                        <p className="text-slate-400 text-sm mt-1">
+                          <Link
+                            to={`/servers/${service.serverId}`}
+                            className="hover:text-primary-400"
+                          >
+                            {service.serverName}
+                          </Link>
+                          <span className="text-slate-500"> · </span>
+                          <span>{service.serviceType?.displayName || 'Generic'}</span>
+                          <span className="text-slate-500"> · </span>
+                          <span className="font-mono">
+                            {service.containerImage?.imageName?.split('/').pop() || 'unknown'}
+                            :<span className="text-primary-400">{service.imageTag}</span>
+                          </span>
+                          {hasUpdate && (
+                            <>
+                              <span className="text-slate-500"> → </span>
+                              <span className="font-mono text-green-400">{service.latestAvailableTag}</span>
+                            </>
+                          )}
                         </p>
-                      </td>
-                      <td className="py-4">
-                        <Link
-                          to={`/servers/${service.serverId}`}
-                          className="text-slate-300 hover:text-primary-400"
+                        {/* Row 3: Ports + Container + Last checked */}
+                        <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
+                          {ports.length > 0 && <span>Ports: {formatPorts(ports)}</span>}
+                          <span className="font-mono">{service.containerName}</span>
+                          <span>
+                            {service.lastCheckedAt
+                              ? `Checked ${formatDistanceToNow(new Date(service.lastCheckedAt), { addSuffix: true })}`
+                              : 'Never checked'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    {/* Actions - hybrid pattern */}
+                    <div className="flex items-center gap-2">
+                      {hasUpdate && (
+                        <button
+                          onClick={() => {
+                            deployService(service.id, {
+                              imageTag: service.latestAvailableTag!,
+                              pullImage: true,
+                            }).then(() => {
+                              toast.success(`Deployed ${service.name} to ${service.latestAvailableTag}`);
+                              // Reload
+                              if (selectedEnvironment?.id) {
+                                getEnvironment(selectedEnvironment.id).then(({ environment }) => {
+                                  const allServices: ServiceWithServer[] = [];
+                                  environment.servers.forEach((server) => {
+                                    server.services.forEach((svc) => {
+                                      allServices.push({ ...svc, serverName: server.name });
+                                    });
+                                  });
+                                  setServices(allServices);
+                                });
+                              }
+                            }).catch((err) => {
+                              toast.error(err instanceof Error ? err.message : 'Deploy failed');
+                            });
+                          }}
+                          className="btn btn-primary text-sm"
                         >
-                          {service.serverName}
-                        </Link>
-                      </td>
-                      <td className="py-4 text-sm text-slate-400">
-                        {service.serviceType?.displayName || 'Generic'}
-                      </td>
-                      <td className="py-4 font-mono text-sm">
-                        <span className="text-slate-400">
-                          {service.containerImage?.imageName?.split('/').pop() || 'unknown'}
-                        </span>
-                        :<span className="text-primary-400">{service.imageTag}</span>
-                        {hasUpdate && (
-                          <div className="flex items-center gap-1 mt-1">
-                            <span className="text-xs text-slate-500">→</span>
-                            <span className="text-xs text-green-400 font-mono">{service.latestAvailableTag}</span>
-                          </div>
-                        )}
-                      </td>
-                      <td className="py-4 font-mono text-sm text-slate-400">
-                        {formatPorts(ports)}
-                      </td>
-                      <td className="py-4">
-                        <span className={`badge ${getContainerStatusColor(service.containerStatus || service.status)}`}>
-                          {service.containerStatus || service.status}
-                        </span>
-                      </td>
-                      <td className="py-4">
-                        <span className={`badge ${getHealthStatusColor(service.healthStatus || 'unknown')}`}>
-                          {service.healthStatus || 'unknown'}
-                        </span>
-                      </td>
-                      <td className="py-4 text-sm text-slate-400">
-                        {service.lastCheckedAt
-                          ? formatDistanceToNow(new Date(service.lastCheckedAt), {
-                              addSuffix: true,
-                            })
-                          : 'Never'}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                          Deploy {service.latestAvailableTag}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
             <Pagination
               currentPage={currentPage}
               totalPages={totalPages}
@@ -386,9 +405,10 @@ export default function Services() {
               onPageChange={setPage}
               onPageSizeChange={setPageSize}
             />
-          </div>
+          </>
         ) : (
           <EmptyState
+            icon={CubeIcon}
             message="No services discovered"
             description="Go to a server and click 'Discover Containers' to find services"
           />

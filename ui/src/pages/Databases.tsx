@@ -17,7 +17,7 @@ import {
 import { formatDistanceToNow } from 'date-fns';
 import Pagination from '../components/Pagination.js';
 import { usePagination } from '../hooks/usePagination.js';
-import { DatabaseIcon } from '../components/Icons.js';
+import { DatabaseIcon, EyeIcon, PencilIcon, TrashIcon } from '../components/Icons.js';
 import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
 import { EmptyState } from '../components/EmptyState.js';
 
@@ -816,7 +816,7 @@ export default function Databases() {
                     </div>
                   </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
                   <button
                     onClick={() => handleQuickBackup(db)}
                     disabled={backingUpId === db.id}
@@ -824,19 +824,27 @@ export default function Databases() {
                   >
                     {backingUpId === db.id ? 'Starting...' : 'Backup'}
                   </button>
-                  <Link to={`/databases/${db.id}`} className="btn btn-ghost text-sm">
-                    View
+                  <Link
+                    to={`/databases/${db.id}`}
+                    className="p-1.5 text-slate-400 hover:text-white rounded"
+                    title="View"
+                  >
+                    <EyeIcon className="w-4 h-4" />
                   </Link>
-                  <button onClick={() => openEditModal(db)} className="btn btn-ghost text-sm">
-                    Edit
+                  <button
+                    onClick={() => openEditModal(db)}
+                    className="p-1.5 text-slate-400 hover:text-white rounded"
+                    title="Edit"
+                  >
+                    <PencilIcon className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => handleDelete(db)}
-                    className="btn btn-ghost text-sm text-red-400 hover:text-red-300"
+                    className="p-1.5 text-slate-400 hover:text-red-400 rounded"
                     disabled={(db._count?.backups || 0) > 0}
-                    title={(db._count?.backups || 0) > 0 ? 'Delete backups first' : ''}
+                    title={(db._count?.backups || 0) > 0 ? 'Delete backups first' : 'Delete'}
                   >
-                    Delete
+                    <TrashIcon className="w-4 h-4" />
                   </button>
                 </div>
               </div>

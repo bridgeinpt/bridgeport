@@ -18,7 +18,7 @@ import {
 import { formatDistanceToNow } from 'date-fns';
 import Pagination from '../components/Pagination.js';
 import { usePagination } from '../hooks/usePagination.js';
-import { RegistryIcon } from '../components/Icons.js';
+import { RegistryIcon, PencilIcon, TrashIcon } from '../components/Icons.js';
 import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
 import { EmptyState } from '../components/EmptyState.js';
 
@@ -334,13 +334,13 @@ export default function Registries() {
                     )}
                   </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
                   {(registry._count?.services || 0) > 0 && (
                     <>
                       <button
                         onClick={() => handleCheckUpdates(registry.id)}
                         disabled={checkingUpdates === registry.id}
-                        className="btn btn-secondary text-sm"
+                        className="btn btn-primary text-sm"
                       >
                         {checkingUpdates === registry.id ? 'Checking...' : 'Check Updates'}
                       </button>
@@ -361,21 +361,22 @@ export default function Registries() {
                   </button>
                   <button
                     onClick={() => openEdit(registry)}
-                    className="btn btn-ghost text-sm"
+                    className="p-1.5 text-slate-400 hover:text-white rounded"
+                    title="Edit"
                   >
-                    Edit
+                    <PencilIcon className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => handleDelete(registry.id)}
-                    className="btn btn-ghost text-sm text-red-400 hover:text-red-300"
+                    className="p-1.5 text-slate-400 hover:text-red-400 rounded"
                     disabled={(registry._count?.services || 0) > 0}
                     title={
                       (registry._count?.services || 0) > 0
                         ? 'Cannot delete registry with attached services'
-                        : ''
+                        : 'Delete'
                     }
                   >
-                    Delete
+                    <TrashIcon className="w-4 h-4" />
                   </button>
                 </div>
               </div>

@@ -508,9 +508,9 @@ Use this structure for Servers, Databases, Registries, and similar resource list
 </div>
 ```
 
-#### Table Layout (For dense data like Services)
+#### Table Layout (For dense tabular data)
 
-Use tables when showing many columns of comparable data:
+Use tables when showing many columns of comparable data where rows need side-by-side comparison:
 
 ```tsx
 <table className="w-full">
@@ -532,23 +532,63 @@ Use tables when showing many columns of comparable data:
 </table>
 ```
 
+**Note:** Prefer card layout for most lists. Tables are best for audit logs, health check history, and similar dense data.
+
 #### Navigation Rules
 
 - **If page has a detail view**: Make the item name a `<Link>` - do NOT add a separate "View" button
 - **If page uses modals only**: Use action buttons (Edit, Delete) without navigation links
 - **Never have both**: A clickable name AND a "View" button (redundant)
 
-#### Action Button Conventions
+#### Action Button Conventions (Hybrid Pattern)
 
-**Order** (left to right):
-1. Primary action (Deploy, Backup, Check Updates)
-2. Secondary actions (Edit, Test)
-3. Destructive action (Delete) - always last, always red text
+Action buttons use a hybrid pattern: context-specific actions as text buttons, standard actions as icon-only buttons.
 
-**Styling:**
-- Primary action: `btn btn-primary text-sm`
-- Secondary actions: `btn btn-ghost text-sm`
-- Destructive: `btn btn-ghost text-sm text-red-400 hover:text-red-300`
+**Hybrid Layout:**
+```tsx
+<div className="flex items-center gap-2">
+  {/* Context-specific: text buttons */}
+  <button className="btn btn-primary text-sm">Deploy latest</button>
+  <button className="btn btn-ghost text-sm">Discover</button>
+
+  {/* Standard actions: icon-only buttons */}
+  <button className="p-1.5 text-slate-400 hover:text-white rounded" title="View">
+    <EyeIcon className="w-4 h-4" />
+  </button>
+  <button className="p-1.5 text-slate-400 hover:text-white rounded" title="Edit">
+    <PencilIcon className="w-4 h-4" />
+  </button>
+  <button className="p-1.5 text-slate-400 hover:text-red-400 rounded" title="Delete">
+    <TrashIcon className="w-4 h-4" />
+  </button>
+</div>
+```
+
+**What goes where:**
+
+| Action Type | Style | Examples |
+|-------------|-------|----------|
+| Primary/context-specific | Text button (`btn btn-primary`) | Deploy, Backup, Check Updates |
+| Secondary context-specific | Text button (`btn btn-ghost`) | Discover, View Services, Reveal/Hide |
+| View (detail page) | Icon-only (`EyeIcon`) | View database, View details |
+| Edit | Icon-only (`PencilIcon`) | Edit settings, Edit config |
+| Delete | Icon-only (`TrashIcon`, red hover) | Delete resource |
+| Health Check | Icon-only (`HeartPulseIcon`) | Server/service health check |
+
+**Icon Button Styling:**
+```tsx
+{/* Standard icon button */}
+<button className="p-1.5 text-slate-400 hover:text-white rounded" title="Edit">
+  <PencilIcon className="w-4 h-4" />
+</button>
+
+{/* Destructive icon button */}
+<button className="p-1.5 text-slate-400 hover:text-red-400 rounded" title="Delete">
+  <TrashIcon className="w-4 h-4" />
+</button>
+```
+
+**Important:** Always include `title` attribute on icon-only buttons for accessibility.
 
 #### Status Badges
 
@@ -590,6 +630,6 @@ Always use the `EmptyState` component with an icon:
 
 #### Reference Implementations
 
-- **Card layout**: `Databases.tsx`, `Servers.tsx`, `Registries.tsx`
-- **Table layout**: `Services.tsx`
+- **Card layout**: `Services.tsx`, `Servers.tsx`, `Databases.tsx`, `Registries.tsx`, `Secrets.tsx`
+- **Table layout**: Health check logs, audit logs (dense tabular data)
 - **Grid layout**: `ConfigFiles.tsx` (special case for compact items)

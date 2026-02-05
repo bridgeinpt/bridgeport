@@ -13,7 +13,7 @@ import {
 import { formatDistanceToNow } from 'date-fns';
 import { Modal } from '../components/Modal.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
-import { LockIcon, LinkIcon, WarningIcon } from '../components/Icons.js';
+import { LockIcon, LinkIcon, WarningIcon, PencilIcon, TrashIcon } from '../components/Icons.js';
 import Pagination from '../components/Pagination.js';
 import { usePagination } from '../hooks/usePagination.js';
 import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
@@ -394,7 +394,7 @@ export default function Secrets() {
                 </p>
               </div>
 
-              <div className="flex gap-1">
+              <div className="flex items-center gap-1">
                 <button
                   onClick={() => handleReveal(secret)}
                   disabled={!canReveal(secret)}
@@ -416,15 +416,17 @@ export default function Secrets() {
                     setEditingSecret(secret.id);
                     setEditValue('');
                   }}
-                  className="btn btn-ghost text-sm"
+                  className="p-1.5 text-slate-400 hover:text-white rounded"
+                  title="Edit"
                 >
-                  Edit
+                  <PencilIcon className="w-4 h-4" />
                 </button>
                 <button
                   onClick={() => setDeleteConfirm(secret)}
-                  className="btn btn-ghost text-sm text-red-400 hover:text-red-300"
+                  className="p-1.5 text-slate-400 hover:text-red-400 rounded"
+                  title="Delete"
                 >
-                  Delete
+                  <TrashIcon className="w-4 h-4" />
                 </button>
               </div>
             </div>
