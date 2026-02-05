@@ -69,6 +69,12 @@ services:
     # Required if mounting Docker socket - add docker group for permissions
     # group_add:
     #   - "999"  # Run: stat -c '%g' /var/run/docker.sock to get your docker group ID
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 ```
 
 > **Note**: Mounting the Docker socket is the recommended way to manage containers on the host machine. You must also add the docker group ID via `group_add` for permission to access the socket. If you can't mount the socket, you can use SSH instead (configure keys via Settings page in the UI).

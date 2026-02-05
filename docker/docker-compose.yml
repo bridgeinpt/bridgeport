@@ -41,7 +41,7 @@ services:
       # Each environment has its own SSH key for security isolation
       # Keys are encrypted and stored in the BridgePort database
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
