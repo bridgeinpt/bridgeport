@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useAppStore } from '../lib/store.js';
-import { listServers, checkServerHealth, discoverContainers, createServer, getHostInfo, registerHost, getHealthLogs, type Server, type HostInfo, type HealthCheckLog } from '../lib/api.js';
+import { useAppStore, useAuthStore, isAdmin } from '../lib/store.js';
+import { listServers, checkServerHealth, discoverContainers, createServer, deleteServer, getHostInfo, registerHost, getHealthLogs, type Server, type HostInfo, type HealthCheckLog } from '../lib/api.js';
 import { formatDistanceToNow } from 'date-fns';
 import { Modal } from '../components/Modal.js';
 import Pagination from '../components/Pagination.js';
@@ -10,10 +10,11 @@ import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { Alert } from '../components/Alert.js';
 import { useToast } from '../components/Toast.js';
-import { ServerIcon, HeartPulseIcon } from '../components/Icons.js';
+import { ServerIcon, HeartPulseIcon, TrashIcon } from '../components/Icons.js';
 
 export default function Servers() {
   const { selectedEnvironment } = useAppStore();
+  const { user } = useAuthStore();
   const toast = useToast();
   const [servers, setServers] = useState<Server[]>([]);
   const [loading, setLoading] = useState(true);
@@ -28,6 +29,8 @@ export default function Servers() {
   const [hostBannerDismissed, setHostBannerDismissed] = useState(false);
   const [registeringHost, setRegisteringHost] = useState(false);
   const [healthLogs, setHealthLogs] = useState<HealthCheckLog[]>([]);
+  const [serverToDelete, setServerToDelete] = useState<Server | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const loadHealthLogs = async (envId: string) => {
     try {
@@ -127,6 +130,21 @@ export default function Servers() {
       setNewTags('');
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!serverToDelete) return;
+    setDeleting(true);
+    try {
+      await deleteServer(serverToDelete.id);
+      setServers((prev) => prev.filter((s) => s.id !== serverToDelete.id));
+      toast.success(`Server "${serverToDelete.name}" deleted`);
+      setServerToDelete(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to delete server');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -281,6 +299,41 @@ export default function Servers() {
         </form>
       </Modal>
 
+      {/* Delete Confirmation Modal */}
+      <Modal
+        isOpen={!!serverToDelete}
+        onClose={() => setServerToDelete(null)}
+        title="Delete Server"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <p className="text-slate-300">
+            Are you sure you want to delete <span className="font-semibold text-white">{serverToDelete?.name}</span>?
+          </p>
+          <p className="text-sm text-slate-400">
+            This will remove the server and all its associated services from BridgePort. This action cannot be undone.
+          </p>
+          <div className="flex gap-2 justify-end">
+            <button
+              type="button"
+              onClick={() => setServerToDelete(null)}
+              className="btn btn-ghost"
+              disabled={deleting}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={deleting}
+              className="btn bg-red-600 hover:bg-red-700 text-white"
+            >
+              {deleting ? 'Deleting...' : 'Delete Server'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
       <div className="space-y-4">
         {paginatedData.map((server) => {
           const tags = server.tags ? JSON.parse(server.tags) : [];
@@ -355,6 +408,15 @@ export default function Servers() {
                   >
                     <HeartPulseIcon className="w-4 h-4" />
                   </button>
+                  {isAdmin(user) && (
+                    <button
+                      onClick={() => setServerToDelete(server)}
+                      className="p-1.5 text-slate-400 hover:text-red-400 rounded"
+                      title="Delete"
+                    >
+                      <TrashIcon className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

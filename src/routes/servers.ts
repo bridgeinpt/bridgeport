@@ -15,6 +15,7 @@ import { deployAgent, removeAgent, checkAgentStatus } from '../services/agent-de
 import { getHostInfo, registerHostServer } from '../services/host-detection.js';
 import { prisma } from '../lib/db.js';
 import { bundledAgentVersion } from '../server.js';
+import { requireAdmin } from '../plugins/authorize.js';
 
 const createServerSchema = z.object({
   name: z.string().min(1),
@@ -151,10 +152,10 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
-  // Delete server
+  // Delete server (admin only)
   fastify.delete(
     '/api/servers/:id',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
