@@ -70,7 +70,7 @@ services:
     # group_add:
     #   - "999"  # Run: stat -c '%g' /var/run/docker.sock to get your docker group ID
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:3000/health"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
