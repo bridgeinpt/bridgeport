@@ -1,0 +1,66 @@
+name: Build and Push BridgePort
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Docker image tag (default: latest)'
+        required: false
+        default: 'latest'
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history for git log
+
+      - name: Set versions
+        run: |
+          # BridgePort version (always updates with each build)
+          if [ -n "${{ github.event.inputs.tag }}" ] && [ "${{ github.event.inputs.tag }}" != "latest" ]; then
+            echo "VERSION_TAG=${{ github.event.inputs.tag }}" >> $GITHUB_ENV
+          else
+            echo "VERSION_TAG=$(date +%Y%m%d)-${GITHUB_SHA::7}" >> $GITHUB_ENV
+          fi
+
+          # Agent version - derived from last commit that touched agent directory
+          # Format: YYYYMMDD-{short-sha} of the last commit to bridgeport-agent/
+          AGENT_VER=$(git log -1 --format='%cd-%h' --date=format:'%Y%m%d' -- bridgeport-agent/)
+          echo "AGENT_VERSION=${AGENT_VER}" >> $GITHUB_ENV
+          echo "Agent version (from git): ${AGENT_VER}"
+
+          # CLI version - derived from last commit that touched cli directory
+          CLI_VER=$(git log -1 --format='%cd-%h' --date=format:'%Y%m%d' -- cli/)
+          echo "CLI_VERSION=${CLI_VER}" >> $GITHUB_ENV
+          echo "CLI version (from git): ${CLI_VER}"
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DO_REGISTRY_TOKEN }}
+
+      - name: Log in to DigitalOcean Container Registry
+        run: doctl registry login --expiry-seconds 1200
+
+      - name: Build BridgePort Docker image
+        run: |
+          docker build \
+            --build-arg APP_VERSION=${{ env.VERSION_TAG }} \
+            --build-arg AGENT_VERSION=${{ env.AGENT_VERSION }} \
+            --build-arg CLI_VERSION=${{ env.CLI_VERSION }} \
+            -f docker/Dockerfile \
+            -t registry.digitalocean.com/bios-registry/bridgeport:${{ env.VERSION_TAG }} \
+            -t registry.digitalocean.com/bios-registry/bridgeport:latest \
+            .
+
+      - name: Push BridgePort Docker image
+        run: |
+          docker push registry.digitalocean.com/bios-registry/bridgeport:${{ env.VERSION_TAG }}
+          docker push registry.digitalocean.com/bios-registry/bridgeport:latest
