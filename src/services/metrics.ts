@@ -286,10 +286,10 @@ export async function collectServerDataSSH(serverId: string): Promise<CombinedSe
     getEnvironmentSshKey
   );
 
-  // For socket mode on host servers, we can use local commands for system metrics
+  // For socket mode, we can use local commands for system metrics
   // For SSH mode, we need the SSH client for everything
   let systemClient: CommandClient;
-  if (server.dockerMode === 'socket' && server.serverType === 'host') {
+  if (server.dockerMode === 'socket') {
     // Socket mode: use local execution for system metrics
     systemClient = new LocalClient();
   } else if (sshClient) {
