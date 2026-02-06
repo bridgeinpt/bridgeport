@@ -38,7 +38,7 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
         orderBy: { createdAt: 'desc' },
       });
 
-      return connections;
+      return { connections };
     }
   );
 

@@ -327,7 +327,7 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
   useEffect(() => {
     if (!environmentId) return;
     listConnections(environmentId)
-      .then((res) => setManualConnections(res.connections))
+      .then((res) => setManualConnections(res.connections || []))
       .catch(() => setManualConnections([]));
   }, [environmentId]);
 
