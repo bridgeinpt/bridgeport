@@ -4,8 +4,10 @@ import { prisma } from '../lib/db.js';
 import { checkServerHealth } from '../services/servers.js';
 import { checkServiceHealth } from '../services/services.js';
 import { logAudit } from '../services/audit.js';
+import { requireOperator } from '../plugins/authorize.js';
 import { bundledAgentVersion } from '../server.js';
 import { getAgentEvents } from '../services/agent-events.js';
+import { logHealthCheck, getSchedulerConfig, DEFAULT_SCHEDULER_CONFIG } from '../services/health-checks.js';
 
 const healthLogQuerySchema = z.object({
   type: z.enum(['server', 'service', 'container']).optional(),
@@ -49,81 +51,6 @@ const schedulerConfigSchema = z.object({
   collectTcpChecks: z.boolean().optional(),
   collectCertChecks: z.boolean().optional(),
 });
-
-// Default scheduler config values
-const DEFAULT_SCHEDULER_CONFIG = {
-  serverHealthIntervalMs: 60000,
-  serviceHealthIntervalMs: 60000,
-  discoveryIntervalMs: 300000,
-  metricsIntervalMs: 300000,
-  updateCheckIntervalMs: 1800000,
-  backupCheckIntervalMs: 60000,
-  metricsRetentionDays: 7,
-  healthLogRetentionDays: 30,
-  bounceThreshold: 3,
-  bounceCooldownMs: 900000,
-  // Metrics collection toggles - all enabled by default
-  collectCpu: true,
-  collectMemory: true,
-  collectSwap: true,
-  collectDisk: true,
-  collectLoad: true,
-  collectFds: true,
-  collectTcp: true,
-  collectProcesses: true,
-  collectTcpChecks: true,
-  collectCertChecks: true,
-};
-
-export type SchedulerConfig = typeof DEFAULT_SCHEDULER_CONFIG;
-
-/**
- * Log a health check result
- */
-export async function logHealthCheck(params: {
-  environmentId: string;
-  resourceType: 'server' | 'service' | 'container';
-  resourceId: string;
-  resourceName: string;
-  checkType: 'ssh' | 'url' | 'container_health' | 'discovery';
-  status: 'success' | 'failure' | 'timeout';
-  durationMs?: number;
-  httpStatus?: number;
-  errorMessage?: string;
-}): Promise<void> {
-  await prisma.healthCheckLog.create({
-    data: params,
-  });
-}
-
-/**
- * Clean up old health check logs based on retention days
- */
-export async function cleanupHealthCheckLogs(retentionDays: number): Promise<number> {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - retentionDays);
-
-  const result = await prisma.healthCheckLog.deleteMany({
-    where: {
-      createdAt: { lt: cutoff },
-    },
-  });
-
-  return result.count;
-}
-
-/**
- * Get scheduler config for an environment (with defaults filled in)
- */
-export async function getSchedulerConfig(environmentId: string): Promise<SchedulerConfig> {
-  const env = await prisma.environment.findUnique({
-    where: { id: environmentId },
-    select: { schedulerConfig: true },
-  });
-
-  const stored = env?.schedulerConfig ? JSON.parse(env.schedulerConfig) : {};
-  return { ...DEFAULT_SCHEDULER_CONFIG, ...stored };
-}
 
 export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> {
   // Get health check logs with filtering and pagination
@@ -733,7 +660,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
   // Update scheduler config for environment
   fastify.patch(
     '/api/environments/:envId/scheduler-config',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       const body = schedulerConfigSchema.safeParse(request.body);

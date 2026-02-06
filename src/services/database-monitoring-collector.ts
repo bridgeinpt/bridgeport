@@ -1,5 +1,6 @@
 import { prisma } from '../lib/db.js';
 import { decrypt } from '../lib/crypto.js';
+import { getEnvironmentSshKey } from '../routes/environments.js';
 import { executeMonitoringQueries, type MonitoringConfig, type SQLConnectionInfo, type SSHConnectionInfo } from './database-query-executor.js';
 
 /**
@@ -11,7 +12,6 @@ export async function collectDatabaseMetrics(databaseId: string): Promise<void> 
     include: {
       databaseType: true,
       server: true,
-      environment: { select: { sshPrivateKey: true, sshUser: true } },
     },
   });
 
@@ -61,16 +61,16 @@ export async function collectDatabaseMetrics(databaseId: string): Promise<void> 
       if (!database.server) {
         throw new Error('SSH monitoring requires a server');
       }
-      if (!database.environment?.sshPrivateKey) {
+
+      const sshCreds = await getEnvironmentSshKey(database.environmentId);
+      if (!sshCreds) {
         throw new Error('SSH key not configured for environment');
       }
 
-      const sshKey = decrypt(database.environment.sshPrivateKey, '');
-
       sshConn = {
         hostname: database.server.hostname,
-        sshUser: database.environment.sshUser,
-        sshPrivateKey: sshKey,
+        sshUser: sshCreds.username,
+        sshPrivateKey: sshCreds.privateKey,
         filePath: database.filePath || undefined,
       };
     }

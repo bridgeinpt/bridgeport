@@ -17,6 +17,7 @@ import {
 } from '../services/database-backup.js';
 import { logAudit } from '../services/audit.js';
 import { prisma } from '../lib/db.js';
+import { requireOperator } from '../plugins/authorize.js';
 import { collectDatabaseMetrics } from '../services/database-monitoring-collector.js';
 
 const storageTypeSchema = z.enum(['local', 'spaces']);
@@ -76,7 +77,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // Create database
   fastify.post(
     '/api/environments/:envId/databases',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       const body = createDatabaseSchema.safeParse(request.body);
@@ -139,7 +140,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // Update database
   fastify.patch(
     '/api/databases/:id',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = updateDatabaseSchema.safeParse(request.body);
@@ -175,7 +176,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // Delete database
   fastify.delete(
     '/api/databases/:id',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -208,7 +209,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // Create backup
   fastify.post(
     '/api/databases/:id/backups',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -328,7 +329,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // Delete backup
   fastify.delete(
     '/api/backups/:id',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -372,7 +373,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // Set backup schedule
   fastify.put(
     '/api/databases/:id/schedule',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = scheduleSchema.safeParse(request.body);
@@ -410,7 +411,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // Delete backup schedule
   fastify.delete(
     '/api/databases/:id/schedule',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -449,34 +450,28 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
           databaseType: {
             select: { displayName: true, monitoringConfig: true },
           },
+          metrics: {
+            orderBy: { collectedAt: 'desc' },
+            take: 1,
+          },
         },
       });
 
-      const result = await Promise.all(
-        databases.map(async (db) => {
-          // Get latest metrics
-          const latestMetric = await prisma.databaseMetrics.findFirst({
-            where: { databaseId: db.id },
-            orderBy: { collectedAt: 'desc' },
-          });
-
-          return {
-            id: db.id,
-            name: db.name,
-            type: db.type,
-            typeName: db.databaseType?.displayName || db.type,
-            serverName: db.server?.name || null,
-            monitoringEnabled: db.monitoringEnabled,
-            monitoringStatus: db.monitoringStatus,
-            lastCollectedAt: db.lastCollectedAt,
-            lastMonitoringError: db.lastMonitoringError,
-            latestMetrics: latestMetric ? JSON.parse(latestMetric.metricsJson) : null,
-            monitoringConfig: db.databaseType?.monitoringConfig
-              ? JSON.parse(db.databaseType.monitoringConfig)
-              : null,
-          };
-        })
-      );
+      const result = databases.map((db) => ({
+        id: db.id,
+        name: db.name,
+        type: db.type,
+        typeName: db.databaseType?.displayName || db.type,
+        serverName: db.server?.name || null,
+        monitoringEnabled: db.monitoringEnabled,
+        monitoringStatus: db.monitoringStatus,
+        lastCollectedAt: db.lastCollectedAt,
+        lastMonitoringError: db.lastMonitoringError,
+        latestMetrics: db.metrics[0] ? JSON.parse(db.metrics[0].metricsJson) : null,
+        monitoringConfig: db.databaseType?.monitoringConfig
+          ? JSON.parse(db.databaseType.monitoringConfig)
+          : null,
+      }));
 
       return { databases: result };
     }
@@ -550,7 +545,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // Update monitoring configuration for a database
   fastify.patch(
     '/api/environments/:envId/databases/:id/monitoring',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { id } = request.params as { envId: string; id: string };
       const body = request.body as {
@@ -563,17 +558,12 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.code(404).send({ error: 'Database not found' });
       }
 
-      const updateData: Record<string, unknown> = {};
-      if (body.monitoringEnabled !== undefined) {
-        updateData.monitoringEnabled = body.monitoringEnabled;
-      }
-      if (body.collectionIntervalSec !== undefined) {
-        updateData.collectionIntervalSec = body.collectionIntervalSec;
-      }
-
       const updated = await prisma.database.update({
         where: { id },
-        data: updateData,
+        data: {
+          ...(body.monitoringEnabled !== undefined && { monitoringEnabled: body.monitoringEnabled }),
+          ...(body.collectionIntervalSec !== undefined && { collectionIntervalSec: body.collectionIntervalSec }),
+        },
       });
 
       await logAudit({

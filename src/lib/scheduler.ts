@@ -15,12 +15,12 @@ import { checkDueBackups } from '../services/database-backup.js';
 import { sendSystemNotification, NOTIFICATION_TYPES, cleanupOldNotifications } from '../services/notifications.js';
 import { recordFailure, recordSuccess } from '../services/bounce-tracker.js';
 import { buildDeploymentPlan, executePlan } from '../services/orchestration.js';
-import { logHealthCheck, cleanupHealthCheckLogs } from '../routes/monitoring.js';
+import { logHealthCheck, cleanupHealthCheckLogs } from '../services/health-checks.js';
 import { getSystemSettings } from '../services/system-settings.js';
 import { logAgentEvent } from '../services/agent-events.js';
 import { runDatabaseMetricsCollection, cleanupOldDatabaseMetrics } from '../services/database-monitoring-collector.js';
 
-interface SchedulerConfig {
+interface GlobalSchedulerConfig {
   serverHealthIntervalMs: number;
   serviceHealthIntervalMs: number;
   discoveryIntervalMs: number;
@@ -33,7 +33,7 @@ interface SchedulerConfig {
   healthLogRetentionDays: number;
 }
 
-const DEFAULT_CONFIG: SchedulerConfig = {
+const DEFAULT_CONFIG: GlobalSchedulerConfig = {
   serverHealthIntervalMs: 60 * 1000, // 1 minute
   serviceHealthIntervalMs: 60 * 1000, // 1 minute
   discoveryIntervalMs: 5 * 60 * 1000, // 5 minutes
@@ -841,7 +841,7 @@ async function runHealthLogCleanup(retentionDays: number): Promise<void> {
 /**
  * Start the scheduler with periodic health checks and discovery
  */
-export function startScheduler(config: Partial<SchedulerConfig> = {}): void {
+export function startScheduler(config: Partial<GlobalSchedulerConfig> = {}): void {
   if (isRunning) {
     console.log('[Scheduler] Already running');
     return;

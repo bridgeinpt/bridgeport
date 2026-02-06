@@ -10,7 +10,7 @@ import {
   getEnvironmentMetricsSummary,
 } from '../services/metrics.js';
 import { logAudit } from '../services/audit.js';
-import { getSchedulerConfig } from './monitoring.js';
+import { getSchedulerConfig } from '../services/health-checks.js';
 import { deployAgent } from '../services/agent-deploy.js';
 import { logAgentEvent } from '../services/agent-events.js';
 import crypto from 'crypto';
@@ -375,7 +375,7 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
             // Determine health status from container health
             let healthStatus = 'unknown';
             if (!isRunning) {
-              healthStatus = state === 'not_found' ? 'unknown' : 'unknown';
+              healthStatus = 'unknown';
             } else if (health === 'healthy') {
               healthStatus = 'healthy';
             } else if (health === 'unhealthy') {

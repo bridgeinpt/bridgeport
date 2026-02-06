@@ -36,6 +36,63 @@ export interface ServiceMetricsData {
   restartCount?: number;
 }
 
+/**
+ * Collect system-level metrics (CPU, memory, disk, load, uptime) via a CommandClient.
+ * Shared between collectServerMetricsSSH and collectServerDataSSH.
+ */
+export async function collectSystemMetrics(client: CommandClient): Promise<ServerMetricsData> {
+  const metrics: ServerMetricsData = {};
+
+  // CPU usage - using top in batch mode
+  const cpuResult = await client.exec("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'");
+  if (cpuResult.code === 0 && cpuResult.stdout) {
+    const cpuValue = parseFloat(cpuResult.stdout.trim());
+    if (!isNaN(cpuValue)) {
+      metrics.cpuPercent = cpuValue;
+    }
+  }
+
+  // Memory - using free
+  const memResult = await client.exec("free -m | awk '/^Mem:/ {print $2, $3}'");
+  if (memResult.code === 0 && memResult.stdout) {
+    const [total, used] = memResult.stdout.trim().split(/\s+/).map(Number);
+    if (!isNaN(total) && !isNaN(used)) {
+      metrics.memoryTotalMb = total;
+      metrics.memoryUsedMb = used;
+    }
+  }
+
+  // Disk - using df
+  const diskResult = await client.exec("df -BG / | awk 'NR==2 {gsub(/G/,\"\"); print $2, $3}'");
+  if (diskResult.code === 0 && diskResult.stdout) {
+    const [total, used] = diskResult.stdout.trim().split(/\s+/).map(Number);
+    if (!isNaN(total) && !isNaN(used)) {
+      metrics.diskTotalGb = total;
+      metrics.diskUsedGb = used;
+    }
+  }
+
+  // Load average
+  const loadResult = await client.exec("cat /proc/loadavg | awk '{print $1, $2, $3}'");
+  if (loadResult.code === 0 && loadResult.stdout) {
+    const [load1, load5, load15] = loadResult.stdout.trim().split(/\s+/).map(Number);
+    if (!isNaN(load1)) metrics.loadAvg1 = load1;
+    if (!isNaN(load5)) metrics.loadAvg5 = load5;
+    if (!isNaN(load15)) metrics.loadAvg15 = load15;
+  }
+
+  // Uptime in seconds
+  const uptimeResult = await client.exec("cat /proc/uptime | awk '{print int($1)}'");
+  if (uptimeResult.code === 0 && uptimeResult.stdout) {
+    const uptime = parseInt(uptimeResult.stdout.trim());
+    if (!isNaN(uptime)) {
+      metrics.uptime = uptime;
+    }
+  }
+
+  return metrics;
+}
+
 export async function collectServerMetricsSSH(serverId: string): Promise<ServerMetricsData | null> {
   const server = await prisma.server.findUnique({
     where: { id: serverId },
@@ -60,57 +117,7 @@ export async function collectServerMetricsSSH(serverId: string): Promise<ServerM
 
   try {
     await client.connect();
-
-    const metrics: ServerMetricsData = {};
-
-    // CPU usage - using top in batch mode
-    const cpuResult = await client.exec("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'");
-    if (cpuResult.code === 0 && cpuResult.stdout) {
-      const cpuValue = parseFloat(cpuResult.stdout.trim());
-      if (!isNaN(cpuValue)) {
-        metrics.cpuPercent = cpuValue;
-      }
-    }
-
-    // Memory - using free
-    const memResult = await client.exec("free -m | awk '/^Mem:/ {print $2, $3}'");
-    if (memResult.code === 0 && memResult.stdout) {
-      const [total, used] = memResult.stdout.trim().split(/\s+/).map(Number);
-      if (!isNaN(total) && !isNaN(used)) {
-        metrics.memoryTotalMb = total;
-        metrics.memoryUsedMb = used;
-      }
-    }
-
-    // Disk - using df
-    const diskResult = await client.exec("df -BG / | awk 'NR==2 {gsub(/G/,\"\"); print $2, $3}'");
-    if (diskResult.code === 0 && diskResult.stdout) {
-      const [total, used] = diskResult.stdout.trim().split(/\s+/).map(Number);
-      if (!isNaN(total) && !isNaN(used)) {
-        metrics.diskTotalGb = total;
-        metrics.diskUsedGb = used;
-      }
-    }
-
-    // Load average
-    const loadResult = await client.exec("cat /proc/loadavg | awk '{print $1, $2, $3}'");
-    if (loadResult.code === 0 && loadResult.stdout) {
-      const [load1, load5, load15] = loadResult.stdout.trim().split(/\s+/).map(Number);
-      if (!isNaN(load1)) metrics.loadAvg1 = load1;
-      if (!isNaN(load5)) metrics.loadAvg5 = load5;
-      if (!isNaN(load15)) metrics.loadAvg15 = load15;
-    }
-
-    // Uptime in seconds
-    const uptimeResult = await client.exec("cat /proc/uptime | awk '{print int($1)}'");
-    if (uptimeResult.code === 0 && uptimeResult.stdout) {
-      const uptime = parseInt(uptimeResult.stdout.trim());
-      if (!isNaN(uptime)) {
-        metrics.uptime = uptime;
-      }
-    }
-
-    return metrics;
+    return await collectSystemMetrics(client);
   } catch (error) {
     console.error(`Failed to collect metrics for server ${serverId}:`, error);
     return null;
@@ -313,54 +320,7 @@ export async function collectServerDataSSH(serverId: string): Promise<CombinedSe
     const serverHealth: { status: 'healthy' | 'unhealthy' } = { status: 'healthy' };
 
     // Collect server metrics using system client
-    const serverMetrics: ServerMetricsData = {};
-
-    // CPU usage
-    const cpuResult = await systemClient.exec("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'");
-    if (cpuResult.code === 0 && cpuResult.stdout) {
-      const cpuValue = parseFloat(cpuResult.stdout.trim());
-      if (!isNaN(cpuValue)) {
-        serverMetrics.cpuPercent = cpuValue;
-      }
-    }
-
-    // Memory
-    const memResult = await systemClient.exec("free -m | awk '/^Mem:/ {print $2, $3}'");
-    if (memResult.code === 0 && memResult.stdout) {
-      const [total, used] = memResult.stdout.trim().split(/\s+/).map(Number);
-      if (!isNaN(total) && !isNaN(used)) {
-        serverMetrics.memoryTotalMb = total;
-        serverMetrics.memoryUsedMb = used;
-      }
-    }
-
-    // Disk
-    const diskResult = await systemClient.exec("df -BG / | awk 'NR==2 {gsub(/G/,\"\"); print $2, $3}'");
-    if (diskResult.code === 0 && diskResult.stdout) {
-      const [total, used] = diskResult.stdout.trim().split(/\s+/).map(Number);
-      if (!isNaN(total) && !isNaN(used)) {
-        serverMetrics.diskTotalGb = total;
-        serverMetrics.diskUsedGb = used;
-      }
-    }
-
-    // Load average
-    const loadResult = await systemClient.exec("cat /proc/loadavg | awk '{print $1, $2, $3}'");
-    if (loadResult.code === 0 && loadResult.stdout) {
-      const [load1, load5, load15] = loadResult.stdout.trim().split(/\s+/).map(Number);
-      if (!isNaN(load1)) serverMetrics.loadAvg1 = load1;
-      if (!isNaN(load5)) serverMetrics.loadAvg5 = load5;
-      if (!isNaN(load15)) serverMetrics.loadAvg15 = load15;
-    }
-
-    // Uptime
-    const uptimeResult = await systemClient.exec("cat /proc/uptime | awk '{print int($1)}'");
-    if (uptimeResult.code === 0 && uptimeResult.stdout) {
-      const uptime = parseInt(uptimeResult.stdout.trim());
-      if (!isNaN(uptime)) {
-        serverMetrics.uptime = uptime;
-      }
-    }
+    const serverMetrics = await collectSystemMetrics(systemClient);
 
     // Collect service metrics and health for all containers
     const serviceData: ServiceHealthData[] = [];

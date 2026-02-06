@@ -1,5 +1,5 @@
 import Docker from 'dockerode';
-import { access, constants, readFile } from 'fs/promises';
+import { access, constants } from 'fs/promises';
 import type { CommandClient } from './ssh.js';
 
 // ==================== Types ====================

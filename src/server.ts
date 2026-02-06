@@ -44,32 +44,23 @@ import { downloadRoutes } from './routes/downloads.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Read version from package.json at startup
+async function readVersionFile(path: string): Promise<string> {
+  try {
+    return (await readFile(path, 'utf-8')).trim();
+  } catch {
+    return 'unknown';
+  }
+}
+
+// Read versions at startup
 let appVersion = 'unknown';
 try {
-  const packageJson = JSON.parse(
-    await readFile(join(__dirname, '../package.json'), 'utf-8')
-  );
+  const packageJson = JSON.parse(await readFile(join(__dirname, '../package.json'), 'utf-8'));
   appVersion = packageJson.version;
-} catch {
-  // Fallback if package.json can't be read
-}
+} catch { /* dev mode fallback */ }
 
-// Read bundled agent version at startup
-let bundledAgentVersion = 'unknown';
-try {
-  bundledAgentVersion = (await readFile(join(__dirname, '../agent/agent-version.txt'), 'utf-8')).trim();
-} catch {
-  // Fallback if agent-version.txt can't be read (dev mode)
-}
-
-// Read CLI version at startup
-let cliVersion = 'unknown';
-try {
-  cliVersion = (await readFile(join(__dirname, '../cli/cli-version.txt'), 'utf-8')).trim();
-} catch {
-  // Fallback if cli-version.txt can't be read (dev mode)
-}
+const bundledAgentVersion = await readVersionFile(join(__dirname, '../agent/agent-version.txt'));
+const cliVersion = await readVersionFile(join(__dirname, '../cli/cli-version.txt'));
 
 // Export for use in routes
 export { bundledAgentVersion, cliVersion };
