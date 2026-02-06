@@ -1,30 +1,28 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppStore } from '../lib/store';
-import { api } from '../lib/api';
+import {
+  getDatabaseMonitoringSummary,
+  getDatabaseMetricsHistory,
+  getEnvironmentMetricsSummary,
+  type DatabaseMonitoringSummaryItem,
+  type DatabaseMetricsHistoryItem,
+  type DatabaseQueryMeta,
+  type MetricsSummaryServer,
+} from '../lib/api';
+import { format, formatDistanceToNow } from 'date-fns';
+import ChartCard from '../components/monitoring/ChartCard';
+import TimeRangeSelector from '../components/monitoring/TimeRangeSelector';
 import AutoRefreshToggle from '../components/monitoring/AutoRefreshToggle';
 import { DatabaseIcon } from '../components/Icons';
-import { formatDistanceToNow } from 'date-fns';
 
-interface DatabaseMonitoringSummary {
-  id: string;
-  name: string;
-  type: string;
-  typeName: string;
-  serverName: string | null;
-  monitoringEnabled: boolean;
-  monitoringStatus: string; // connected | error | unknown
-  lastCollectedAt: string | null;
-  lastMonitoringError: string | null;
-  latestMetrics: Record<string, unknown> | null;
-  monitoringConfig: {
-    queries: Array<{
-      name: string;
-      displayName: string;
-      unit?: string;
-      resultType: string;
-    }>;
-  } | null;
+function parseTags(tagsJson: string): string[] {
+  if (!tagsJson) return [];
+  try {
+    return JSON.parse(tagsJson);
+  } catch {
+    return [];
+  }
 }
 
 function formatBytes(bytes: number): string {
@@ -33,6 +31,16 @@ function formatBytes(bytes: number): string {
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+function formatMetricValue(value: unknown, unit?: string): string {
+  if (value == null) return '-';
+  const num = Number(value);
+  if (isNaN(num)) return String(value);
+  if (unit === 'bytes') return formatBytes(num);
+  if (unit === '%') return `${num.toFixed(1)}%`;
+  if (Number.isInteger(num)) return num.toLocaleString();
+  return num.toFixed(2);
 }
 
 function StatusDot({ status, enabled }: { status: string; enabled: boolean }) {
@@ -48,11 +56,18 @@ function StatusDot({ status, enabled }: { status: string; enabled: boolean }) {
 export default function MonitoringDatabases() {
   const {
     selectedEnvironment,
+    monitoringTimeRange,
+    setMonitoringTimeRange,
     autoRefreshEnabled,
     setAutoRefreshEnabled,
+    monitoringTagFilter,
+    setMonitoringTagFilter,
   } = useAppStore();
 
-  const [databases, setDatabases] = useState<DatabaseMonitoringSummary[]>([]);
+  const [summary, setSummary] = useState<DatabaseMonitoringSummaryItem[]>([]);
+  const [metricsHistory, setMetricsHistory] = useState<DatabaseMetricsHistoryItem[]>([]);
+  const [queryMeta, setQueryMeta] = useState<DatabaseQueryMeta[]>([]);
+  const [servers, setServers] = useState<MetricsSummaryServer[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -62,10 +77,15 @@ export default function MonitoringDatabases() {
     else setLoading(true);
 
     try {
-      const res = await api.get<{ databases: DatabaseMonitoringSummary[] }>(
-        `/environments/${selectedEnvironment.id}/databases/monitoring-summary`
-      );
-      setDatabases(res.databases);
+      const [summaryRes, historyRes, serverRes] = await Promise.all([
+        getDatabaseMonitoringSummary(selectedEnvironment.id),
+        getDatabaseMetricsHistory(selectedEnvironment.id, monitoringTimeRange),
+        getEnvironmentMetricsSummary(selectedEnvironment.id),
+      ]);
+      setSummary(summaryRes.databases);
+      setMetricsHistory(historyRes.databases);
+      setQueryMeta(historyRes.queryMeta);
+      setServers(serverRes.servers);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -74,14 +94,144 @@ export default function MonitoringDatabases() {
 
   useEffect(() => {
     fetchData();
-  }, [selectedEnvironment?.id]);
+  }, [selectedEnvironment?.id, monitoringTimeRange]);
 
-  // Auto-refresh every 30 seconds if enabled
   useEffect(() => {
     if (!autoRefreshEnabled) return;
     const interval = setInterval(() => fetchData(true), 30000);
     return () => clearInterval(interval);
-  }, [selectedEnvironment?.id, autoRefreshEnabled]);
+  }, [selectedEnvironment?.id, monitoringTimeRange, autoRefreshEnabled]);
+
+  // Collect unique tags from servers that have databases
+  const allTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    servers.forEach((server) => {
+      parseTags(server.tags).forEach((tag) => tagSet.add(tag));
+    });
+    return Array.from(tagSet).sort();
+  }, [servers]);
+
+  const tagFilterSet = useMemo(() => new Set(monitoringTagFilter), [monitoringTagFilter]);
+
+  // Filter databases based on selected tags (via server)
+  const filteredMetricsHistory = useMemo(() => {
+    if (tagFilterSet.size === 0) return metricsHistory;
+    return metricsHistory.filter((db) => {
+      const dbTags = parseTags(db.serverTags);
+      return dbTags.some((tag) => tagFilterSet.has(tag));
+    });
+  }, [metricsHistory, tagFilterSet]);
+
+  const filteredSummary = useMemo(() => {
+    if (tagFilterSet.size === 0) return summary;
+    // Build set of server IDs matching tags
+    const matchingServerIds = new Set(
+      servers
+        .filter((s) => parseTags(s.tags).some((tag) => tagFilterSet.has(tag)))
+        .map((s) => s.id)
+    );
+    return summary.filter((db) => !db.serverId || matchingServerIds.has(db.serverId));
+  }, [summary, servers, tagFilterSet]);
+
+  const handleTagToggle = useCallback(
+    (tag: string) => {
+      const newFilter = monitoringTagFilter.includes(tag)
+        ? monitoringTagFilter.filter((t) => t !== tag)
+        : [...monitoringTagFilter, tag];
+      setMonitoringTagFilter(newFilter);
+    },
+    [monitoringTagFilter, setMonitoringTagFilter]
+  );
+
+  // Prepare chart data for a given query metric
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const prepareChartData = (meta: DatabaseQueryMeta): { data: any[]; names: string[] } => {
+    const timeMap = new Map<string, Record<string, unknown>>();
+    const nameSet = new Set<string>();
+
+    if (meta.resultType === 'scalar') {
+      // Scalar: one line per database
+      filteredMetricsHistory.forEach((db) => {
+        db.data.forEach((point) => {
+          const time = point.time as string;
+          if (!timeMap.has(time)) timeMap.set(time, { time });
+          const entry = timeMap.get(time)!;
+          const val = point[meta.name];
+          if (val != null) {
+            entry[db.name] = val;
+            nameSet.add(db.name);
+          }
+        });
+      });
+    } else if (meta.resultType === 'row') {
+      // Row: flatten to dbName.fieldName — but only if ≤ 3 databases have this query
+      const dbsWithQuery = filteredMetricsHistory.filter((db) =>
+        db.data.some((point) => {
+          // Check for flattened row keys like "connections.active"
+          return Object.keys(point).some((k) => k.startsWith(`${meta.name}.`));
+        })
+      );
+
+      if (dbsWithQuery.length <= 3) {
+        dbsWithQuery.forEach((db) => {
+          db.data.forEach((point) => {
+            const time = point.time as string;
+            if (!timeMap.has(time)) timeMap.set(time, { time });
+            const entry = timeMap.get(time)!;
+
+            for (const [key, value] of Object.entries(point)) {
+              if (key.startsWith(`${meta.name}.`) && value != null) {
+                const field = key.slice(meta.name.length + 1);
+                const lineName = dbsWithQuery.length === 1 ? field : `${db.name}.${field}`;
+                entry[lineName] = value;
+                nameSet.add(lineName);
+              }
+            }
+          });
+        });
+      } else {
+        // Too many databases — skip row query charting
+        return { data: [], names: [] };
+      }
+    }
+
+    const data = Array.from(timeMap.values()).sort((a, b) =>
+      (a.time as string).localeCompare(b.time as string)
+    );
+    return { data, names: Array.from(nameSet) };
+  };
+
+  const formatTime = (time: string) => {
+    const date = new Date(time);
+    if (monitoringTimeRange <= 24) return format(date, 'HH:mm');
+    return format(date, 'MMM d HH:mm');
+  };
+
+  const getChartUnit = (meta: DatabaseQueryMeta): string => {
+    if (meta.unit === 'bytes') return ' MB';
+    if (meta.unit === '%') return '%';
+    return '';
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const getChartDomain = (meta: DatabaseQueryMeta): [number | 'auto', number | 'auto'] => {
+    if (meta.unit === '%') return [0, 100];
+    return [0, 'auto'];
+  };
+
+  // For byte-unit charts, convert values from bytes to MB for readability
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const transformBytesToMB = (data: any[], names: string[]): any[] => {
+    return data.map((point) => {
+      const newPoint = { ...point };
+      for (const name of names) {
+        if (newPoint[name] != null) {
+          newPoint[name] = Number(newPoint[name]) / (1024 * 1024);
+        }
+      }
+      return newPoint;
+    });
+  };
 
   if (!selectedEnvironment) {
     return (
@@ -96,9 +246,9 @@ export default function MonitoringDatabases() {
       <div className="p-8">
         <div className="animate-pulse">
           <div className="h-6 w-64 bg-slate-700 rounded mb-6"></div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-6">
             {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="h-40 bg-slate-800 rounded-xl"></div>
+              <div key={i} className="h-64 bg-slate-800 rounded-xl"></div>
             ))}
           </div>
         </div>
@@ -106,15 +256,17 @@ export default function MonitoringDatabases() {
     );
   }
 
-  const monitoredCount = databases.filter((db) => db.monitoringEnabled).length;
-  const connectedCount = databases.filter((db) => db.monitoringStatus === 'connected').length;
-  const errorCount = databases.filter((db) => db.monitoringStatus === 'error').length;
+  const monitoredCount = filteredSummary.filter((db) => db.monitoringEnabled).length;
+  const connectedCount = filteredSummary.filter((db) => db.monitoringStatus === 'connected').length;
+  const errorCount = filteredSummary.filter((db) => db.monitoringStatus === 'error').length;
+
+  const hasChartData = filteredMetricsHistory.length > 0 && filteredMetricsHistory.some((db) => db.data.length > 0);
 
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-5">
         <p className="text-slate-400">
-          Database monitoring status across {selectedEnvironment.name}
+          Database monitoring across {selectedEnvironment.name}
         </p>
         <AutoRefreshToggle
           enabled={autoRefreshEnabled}
@@ -124,121 +276,166 @@ export default function MonitoringDatabases() {
         />
       </div>
 
-      {/* Summary Stats */}
-      {databases.length > 0 && (
-        <div className="grid grid-cols-4 gap-4 mb-6">
-          <div className="rounded-xl border p-4 bg-blue-500/10 border-blue-500/30">
-            <p className="text-slate-400 text-xs mb-1">Total</p>
-            <p className="text-2xl font-bold text-blue-400">{databases.length}</p>
-          </div>
-          <div className="rounded-xl border p-4 bg-green-500/10 border-green-500/30">
-            <p className="text-slate-400 text-xs mb-1">Monitored</p>
-            <p className="text-2xl font-bold text-green-400">{monitoredCount}</p>
-          </div>
-          <div className="rounded-xl border p-4 bg-emerald-500/10 border-emerald-500/30">
-            <p className="text-slate-400 text-xs mb-1">Connected</p>
-            <p className="text-2xl font-bold text-emerald-400">{connectedCount}</p>
-          </div>
-          <div className={`rounded-xl border p-4 ${errorCount > 0 ? 'bg-red-500/10 border-red-500/30' : 'bg-slate-500/10 border-slate-500/30'}`}>
-            <p className="text-slate-400 text-xs mb-1">Errors</p>
-            <p className={`text-2xl font-bold ${errorCount > 0 ? 'text-red-400' : 'text-slate-400'}`}>{errorCount}</p>
-          </div>
-        </div>
-      )}
+      {/* Time Range and Tag Filter */}
+      <div className="flex items-center flex-wrap gap-4 mb-6">
+        <TimeRangeSelector
+          value={monitoringTimeRange}
+          onChange={setMonitoringTimeRange}
+        />
 
-      {/* Database Grid */}
-      {databases.length > 0 ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {databases.map((db) => (
-            <div key={db.id} className="card">
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex items-start gap-3">
-                  <div className="p-2 bg-slate-800 rounded-lg mt-0.5">
-                    <DatabaseIcon className="w-5 h-5 text-primary-400" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <StatusDot status={db.monitoringStatus} enabled={db.monitoringEnabled} />
-                      <Link
-                        to={`/monitoring/databases/${db.id}`}
-                        className="text-lg font-semibold text-white hover:text-primary-400"
-                      >
-                        {db.name}
-                      </Link>
-                    </div>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="badge bg-slate-700 text-slate-300 text-xs">{db.typeName}</span>
-                      {db.serverName && (
-                        <span className="text-slate-500 text-sm">{db.serverName}</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                {!db.monitoringEnabled && (
-                  <span className="badge bg-slate-700 text-slate-400 text-xs">Disabled</span>
-                )}
-              </div>
-
-              {/* Metrics */}
-              {db.monitoringEnabled && db.latestMetrics && (
-                <div className="grid grid-cols-3 gap-3 mt-3">
-                  {db.latestMetrics.db_size != null && (
-                    <div className="p-2 rounded bg-slate-800/50">
-                      <p className="text-slate-500 text-xs">DB Size</p>
-                      <p className="text-white font-semibold text-sm mt-0.5">
-                        {formatBytes(db.latestMetrics.db_size as number)}
-                      </p>
-                    </div>
-                  )}
-                  {db.latestMetrics.table_count != null && (
-                    <div className="p-2 rounded bg-slate-800/50">
-                      <p className="text-slate-500 text-xs">Tables</p>
-                      <p className="text-white font-semibold text-sm mt-0.5">
-                        {db.latestMetrics.table_count as number}
-                      </p>
-                    </div>
-                  )}
-                  {db.latestMetrics.active_connections != null && (
-                    <div className="p-2 rounded bg-slate-800/50">
-                      <p className="text-slate-500 text-xs">Connections</p>
-                      <p className="text-white font-semibold text-sm mt-0.5">
-                        {db.latestMetrics.active_connections as number}
-                        {db.latestMetrics.max_connections != null && (
-                          <span className="text-slate-500 text-xs">
-                            /{db.latestMetrics.max_connections as number}
-                          </span>
-                        )}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Error message */}
-              {db.monitoringEnabled && db.monitoringStatus === 'error' && db.lastMonitoringError && (
-                <div className="mt-3 p-2 rounded bg-red-500/10 border border-red-500/20">
-                  <p className="text-red-400 text-xs truncate" title={db.lastMonitoringError}>
-                    {db.lastMonitoringError}
-                  </p>
-                </div>
-              )}
-
-              {/* Last collected */}
-              {db.monitoringEnabled && (
-                <div className="mt-3 text-xs text-slate-500">
-                  {db.lastCollectedAt ? (
-                    <>
-                      Last collected{' '}
-                      {formatDistanceToNow(new Date(db.lastCollectedAt), { addSuffix: true })}
-                    </>
-                  ) : (
-                    'No data collected yet'
-                  )}
-                </div>
+        {allTags.length > 0 && (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-slate-400">Tags:</span>
+            <div className="flex flex-wrap gap-1">
+              {allTags.map((tag) => (
+                <button
+                  key={tag}
+                  onClick={() => handleTagToggle(tag)}
+                  className={`px-2 py-1 text-xs rounded-full transition-colors ${
+                    tagFilterSet.has(tag)
+                      ? 'bg-brand-600 text-white'
+                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                  }`}
+                >
+                  {tag}
+                </button>
+              ))}
+              {tagFilterSet.size > 0 && (
+                <button
+                  onClick={() => setMonitoringTagFilter([])}
+                  className="px-2 py-1 text-xs rounded-full bg-slate-800 text-slate-400 hover:bg-slate-700"
+                >
+                  Clear
+                </button>
               )}
             </div>
-          ))}
-        </div>
+          </div>
+        )}
+      </div>
+
+      {/* Charts */}
+      {hasChartData ? (
+        <>
+          <div className="grid grid-cols-2 gap-6 mb-8">
+            {queryMeta.map((meta) => {
+              const { data, names } = prepareChartData(meta);
+              if (data.length === 0 || names.length === 0) return null;
+
+              const chartUnit = getChartUnit(meta);
+              const chartDomain = getChartDomain(meta);
+              const chartData = meta.unit === 'bytes' ? transformBytesToMB(data, names) : data;
+
+              return (
+                <ChartCard
+                  key={meta.name}
+                  title={meta.displayName}
+                  data={chartData}
+                  names={names}
+                  formatTime={formatTime}
+                  unit={chartUnit}
+                  domain={chartDomain}
+                />
+              );
+            })}
+          </div>
+
+          {/* Database Table */}
+          {filteredSummary.length > 0 && (
+            <div className="card">
+              <h2 className="text-lg font-semibold text-white mb-4">
+                Database Status
+              </h2>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
+                      <th className="pb-3 font-medium">Database</th>
+                      <th className="pb-3 font-medium">Server</th>
+                      <th className="pb-3 font-medium">Type</th>
+                      <th className="pb-3 font-medium">Status</th>
+                      {queryMeta.filter((m) => m.resultType === 'scalar').slice(0, 4).map((m) => (
+                        <th key={m.name} className="pb-3 font-medium">{m.displayName}</th>
+                      ))}
+                      <th className="pb-3 font-medium">Last Collected</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-700">
+                    {filteredSummary.map((db) => (
+                      <tr key={db.id} className="text-slate-300">
+                        <td className="py-3">
+                          <Link
+                            to={`/monitoring/databases/${db.id}`}
+                            className="text-white hover:text-brand-400 font-medium"
+                          >
+                            {db.name}
+                          </Link>
+                        </td>
+                        <td className="py-3 text-sm">{db.serverName || '-'}</td>
+                        <td className="py-3">
+                          <span className="badge bg-slate-700 text-slate-300 text-xs">
+                            {db.databaseType?.displayName || db.type}
+                          </span>
+                        </td>
+                        <td className="py-3">
+                          <div className="flex items-center gap-2">
+                            <StatusDot status={db.monitoringStatus} enabled={db.monitoringEnabled} />
+                            <span className="text-sm">
+                              {!db.monitoringEnabled ? 'Disabled' : db.monitoringStatus}
+                            </span>
+                          </div>
+                        </td>
+                        {queryMeta.filter((m) => m.resultType === 'scalar').slice(0, 4).map((m) => (
+                          <td key={m.name} className="py-3 text-sm font-mono">
+                            {db.latestMetrics?.[m.name] != null
+                              ? formatMetricValue(db.latestMetrics[m.name], m.unit)
+                              : '-'}
+                          </td>
+                        ))}
+                        <td className="py-3 text-sm text-slate-500">
+                          {db.lastCollectedAt
+                            ? formatDistanceToNow(new Date(db.lastCollectedAt), { addSuffix: true })
+                            : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      ) : filteredSummary.length > 0 ? (
+        <>
+          {/* Summary Stats when no chart data */}
+          <div className="grid grid-cols-4 gap-4 mb-6">
+            <div className="rounded-xl border p-4 bg-blue-500/10 border-blue-500/30">
+              <p className="text-slate-400 text-xs mb-1">Total</p>
+              <p className="text-2xl font-bold text-blue-400">{filteredSummary.length}</p>
+            </div>
+            <div className="rounded-xl border p-4 bg-green-500/10 border-green-500/30">
+              <p className="text-slate-400 text-xs mb-1">Monitored</p>
+              <p className="text-2xl font-bold text-green-400">{monitoredCount}</p>
+            </div>
+            <div className="rounded-xl border p-4 bg-emerald-500/10 border-emerald-500/30">
+              <p className="text-slate-400 text-xs mb-1">Connected</p>
+              <p className="text-2xl font-bold text-emerald-400">{connectedCount}</p>
+            </div>
+            <div className={`rounded-xl border p-4 ${errorCount > 0 ? 'bg-red-500/10 border-red-500/30' : 'bg-slate-500/10 border-slate-500/30'}`}>
+              <p className="text-slate-400 text-xs mb-1">Errors</p>
+              <p className={`text-2xl font-bold ${errorCount > 0 ? 'text-red-400' : 'text-slate-400'}`}>{errorCount}</p>
+            </div>
+          </div>
+
+          <div className="card text-center py-12">
+            <p className="text-slate-400 mb-2">No metrics data collected yet</p>
+            <p className="text-slate-500 text-sm">
+              Enable monitoring on your databases to start collecting metrics.
+            </p>
+            <Link to="/databases" className="btn btn-primary mt-4">
+              Configure Databases
+            </Link>
+          </div>
+        </>
       ) : (
         <div className="card text-center py-12">
           <DatabaseIcon className="w-12 h-12 text-slate-600 mx-auto mb-4" />

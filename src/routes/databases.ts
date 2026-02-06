@@ -436,6 +436,103 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
 
   // ==================== Database Monitoring Endpoints ====================
 
+  // Get aggregate database metrics history for charts
+  fastify.get(
+    '/api/environments/:envId/databases/metrics/history',
+    { preHandler: [fastify.authenticate] },
+    async (request) => {
+      const { envId } = request.params as { envId: string };
+      const { hours } = request.query as { hours?: string };
+      const hoursNum = hours ? parseInt(hours) : 24;
+      const since = new Date();
+      since.setHours(since.getHours() - hoursNum);
+
+      // Get all monitored databases with server and type info
+      const databases = await prisma.database.findMany({
+        where: { environmentId: envId, monitoringEnabled: true },
+        include: {
+          server: { select: { id: true, name: true, tags: true } },
+          databaseType: { select: { id: true, name: true, displayName: true, monitoringConfig: true } },
+        },
+      });
+
+      // Fetch metrics for all databases in parallel
+      const metricsPerDb = await Promise.all(
+        databases.map(async (db) => {
+          const metrics = await prisma.databaseMetrics.findMany({
+            where: { databaseId: db.id, collectedAt: { gte: since } },
+            orderBy: { collectedAt: 'asc' },
+          });
+          return { db, metrics };
+        })
+      );
+
+      // Collect union of query metadata from all database types (scalar + row only)
+      const queryMetaMap = new Map<string, { name: string; displayName: string; resultType: string; unit?: string; resultMapping?: Record<string, string> }>();
+      const seenTypeIds = new Set<string>();
+
+      for (const { db } of metricsPerDb) {
+        if (!db.databaseType?.monitoringConfig) continue;
+        if (seenTypeIds.has(db.databaseType.id)) continue;
+        seenTypeIds.add(db.databaseType.id);
+
+        const config = JSON.parse(db.databaseType.monitoringConfig) as {
+          queries: Array<{ name: string; displayName: string; resultType: string; unit?: string; resultMapping?: Record<string, string> }>;
+        };
+
+        for (const q of config.queries) {
+          if (q.resultType === 'rows') continue; // Skip table queries — can't chart them
+          if (!queryMetaMap.has(q.name)) {
+            queryMetaMap.set(q.name, {
+              name: q.name,
+              displayName: q.displayName,
+              resultType: q.resultType,
+              unit: q.unit,
+              resultMapping: q.resultMapping,
+            });
+          }
+        }
+      }
+
+      // Build per-database time-series data
+      const dbResults = metricsPerDb.map(({ db, metrics }) => {
+        const data = metrics.map((m) => {
+          const parsed = JSON.parse(m.metricsJson) as Record<string, unknown>;
+          const point: Record<string, unknown> = { time: m.collectedAt.toISOString() };
+
+          // Flatten scalar and row values
+          for (const [key, value] of Object.entries(parsed)) {
+            if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+              // Row result — flatten fields
+              for (const [field, fieldValue] of Object.entries(value as Record<string, unknown>)) {
+                point[`${key}.${field}`] = fieldValue;
+              }
+            } else {
+              point[key] = value;
+            }
+          }
+          return point;
+        });
+
+        return {
+          id: db.id,
+          name: db.name,
+          type: db.type,
+          typeName: db.databaseType?.displayName || db.type,
+          serverId: db.server?.id || null,
+          serverName: db.server?.name || null,
+          serverTags: db.server?.tags || '[]',
+          data,
+        };
+      });
+
+      return {
+        databases: dbResults,
+        queryMeta: Array.from(queryMetaMap.values()),
+      };
+    }
+  );
+
   // Get monitoring summary for all databases in an environment
   fastify.get(
     '/api/environments/:envId/databases/monitoring-summary',

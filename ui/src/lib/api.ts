@@ -2359,6 +2359,33 @@ export interface DatabaseMetricsEntry {
 export const getDatabaseMonitoringSummary = (envId: string) =>
   api.get<{ databases: DatabaseMonitoringSummaryItem[] }>(`/environments/${envId}/databases/monitoring-summary`);
 
+export interface DatabaseMetricsHistoryItem {
+  id: string;
+  name: string;
+  type: string;
+  typeName: string;
+  serverId: string | null;
+  serverName: string | null;
+  serverTags: string;
+  data: Array<Record<string, unknown>>;
+}
+
+export interface DatabaseQueryMeta {
+  name: string;
+  displayName: string;
+  resultType: 'scalar' | 'row';
+  unit?: string;
+  resultMapping?: Record<string, string>;
+}
+
+export const getDatabaseMetricsHistory = (envId: string, hours: number = 24) => {
+  const params = new URLSearchParams();
+  params.append('hours', hours.toString());
+  return api.get<{ databases: DatabaseMetricsHistoryItem[]; queryMeta: DatabaseQueryMeta[] }>(
+    `/environments/${envId}/databases/metrics/history?${params.toString()}`
+  );
+};
+
 export const getDatabaseMetrics = (envId: string, dbId: string, hours: number = 24) =>
   api.get<{ metrics: DatabaseMetricsEntry[] }>(`/environments/${envId}/databases/${dbId}/metrics?hours=${hours}`);
 
