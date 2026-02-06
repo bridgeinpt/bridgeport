@@ -23,7 +23,7 @@ import {
   getServiceDependencies,
   getContainerImage,
   listServiceTypes,
-  getSchedulerConfig,
+  getModuleSettings,
   type ServiceWithServer,
   type Deployment,
   type ServiceFile,
@@ -39,7 +39,6 @@ import {
   type TCPCheckResult,
   type CertCheckConfig,
   type CertCheckResult,
-  type SchedulerConfig,
 } from '../lib/api';
 import { DependencyEditor } from '../components/DependencyEditor';
 import Pagination from '../components/Pagination';
@@ -187,7 +186,7 @@ export default function ServiceDetail() {
   const [containerImage, setContainerImage] = useState<ContainerImage | null>(null);
 
   // Metrics config (for filtering health checks display)
-  const [schedulerConfig, setSchedulerConfig] = useState<SchedulerConfig | null>(null);
+  const [schedulerConfig, setSchedulerConfig] = useState<Record<string, unknown> | null>(null);
 
   // Pagination hooks (must be at top level)
   const deploymentPagination = usePagination({ data: deployments, defaultPageSize: 10 });
@@ -222,9 +221,9 @@ export default function ServiceDetail() {
       listConfigFiles(selectedEnvironment.id).then(({ configFiles }) =>
         setConfigFiles(configFiles)
       );
-      // Load scheduler config for metrics/health check toggles
-      getSchedulerConfig(selectedEnvironment.id)
-        .then(({ config }) => setSchedulerConfig(config))
+      // Load monitoring settings for metrics/health check toggles
+      getModuleSettings(selectedEnvironment.id, 'monitoring')
+        .then(({ settings }) => setSchedulerConfig(settings))
         .catch(() => setSchedulerConfig(null));
     }
     // Load service types (global, not per-environment)

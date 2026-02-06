@@ -19,7 +19,7 @@ import {
   getServerConfigFilesStatus,
   syncAllServerFiles,
   listContainerImages,
-  getSchedulerConfig,
+  getModuleSettings,
   type ServerWithServices,
   type MetricsMode,
   type ServerMetrics,
@@ -31,7 +31,6 @@ import {
   type ServerSyncAllResult,
   type ContainerImage,
   type ProcessSnapshot,
-  type SchedulerConfig,
 } from '../lib/api';
 import { useToast } from '../components/Toast';
 import { formatDistanceToNow } from 'date-fns';
@@ -149,7 +148,7 @@ export default function ServerDetail() {
   const [processUpdatedAt, setProcessUpdatedAt] = useState<string | null>(null);
 
   // Metrics config (for filtering disabled metrics)
-  const [schedulerConfig, setSchedulerConfig] = useState<SchedulerConfig | null>(null);
+  const [schedulerConfig, setSchedulerConfig] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
     if (id) {
@@ -175,9 +174,9 @@ export default function ServerDetail() {
             listContainerImages(serverRes.server.environmentId)
               .then(({ images }) => setContainerImages(images))
               .catch(() => setContainerImages([]));
-            // Load scheduler config for metrics toggles
-            getSchedulerConfig(serverRes.server.environmentId)
-              .then(({ config }) => setSchedulerConfig(config))
+            // Load monitoring settings for metrics toggles
+            getModuleSettings(serverRes.server.environmentId, 'monitoring')
+              .then(({ settings }) => setSchedulerConfig(settings))
               .catch(() => setSchedulerConfig(null));
           }
         })

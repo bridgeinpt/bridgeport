@@ -4,6 +4,7 @@ import { prisma } from '../lib/db.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
 import { logAudit } from '../services/audit.js';
 import { requireAdmin } from '../plugins/authorize.js';
+import { createDefaultSettings } from '../services/environment-settings.js';
 import { S3Client, ListBucketsCommand } from '@aws-sdk/client-s3';
 
 const createEnvSchema = z.object({
@@ -13,11 +14,6 @@ const createEnvSchema = z.object({
 const updateSshSchema = z.object({
   sshPrivateKey: z.string().min(1),
   sshUser: z.string().min(1).default('root'),
-});
-
-const updateSettingsSchema = z.object({
-  allowSecretReveal: z.boolean().optional(),
-  allowBackupDownload: z.boolean().optional(),
 });
 
 export async function environmentRoutes(fastify: FastifyInstance): Promise<void> {
@@ -95,6 +91,8 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
         data: { name: body.data.name },
       });
 
+      await createDefaultSettings(environment.id);
+
       await logAudit({
         action: 'create',
         resourceType: 'environment',
@@ -166,8 +164,13 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
         where: { id },
         data: {
           sshPrivateKey: encryptedKey,
-          sshUser: body.data.sshUser,
         },
+      });
+
+      await prisma.generalSettings.upsert({
+        where: { environmentId: id },
+        update: { sshUser: body.data.sshUser },
+        create: { environmentId: id, sshUser: body.data.sshUser },
       });
 
       await logAudit({
@@ -193,16 +196,20 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
 
       const environment = await prisma.environment.findUnique({
         where: { id },
-        select: { id: true, name: true, sshUser: true, sshPrivateKey: true },
+        select: { id: true, name: true, sshPrivateKey: true },
       });
 
       if (!environment) {
         return reply.code(404).send({ error: 'Environment not found' });
       }
 
+      const generalSettings = await prisma.generalSettings.findUnique({
+        where: { environmentId: id },
+      });
+
       return {
         configured: !!environment.sshPrivateKey,
-        sshUser: environment.sshUser,
+        sshUser: generalSettings?.sshUser ?? 'root',
       };
     }
   );
@@ -226,8 +233,13 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
         where: { id },
         data: {
           sshPrivateKey: null,
-          sshUser: 'root',
         },
+      });
+
+      await prisma.generalSettings.upsert({
+        where: { environmentId: id },
+        update: { sshUser: 'root' },
+        create: { environmentId: id, sshUser: 'root' },
       });
 
       await logAudit({
@@ -280,84 +292,6 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
       return {
         privateKey: sshCreds.privateKey,
         username: sshCreds.username,
-      };
-    }
-  );
-
-  // Get environment settings
-  fastify.get(
-    '/api/environments/:id/settings',
-    { preHandler: [fastify.authenticate] },
-    async (request, reply) => {
-      const { id } = request.params as { id: string };
-
-      const environment = await prisma.environment.findUnique({
-        where: { id },
-        select: { id: true, name: true, allowSecretReveal: true, allowBackupDownload: true },
-      });
-
-      if (!environment) {
-        return reply.code(404).send({ error: 'Environment not found' });
-      }
-
-      return {
-        settings: {
-          allowSecretReveal: environment.allowSecretReveal,
-          allowBackupDownload: environment.allowBackupDownload,
-        },
-      };
-    }
-  );
-
-  // Update environment settings (admin only)
-  fastify.patch(
-    '/api/environments/:id/settings',
-    { preHandler: [fastify.authenticate, requireAdmin] },
-    async (request, reply) => {
-      const { id } = request.params as { id: string };
-      const body = updateSettingsSchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
-
-      const environment = await prisma.environment.findUnique({
-        where: { id },
-      });
-
-      if (!environment) {
-        return reply.code(404).send({ error: 'Environment not found' });
-      }
-
-      const updateData: { allowSecretReveal?: boolean; allowBackupDownload?: boolean } = {};
-      if (body.data.allowSecretReveal !== undefined) {
-        updateData.allowSecretReveal = body.data.allowSecretReveal;
-      }
-      if (body.data.allowBackupDownload !== undefined) {
-        updateData.allowBackupDownload = body.data.allowBackupDownload;
-      }
-
-      const updated = await prisma.environment.update({
-        where: { id },
-        data: updateData,
-        select: { id: true, name: true, allowSecretReveal: true, allowBackupDownload: true },
-      });
-
-      await logAudit({
-        action: 'update',
-        resourceType: 'environment',
-        resourceId: id,
-        resourceName: environment.name,
-        details: { settingsUpdated: updateData },
-        userId: request.authUser!.id,
-        environmentId: id,
-      });
-
-      return {
-        settings: {
-          allowSecretReveal: updated.allowSecretReveal,
-          allowBackupDownload: updated.allowBackupDownload,
-        },
       };
     }
   );
@@ -503,7 +437,7 @@ export async function getEnvironmentSshKey(environmentId: string): Promise<{
 } | null> {
   const environment = await prisma.environment.findUnique({
     where: { id: environmentId },
-    select: { sshPrivateKey: true, sshUser: true },
+    select: { sshPrivateKey: true },
   });
 
   if (!environment?.sshPrivateKey) {
@@ -513,9 +447,13 @@ export async function getEnvironmentSshKey(environmentId: string): Promise<{
   const [nonce, ciphertext] = environment.sshPrivateKey.split(':');
   const privateKey = decrypt(ciphertext, nonce);
 
+  const generalSettings = await prisma.generalSettings.findUnique({
+    where: { environmentId },
+  });
+
   return {
     privateKey,
-    username: environment.sshUser,
+    username: generalSettings?.sshUser ?? 'root',
   };
 }
 

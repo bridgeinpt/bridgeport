@@ -1,3 +1,5 @@
+import { captureException } from './sentry';
+
 const API_BASE = '/api';
 
 interface ApiError {
@@ -107,6 +109,13 @@ class ApiClient {
     const data = await response.json();
 
     if (!response.ok) {
+      if (response.status >= 500) {
+        captureException(new Error((data as ApiError).error || 'Server error'), {
+          method,
+          url: path,
+          statusCode: response.status,
+        });
+      }
       throw new Error((data as ApiError).error || 'Request failed');
     }
 
@@ -244,17 +253,42 @@ export const getEnvironment = (id: string) =>
 export const createEnvironment = (name: string) =>
   api.post<{ environment: Environment }>('/environments', { name });
 
-// Environment settings
-export interface EnvironmentSettings {
-  allowSecretReveal: boolean;
-  allowBackupDownload: boolean;
+// Environment module settings
+export interface SettingDefinition {
+  key: string;
+  type: 'boolean' | 'integer' | 'string';
+  default: boolean | number | string;
+  label: string;
+  description: string;
+  group: string;
+  widget: 'toggle' | 'number' | 'text' | 'select';
+  options?: string[];
+  min?: number;
+  max?: number;
 }
 
-export const getEnvironmentSettings = (id: string) =>
-  api.get<{ settings: EnvironmentSettings }>(`/environments/${id}/settings`);
+export type SettingsModule = 'general' | 'monitoring' | 'operations' | 'data' | 'configuration';
 
-export const updateEnvironmentSettings = (id: string, settings: Partial<EnvironmentSettings>) =>
-  api.patch<{ settings: EnvironmentSettings }>(`/environments/${id}/settings`, settings);
+export const getModuleSettings = (envId: string, module: SettingsModule) =>
+  api.get<{ settings: Record<string, unknown>; definitions: SettingDefinition[] }>(
+    `/environments/${envId}/settings/${module}`
+  );
+
+export const updateModuleSettings = (envId: string, module: SettingsModule, data: Record<string, unknown>) =>
+  api.patch<{ settings: Record<string, unknown> }>(
+    `/environments/${envId}/settings/${module}`,
+    data
+  );
+
+export const resetModuleSettings = (envId: string, module: SettingsModule) =>
+  api.post<{ settings: Record<string, unknown> }>(
+    `/environments/${envId}/settings/${module}/reset`
+  );
+
+export const getSettingsRegistry = (envId: string) =>
+  api.get<{ registry: Record<SettingsModule, SettingDefinition[]> }>(
+    `/environments/${envId}/settings/registry`
+  );
 
 // Spaces buckets (uses global Spaces config)
 export const listSpacesBuckets = (id: string) =>
@@ -2135,36 +2169,6 @@ export interface SSHTestAllResult {
 export const testAllSSH = (envId: string) =>
   api.post<{ results: SSHTestAllResult[] }>(`/environments/${envId}/test-all-ssh`);
 
-// Scheduler Config
-export interface SchedulerConfig {
-  serverHealthIntervalMs: number;
-  serviceHealthIntervalMs: number;
-  discoveryIntervalMs: number;
-  metricsIntervalMs: number;
-  updateCheckIntervalMs: number;
-  backupCheckIntervalMs: number;
-  metricsRetentionDays: number;
-  healthLogRetentionDays: number;
-  bounceThreshold: number;
-  bounceCooldownMs: number;
-  // Metrics collection toggles
-  collectCpu: boolean;
-  collectMemory: boolean;
-  collectSwap: boolean;
-  collectDisk: boolean;
-  collectLoad: boolean;
-  collectFds: boolean;
-  collectTcp: boolean;
-  collectProcesses: boolean;
-  collectTcpChecks: boolean;
-  collectCertChecks: boolean;
-}
-
-export const getSchedulerConfig = (envId: string) =>
-  api.get<{ config: SchedulerConfig }>(`/environments/${envId}/scheduler-config`);
-
-export const updateSchedulerConfig = (envId: string, config: Partial<SchedulerConfig>) =>
-  api.patch<{ config: SchedulerConfig }>(`/environments/${envId}/scheduler-config`, config);
 
 // Monitoring Overview
 export interface MonitoringOverviewStats {

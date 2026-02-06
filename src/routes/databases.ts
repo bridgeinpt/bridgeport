@@ -258,11 +258,10 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
       });
 
       // Check if downloads are allowed
-      const environment = await prisma.environment.findUnique({
-        where: { id: database.environmentId },
-        select: { allowBackupDownload: true },
+      const dataSettings = await prisma.dataSettings.findUnique({
+        where: { environmentId: database.environmentId },
       });
-      const allowDownload = environment?.allowBackupDownload ?? false;
+      const allowDownload = dataSettings?.allowBackupDownload ?? false;
 
       return {
         backups: backups.map((b) => ({
@@ -288,7 +287,10 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       // Check if downloads are allowed
-      const allowDownload = backup.database.environment.allowBackupDownload ?? false;
+      const dataSettings = await prisma.dataSettings.findUnique({
+        where: { environmentId: backup.database.environmentId },
+      });
+      const allowDownload = dataSettings?.allowBackupDownload ?? false;
 
       return {
         backup: {

@@ -7,7 +7,7 @@ import {
   getSecretValue,
   updateSecret,
   deleteSecret,
-  getEnvironmentSettings,
+  getModuleSettings,
   type Secret,
 } from '../lib/api.js';
 import { formatDistanceToNow } from 'date-fns';
@@ -44,11 +44,11 @@ export default function Secrets() {
       setLoading(true);
       Promise.all([
         listSecrets(selectedEnvironment.id),
-        getEnvironmentSettings(selectedEnvironment.id),
+        getModuleSettings(selectedEnvironment.id, 'general'),
       ])
         .then(([secretsRes, settingsRes]) => {
           setSecrets(secretsRes.secrets);
-          setAllowSecretReveal(settingsRes.settings.allowSecretReveal);
+          setAllowSecretReveal(settingsRes.settings.allowSecretReveal as boolean);
         })
         .finally(() => setLoading(false));
     }

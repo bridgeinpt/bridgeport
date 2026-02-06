@@ -4,10 +4,9 @@ import { prisma } from '../lib/db.js';
 import { checkServerHealth } from '../services/servers.js';
 import { checkServiceHealth } from '../services/services.js';
 import { logAudit } from '../services/audit.js';
-import { requireOperator } from '../plugins/authorize.js';
 import { bundledAgentVersion } from '../server.js';
 import { getAgentEvents } from '../services/agent-events.js';
-import { logHealthCheck, getSchedulerConfig, DEFAULT_SCHEDULER_CONFIG } from '../services/health-checks.js';
+import { logHealthCheck } from '../services/health-checks.js';
 
 const healthLogQuerySchema = z.object({
   type: z.enum(['server', 'service', 'container']).optional(),
@@ -28,29 +27,6 @@ const runHealthChecksSchema = z.object({
   type: z.enum(['all', 'servers', 'services']).optional().default('all'),
 });
 
-const schedulerConfigSchema = z.object({
-  serverHealthIntervalMs: z.number().min(10000).max(3600000).optional(),
-  serviceHealthIntervalMs: z.number().min(10000).max(3600000).optional(),
-  discoveryIntervalMs: z.number().min(60000).max(86400000).optional(),
-  metricsIntervalMs: z.number().min(60000).max(3600000).optional(),
-  updateCheckIntervalMs: z.number().min(60000).max(86400000).optional(),
-  backupCheckIntervalMs: z.number().min(10000).max(3600000).optional(),
-  metricsRetentionDays: z.number().min(1).max(365).optional(),
-  healthLogRetentionDays: z.number().min(1).max(365).optional(),
-  bounceThreshold: z.number().min(1).max(10).optional(),
-  bounceCooldownMs: z.number().min(60000).max(86400000).optional(),
-  // Metrics collection toggles
-  collectCpu: z.boolean().optional(),
-  collectMemory: z.boolean().optional(),
-  collectSwap: z.boolean().optional(),
-  collectDisk: z.boolean().optional(),
-  collectLoad: z.boolean().optional(),
-  collectFds: z.boolean().optional(),
-  collectTcp: z.boolean().optional(),
-  collectProcesses: z.boolean().optional(),
-  collectTcpChecks: z.boolean().optional(),
-  collectCertChecks: z.boolean().optional(),
-});
 
 export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> {
   // Get health check logs with filtering and pagination
@@ -640,64 +616,6 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
     }
   );
 
-  // Get scheduler config for environment
-  fastify.get(
-    '/api/environments/:envId/scheduler-config',
-    { preHandler: [fastify.authenticate] },
-    async (request, reply) => {
-      const { envId } = request.params as { envId: string };
-
-      const env = await prisma.environment.findUnique({ where: { id: envId } });
-      if (!env) {
-        return reply.code(404).send({ error: 'Environment not found' });
-      }
-
-      const config = await getSchedulerConfig(envId);
-      return { config };
-    }
-  );
-
-  // Update scheduler config for environment
-  fastify.patch(
-    '/api/environments/:envId/scheduler-config',
-    { preHandler: [fastify.authenticate, requireOperator] },
-    async (request, reply) => {
-      const { envId } = request.params as { envId: string };
-      const body = schedulerConfigSchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid config', details: body.error.issues });
-      }
-
-      const env = await prisma.environment.findUnique({ where: { id: envId } });
-      if (!env) {
-        return reply.code(404).send({ error: 'Environment not found' });
-      }
-
-      // Merge with existing config
-      const existingConfig = env.schedulerConfig ? JSON.parse(env.schedulerConfig) : {};
-      const newConfig = { ...existingConfig, ...body.data };
-
-      await prisma.environment.update({
-        where: { id: envId },
-        data: { schedulerConfig: JSON.stringify(newConfig) },
-      });
-
-      await logAudit({
-        action: 'update',
-        resourceType: 'environment',
-        resourceId: envId,
-        resourceName: env.name,
-        details: { schedulerConfigUpdated: body.data },
-        userId: request.authUser!.id,
-        environmentId: envId,
-      });
-
-      const fullConfig = { ...DEFAULT_SCHEDULER_CONFIG, ...newConfig };
-      return { config: fullConfig };
-    }
-  );
-
   // Get monitoring overview stats
   fastify.get(
     '/api/environments/:envId/monitoring/overview',
@@ -895,11 +813,15 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
 
       const env = await prisma.environment.findUnique({
         where: { id: envId },
-        select: { id: true, sshUser: true },
+        select: { id: true },
       });
       if (!env) {
         return reply.code(404).send({ error: 'Environment not found' });
       }
+
+      const generalSettings = await prisma.generalSettings.findUnique({
+        where: { environmentId: envId },
+      });
 
       const servers = await prisma.server.findMany({
         where: { environmentId: envId },
@@ -940,7 +862,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
       }));
 
       return {
-        sshUser: env.sshUser,
+        sshUser: generalSettings?.sshUser ?? 'root',
         agents: agentsInfo,
         bundledAgentVersion,
       };

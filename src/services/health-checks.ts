@@ -66,11 +66,34 @@ export type EnvironmentSchedulerConfig = typeof DEFAULT_SCHEDULER_CONFIG;
  * Get scheduler config for an environment (with defaults filled in)
  */
 export async function getSchedulerConfig(environmentId: string): Promise<EnvironmentSchedulerConfig> {
-  const env = await prisma.environment.findUnique({
-    where: { id: environmentId },
-    select: { schedulerConfig: true },
+  const settings = await prisma.monitoringSettings.findUnique({
+    where: { environmentId },
   });
 
-  const stored = env?.schedulerConfig ? JSON.parse(env.schedulerConfig) : {};
-  return { ...DEFAULT_SCHEDULER_CONFIG, ...stored };
+  if (!settings) {
+    return { ...DEFAULT_SCHEDULER_CONFIG };
+  }
+
+  return {
+    serverHealthIntervalMs: settings.serverHealthIntervalMs,
+    serviceHealthIntervalMs: settings.serviceHealthIntervalMs,
+    discoveryIntervalMs: settings.discoveryIntervalMs,
+    metricsIntervalMs: settings.metricsIntervalMs,
+    updateCheckIntervalMs: settings.updateCheckIntervalMs,
+    backupCheckIntervalMs: settings.backupCheckIntervalMs,
+    metricsRetentionDays: settings.metricsRetentionDays,
+    healthLogRetentionDays: settings.healthLogRetentionDays,
+    bounceThreshold: settings.bounceThreshold,
+    bounceCooldownMs: settings.bounceCooldownMs,
+    collectCpu: settings.collectCpu,
+    collectMemory: settings.collectMemory,
+    collectSwap: settings.collectSwap,
+    collectDisk: settings.collectDisk,
+    collectLoad: settings.collectLoad,
+    collectFds: settings.collectFds,
+    collectTcp: settings.collectTcp,
+    collectProcesses: settings.collectProcesses,
+    collectTcpChecks: settings.collectTcpChecks,
+    collectCertChecks: settings.collectCertChecks,
+  };
 }

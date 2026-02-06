@@ -1,178 +1,195 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useAppStore, isAdmin } from '../lib/store';
 import { useAuthStore } from '../lib/store';
 import {
-  getEnvironmentSettings,
-  updateEnvironmentSettings,
-  listServers,
-  listDatabases,
-  getSchedulerConfig,
-  updateSchedulerConfig,
+  getModuleSettings,
+  updateModuleSettings,
+  resetModuleSettings,
   getSshStatus,
+  listServers,
+  type SettingDefinition,
+  type SettingsModule,
   type Server,
-  type Database,
-  type SchedulerConfig,
   type SshStatus,
 } from '../lib/api';
 import { useToast } from '../components/Toast';
 import { SshKeyModal } from '../components/SshKeyModal';
+import { EmptyState } from '../components/EmptyState.js';
+import { SettingsIcon } from '../components/Icons';
 
-interface EnvironmentSettings {
-  allowSecretReveal: boolean;
-  allowBackupDownload: boolean;
+const TABS: { key: string; label: string; module?: SettingsModule }[] = [
+  { key: 'general', label: 'General', module: 'general' },
+  { key: 'operations', label: 'Operations', module: 'operations' },
+  { key: 'monitoring', label: 'Monitoring', module: 'monitoring' },
+  { key: 'orchestration', label: 'Orchestration' },
+  { key: 'data', label: 'Data', module: 'data' },
+  { key: 'configuration', label: 'Configuration', module: 'configuration' },
+];
+
+interface TabData {
+  settings: Record<string, unknown>;
+  definitions: SettingDefinition[];
 }
 
-interface ModuleStatus {
-  monitoring: {
-    enabled: boolean;
-    serversWithSsh: number;
-    serversWithAgent: number;
-    totalServers: number;
-  };
-  databases: {
-    enabled: boolean;
-    count: number;
-    withBackups: number;
-  };
+function getInitialTab(): string {
+  const hash = window.location.hash.replace('#', '');
+  if (TABS.some((t) => t.key === hash)) return hash;
+  return 'general';
 }
 
 export default function Settings() {
   const { selectedEnvironment } = useAppStore();
   const { user } = useAuthStore();
   const toast = useToast();
-  const [settings, setSettings] = useState<EnvironmentSettings | null>(null);
-  const [moduleStatus, setModuleStatus] = useState<ModuleStatus | null>(null);
-  const [loading, setLoading] = useState(true);
+
+  const [activeTab, setActiveTab] = useState(getInitialTab);
+  const [tabCache, setTabCache] = useState<Record<string, TabData>>({});
+  const [formData, setFormData] = useState<Record<string, unknown>>({});
+  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [schedulerConfig, setSchedulerConfig] = useState<SchedulerConfig | null>(null);
-  const [monitoringExpanded, setMonitoringExpanded] = useState(false);
-  const [metricsCollectionExpanded, setMetricsCollectionExpanded] = useState(false);
-  const [savingScheduler, setSavingScheduler] = useState(false);
+
+  // General tab extras
   const [sshStatus, setSshStatus] = useState<SshStatus | null>(null);
   const [sshModalOpen, setSshModalOpen] = useState(false);
   const [servers, setServers] = useState<Server[]>([]);
+  const [generalLoading, setGeneralLoading] = useState(false);
 
-  useEffect(() => {
-    if (selectedEnvironment?.id) {
-      loadData();
+  // Track which tab's data is currently displayed in formData
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
+
+  const currentTabDef = TABS.find((t) => t.key === activeTab);
+  const currentModule = currentTabDef?.module;
+
+  // Determine if form has changes
+  const cachedData = tabCache[activeTab];
+  const hasChanges = cachedData
+    ? Object.keys(formData).some((key) => formData[key] !== cachedData.settings[key])
+    : false;
+
+  const loadTabData = useCallback(
+    async (tabKey: string) => {
+      if (!selectedEnvironment?.id) return;
+      const tab = TABS.find((t) => t.key === tabKey);
+      if (!tab?.module) return;
+
+      // Already cached
+      if (tabCache[tabKey]) {
+        setFormData({ ...tabCache[tabKey].settings });
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const result = await getModuleSettings(selectedEnvironment.id, tab.module);
+        const data: TabData = { settings: result.settings, definitions: result.definitions };
+        setTabCache((prev) => ({ ...prev, [tabKey]: data }));
+        if (activeTabRef.current === tabKey) {
+          setFormData({ ...result.settings });
+        }
+      } catch (error) {
+        toast.error(`Failed to load ${tab.label} settings`);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [selectedEnvironment?.id, tabCache, toast]
+  );
+
+  const loadGeneralExtras = useCallback(async () => {
+    if (!selectedEnvironment?.id) return;
+    setGeneralLoading(true);
+    try {
+      const [sshRes, serversRes] = await Promise.all([
+        getSshStatus(selectedEnvironment.id),
+        listServers(selectedEnvironment.id),
+      ]);
+      setSshStatus(sshRes);
+      setServers(serversRes.servers);
+    } finally {
+      setGeneralLoading(false);
     }
   }, [selectedEnvironment?.id]);
 
-  const loadData = async () => {
-    if (!selectedEnvironment?.id) return;
-    setLoading(true);
-    try {
-      const [settingsRes, serversRes, databasesRes, schedulerRes, sshRes] = await Promise.all([
-        getEnvironmentSettings(selectedEnvironment.id),
-        listServers(selectedEnvironment.id),
-        listDatabases(selectedEnvironment.id),
-        getSchedulerConfig(selectedEnvironment.id),
-        getSshStatus(selectedEnvironment.id),
-      ]);
+  // Load tab data when active tab or environment changes
+  useEffect(() => {
+    // Clear cache on env change
+    setTabCache({});
+    setFormData({});
+    setSshStatus(null);
+    setServers([]);
+  }, [selectedEnvironment?.id]);
 
-      setSettings(settingsRes.settings);
-      setSchedulerConfig(schedulerRes.config);
-      setSshStatus(sshRes);
-      setServers(serversRes.servers);
-
-      // Calculate module status
-      const servers = serversRes.servers as Array<Server & { metricsMode?: string }>;
-      const databases = databasesRes.databases;
-
-      setModuleStatus({
-        monitoring: {
-          enabled: servers.some((s: Server & { metricsMode?: string }) => s.metricsMode !== 'disabled'),
-          serversWithSsh: servers.filter((s: Server & { metricsMode?: string }) => s.metricsMode === 'ssh').length,
-          serversWithAgent: servers.filter((s: Server & { metricsMode?: string }) => s.metricsMode === 'agent').length,
-          totalServers: servers.length,
-        },
-        databases: {
-          enabled: databases.length > 0,
-          count: databases.length,
-          withBackups: databases.filter((d: Database) => d._count && d._count.backups > 0).length,
-        },
-      });
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    if (currentModule) {
+      loadTabData(activeTab);
     }
+    if (activeTab === 'general') {
+      loadGeneralExtras();
+    }
+  }, [activeTab, selectedEnvironment?.id, loadTabData, loadGeneralExtras, currentModule]);
+
+  const switchTab = (newTab: string) => {
+    if (hasChanges) {
+      if (!confirm('You have unsaved changes. Discard?')) return;
+    }
+    setActiveTab(newTab);
+    window.location.hash = newTab;
   };
 
-  const handleSettingChange = async (key: keyof EnvironmentSettings, value: boolean) => {
-    if (!selectedEnvironment?.id || !isAdmin(user)) return;
+  const handleChange = (key: string, value: unknown) => {
+    setFormData((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleSave = async () => {
+    if (!selectedEnvironment?.id || !currentModule || !cachedData) return;
     setSaving(true);
     try {
-      const result = await updateEnvironmentSettings(selectedEnvironment.id, { [key]: value });
-      setSettings(result.settings);
-      toast.success('Settings updated');
-      // Reload page data to reflect changes
-      window.location.reload();
+      // Only send changed values
+      const changed: Record<string, unknown> = {};
+      for (const key of Object.keys(formData)) {
+        if (formData[key] !== cachedData.settings[key]) {
+          changed[key] = formData[key];
+        }
+      }
+      if (Object.keys(changed).length === 0) return;
+
+      const result = await updateModuleSettings(selectedEnvironment.id, currentModule, changed);
+      const newData: TabData = { settings: result.settings, definitions: cachedData.definitions };
+      setTabCache((prev) => ({ ...prev, [activeTab]: newData }));
+      setFormData({ ...result.settings });
+      toast.success('Settings saved');
     } catch (error) {
-      toast.error('Failed to update settings');
+      toast.error('Failed to save settings');
     } finally {
       setSaving(false);
     }
   };
 
-  const handleSchedulerConfigChange = async (key: keyof SchedulerConfig, value: number | boolean) => {
-    if (!selectedEnvironment?.id || !isAdmin(user) || !schedulerConfig) return;
-    setSavingScheduler(true);
+  const handleReset = async () => {
+    if (!selectedEnvironment?.id || !currentModule) return;
+    if (!confirm('Reset all settings in this tab to their defaults?')) return;
+    setSaving(true);
     try {
-      const result = await updateSchedulerConfig(selectedEnvironment.id, { [key]: value });
-      setSchedulerConfig(result.config);
-      toast.success('Config updated');
+      const result = await resetModuleSettings(selectedEnvironment.id, currentModule);
+      // Refetch definitions since they don't change, but we need fresh settings
+      const freshData = await getModuleSettings(selectedEnvironment.id, currentModule);
+      const newData: TabData = { settings: result.settings, definitions: freshData.definitions };
+      setTabCache((prev) => ({ ...prev, [activeTab]: newData }));
+      setFormData({ ...result.settings });
+      toast.success('Settings reset to defaults');
     } catch (error) {
-      toast.error('Failed to update config');
+      toast.error('Failed to reset settings');
     } finally {
-      setSavingScheduler(false);
-    }
-  };
-
-  const handleResetSchedulerConfig = async () => {
-    if (!selectedEnvironment?.id || !isAdmin(user)) return;
-    if (!confirm('Reset all scheduler settings to defaults?')) return;
-    setSavingScheduler(true);
-    try {
-      const result = await updateSchedulerConfig(selectedEnvironment.id, {
-        serverHealthIntervalMs: 60000,
-        serviceHealthIntervalMs: 60000,
-        discoveryIntervalMs: 300000,
-        metricsIntervalMs: 300000,
-        updateCheckIntervalMs: 1800000,
-        backupCheckIntervalMs: 60000,
-        metricsRetentionDays: 7,
-        healthLogRetentionDays: 30,
-        bounceThreshold: 3,
-        bounceCooldownMs: 900000,
-      });
-      setSchedulerConfig(result.config);
-      toast.success('Scheduler config reset to defaults');
-    } catch (error) {
-      toast.error('Failed to reset scheduler config');
-    } finally {
-      setSavingScheduler(false);
+      setSaving(false);
     }
   };
 
   if (!selectedEnvironment) {
     return (
       <div className="p-8">
-        <div className="card text-center py-12">
+        <div className="panel text-center py-12">
           <p className="text-slate-400">Please select an environment</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div className="p-8">
-        <div className="animate-pulse">
-          <div className="h-8 w-48 bg-slate-700 rounded mb-8"></div>
-          <div className="space-y-4">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="h-24 bg-slate-800 rounded-xl"></div>
-            ))}
-          </div>
         </div>
       </div>
     );
@@ -186,587 +203,318 @@ export default function Settings() {
         </p>
       </div>
 
-      {/* Module Status */}
-      <div className="card mb-6">
-        <h3 className="text-lg font-semibold text-white mb-4">Module Status</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Monitoring Module */}
-          <div className="p-4 bg-slate-800 rounded-lg">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <svg className="w-5 h-5 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-                <span className="font-medium text-white">Monitoring</span>
-              </div>
-              <span className={`px-2 py-1 rounded text-xs font-medium ${
-                moduleStatus?.monitoring.enabled
-                  ? 'bg-green-500/20 text-green-400'
-                  : 'bg-slate-700 text-slate-400'
-              }`}>
-                {moduleStatus?.monitoring.enabled ? 'Active' : 'Inactive'}
-              </span>
-            </div>
-            {moduleStatus && (
-              <div className="space-y-1 text-sm">
-                <div className="flex justify-between text-slate-400">
-                  <span>Servers with SSH monitoring:</span>
-                  <span className="text-white">{moduleStatus.monitoring.serversWithSsh}</span>
-                </div>
-                <div className="flex justify-between text-slate-400">
-                  <span>Servers with Agent monitoring:</span>
-                  <span className="text-white">{moduleStatus.monitoring.serversWithAgent}</span>
-                </div>
-                <div className="flex justify-between text-slate-400">
-                  <span>Total servers:</span>
-                  <span className="text-white">{moduleStatus.monitoring.totalServers}</span>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Databases Module */}
-          <div className="p-4 bg-slate-800 rounded-lg">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <svg className="w-5 h-5 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
-                </svg>
-                <span className="font-medium text-white">Databases</span>
-              </div>
-              <span className={`px-2 py-1 rounded text-xs font-medium ${
-                moduleStatus?.databases.enabled
-                  ? 'bg-green-500/20 text-green-400'
-                  : 'bg-slate-700 text-slate-400'
-              }`}>
-                {moduleStatus?.databases.enabled ? 'Active' : 'Inactive'}
-              </span>
-            </div>
-            {moduleStatus && (
-              <div className="space-y-1 text-sm">
-                <div className="flex justify-between text-slate-400">
-                  <span>Registered databases:</span>
-                  <span className="text-white">{moduleStatus.databases.count}</span>
-                </div>
-                <div className="flex justify-between text-slate-400">
-                  <span>With backups:</span>
-                  <span className="text-white">{moduleStatus.databases.withBackups}</span>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+      {/* Tabs */}
+      <div className="border-b border-slate-700 mb-6">
+        <nav className="flex gap-6 -mb-px">
+          {TABS.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => switchTab(tab.key)}
+              className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === tab.key
+                  ? 'border-brand-600 text-white'
+                  : 'border-transparent text-slate-400 hover:text-white hover:border-slate-500'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
       </div>
 
-      {/* Security Settings */}
-      <div className="card mb-6">
-        <h3 className="text-lg font-semibold text-white mb-4">Security Settings</h3>
-        <div className="space-y-4">
-          <div className="flex items-center justify-between p-4 bg-slate-800 rounded-lg">
-            <div>
-              <p className="font-medium text-white">Allow Secret Reveal</p>
-              <p className="text-sm text-slate-400">
-                Allow users to reveal secret values in this environment. Disable for production.
-              </p>
-            </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings?.allowSecretReveal ?? true}
-                onChange={(e) => handleSettingChange('allowSecretReveal', e.target.checked)}
-                disabled={saving || !isAdmin(user)}
-                className="sr-only peer"
-              />
-              <div className={`w-11 h-6 bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600 ${
-                !isAdmin(user) ? 'opacity-50 cursor-not-allowed' : ''
-              }`}></div>
-            </label>
+      {/* Tab Content */}
+      {activeTab === 'orchestration' ? (
+        <EmptyState
+          icon={SettingsIcon}
+          message="No settings configured for this module yet."
+        />
+      ) : loading ? (
+        <div className="animate-pulse">
+          <div className="space-y-4">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-16 bg-slate-800 rounded-xl"></div>
+            ))}
           </div>
-
-          <div className="flex items-center justify-between p-4 bg-slate-800 rounded-lg">
-            <div>
-              <p className="font-medium text-white">Allow Backup Downloads</p>
-              <p className="text-sm text-slate-400">
-                Allow users to download database backups. Enable with caution for sensitive data.
-              </p>
-            </div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={settings?.allowBackupDownload ?? false}
-                onChange={(e) => handleSettingChange('allowBackupDownload', e.target.checked)}
-                disabled={saving || !isAdmin(user)}
-                className="sr-only peer"
+        </div>
+      ) : cachedData ? (
+        <div className="space-y-8">
+          {/* General tab: SSH config + Environment info */}
+          {activeTab === 'general' && (
+            <>
+              <SshSection
+                sshStatus={sshStatus}
+                isUserAdmin={isAdmin(user)}
+                onOpenModal={() => setSshModalOpen(true)}
+                loading={generalLoading}
               />
-              <div className={`w-11 h-6 bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600 ${
-                !isAdmin(user) ? 'opacity-50 cursor-not-allowed' : ''
-              }`}></div>
-            </label>
-          </div>
+              <SshKeyModal
+                isOpen={sshModalOpen}
+                onClose={() => setSshModalOpen(false)}
+                onUpdate={() => {
+                  loadGeneralExtras();
+                  setSshModalOpen(false);
+                }}
+                currentSshUser={sshStatus?.sshUser || 'root'}
+                testServerId={servers.length > 0 ? servers[0].id : undefined}
+              />
+              <EnvironmentInfo environment={selectedEnvironment} />
+            </>
+          )}
 
-          {!isAdmin(user) && (
-            <p className="text-sm text-slate-500">
+          {/* Grouped settings widgets */}
+          <SettingsGroups
+            definitions={cachedData.definitions}
+            formData={formData}
+            onChange={handleChange}
+            disabled={!isAdmin(user)}
+          />
+
+          {/* Save/Reset bar */}
+          {isAdmin(user) ? (
+            <div className="flex justify-between pt-6 border-t border-slate-700">
+              <button
+                onClick={handleReset}
+                className="btn btn-ghost text-sm"
+                disabled={saving}
+              >
+                Reset to Defaults
+              </button>
+              <button
+                onClick={handleSave}
+                className="btn btn-primary text-sm"
+                disabled={!hasChanges || saving}
+              >
+                {saving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500 pt-4">
               Only administrators can modify environment settings.
             </p>
           )}
         </div>
-      </div>
+      ) : null}
+    </div>
+  );
+}
 
-      {/* SSH Configuration */}
-      <div className="card mb-6">
-        <h3 className="text-lg font-semibold text-white mb-4">SSH Configuration</h3>
-        <div className="p-4 bg-slate-800 rounded-lg">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="font-medium text-white">SSH Key</p>
-              <p className="text-sm text-slate-400">
-                {sshStatus?.configured ? (
-                  <>
-                    Configured (user: <span className="text-white">{sshStatus.sshUser}</span>)
-                  </>
-                ) : (
-                  'Not configured. Required for SSH-based operations.'
-                )}
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className={`px-2 py-1 rounded text-xs font-medium ${
+// ─── Sub-components ──────────────────────────────────────────────
+
+function SettingsGroups({
+  definitions,
+  formData,
+  onChange,
+  disabled,
+}: {
+  definitions: SettingDefinition[];
+  formData: Record<string, unknown>;
+  onChange: (key: string, val: unknown) => void;
+  disabled: boolean;
+}) {
+  // Group definitions by group field
+  const grouped: Record<string, SettingDefinition[]> = {};
+  for (const def of definitions) {
+    const group = def.group || 'General';
+    if (!grouped[group]) grouped[group] = [];
+    grouped[group].push(def);
+  }
+
+  return (
+    <>
+      {Object.entries(grouped).map(([groupName, defs]) => (
+        <div key={groupName} className="space-y-4">
+          <h3 className="text-sm font-medium text-slate-300 uppercase tracking-wider">
+            {groupName}
+          </h3>
+          <div className="space-y-4">
+            {defs.map((def) => (
+              <SettingWidget
+                key={def.key}
+                def={def}
+                value={formData[def.key]}
+                onChange={onChange}
+                disabled={disabled}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+function SettingWidget({
+  def,
+  value,
+  onChange,
+  disabled,
+}: {
+  def: SettingDefinition;
+  value: unknown;
+  onChange: (key: string, val: unknown) => void;
+  disabled: boolean;
+}) {
+  switch (def.widget) {
+    case 'toggle':
+      return (
+        <label className={`flex items-center gap-3 ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}>
+          <input
+            type="checkbox"
+            checked={value as boolean}
+            onChange={(e) => onChange(def.key, e.target.checked)}
+            disabled={disabled}
+            className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-brand-600 focus:ring-brand-500"
+          />
+          <div>
+            <div className="text-sm text-white">{def.label}</div>
+            <div className="text-xs text-slate-400">{def.description}</div>
+          </div>
+        </label>
+      );
+    case 'number':
+      return (
+        <div>
+          <label className="block text-sm text-white mb-1">{def.label}</label>
+          <p className="text-xs text-slate-400 mb-2">{def.description}</p>
+          <input
+            type="number"
+            value={value as number}
+            min={def.min}
+            max={def.max}
+            onChange={(e) => onChange(def.key, parseInt(e.target.value, 10))}
+            disabled={disabled}
+            className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
+          />
+        </div>
+      );
+    case 'select':
+      return (
+        <div>
+          <label className="block text-sm text-white mb-1">{def.label}</label>
+          <p className="text-xs text-slate-400 mb-2">{def.description}</p>
+          <select
+            value={value as string}
+            onChange={(e) => onChange(def.key, e.target.value)}
+            disabled={disabled}
+            className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
+          >
+            {def.options?.map((opt) => (
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
+            ))}
+          </select>
+        </div>
+      );
+    case 'text':
+      return (
+        <div>
+          <label className="block text-sm text-white mb-1">{def.label}</label>
+          <p className="text-xs text-slate-400 mb-2">{def.description}</p>
+          <input
+            type="text"
+            value={(value as string) ?? ''}
+            onChange={(e) => onChange(def.key, e.target.value)}
+            disabled={disabled}
+            className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
+          />
+        </div>
+      );
+    default:
+      return null;
+  }
+}
+
+function SshSection({
+  sshStatus,
+  isUserAdmin,
+  onOpenModal,
+  loading,
+}: {
+  sshStatus: SshStatus | null;
+  isUserAdmin: boolean;
+  onOpenModal: () => void;
+  loading: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="panel animate-pulse">
+        <div className="h-12 bg-slate-800 rounded"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="panel">
+      <h3 className="text-sm font-medium text-slate-300 uppercase tracking-wider mb-4">
+        SSH Configuration
+      </h3>
+      <div className="p-4 bg-slate-800 rounded-lg">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="font-medium text-white">SSH Key</p>
+            <p className="text-sm text-slate-400">
+              {sshStatus?.configured ? (
+                <>
+                  Configured (user: <span className="text-white">{sshStatus.sshUser}</span>)
+                </>
+              ) : (
+                'Not configured. Required for SSH-based operations.'
+              )}
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span
+              className={`px-2 py-1 rounded text-xs font-medium ${
                 sshStatus?.configured
                   ? 'bg-green-500/20 text-green-400'
                   : 'bg-yellow-500/20 text-yellow-400'
-              }`}>
-                {sshStatus?.configured ? 'Configured' : 'Not Set'}
-              </span>
-              {isAdmin(user) && (
-                <button
-                  onClick={() => setSshModalOpen(true)}
-                  className="btn btn-secondary btn-sm"
-                >
-                  {sshStatus?.configured ? 'Update' : 'Configure'}
-                </button>
-              )}
-            </div>
+              }`}
+            >
+              {sshStatus?.configured ? 'Configured' : 'Not Set'}
+            </span>
+            {isUserAdmin && (
+              <button onClick={onOpenModal} className="btn btn-secondary btn-sm">
+                {sshStatus?.configured ? 'Update' : 'Configure'}
+              </button>
+            )}
           </div>
-          {!sshStatus?.configured && (
-            <p className="text-xs text-slate-500 mt-3">
-              SSH access is required for server health checks, deployments, metrics collection, and agent deployment.
-            </p>
-          )}
         </div>
-        {!isAdmin(user) && (
-          <p className="text-sm text-slate-500 mt-4">
-            Only administrators can configure SSH settings.
+        {!sshStatus?.configured && (
+          <p className="text-xs text-slate-500 mt-3">
+            SSH access is required for server health checks, deployments, metrics collection, and
+            agent deployment.
           </p>
         )}
-      </div>
-
-      {/* SSH Key Modal */}
-      <SshKeyModal
-        isOpen={sshModalOpen}
-        onClose={() => setSshModalOpen(false)}
-        onUpdate={() => {
-          loadData();
-          setSshModalOpen(false);
-        }}
-        currentSshUser={sshStatus?.sshUser || 'root'}
-        testServerId={servers.length > 0 ? servers[0].id : undefined}
-      />
-
-      {/* Monitoring Settings */}
-      <div className="card mb-6">
-        <button
-          onClick={() => setMonitoringExpanded(!monitoringExpanded)}
-          className="w-full flex items-center justify-between"
-        >
-          <h3 className="text-lg font-semibold text-white">Monitoring Settings</h3>
-          <svg
-            className={`w-5 h-5 text-slate-400 transition-transform ${monitoringExpanded ? 'rotate-180' : ''}`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
-
-        {monitoringExpanded && schedulerConfig && (
-          <div className="mt-6 space-y-6">
-            {/* Health Check Intervals */}
-            <div>
-              <h4 className="text-sm font-medium text-slate-300 mb-3">Health Check Intervals</h4>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Server Health (SSH)</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      value={schedulerConfig.serverHealthIntervalMs / 1000}
-                      onChange={(e) => handleSchedulerConfigChange('serverHealthIntervalMs', parseInt(e.target.value) * 1000)}
-                      min={10}
-                      max={3600}
-                      disabled={savingScheduler || !isAdmin(user)}
-                      className="input w-24"
-                    />
-                    <span className="text-slate-500 text-sm">sec</span>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Service Health</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      value={schedulerConfig.serviceHealthIntervalMs / 1000}
-                      onChange={(e) => handleSchedulerConfigChange('serviceHealthIntervalMs', parseInt(e.target.value) * 1000)}
-                      min={10}
-                      max={3600}
-                      disabled={savingScheduler || !isAdmin(user)}
-                      className="input w-24"
-                    />
-                    <span className="text-slate-500 text-sm">sec</span>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Container Discovery</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      value={schedulerConfig.discoveryIntervalMs / 1000}
-                      onChange={(e) => handleSchedulerConfigChange('discoveryIntervalMs', parseInt(e.target.value) * 1000)}
-                      min={60}
-                      max={86400}
-                      disabled={savingScheduler || !isAdmin(user)}
-                      className="input w-24"
-                    />
-                    <span className="text-slate-500 text-sm">sec</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Metrics Collection */}
-            <div>
-              <h4 className="text-sm font-medium text-slate-300 mb-3">Metrics Collection</h4>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Collection Interval</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      value={schedulerConfig.metricsIntervalMs / 1000}
-                      onChange={(e) => handleSchedulerConfigChange('metricsIntervalMs', parseInt(e.target.value) * 1000)}
-                      min={60}
-                      max={3600}
-                      disabled={savingScheduler || !isAdmin(user)}
-                      className="input w-24"
-                    />
-                    <span className="text-slate-500 text-sm">sec</span>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Metrics Retention</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      value={schedulerConfig.metricsRetentionDays}
-                      onChange={(e) => handleSchedulerConfigChange('metricsRetentionDays', parseInt(e.target.value))}
-                      min={1}
-                      max={365}
-                      disabled={savingScheduler || !isAdmin(user)}
-                      className="input w-24"
-                    />
-                    <span className="text-slate-500 text-sm">days</span>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Health Log Retention</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      value={schedulerConfig.healthLogRetentionDays}
-                      onChange={(e) => handleSchedulerConfigChange('healthLogRetentionDays', parseInt(e.target.value))}
-                      min={1}
-                      max={365}
-                      disabled={savingScheduler || !isAdmin(user)}
-                      className="input w-24"
-                    />
-                    <span className="text-slate-500 text-sm">days</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Other Schedules */}
-            <div>
-              <h4 className="text-sm font-medium text-slate-300 mb-3">Other Schedules</h4>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Registry Update Check</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      value={schedulerConfig.updateCheckIntervalMs / 1000}
-                      onChange={(e) => handleSchedulerConfigChange('updateCheckIntervalMs', parseInt(e.target.value) * 1000)}
-                      min={60}
-                      max={86400}
-                      disabled={savingScheduler || !isAdmin(user)}
-                      className="input w-24"
-                    />
-                    <span className="text-slate-500 text-sm">sec</span>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Backup Check</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      value={schedulerConfig.backupCheckIntervalMs / 1000}
-                      onChange={(e) => handleSchedulerConfigChange('backupCheckIntervalMs', parseInt(e.target.value) * 1000)}
-                      min={10}
-                      max={3600}
-                      disabled={savingScheduler || !isAdmin(user)}
-                      className="input w-24"
-                    />
-                    <span className="text-slate-500 text-sm">sec</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Alert Configuration */}
-            <div>
-              <h4 className="text-sm font-medium text-slate-300 mb-3">Alert Configuration</h4>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Failure Threshold</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      value={schedulerConfig.bounceThreshold}
-                      onChange={(e) => handleSchedulerConfigChange('bounceThreshold', parseInt(e.target.value))}
-                      min={1}
-                      max={10}
-                      disabled={savingScheduler || !isAdmin(user)}
-                      className="input w-24"
-                    />
-                    <span className="text-slate-500 text-sm">failures</span>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Cooldown</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      value={schedulerConfig.bounceCooldownMs / 1000}
-                      onChange={(e) => handleSchedulerConfigChange('bounceCooldownMs', parseInt(e.target.value) * 1000)}
-                      min={60}
-                      max={86400}
-                      disabled={savingScheduler || !isAdmin(user)}
-                      className="input w-24"
-                    />
-                    <span className="text-slate-500 text-sm">sec</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {isAdmin(user) && (
-              <div className="pt-4 border-t border-slate-700">
-                <button
-                  onClick={handleResetSchedulerConfig}
-                  disabled={savingScheduler}
-                  className="btn btn-ghost text-sm"
-                >
-                  Reset to Defaults
-                </button>
-              </div>
-            )}
-
-            {!isAdmin(user) && (
-              <p className="text-sm text-slate-500 pt-2">
-                Only administrators can modify scheduler settings.
-              </p>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Metrics Collection Configuration */}
-      <div className="card mb-6">
-        <button
-          onClick={() => setMetricsCollectionExpanded(!metricsCollectionExpanded)}
-          className="w-full flex items-center justify-between"
-        >
-          <h3 className="text-lg font-semibold text-white">Metrics Collection</h3>
-          <svg
-            className={`w-5 h-5 text-slate-400 transition-transform ${metricsCollectionExpanded ? 'rotate-180' : ''}`}
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </button>
-
-        {metricsCollectionExpanded && schedulerConfig && (
-          <div className="mt-6 space-y-6">
-            <p className="text-sm text-slate-400">
-              Choose which metrics to collect and display for this environment. Disabled metrics will not be collected by agents or shown in the UI.
-            </p>
-
-            {/* System Metrics */}
-            <div>
-              <h4 className="text-sm font-medium text-slate-300 mb-3">System Metrics</h4>
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                <MetricToggle
-                  label="CPU"
-                  description="CPU usage percentage"
-                  checked={schedulerConfig.collectCpu}
-                  onChange={(v) => handleSchedulerConfigChange('collectCpu', v)}
-                  disabled={savingScheduler || !isAdmin(user)}
-                />
-                <MetricToggle
-                  label="Memory"
-                  description="RAM usage"
-                  checked={schedulerConfig.collectMemory}
-                  onChange={(v) => handleSchedulerConfigChange('collectMemory', v)}
-                  disabled={savingScheduler || !isAdmin(user)}
-                />
-                <MetricToggle
-                  label="Swap"
-                  description="Swap space usage"
-                  checked={schedulerConfig.collectSwap}
-                  onChange={(v) => handleSchedulerConfigChange('collectSwap', v)}
-                  disabled={savingScheduler || !isAdmin(user)}
-                />
-                <MetricToggle
-                  label="Disk"
-                  description="Disk space usage"
-                  checked={schedulerConfig.collectDisk}
-                  onChange={(v) => handleSchedulerConfigChange('collectDisk', v)}
-                  disabled={savingScheduler || !isAdmin(user)}
-                />
-                <MetricToggle
-                  label="Load Average"
-                  description="System load averages"
-                  checked={schedulerConfig.collectLoad}
-                  onChange={(v) => handleSchedulerConfigChange('collectLoad', v)}
-                  disabled={savingScheduler || !isAdmin(user)}
-                />
-                <MetricToggle
-                  label="File Descriptors"
-                  description="Open file handles"
-                  checked={schedulerConfig.collectFds}
-                  onChange={(v) => handleSchedulerConfigChange('collectFds', v)}
-                  disabled={savingScheduler || !isAdmin(user)}
-                />
-                <MetricToggle
-                  label="TCP Connections"
-                  description="Network connection counts"
-                  checked={schedulerConfig.collectTcp}
-                  onChange={(v) => handleSchedulerConfigChange('collectTcp', v)}
-                  disabled={savingScheduler || !isAdmin(user)}
-                />
-              </div>
-            </div>
-
-            {/* Process Monitoring */}
-            <div>
-              <h4 className="text-sm font-medium text-slate-300 mb-3">Process Monitoring</h4>
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                <MetricToggle
-                  label="Top Processes"
-                  description="Top CPU/memory consumers"
-                  checked={schedulerConfig.collectProcesses}
-                  onChange={(v) => handleSchedulerConfigChange('collectProcesses', v)}
-                  disabled={savingScheduler || !isAdmin(user)}
-                />
-              </div>
-            </div>
-
-            {/* Health Checks */}
-            <div>
-              <h4 className="text-sm font-medium text-slate-300 mb-3">Health Checks</h4>
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                <MetricToggle
-                  label="TCP Ports"
-                  description="Port connectivity checks"
-                  checked={schedulerConfig.collectTcpChecks}
-                  onChange={(v) => handleSchedulerConfigChange('collectTcpChecks', v)}
-                  disabled={savingScheduler || !isAdmin(user)}
-                />
-                <MetricToggle
-                  label="Certificate Expiry"
-                  description="TLS certificate checks"
-                  checked={schedulerConfig.collectCertChecks}
-                  onChange={(v) => handleSchedulerConfigChange('collectCertChecks', v)}
-                  disabled={savingScheduler || !isAdmin(user)}
-                />
-              </div>
-            </div>
-
-            {!isAdmin(user) && (
-              <p className="text-sm text-slate-500 pt-2">
-                Only administrators can modify metrics collection settings.
-              </p>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Environment Info */}
-      <div className="card">
-        <h3 className="text-lg font-semibold text-white mb-4">Environment Info</h3>
-        <dl className="space-y-3">
-          <div className="flex justify-between">
-            <dt className="text-slate-400">Name</dt>
-            <dd className="text-white font-medium">{selectedEnvironment.name}</dd>
-          </div>
-          <div className="flex justify-between">
-            <dt className="text-slate-400">Servers</dt>
-            <dd className="text-white">{selectedEnvironment._count?.servers ?? 0}</dd>
-          </div>
-          <div className="flex justify-between">
-            <dt className="text-slate-400">Secrets</dt>
-            <dd className="text-white">{selectedEnvironment._count?.secrets ?? 0}</dd>
-          </div>
-          <div className="flex justify-between">
-            <dt className="text-slate-400">ID</dt>
-            <dd className="text-slate-400 font-mono text-sm">{selectedEnvironment.id}</dd>
-          </div>
-        </dl>
       </div>
     </div>
   );
 }
 
-// Metric toggle component
-interface MetricToggleProps {
-  label: string;
-  description: string;
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  disabled?: boolean;
-}
-
-function MetricToggle({ label, description, checked, onChange, disabled }: MetricToggleProps) {
+function EnvironmentInfo({ environment }: { environment: { id: string; name: string; _count: { servers: number; secrets: number } } }) {
   return (
-    <label
-      className={`flex items-center gap-3 p-3 bg-slate-800 rounded-lg cursor-pointer hover:bg-slate-700/70 transition-colors ${
-        disabled ? 'opacity-50 cursor-not-allowed' : ''
-      }`}
-    >
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        disabled={disabled}
-        className="sr-only peer"
-      />
-      <div className="w-9 h-5 bg-slate-600 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-primary-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-primary-600 relative shrink-0"></div>
-      <div className="min-w-0">
-        <p className="text-white text-sm font-medium">{label}</p>
-        <p className="text-slate-500 text-xs truncate">{description}</p>
-      </div>
-    </label>
+    <div className="panel">
+      <h3 className="text-sm font-medium text-slate-300 uppercase tracking-wider mb-4">
+        Environment Info
+      </h3>
+      <dl className="space-y-3">
+        <div className="flex justify-between">
+          <dt className="text-slate-400">Name</dt>
+          <dd className="text-white font-medium">{environment.name}</dd>
+        </div>
+        <div className="flex justify-between">
+          <dt className="text-slate-400">Servers</dt>
+          <dd className="text-white">{environment._count?.servers ?? 0}</dd>
+        </div>
+        <div className="flex justify-between">
+          <dt className="text-slate-400">Secrets</dt>
+          <dd className="text-white">{environment._count?.secrets ?? 0}</dd>
+        </div>
+        <div className="flex justify-between">
+          <dt className="text-slate-400">ID</dt>
+          <dd className="text-slate-400 font-mono text-sm">{environment.id}</dd>
+        </div>
+      </dl>
+    </div>
   );
 }

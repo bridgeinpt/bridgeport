@@ -40,18 +40,12 @@ model ApiToken {
 }
 
 model Environment {
-  id                  String  @id @default(cuid())
-  name                String  @unique // staging, production
-  sshPrivateKey       String? // Encrypted SSH private key for this environment
-  sshUser             String  @default("root") // SSH username
-  allowSecretReveal   Boolean @default(true) // Whether secrets can be revealed in this environment
-  allowBackupDownload Boolean @default(false) // Whether backup downloads are allowed in this environment
+  id            String  @id @default(cuid())
+  name          String  @unique // staging, production
+  sshPrivateKey String? // Encrypted SSH private key for this environment
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
-  // Scheduler configuration (JSON blob)
-  schedulerConfig String?
 
   servers              Server[]
   secrets              Secret[]
@@ -65,6 +59,78 @@ model Environment {
   healthCheckLogs      HealthCheckLog[]
   serviceConnections   ServiceConnection[]
   diagramLayout        DiagramLayout?
+
+  // Per-module settings (one row per environment, created eagerly)
+  generalSettings       GeneralSettings?
+  monitoringSettings    MonitoringSettings?
+  operationsSettings    OperationsSettings?
+  dataSettings          DataSettings?
+  configurationSettings ConfigurationSettings?
+}
+
+// ==================== Per-Environment Module Settings ====================
+
+model GeneralSettings {
+  id            String @id @default(cuid())
+  environmentId String @unique
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+
+  sshUser String @default("root") // SSH username
+}
+
+model MonitoringSettings {
+  id            String @id @default(cuid())
+  environmentId String @unique
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+
+  enabled                Boolean @default(false) // Master toggle for monitoring
+  serverHealthIntervalMs Int     @default(60000)
+  serviceHealthIntervalMs Int    @default(60000)
+  discoveryIntervalMs    Int     @default(300000)
+  metricsIntervalMs      Int     @default(300000)
+  updateCheckIntervalMs  Int     @default(1800000)
+  backupCheckIntervalMs  Int     @default(60000)
+  metricsRetentionDays   Int     @default(7)
+  healthLogRetentionDays Int     @default(30)
+  bounceThreshold        Int     @default(3)
+  bounceCooldownMs       Int     @default(900000)
+  collectCpu             Boolean @default(true)
+  collectMemory          Boolean @default(true)
+  collectSwap            Boolean @default(true)
+  collectDisk            Boolean @default(true)
+  collectLoad            Boolean @default(true)
+  collectFds             Boolean @default(true)
+  collectTcp             Boolean @default(true)
+  collectProcesses       Boolean @default(true)
+  collectTcpChecks       Boolean @default(true)
+  collectCertChecks      Boolean @default(true)
+}
+
+model OperationsSettings {
+  id            String @id @default(cuid())
+  environmentId String @unique
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+
+  defaultDockerMode  String @default("ssh")      // "ssh" | "socket"
+  defaultMetricsMode String @default("disabled")  // "disabled" | "ssh" | "agent"
+}
+
+model DataSettings {
+  id            String @id @default(cuid())
+  environmentId String @unique
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+
+  allowBackupDownload        Boolean @default(false)
+  defaultMonitoringEnabled   Boolean @default(false)
+  defaultCollectionIntervalSec Int   @default(300)
+}
+
+model ConfigurationSettings {
+  id            String @id @default(cuid())
+  environmentId String @unique
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+
+  allowSecretReveal Boolean @default(true)
 }
 
 model Server {

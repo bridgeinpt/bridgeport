@@ -165,7 +165,6 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
       try {
         const secret = await prisma.secret.findUnique({
           where: { id },
-          include: { environment: true },
         });
 
         if (!secret) {
@@ -173,7 +172,10 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
         }
 
         // Check environment-level reveal setting
-        if (!secret.environment.allowSecretReveal) {
+        const configSettings = await prisma.configurationSettings.findUnique({
+          where: { environmentId: secret.environmentId },
+        });
+        if (configSettings && !configSettings.allowSecretReveal) {
           await logAudit({
             action: 'access',
             resourceType: 'secret',

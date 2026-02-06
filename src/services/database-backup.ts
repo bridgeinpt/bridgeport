@@ -872,7 +872,7 @@ export async function getBackupDownload(
   const backup = await prisma.databaseBackup.findUnique({
     where: { id: backupId },
     include: {
-      database: { include: { server: true, environment: true } },
+      database: { include: { server: true } },
     },
   });
 
@@ -880,7 +880,10 @@ export async function getBackupDownload(
   if (backup.status !== 'completed') throw new Error('Backup is not completed');
 
   // Check if downloads are allowed
-  if (!backup.database.environment.allowBackupDownload) {
+  const dataSettings = await prisma.dataSettings.findUnique({
+    where: { environmentId: backup.database.environmentId },
+  });
+  if (!dataSettings?.allowBackupDownload) {
     throw new Error('Backup downloads are not allowed for this environment');
   }
 

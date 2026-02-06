@@ -1,3 +1,5 @@
+import { initSentry, captureException, flushSentry, getSentryConfig } from './lib/sentry.js';
+
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
@@ -41,6 +43,7 @@ import { monitoringRoutes } from './routes/monitoring.js';
 import { systemSettingsRoutes } from './routes/system-settings.js';
 import { downloadRoutes } from './routes/downloads.js';
 import { topologyRoutes } from './routes/topology.js';
+import { environmentSettingsRoutes } from './routes/environment-settings.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -65,6 +68,9 @@ const cliVersion = await readVersionFile(join(__dirname, '../cli/cli-version.txt
 
 // Export for use in routes
 export { bundledAgentVersion, cliVersion };
+
+// Initialize Sentry error monitoring (no-op if SENTRY_DSN is not set)
+initSentry(appVersion);
 
 async function buildServer() {
   const fastify = Fastify({
@@ -165,6 +171,7 @@ async function buildServer() {
   await fastify.register(systemSettingsRoutes);
   await fastify.register(downloadRoutes);
   await fastify.register(topologyRoutes);
+  await fastify.register(environmentSettingsRoutes);
   // Health check
   fastify.get('/health', async () => {
     return {
@@ -174,6 +181,30 @@ async function buildServer() {
       bundledAgentVersion,
       cliVersion,
     };
+  });
+
+  // Client config (public endpoint for frontend Sentry init)
+  fastify.get('/api/client-config', async () => {
+    const sentry = getSentryConfig();
+    return {
+      sentryDsn: sentry.dsn || null,
+      sentryEnvironment: sentry.environment,
+    };
+  });
+
+  // Capture 5xx errors to Sentry
+  fastify.setErrorHandler((error: Error & { statusCode?: number }, request, reply) => {
+    const statusCode = error.statusCode ?? 500;
+    if (statusCode >= 500) {
+      captureException(error, {
+        method: request.method,
+        url: request.url,
+        statusCode,
+      });
+    }
+    reply.status(statusCode).send({
+      error: statusCode >= 500 ? 'Internal Server Error' : error.message,
+    });
   });
 
   // Serve static files in production
@@ -211,11 +242,22 @@ async function buildServer() {
     stopScheduler();
     await fastify.close();
     await disconnectDatabase();
+    await flushSentry();
     process.exit(0);
   };
 
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
+
+  process.on('uncaughtException', (error) => {
+    captureException(error, { mechanism: 'uncaughtException' });
+    console.error('Uncaught exception:', error);
+  });
+
+  process.on('unhandledRejection', (reason) => {
+    captureException(reason, { mechanism: 'unhandledRejection' });
+    console.error('Unhandled rejection:', reason);
+  });
 
   return fastify;
 }

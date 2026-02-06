@@ -4,10 +4,9 @@ import { useAppStore } from '../lib/store';
 import {
   getEnvironmentMetricsSummary,
   getMetricsHistory,
-  getSchedulerConfig,
+  getModuleSettings,
   type MetricsSummaryServer,
   type MetricsHistoryServer,
-  type SchedulerConfig,
 } from '../lib/api';
 import { formatDistanceToNow, format } from 'date-fns';
 import ChartCard from '../components/monitoring/ChartCard';
@@ -37,7 +36,7 @@ export default function MonitoringServers() {
 
   const [servers, setServers] = useState<MetricsSummaryServer[]>([]);
   const [metricsHistory, setMetricsHistory] = useState<MetricsHistoryServer[]>([]);
-  const [schedulerConfig, setSchedulerConfig] = useState<SchedulerConfig | null>(null);
+  const [schedulerConfig, setSchedulerConfig] = useState<Record<string, unknown> | null>(null);
   const [disabledMetricsExpanded, setDisabledMetricsExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -51,11 +50,11 @@ export default function MonitoringServers() {
       const [summaryRes, historyRes, configRes] = await Promise.all([
         getEnvironmentMetricsSummary(selectedEnvironment.id),
         getMetricsHistory(selectedEnvironment.id, monitoringTimeRange),
-        getSchedulerConfig(selectedEnvironment.id),
+        getModuleSettings(selectedEnvironment.id, 'monitoring'),
       ]);
       setServers(summaryRes.servers);
       setMetricsHistory(historyRes.servers);
-      setSchedulerConfig(configRes.config);
+      setSchedulerConfig(configRes.settings);
     } finally {
       setLoading(false);
       setRefreshing(false);
