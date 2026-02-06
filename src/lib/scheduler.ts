@@ -1,3 +1,4 @@
+import { captureException } from './sentry.js';
 import { prisma } from './db.js';
 import { checkServerHealth, discoverContainers } from '../services/servers.js';
 import { checkServiceHealth } from '../services/services.js';
@@ -128,6 +129,7 @@ async function runServerHealthChecks(): Promise<void> {
       }
     }
   } catch (error) {
+    captureException(error, { scheduler: 'serverHealthChecks' });
     console.error('[Scheduler] Server health check run failed:', error);
   }
 }
@@ -207,6 +209,7 @@ async function runServiceHealthChecks(): Promise<void> {
       }
     }
   } catch (error) {
+    captureException(error, { scheduler: 'serviceHealthChecks' });
     console.error('[Scheduler] Service health check run failed:', error);
   }
 }
@@ -231,6 +234,7 @@ async function runDiscovery(): Promise<void> {
       }
     }
   } catch (error) {
+    captureException(error, { scheduler: 'discovery' });
     console.error('[Scheduler] Discovery run failed:', error);
   }
 }
@@ -400,6 +404,7 @@ async function runUpdateChecks(): Promise<void> {
       }
     }
   } catch (error) {
+    captureException(error, { scheduler: 'updateChecks' });
     console.error('[Scheduler] Update check run failed:', error);
   }
 }
@@ -613,6 +618,7 @@ async function runMetricsCollection(): Promise<void> {
       }
     }
   } catch (error) {
+    captureException(error, { scheduler: 'metricsCollection' });
     console.error('[Scheduler] Combined metrics/health collection run failed:', error);
   }
 }
@@ -624,6 +630,7 @@ async function runBackupChecks(): Promise<void> {
   try {
     await checkDueBackups();
   } catch (error) {
+    captureException(error, { scheduler: 'backupChecks' });
     console.error('[Scheduler] Backup check failed:', error);
   }
 }
@@ -779,6 +786,7 @@ async function runAgentStalenessCheck(): Promise<void> {
       }
     }
   } catch (error) {
+    captureException(error, { scheduler: 'agentStalenessCheck' });
     console.error('[Scheduler] Agent staleness check failed:', error);
   }
 }
@@ -799,6 +807,7 @@ async function runMetricsCleanup(retentionDays: number): Promise<void> {
       console.log(`[Scheduler] Cleaned up ${dbMetricsDeleted} old database monitoring metrics records`);
     }
   } catch (error) {
+    captureException(error, { scheduler: 'metricsCleanup' });
     console.error('[Scheduler] Metrics cleanup failed:', error);
   }
 }
@@ -813,6 +822,7 @@ async function runNotificationCleanup(retentionDays: number): Promise<void> {
       console.log(`[Scheduler] Cleaned up ${deleted} old notification records`);
     }
   } catch (error) {
+    captureException(error, { scheduler: 'notificationCleanup' });
     console.error('[Scheduler] Notification cleanup failed:', error);
   }
 }
@@ -827,6 +837,7 @@ async function runHealthLogCleanup(retentionDays: number): Promise<void> {
       console.log(`[Scheduler] Cleaned up ${deleted} old health check log records`);
     }
   } catch (error) {
+    captureException(error, { scheduler: 'healthLogCleanup' });
     console.error('[Scheduler] Health log cleanup failed:', error);
   }
 }

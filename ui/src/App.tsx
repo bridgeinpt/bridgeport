@@ -1,6 +1,8 @@
+import { useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from './lib/store';
 import { api } from './lib/api';
+import { setSentryUser } from './lib/sentry';
 import Layout from './components/Layout';
 import AdminLayout from './components/AdminLayout';
 import Login from './pages/Login';
@@ -38,7 +40,15 @@ import AdminNotificationSettings from './pages/admin/NotificationSettings';
 import AdminAbout from './pages/admin/About';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { token } = useAuthStore();
+  const { token, user } = useAuthStore();
+
+  useEffect(() => {
+    if (user) {
+      setSentryUser({ id: user.id, email: user.email });
+    } else {
+      setSentryUser(null);
+    }
+  }, [user]);
 
   if (!token) {
     return <Navigate to="/login" replace />;

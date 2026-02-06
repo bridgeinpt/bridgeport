@@ -29,6 +29,11 @@ const envSchema = z.object({
   CORS_ORIGIN: z.string().optional(), // e.g., "https://deploy.bridgein.com"
   // Plugin directory for service types and database types
   PLUGINS_DIR: z.string().default('./plugins'),
+  // Sentry error monitoring (opt-in via SENTRY_DSN)
+  SENTRY_DSN: z.string().url().optional(),
+  SENTRY_ENVIRONMENT: z.string().optional(),
+  SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0),
+  SENTRY_ENABLED: z.coerce.boolean().default(true),
 });
 
 export type Config = z.infer<typeof envSchema>;
