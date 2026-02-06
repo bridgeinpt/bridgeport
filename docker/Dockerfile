@@ -54,8 +54,10 @@ RUN npm run build
 FROM node:22-alpine AS prisma-build
 WORKDIR /app
 
-# Install only prisma CLI (needed for generate and migrate deploy)
-RUN npm install prisma@6 --ignore-scripts
+# Install prisma CLI (needed for generate and migrate deploy)
+# Use project lockfile to pin exact transitive dep versions
+COPY package.json package-lock.json* ./
+RUN npm ci --ignore-scripts
 
 COPY prisma/ ./prisma/
 
