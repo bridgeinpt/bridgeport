@@ -148,8 +148,8 @@ export default function DatabaseDetail() {
         backupSpacesPrefix: db.backupSpacesPrefix || '',
       });
       // Set monitoring state from database
-      setMonitoringEnabled((db as Database & { monitoringEnabled?: boolean }).monitoringEnabled ?? true);
-      setCollectionInterval((db as Database & { collectionIntervalSec?: number }).collectionIntervalSec ?? 300);
+      setMonitoringEnabled(db.monitoringEnabled ?? true);
+      setCollectionInterval(db.collectionIntervalSec ?? 300);
     } catch {
       toast.error('Failed to load database');
       navigate('/databases');
@@ -615,7 +615,7 @@ export default function DatabaseDetail() {
                       type="text"
                       value={configForm.backupSpacesPrefix}
                       onChange={e => setConfigForm({ ...configForm, backupSpacesPrefix: e.target.value })}
-                      placeholder="backups/"
+                      placeholder="{environment}/{name}/"
                       className="input font-mono text-sm"
                     />
                   </div>

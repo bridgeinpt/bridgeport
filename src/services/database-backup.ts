@@ -93,6 +93,8 @@ export interface DatabaseOutput {
   backupCompressionLevel: number;
   pgDumpOptions: PgDumpOptions | null;
   pgDumpTimeoutMs: number;
+  monitoringEnabled: boolean;
+  collectionIntervalSec: number;
   createdAt: Date;
   updatedAt: Date;
   environmentId: string;
@@ -146,6 +148,14 @@ export async function createDatabase(
     pgDumpTimeoutMs: input.pgDumpTimeoutMs,
     environmentId,
   };
+
+  // Generate default Spaces prefix: {environment}/{name}/
+  if (data.backupStorageType === 'spaces' && !data.backupSpacesPrefix) {
+    const env = await prisma.environment.findUnique({ where: { id: environmentId }, select: { name: true } });
+    if (env) {
+      data.backupSpacesPrefix = `${env.name}/${input.name}/`;
+    }
+  }
 
   if (input.pgDumpOptions) {
     data.pgDumpOptions = JSON.stringify(input.pgDumpOptions);
@@ -291,6 +301,8 @@ function toOutput(db: {
   backupCompressionLevel: number;
   pgDumpOptions: string | null;
   pgDumpTimeoutMs: number;
+  monitoringEnabled: boolean;
+  collectionIntervalSec: number;
   createdAt: Date;
   updatedAt: Date;
   environmentId: string;
@@ -325,6 +337,8 @@ function toOutput(db: {
     backupCompressionLevel: db.backupCompressionLevel,
     pgDumpOptions: parsedPgDumpOptions,
     pgDumpTimeoutMs: db.pgDumpTimeoutMs,
+    monitoringEnabled: db.monitoringEnabled,
+    collectionIntervalSec: db.collectionIntervalSec,
     createdAt: db.createdAt,
     updatedAt: db.updatedAt,
     environmentId: db.environmentId,
@@ -973,55 +987,112 @@ export async function checkDueBackups(): Promise<void> {
 }
 
 /**
- * Check if a cron schedule is due to run.
- * Simplified implementation - checks common patterns.
+ * Parse a cron field into a set of valid values.
+ * Supports: wildcard, specific numbers, ranges (1-5), steps, and lists (1,3,5).
  */
-function isScheduleDue(cronExpression: string, lastRunAt: Date | null, now: Date): boolean {
-  if (!lastRunAt) return true; // Never run before
-
-  const msSinceLastRun = now.getTime() - lastRunAt.getTime();
-  const hoursSinceLastRun = msSinceLastRun / (1000 * 60 * 60);
-
-  // Parse common cron patterns
-  const parts = cronExpression.trim().split(/\s+/);
-  if (parts.length < 5) return false;
-
-  // Daily at specific hour (e.g., "0 2 * * *" = daily at 2am)
-  if (parts[2] === '*' && parts[3] === '*' && parts[4] === '*') {
-    return hoursSinceLastRun >= 24;
+function parseCronField(field: string, min: number, max: number): Set<number> {
+  const values = new Set<number>();
+  for (const part of field.split(',')) {
+    if (part.includes('/')) {
+      const [range, stepStr] = part.split('/');
+      const step = parseInt(stepStr);
+      let start = min;
+      let end = max;
+      if (range !== '*') {
+        if (range.includes('-')) {
+          [start, end] = range.split('-').map(Number);
+        } else {
+          start = parseInt(range);
+        }
+      }
+      for (let i = start; i <= end; i += step) values.add(i);
+    } else if (part === '*') {
+      for (let i = min; i <= max; i++) values.add(i);
+    } else if (part.includes('-')) {
+      const [start, end] = part.split('-').map(Number);
+      for (let i = start; i <= end; i++) values.add(i);
+    } else {
+      values.add(parseInt(part));
+    }
   }
-
-  // Hourly (e.g., "0 * * * *")
-  if (parts[1] === '*') {
-    return hoursSinceLastRun >= 1;
-  }
-
-  // Weekly (e.g., "0 2 * * 0")
-  if (parts[4] !== '*') {
-    return hoursSinceLastRun >= 24 * 7;
-  }
-
-  // Default: daily
-  return hoursSinceLastRun >= 24;
+  return values;
 }
 
 /**
- * Calculate next run time for a cron expression.
+ * Calculate the next run time for a cron expression after the given date.
+ * Standard 5-field cron: minute hour day-of-month month day-of-week
  */
-function getNextRunTime(cronExpression: string, from: Date): Date {
+export function getNextRunTime(cronExpression: string, from: Date): Date {
   const parts = cronExpression.trim().split(/\s+/);
-  const next = new Date(from);
-
-  // Simple calculation - add appropriate interval
-  if (parts[1] === '*') {
-    next.setHours(next.getHours() + 1);
-  } else if (parts[4] !== '*') {
-    next.setDate(next.getDate() + 7);
-  } else {
-    next.setDate(next.getDate() + 1);
+  if (parts.length < 5) {
+    const fallback = new Date(from);
+    fallback.setDate(fallback.getDate() + 1);
+    return fallback;
   }
 
-  return next;
+  const minutes = parseCronField(parts[0], 0, 59);
+  const hours = parseCronField(parts[1], 0, 23);
+  const daysOfMonth = parseCronField(parts[2], 1, 31);
+  const months = parseCronField(parts[3], 1, 12);
+  const daysOfWeek = parseCronField(parts[4], 0, 7);
+  if (daysOfWeek.has(7)) daysOfWeek.add(0); // Normalize Sunday
+
+  const hasDomConstraint = parts[2] !== '*';
+  const hasDowConstraint = parts[4] !== '*';
+
+  const next = new Date(from);
+  next.setSeconds(0, 0);
+  next.setMinutes(next.getMinutes() + 1);
+
+  // Search up to 1 year ahead
+  for (let i = 0; i < 366 * 24 * 60; i++) {
+    if (!months.has(next.getMonth() + 1)) {
+      next.setMonth(next.getMonth() + 1, 1);
+      next.setHours(0, 0, 0, 0);
+      continue;
+    }
+
+    // Standard cron: if both dom and dow are restricted, match either (OR).
+    // If only one is restricted, the other is treated as * (AND).
+    const domMatch = daysOfMonth.has(next.getDate());
+    const dowMatch = daysOfWeek.has(next.getDay());
+    const dayMatch = (hasDomConstraint && hasDowConstraint)
+      ? (domMatch || dowMatch)
+      : (domMatch && dowMatch);
+
+    if (!dayMatch) {
+      next.setDate(next.getDate() + 1);
+      next.setHours(0, 0, 0, 0);
+      continue;
+    }
+
+    if (!hours.has(next.getHours())) {
+      next.setHours(next.getHours() + 1, 0, 0, 0);
+      continue;
+    }
+
+    if (!minutes.has(next.getMinutes())) {
+      next.setMinutes(next.getMinutes() + 1, 0, 0);
+      continue;
+    }
+
+    return next;
+  }
+
+  // Fallback
+  const fallback = new Date(from);
+  fallback.setDate(fallback.getDate() + 1);
+  return fallback;
+}
+
+/**
+ * Check if a cron schedule is due to run.
+ * Calculates the next occurrence after lastRunAt and checks if it's <= now.
+ */
+function isScheduleDue(cronExpression: string, lastRunAt: Date | null, now: Date): boolean {
+  if (!lastRunAt) return true;
+  const nextRun = getNextRunTime(cronExpression, lastRunAt);
+  return nextRun <= now;
 }
 
 /**

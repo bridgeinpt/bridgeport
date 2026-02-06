@@ -65,6 +65,7 @@ async function executeSQLQueries(
       database: conn.database,
       user: conn.user,
       password: conn.password,
+      ssl: { rejectUnauthorized: false },
       connectionTimeoutMillis: 10000,
       statement_timeout: 30000,
     });

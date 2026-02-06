@@ -1162,6 +1162,8 @@ export interface Database {
   backupCompressionLevel: number;
   pgDumpOptions: PgDumpOptions | null;
   pgDumpTimeoutMs: number;
+  monitoringEnabled: boolean;
+  collectionIntervalSec: number;
   createdAt: string;
   updatedAt: string;
   environmentId: string;

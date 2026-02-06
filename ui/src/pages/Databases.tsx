@@ -483,7 +483,7 @@ export default function Databases() {
                       type="text"
                       value={formData.backupSpacesPrefix || ''}
                       onChange={(e) => setFormData({ ...formData, backupSpacesPrefix: e.target.value })}
-                      placeholder="backups/staging/"
+                      placeholder="{environment}/{name}/"
                       className="input font-mono text-sm"
                     />
                   </div>
@@ -720,7 +720,7 @@ export default function Databases() {
                       type="text"
                       value={formData.backupSpacesPrefix || ''}
                       onChange={(e) => setFormData({ ...formData, backupSpacesPrefix: e.target.value })}
-                      placeholder="backups/staging/"
+                      placeholder="{environment}/{name}/"
                       className="input font-mono text-sm"
                     />
                   </div>
