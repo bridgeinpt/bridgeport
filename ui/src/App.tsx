@@ -17,8 +17,10 @@ import DatabaseDetail from './pages/DatabaseDetail';
 import Monitoring from './pages/Monitoring';
 import MonitoringHealth from './pages/MonitoringHealth';
 import MonitoringAgents from './pages/MonitoringAgents';
-import MonitoringDataStores from './pages/MonitoringDataStores';
-import DataStoreDetail from './pages/DataStoreDetail';
+import MonitoringServers from './pages/MonitoringServers';
+import MonitoringServices from './pages/MonitoringServices';
+import MonitoringDatabases from './pages/MonitoringDatabases';
+import DatabaseMonitoringDetail from './pages/DatabaseMonitoringDetail';
 import Settings from './pages/Settings';
 import Notifications from './pages/Notifications';
 import ContainerImages from './pages/ContainerImages';
@@ -84,10 +86,12 @@ export default function App() {
               <Routes>
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/monitoring" element={<Monitoring />} />
+                <Route path="/monitoring/servers" element={<MonitoringServers />} />
+                <Route path="/monitoring/services" element={<MonitoringServices />} />
+                <Route path="/monitoring/databases" element={<MonitoringDatabases />} />
+                <Route path="/monitoring/databases/:id" element={<DatabaseMonitoringDetail />} />
                 <Route path="/monitoring/health" element={<MonitoringHealth />} />
                 <Route path="/monitoring/agents" element={<MonitoringAgents />} />
-                <Route path="/monitoring/data-stores" element={<MonitoringDataStores />} />
-                <Route path="/data-stores/:id" element={<DataStoreDetail />} />
                 <Route path="/servers" element={<Servers />} />
                 <Route path="/servers/:id" element={<ServerDetail />} />
                 <Route path="/services" element={<Services />} />

@@ -74,9 +74,11 @@ const navigationGroups: NavGroup[] = [
     name: 'Monitoring',
     items: [
       { name: 'Overview', href: '/monitoring', icon: ChartIcon },
+      { name: 'Servers', href: '/monitoring/servers', icon: ServerIcon },
+      { name: 'Services', href: '/monitoring/services', icon: CubeIcon },
+      { name: 'Databases', href: '/monitoring/databases', icon: DatabaseIcon },
       { name: 'Health Checks', href: '/monitoring/health', icon: HeartPulseIcon },
       { name: 'Agents & SSH', href: '/monitoring/agents', icon: NetworkIcon },
-      { name: 'Data Stores', href: '/monitoring/data-stores', icon: DatabaseIcon },
     ],
   },
   {

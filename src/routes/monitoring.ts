@@ -807,6 +807,16 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         (s) => s.healthStatus === 'unhealthy' || s.containerStatus === 'exited' || s.containerStatus === 'dead'
       ).length;
 
+      // Get database monitoring stats
+      const databases = await prisma.database.findMany({
+        where: { environmentId: envId },
+        select: { monitoringEnabled: true, monitoringStatus: true },
+      });
+
+      const monitoredDatabases = databases.filter(d => d.monitoringEnabled);
+      const connectedDatabases = monitoredDatabases.filter(d => d.monitoringStatus === 'connected').length;
+      const errorDatabases = monitoredDatabases.filter(d => d.monitoringStatus === 'error').length;
+
       return {
         stats: {
           servers: {
@@ -819,7 +829,13 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
             healthy: healthyServices,
             unhealthy: unhealthyServices,
           },
-          alerts: unhealthyServers + unhealthyServices,
+          databases: {
+            total: databases.length,
+            monitored: monitoredDatabases.length,
+            connected: connectedDatabases,
+            error: errorDatabases,
+          },
+          alerts: unhealthyServers + unhealthyServices + errorDatabases,
         },
       };
     }

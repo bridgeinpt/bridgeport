@@ -40,7 +40,6 @@ import { spacesRoutes } from './routes/spaces.js';
 import { monitoringRoutes } from './routes/monitoring.js';
 import { systemSettingsRoutes } from './routes/system-settings.js';
 import { downloadRoutes } from './routes/downloads.js';
-import { dataStoreRoutes } from './routes/data-stores.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -173,8 +172,6 @@ async function buildServer() {
   await fastify.register(monitoringRoutes);
   await fastify.register(systemSettingsRoutes);
   await fastify.register(downloadRoutes);
-  await fastify.register(dataStoreRoutes);
-
   // Health check
   fastify.get('/health', async () => {
     return {

@@ -13,6 +13,7 @@ interface FormData {
   agentStaleThresholdSec: number;
   agentOfflineThresholdSec: number;
   auditLogRetentionDays: number;
+  databaseMetricsRetentionDays: number;
 }
 
 interface Defaults {
@@ -116,6 +117,7 @@ export default function SystemSettings() {
     agentStaleThresholdSec: 180,
     agentOfflineThresholdSec: 300,
     auditLogRetentionDays: 90,
+    databaseMetricsRetentionDays: 30,
   });
 
   useEffect(() => {
@@ -140,6 +142,7 @@ export default function SystemSettings() {
         agentStaleThresholdSec: msToSec(settings.agentStaleThresholdMs),
         agentOfflineThresholdSec: msToSec(settings.agentOfflineThresholdMs),
         auditLogRetentionDays: settings.auditLogRetentionDays,
+        databaseMetricsRetentionDays: settings.databaseMetricsRetentionDays ?? 30,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load settings');
@@ -167,6 +170,7 @@ export default function SystemSettings() {
         agentStaleThresholdMs: secToMs(formData.agentStaleThresholdSec),
         agentOfflineThresholdMs: secToMs(formData.agentOfflineThresholdSec),
         auditLogRetentionDays: formData.auditLogRetentionDays,
+        databaseMetricsRetentionDays: formData.databaseMetricsRetentionDays,
       };
       await updateSystemSettings(updateData);
 
@@ -201,6 +205,7 @@ export default function SystemSettings() {
         agentStaleThresholdSec: msToSec(settings.agentStaleThresholdMs),
         agentOfflineThresholdSec: msToSec(settings.agentOfflineThresholdMs),
         auditLogRetentionDays: settings.auditLogRetentionDays,
+        databaseMetricsRetentionDays: settings.databaseMetricsRetentionDays ?? 30,
       });
 
       setSuccess('Settings reset to defaults');
@@ -456,6 +461,23 @@ export default function SystemSettings() {
               />
               <p className="text-xs text-slate-500 mt-1">
                 Days to keep audit logs (default: {defaults?.auditLogRetentionDays || 90} days, 0 = keep forever)
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">
+                Database Metrics Retention
+                <span className="text-slate-500 ml-1">(days)</span>
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={365}
+                value={formData.databaseMetricsRetentionDays}
+                onChange={(e) => updateField('databaseMetricsRetentionDays', parseInt(e.target.value) || 30)}
+                className="input w-full"
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                Days to keep database monitoring metrics (default: 30 days)
               </p>
             </div>
           </div>

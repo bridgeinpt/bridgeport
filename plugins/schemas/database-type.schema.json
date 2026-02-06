@@ -55,6 +55,43 @@
         },
         "additionalProperties": false
       }
+    },
+    "monitoring": {
+      "type": "object",
+      "description": "Monitoring configuration for collecting database metrics",
+      "properties": {
+        "connectionMode": {
+          "type": "string",
+          "enum": ["sql", "ssh"],
+          "description": "How to connect: 'sql' for direct DB connection, 'ssh' for remote commands"
+        },
+        "driver": {
+          "type": "string",
+          "enum": ["pg", "mysql2"],
+          "description": "Node.js driver to use for SQL connections"
+        },
+        "queries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "displayName", "query", "resultType"],
+            "properties": {
+              "name": { "type": "string" },
+              "displayName": { "type": "string" },
+              "query": { "type": "string" },
+              "resultType": { "type": "string", "enum": ["scalar", "row", "rows"] },
+              "unit": { "type": "string" },
+              "chartGroup": { "type": "string" },
+              "resultMapping": {
+                "type": "object",
+                "description": "Maps column names to result field names"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

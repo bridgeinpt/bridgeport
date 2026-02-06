@@ -76,8 +76,6 @@ interface AppState {
   setMonitoringHealthType: (type: string) => void;
   monitoringHealthStatus: string;
   setMonitoringHealthStatus: (status: string) => void;
-  monitoringActiveTab: 'servers' | 'services';
-  setMonitoringActiveTab: (tab: 'servers' | 'services') => void;
   monitoringHealthTab: 'status' | 'logs';
   setMonitoringHealthTab: (tab: 'status' | 'logs') => void;
 }
@@ -129,8 +127,6 @@ export const useAppStore = create<AppState>()(
       setMonitoringHealthType: (type) => set({ monitoringHealthType: type }),
       monitoringHealthStatus: '',
       setMonitoringHealthStatus: (status) => set({ monitoringHealthStatus: status }),
-      monitoringActiveTab: 'servers',
-      setMonitoringActiveTab: (tab) => set({ monitoringActiveTab: tab }),
       monitoringHealthTab: 'status',
       setMonitoringHealthTab: (tab) => set({ monitoringHealthTab: tab }),
     }),
@@ -150,7 +146,6 @@ export const useAppStore = create<AppState>()(
         activityResourceTypeFilter: state.activityResourceTypeFilter,
         monitoringHealthType: state.monitoringHealthType,
         monitoringHealthStatus: state.monitoringHealthStatus,
-        monitoringActiveTab: state.monitoringActiveTab,
         monitoringHealthTab: state.monitoringHealthTab,
       }),
     }

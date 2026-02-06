@@ -24,6 +24,7 @@ export const NOTIFICATION_TYPES = {
   SYSTEM_SERVER_ONLINE: 'system.server_online',
   SYSTEM_CONTAINER_CRASH: 'system.container_crash',
   SYSTEM_CONTAINER_RECOVERED: 'system.container_recovered',
+  SYSTEM_DATABASE_UNREACHABLE: 'system.database_unreachable',
 } as const;
 
 export type NotificationTypeCode = (typeof NOTIFICATION_TYPES)[keyof typeof NOTIFICATION_TYPES];
@@ -220,6 +221,18 @@ const DEFAULT_TYPES: Array<{
     defaultChannels: ['in_app'],
     severity: 'info',
     bounceEnabled: false,
+    bounceThreshold: 3,
+    bounceCooldown: 900,
+  },
+  {
+    code: NOTIFICATION_TYPES.SYSTEM_DATABASE_UNREACHABLE,
+    category: 'system',
+    name: 'Database Unreachable',
+    description: 'A monitored database cannot be reached',
+    template: 'Database "{{databaseName}}" is unreachable: {{error}}',
+    defaultChannels: ['in_app', 'email', 'webhook'],
+    severity: 'critical',
+    bounceEnabled: true,
     bounceThreshold: 3,
     bounceCooldown: 900,
   },

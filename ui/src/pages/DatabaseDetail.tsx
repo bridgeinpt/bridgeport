@@ -14,6 +14,8 @@ import {
   listSpacesBuckets,
   getBackupDownloadUrl,
   listServers,
+  testDatabaseConnection,
+  updateDatabaseMonitoring,
   type Database,
   type DatabaseInput,
   type DatabaseBackup,
@@ -118,6 +120,13 @@ export default function DatabaseDetail() {
   // Polling for in-progress backups
   const [pollingBackupId, setPollingBackupId] = useState<string | null>(null);
 
+  // Monitoring state
+  const [monitoringEnabled, setMonitoringEnabled] = useState(true);
+  const [collectionInterval, setCollectionInterval] = useState(300);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; error?: string } | null>(null);
+  const [savingMonitoring, setSavingMonitoring] = useState(false);
+
   const loadDatabase = useCallback(async () => {
     if (!id) return;
     try {
@@ -138,6 +147,9 @@ export default function DatabaseDetail() {
         backupSpacesBucket: db.backupSpacesBucket || '',
         backupSpacesPrefix: db.backupSpacesPrefix || '',
       });
+      // Set monitoring state from database
+      setMonitoringEnabled((db as Database & { monitoringEnabled?: boolean }).monitoringEnabled ?? true);
+      setCollectionInterval((db as Database & { collectionIntervalSec?: number }).collectionIntervalSec ?? 300);
     } catch {
       toast.error('Failed to load database');
       navigate('/databases');
@@ -771,6 +783,107 @@ export default function DatabaseDetail() {
                 </div>
               )}
             </dl>
+          )}
+        </div>
+      </div>
+
+      {/* Monitoring Card */}
+      <div className="card mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-white">Monitoring</h3>
+          <Link
+            to={`/monitoring/databases/${database.id}`}
+            className="btn btn-ghost text-sm"
+          >
+            View Metrics
+          </Link>
+        </div>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-white">Enable Monitoring</p>
+              <p className="text-xs text-slate-500">Collect database metrics on a schedule</p>
+            </div>
+            <button
+              onClick={async () => {
+                if (!selectedEnvironment?.id || !id) return;
+                setSavingMonitoring(true);
+                try {
+                  await updateDatabaseMonitoring(selectedEnvironment.id, id, { monitoringEnabled: !monitoringEnabled });
+                  setMonitoringEnabled(!monitoringEnabled);
+                  toast.success(monitoringEnabled ? 'Monitoring disabled' : 'Monitoring enabled');
+                } catch (error) {
+                  toast.error(error instanceof Error ? error.message : 'Failed to update monitoring');
+                } finally {
+                  setSavingMonitoring(false);
+                }
+              }}
+              disabled={savingMonitoring}
+              className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                monitoringEnabled
+                  ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
+                  : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+              }`}
+            >
+              {monitoringEnabled ? 'Enabled' : 'Disabled'}
+            </button>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="flex-1">
+              <label className="block text-sm text-slate-400 mb-1">Collection Interval</label>
+              <select
+                value={collectionInterval}
+                onChange={async (e) => {
+                  if (!selectedEnvironment?.id || !id) return;
+                  const newInterval = parseInt(e.target.value);
+                  setSavingMonitoring(true);
+                  try {
+                    await updateDatabaseMonitoring(selectedEnvironment.id, id, { collectionIntervalSec: newInterval });
+                    setCollectionInterval(newInterval);
+                    toast.success('Collection interval updated');
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : 'Failed to update interval');
+                  } finally {
+                    setSavingMonitoring(false);
+                  }
+                }}
+                disabled={savingMonitoring}
+                className="input w-48"
+              >
+                <option value={60}>1 minute</option>
+                <option value={300}>5 minutes</option>
+                <option value={900}>15 minutes</option>
+                <option value={1800}>30 minutes</option>
+                <option value={3600}>1 hour</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">Test Connection</label>
+              <button
+                onClick={async () => {
+                  if (!selectedEnvironment?.id || !id) return;
+                  setTestingConnection(true);
+                  setTestResult(null);
+                  try {
+                    const result = await testDatabaseConnection(selectedEnvironment.id, id);
+                    setTestResult({ success: result.success, error: result.error });
+                  } catch (error) {
+                    setTestResult({ success: false, error: error instanceof Error ? error.message : 'Connection test failed' });
+                  } finally {
+                    setTestingConnection(false);
+                  }
+                }}
+                disabled={testingConnection}
+                className="btn btn-secondary"
+              >
+                {testingConnection ? 'Testing...' : 'Test'}
+              </button>
+            </div>
+          </div>
+          {testResult && (
+            <div className={`p-3 rounded-lg text-sm ${testResult.success ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
+              {testResult.success ? 'Connection successful' : `Connection failed: ${testResult.error}`}
+            </div>
           )}
         </div>
       </div>

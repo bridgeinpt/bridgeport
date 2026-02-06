@@ -15,5 +15,57 @@
   "commands": [
     { "name": "shell", "displayName": "PostgreSQL Shell", "command": "psql -h {{host}} -p {{port}} -U {{username}} {{databaseName}}", "description": "Interactive PostgreSQL shell", "sortOrder": 0 },
     { "name": "vacuum", "displayName": "Vacuum Analyze", "command": "psql -h {{host}} -p {{port}} -U {{username}} -d {{databaseName}} -c \"VACUUM ANALYZE\"", "description": "Run VACUUM ANALYZE", "sortOrder": 1 }
-  ]
+  ],
+  "monitoring": {
+    "connectionMode": "sql",
+    "driver": "pg",
+    "queries": [
+      {
+        "name": "dbSize",
+        "displayName": "Database Size",
+        "query": "SELECT pg_database_size(current_database()) AS value",
+        "resultType": "scalar",
+        "unit": "bytes",
+        "chartGroup": "storage"
+      },
+      {
+        "name": "tableCount",
+        "displayName": "Table Count",
+        "query": "SELECT count(*) AS value FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'",
+        "resultType": "scalar",
+        "chartGroup": "overview"
+      },
+      {
+        "name": "connections",
+        "displayName": "Connections",
+        "query": "SELECT (SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()) AS active, (SELECT setting::int FROM pg_settings WHERE name = 'max_connections') AS max",
+        "resultType": "row",
+        "chartGroup": "connections",
+        "resultMapping": { "active": "active", "max": "max" }
+      },
+      {
+        "name": "cacheHitRatio",
+        "displayName": "Cache Hit Ratio",
+        "query": "SELECT CASE WHEN sum(blks_hit) + sum(blks_read) = 0 THEN 0 ELSE round(sum(blks_hit)::numeric / (sum(blks_hit) + sum(blks_read)) * 100, 2) END AS value FROM pg_stat_database WHERE datname = current_database()",
+        "resultType": "scalar",
+        "unit": "%",
+        "chartGroup": "performance"
+      },
+      {
+        "name": "deadTuples",
+        "displayName": "Dead Tuples",
+        "query": "SELECT coalesce(sum(n_dead_tup), 0) AS value FROM pg_stat_user_tables",
+        "resultType": "scalar",
+        "chartGroup": "performance"
+      },
+      {
+        "name": "topTableSizes",
+        "displayName": "Top Tables by Size",
+        "query": "SELECT schemaname || '.' || tablename AS name, pg_total_relation_size(schemaname || '.' || tablename) AS size, n_live_tup AS rows FROM pg_stat_user_tables ORDER BY pg_total_relation_size(schemaname || '.' || tablename) DESC LIMIT 10",
+        "resultType": "rows",
+        "chartGroup": "storage",
+        "resultMapping": { "name": "name", "size": "size", "rows": "rows" }
+      }
+    ]
+  }
 }

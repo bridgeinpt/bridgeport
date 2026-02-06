@@ -16,6 +16,22 @@ interface ServiceTypeJson {
   }>;
 }
 
+interface MonitoringQueryJson {
+  name: string;
+  displayName: string;
+  query: string;
+  resultType: 'scalar' | 'row' | 'rows';
+  unit?: string;
+  chartGroup?: string;
+  resultMapping?: Record<string, string>;
+}
+
+interface MonitoringConfigJson {
+  connectionMode: 'sql' | 'ssh';
+  driver?: 'pg' | 'mysql2';
+  queries: MonitoringQueryJson[];
+}
+
 interface DatabaseTypeJson {
   name: string;
   displayName: string;
@@ -36,6 +52,7 @@ interface DatabaseTypeJson {
     description?: string;
     sortOrder?: number;
   }>;
+  monitoring?: MonitoringConfigJson;
 }
 
 export interface PluginSyncResult {
@@ -236,6 +253,7 @@ async function syncDatabaseTypes(result: PluginSyncResult): Promise<void> {
             backupCommand: data.backupCommand || null,
             restoreCommand: data.restoreCommand || null,
             defaultPort: data.defaultPort || null,
+            monitoringConfig: data.monitoring ? JSON.stringify(data.monitoring) : null,
             commands: {
               create: (data.commands || []).map((cmd, i) => ({
                 name: cmd.name,
@@ -268,6 +286,7 @@ async function syncDatabaseTypes(result: PluginSyncResult): Promise<void> {
               backupCommand: data.backupCommand || null,
               restoreCommand: data.restoreCommand || null,
               defaultPort: data.defaultPort || null,
+              monitoringConfig: data.monitoring ? JSON.stringify(data.monitoring) : null,
               commands: {
                 create: (data.commands || []).map((cmd, i) => ({
                   name: cmd.name,
@@ -410,6 +429,7 @@ export async function resetTypeToDefaults(
             backupCommand: data.backupCommand || null,
             restoreCommand: data.restoreCommand || null,
             defaultPort: data.defaultPort || null,
+            monitoringConfig: data.monitoring ? JSON.stringify(data.monitoring) : null,
             commands: {
               create: (data.commands || []).map((cmd, i) => ({
                 name: cmd.name,
@@ -483,6 +503,9 @@ export async function exportTypeAsJson(
           ...(cmd.description ? { description: cmd.description } : {}),
           sortOrder: cmd.sortOrder,
         }));
+      }
+      if (type.monitoringConfig) {
+        json.monitoring = JSON.parse(type.monitoringConfig);
       }
 
       const dir = join(config.PLUGINS_DIR, 'database-types');

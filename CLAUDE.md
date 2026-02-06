@@ -155,9 +155,9 @@ bridgeport/
 │   │   ├── secrets.ts        # Secret management + env templates
 │   │   ├── config-files.ts   # Config files with history
 │   │   ├── registries.ts     # Registry connections
-│   │   ├── databases.ts      # Database backup management
+│   │   ├── databases.ts      # Database backup + monitoring management
 │   │   ├── metrics.ts        # Server/service metrics
-│   │   ├── monitoring.ts     # Health logs, metrics history, SSH testing
+│   │   ├── monitoring.ts     # Health logs, metrics history, SSH testing, monitoring overview
 │   │   ├── settings.ts       # Service types CRUD
 │   │   ├── spaces.ts         # Global Spaces configuration
 │   │   ├── system-settings.ts # System-wide operational settings
@@ -166,6 +166,8 @@ bridgeport/
 │   ├── services/             # Business logic
 │   │   ├── metrics.ts        # SSH metrics collection
 │   │   ├── database-backup.ts # Backup execution
+│   │   ├── database-monitoring-collector.ts # Database metrics collection scheduler
+│   │   ├── database-query-executor.ts # Generic SQL/SSH query executor
 │   │   ├── host-detection.ts # Docker host detection + bootstrap
 │   │   ├── service-types.ts  # Service type utilities
 │   │   ├── system-settings.ts # Cached system settings singleton
@@ -176,10 +178,20 @@ bridgeport/
 ├── ui/                       # Frontend (React + Vite)
 │   ├── src/
 │   │   ├── components/       # Reusable components
-│   │   │   └── Layout.tsx    # Navigation sidebar with env selector
+│   │   │   ├── Layout.tsx    # Navigation sidebar with env selector
+│   │   │   └── monitoring/   # Shared monitoring components
+│   │   │       ├── ChartCard.tsx       # Recharts line chart wrapper
+│   │   │       ├── StatCard.tsx        # Stat card with color variants
+│   │   │       ├── MetricGauge.tsx     # Progress bar gauge
+│   │   │       ├── TimeRangeSelector.tsx # Time range segmented buttons
+│   │   │       └── AutoRefreshToggle.tsx # Auto-refresh checkbox
 │   │   ├── pages/            # Page components
 │   │   │   ├── Dashboard.tsx # Overview with server metrics
-│   │   │   ├── Monitoring.tsx # Metrics overview with charts
+│   │   │   ├── Monitoring.tsx # Monitoring overview summary hub
+│   │   │   ├── MonitoringServers.tsx   # Server metrics + charts
+│   │   │   ├── MonitoringServices.tsx  # Service metrics + charts
+│   │   │   ├── MonitoringDatabases.tsx # Database monitoring grid
+│   │   │   ├── DatabaseMonitoringDetail.tsx # Database monitoring detail + charts
 │   │   │   ├── MonitoringHealth.tsx # Health check logs
 │   │   │   ├── MonitoringAgents.tsx # Agent management, SSH testing
 │   │   │   ├── Servers.tsx   # Server list
@@ -187,7 +199,7 @@ bridgeport/
 │   │   │   ├── Services.tsx  # Service list
 │   │   │   ├── ServiceDetail.tsx # Service deploy + health checks
 │   │   │   ├── Databases.tsx # Database list
-│   │   │   ├── DatabaseDetail.tsx # Database config + backups
+│   │   │   ├── DatabaseDetail.tsx # Database config + backups + monitoring
 │   │   │   ├── Settings.tsx  # Environment settings + scheduler config
 │   │   │   ├── settings/
 │   │   │   │   ├── ServiceTypes.tsx # Service type management
@@ -326,6 +338,15 @@ Two modes for server metrics:
 1. **SSH Polling** (`src/services/metrics.ts`): BridgePort collects via SSH
 2. **Agent Push** (`src/routes/metrics.ts`): Agent sends to `/api/metrics/ingest`
 
+### Database Monitoring
+Plugin-driven monitoring for PostgreSQL, MySQL, and SQLite databases:
+
+1. **Monitoring queries** defined in `plugins/database-types/*.json` under `monitoring` key
+2. **SQL mode** (`pg`/`mysql2`): Direct database connections for query execution
+3. **SSH mode**: Command execution via SSH for file-based databases (SQLite)
+4. **Collector** (`src/services/database-monitoring-collector.ts`): Scheduled collection respecting per-database intervals
+5. **Query executor** (`src/services/database-query-executor.ts`): Generic executor supporting scalar, row, and rows result types
+
 ## Environment Variables
 
 Required for development:
@@ -354,8 +375,9 @@ Service        - Docker container with optional serviceTypeId
 Secret         - Encrypted key-value with neverReveal flag
 ConfigFile     - Synced configuration files (including .env files with secret placeholders)
 FileHistory    - Edit history for config files
-Database       - Registered database for backups (editable after creation)
+Database       - Registered database for backups + monitoring (editable after creation)
 DatabaseBackup - Backup record with status
+DatabaseMetrics - Time-series database monitoring metrics (JSON blob per collection)
 BackupSchedule - Cron-based backup scheduling
 ServerMetrics  - Time-series server metrics
 ServiceMetrics - Time-series container metrics
@@ -365,6 +387,7 @@ HealthCheckLog - Health check results with duration, status, response details
 # Global Settings
 ServiceType        - Predefined service types (Django, Node.js, etc.) with commands
 ServiceTypeCommand - Commands for a service type (shell, migrate, etc.)
+DatabaseType       - Database engine types (PostgreSQL, MySQL, SQLite) with monitoring queries
 SpacesConfig       - Global DO Spaces credentials
 SpacesEnvironment  - Per-environment Spaces enable/disable
 SystemSettings     - System-wide operational settings (timeouts, limits, retries)
@@ -391,15 +414,22 @@ SystemSettings     - System-wide operational settings (timeouts, limits, retries
 ### Database Management
 - **Edit Databases**: Edit existing database configurations (name, connection, backup settings)
 - **Backup Management**: View, create, and delete backups with schedule configuration
+- **Database Monitoring**: Enable/disable monitoring, configure collection intervals, test connections
+- **Monitoring Queries**: Plugin-driven (defined in database type JSON files), supports PostgreSQL, MySQL, SQLite
 
 ### User Management (Admin)
 - **Active Users**: Shows which users are currently online (active in last 15 minutes)
 - **Session Tracking**: lastActiveAt updated on each authenticated request
 
 ### Monitoring Hub (`/monitoring/*`)
-- **Overview** (`/monitoring`): Environment-wide metrics with time-series charts (Recharts)
+- **Overview** (`/monitoring`): Summary hub with quick stats and links to sub-pages
+- **Servers** (`/monitoring/servers`): Server metrics with time-series charts (CPU, Memory, Disk, Load, Swap, TCP)
+- **Services** (`/monitoring/services`): Service metrics with charts (CPU, Memory, Network RX/TX)
+- **Databases** (`/monitoring/databases`): Database monitoring grid with status, key metrics, sparklines
+- **Database Detail** (`/monitoring/databases/:id`): Dynamic charts driven by plugin monitoring queries
 - **Health Checks** (`/monitoring/health`): Filterable health check logs with pagination
 - **Agents** (`/monitoring/agents`): Agent management, SSH connectivity testing, upgrade indicators
+- Shared components in `ui/src/components/monitoring/` (ChartCard, StatCard, MetricGauge, etc.)
 - Auto-refresh every 30 seconds
 
 ### Agent Upgrade Indicators

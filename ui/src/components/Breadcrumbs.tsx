@@ -17,7 +17,6 @@ const routeNames: Record<string, string> = {
   'monitoring': 'Monitoring',
   'health': 'Health Checks',
   'agents': 'Agents & SSH',
-  'data-stores': 'Data Stores',
   // Admin routes
   'admin': 'Admin',
   'system': 'System',

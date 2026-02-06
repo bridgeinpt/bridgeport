@@ -17,6 +17,7 @@ import {
 } from '../services/database-backup.js';
 import { logAudit } from '../services/audit.js';
 import { prisma } from '../lib/db.js';
+import { collectDatabaseMetrics } from '../services/database-monitoring-collector.js';
 
 const storageTypeSchema = z.enum(['local', 'spaces']);
 const backupFormatSchema = z.enum(['plain', 'custom', 'tar']);
@@ -429,6 +430,167 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
       });
 
       return { success: true };
+    }
+  );
+
+  // ==================== Database Monitoring Endpoints ====================
+
+  // Get monitoring summary for all databases in an environment
+  fastify.get(
+    '/api/environments/:envId/databases/monitoring-summary',
+    { preHandler: [fastify.authenticate] },
+    async (request) => {
+      const { envId } = request.params as { envId: string };
+
+      const databases = await prisma.database.findMany({
+        where: { environmentId: envId },
+        include: {
+          server: { select: { name: true } },
+          databaseType: {
+            select: { displayName: true, monitoringConfig: true },
+          },
+        },
+      });
+
+      const result = await Promise.all(
+        databases.map(async (db) => {
+          // Get latest metrics
+          const latestMetric = await prisma.databaseMetrics.findFirst({
+            where: { databaseId: db.id },
+            orderBy: { collectedAt: 'desc' },
+          });
+
+          return {
+            id: db.id,
+            name: db.name,
+            type: db.type,
+            typeName: db.databaseType?.displayName || db.type,
+            serverName: db.server?.name || null,
+            monitoringEnabled: db.monitoringEnabled,
+            monitoringStatus: db.monitoringStatus,
+            lastCollectedAt: db.lastCollectedAt,
+            lastMonitoringError: db.lastMonitoringError,
+            latestMetrics: latestMetric ? JSON.parse(latestMetric.metricsJson) : null,
+            monitoringConfig: db.databaseType?.monitoringConfig
+              ? JSON.parse(db.databaseType.monitoringConfig)
+              : null,
+          };
+        })
+      );
+
+      return { databases: result };
+    }
+  );
+
+  // Get metrics history for a specific database
+  fastify.get(
+    '/api/environments/:envId/databases/:id/metrics',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { envId: string; id: string };
+      const { hours } = request.query as { hours?: string };
+
+      const database = await prisma.database.findUnique({
+        where: { id },
+        include: {
+          databaseType: { select: { monitoringConfig: true } },
+        },
+      });
+
+      if (!database) {
+        return reply.code(404).send({ error: 'Database not found' });
+      }
+
+      const hoursNum = hours ? parseInt(hours) : 24;
+      const since = new Date();
+      since.setHours(since.getHours() - hoursNum);
+
+      const metrics = await prisma.databaseMetrics.findMany({
+        where: {
+          databaseId: id,
+          collectedAt: { gte: since },
+        },
+        orderBy: { collectedAt: 'asc' },
+      });
+
+      return {
+        metrics: metrics.map((m) => ({
+          collectedAt: m.collectedAt,
+          data: JSON.parse(m.metricsJson),
+        })),
+        monitoringConfig: database.databaseType?.monitoringConfig
+          ? JSON.parse(database.databaseType.monitoringConfig)
+          : null,
+      };
+    }
+  );
+
+  // Test database monitoring connection
+  fastify.post(
+    '/api/environments/:envId/databases/:id/test-connection',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { envId: string; id: string };
+
+      const database = await prisma.database.findUnique({ where: { id } });
+      if (!database) {
+        return reply.code(404).send({ error: 'Database not found' });
+      }
+
+      try {
+        await collectDatabaseMetrics(id);
+        return { success: true, message: 'Connection successful, metrics collected' };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Connection failed';
+        return { success: false, message };
+      }
+    }
+  );
+
+  // Update monitoring configuration for a database
+  fastify.patch(
+    '/api/environments/:envId/databases/:id/monitoring',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { envId: string; id: string };
+      const body = request.body as {
+        monitoringEnabled?: boolean;
+        collectionIntervalSec?: number;
+      };
+
+      const database = await prisma.database.findUnique({ where: { id } });
+      if (!database) {
+        return reply.code(404).send({ error: 'Database not found' });
+      }
+
+      const updateData: Record<string, unknown> = {};
+      if (body.monitoringEnabled !== undefined) {
+        updateData.monitoringEnabled = body.monitoringEnabled;
+      }
+      if (body.collectionIntervalSec !== undefined) {
+        updateData.collectionIntervalSec = body.collectionIntervalSec;
+      }
+
+      const updated = await prisma.database.update({
+        where: { id },
+        data: updateData,
+      });
+
+      await logAudit({
+        action: 'update',
+        resourceType: 'database',
+        resourceId: id,
+        resourceName: database.name,
+        details: { monitoringConfigUpdated: body },
+        userId: request.authUser!.id,
+        environmentId: database.environmentId,
+      });
+
+      return {
+        monitoringEnabled: updated.monitoringEnabled,
+        collectionIntervalSec: updated.collectionIntervalSec,
+        monitoringStatus: updated.monitoringStatus,
+      };
     }
   );
 }

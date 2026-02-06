@@ -63,7 +63,6 @@ model Environment {
   containerImages      ContainerImage[]
   deploymentPlans      DeploymentPlan[]
   healthCheckLogs      HealthCheckLog[]
-  dataStores           DataStore[]
 }
 
 model Server {
@@ -98,7 +97,6 @@ model Server {
   containerSnapshot  AgentContainerSnapshot?
   processSnapshot    AgentProcessSnapshot?
   agentEvents        AgentEvent[]
-  dataStores         DataStore[]
 
   @@unique([environmentId, name])
 }
@@ -414,12 +412,17 @@ model Database {
   databaseTypeId String?
   databaseType   DatabaseType? @relation(fields: [databaseTypeId], references: [id], onDelete: SetNull)
 
+  // Monitoring configuration
+  monitoringEnabled     Boolean   @default(true)
+  collectionIntervalSec Int       @default(300)
+  monitoringStatus      String    @default("unknown") // connected | error | unknown
+  lastCollectedAt       DateTime?
+  lastMonitoringError   String?
+
   backups  DatabaseBackup[]
   schedule BackupSchedule?
   services ServiceDatabase[]
-
-  // Optional link from DataStore for unified view
-  dataStore DataStore?
+  metrics  DatabaseMetrics[]
 
   @@unique([environmentId, name])
 }
@@ -742,7 +745,8 @@ model SystemSettings {
   doRegistryToken String? // DigitalOcean registry API token
 
   // Retention Policies
-  auditLogRetentionDays Int @default(90) // Days to keep audit logs (0 = forever)
+  auditLogRetentionDays        Int @default(90) // Days to keep audit logs (0 = forever)
+  databaseMetricsRetentionDays Int @default(30) // Days to keep database monitoring metrics
 
   updatedAt DateTime @updatedAt
 }
@@ -774,6 +778,8 @@ model DatabaseType {
   defaultPort      Int?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+
+  monitoringConfig String? // JSON from plugin monitoring section
 
   commands  DatabaseTypeCommand[]
   databases Database[]
@@ -936,64 +942,15 @@ model AgentEvent {
   @@index([serverId, createdAt(sort: Desc)])
 }
 
-// ==================== Data Store Monitoring ====================
+// ==================== Database Monitoring Metrics ====================
 
-// Data store for performance monitoring (separate from Database which handles backups)
-model DataStore {
-  id            String      @id @default(cuid())
-  name          String // Display name
-  type          String // 'redis' | 'postgres' | 'sqlite'
-  environmentId String
-  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+// Time-series metrics for database monitoring
+model DatabaseMetrics {
+  id          String   @id @default(cuid())
+  databaseId  String
+  database    Database @relation(fields: [databaseId], references: [id], onDelete: Cascade)
+  metricsJson String // All query results as JSON blob
+  collectedAt DateTime @default(now())
 
-  // Optional link to Database (for backup management integration)
-  databaseId String?   @unique
-  database   Database? @relation(fields: [databaseId], references: [id], onDelete: SetNull)
-
-  // Connection details
-  host                 String?
-  port                 Int?
-  encryptedCredentials String? // XChaCha20-Poly1305 encrypted (username:password or just password for Redis)
-  credentialsNonce     String?
-  databaseName         String? // For postgres
-  redisDb              Int? // For redis (0-15)
-
-  // For SQLite or remote access via SSH
-  serverId String?
-  server   Server? @relation(fields: [serverId], references: [id], onDelete: SetNull)
-  filePath String? // SQLite file path on server
-
-  // Monitoring config
-  enabled               Boolean @default(true)
-  collectionIntervalSec Int     @default(60)
-
-  // Status tracking
-  status          String    @default("unknown") // 'connected' | 'error' | 'unknown'
-  lastCollectedAt DateTime?
-  lastError       String?
-
-  // Redis Cluster specific
-  isCluster    Boolean @default(false)
-  clusterNodes String? // JSON array of node addresses
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  metrics DataStoreMetrics[]
-
-  @@unique([environmentId, name])
-  @@index([environmentId])
-}
-
-// Time-series metrics for data stores
-model DataStoreMetrics {
-  id          String    @id @default(cuid())
-  dataStoreId String
-  dataStore   DataStore @relation(fields: [dataStoreId], references: [id], onDelete: Cascade)
-  collectedAt DateTime  @default(now())
-
-  // Type-specific metrics as JSON
-  metricsJson String
-
-  @@index([dataStoreId, collectedAt(sort: Desc)])
+  @@index([databaseId, collectedAt(sort: Desc)])
 }
