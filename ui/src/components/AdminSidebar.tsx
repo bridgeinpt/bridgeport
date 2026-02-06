@@ -139,7 +139,7 @@ export default function AdminSidebar() {
                   <span className="absolute left-0 top-1 bottom-1 w-0.5 bg-brand-600 rounded-r" />
                 )}
                 <item.icon className="w-4 h-4 flex-shrink-0" />
-                <span className="text-sm">{item.name}</span>
+                <span className={`text-sm ${isActive ? 'text-[#cc0000]' : ''}`}>{item.name}</span>
               </Link>
             );
           })}
