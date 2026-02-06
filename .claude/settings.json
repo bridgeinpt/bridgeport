@@ -18,6 +18,7 @@
   "enabledPlugins": {
     "document-skills@anthropic-agent-skills": true,
     "frontend-design@claude-plugins-official": true,
-    "code-simplifier@claude-plugins-official": true
+    "code-simplifier@claude-plugins-official": true,
+    "github@claude-plugins-official": true
   }
 }
