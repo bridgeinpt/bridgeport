@@ -4,7 +4,7 @@ import { checkServiceHealth } from '../services/services.js';
 import { RegistryFactory, type RegistryCredentials } from './registry.js';
 import { getRegistryCredentials } from '../services/registries.js';
 import { deployService } from '../services/deploy.js';
-import { extractRepoName } from './image-utils.js';
+import { extractRepoName, findLatestInFamily } from './image-utils.js';
 import {
   collectServerMetricsSSH,
   saveServerMetrics,
@@ -268,18 +268,11 @@ async function checkServiceForUpdates(
     const client = RegistryFactory.create(creds);
     const repoName = extractRepoName(imageName, creds.repositoryPrefix);
 
-    // Get the latest tag from the registry
-    const latestTag = await client.getLatestTag(repoName);
+    // Get all tags and find the latest within the same tag family
+    const allTags = await client.listTags(repoName);
+    const { latestTag, currentDigest } = findLatestInFamily(allTags, service.imageTag);
     if (!latestTag) {
       return { hasUpdate: false };
-    }
-
-    // Also check the digest for the current tag (handles "latest" tag updates)
-    let currentDigest: string | null = null;
-    try {
-      currentDigest = await client.getManifestDigest(repoName, service.imageTag);
-    } catch {
-      // If we can't get current digest, we'll compare by tag only
     }
 
     // Update the containerImage with latest available info

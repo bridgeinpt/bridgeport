@@ -2,6 +2,8 @@
  * Utilities for parsing Docker image names and extracting registry/repository information.
  */
 
+import type { RegistryTag } from './registry.js';
+
 export interface ParsedRegistry {
   registryUrl: string;
   isDockerHub: boolean;
@@ -66,6 +68,79 @@ export function extractRepoName(imageName: string, repositoryPrefix: string | nu
   }
 
   return repo;
+}
+
+/**
+ * Well-known rolling/special tags that should only match themselves exactly.
+ */
+const SPECIAL_TAGS = new Set([
+  'latest', 'stable', 'edge', 'nightly', 'beta', 'alpha', 'rc', 'lts',
+  'mainline', 'development', 'testing', 'production',
+]);
+
+/**
+ * Extract the "family" suffix from a Docker tag.
+ *
+ * A tag's family is its non-version suffix. Tags in the same family differ
+ * only by version number:
+ *   "2-alpine"       -> "-alpine"
+ *   "2.9.0-alpine"   -> "-alpine"
+ *   "2.9.0"          -> ""         (pure version)
+ *   "latest"         -> "=latest"  (exact-match family)
+ *   "3.19-slim-bookworm" -> "-slim-bookworm"
+ *   "bookworm"       -> "=bookworm" (no version prefix, exact match)
+ */
+export function getTagFamily(tag: string): string {
+  // Special rolling tags get exact-match families
+  if (SPECIAL_TAGS.has(tag.toLowerCase())) {
+    return `=${tag.toLowerCase()}`;
+  }
+
+  // Try to match version prefix: optional 'v', then digits with dots, then optional suffix
+  const match = tag.match(/^v?(\d+\.)*\d+(-.+)?$/);
+  if (match) {
+    // match[2] is the "-suffix" part (e.g., "-alpine"), or undefined for pure versions
+    return match[2] || '';
+  }
+
+  // No version prefix found — treat as exact-match family (e.g., "bookworm", "noble")
+  return `=${tag.toLowerCase()}`;
+}
+
+/**
+ * Filter a list of registry tags to those matching the same family as currentTag.
+ */
+export function filterTagsByFamily(tags: RegistryTag[], currentTag: string): RegistryTag[] {
+  const family = getTagFamily(currentTag);
+
+  return tags.filter((t) => getTagFamily(t.tag) === family);
+}
+
+/**
+ * From a pre-fetched tag list, find the latest tag in the same family as currentTag.
+ * Also extracts the current tag's digest. This replaces two separate API calls
+ * (getLatestTag + getManifestDigest) with one (listTags).
+ */
+export function findLatestInFamily(
+  allTags: RegistryTag[],
+  currentTag: string
+): { latestTag: RegistryTag | null; currentDigest: string | null } {
+  const familyTags = filterTagsByFamily(allTags, currentTag);
+
+  // Find current tag's digest
+  const currentEntry = allTags.find((t) => t.tag === currentTag);
+  const currentDigest = currentEntry?.digest || null;
+
+  if (familyTags.length === 0) {
+    return { latestTag: null, currentDigest };
+  }
+
+  // Sort by updatedAt descending to find the most recently updated tag in the family
+  const sorted = [...familyTags].sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+  );
+
+  return { latestTag: sorted[0], currentDigest };
 }
 
 /**

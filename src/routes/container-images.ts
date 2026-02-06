@@ -14,7 +14,7 @@ import { buildDeploymentPlan, executePlan } from '../services/orchestration.js';
 import { logAudit } from '../services/audit.js';
 import { RegistryFactory } from '../lib/registry.js';
 import { getRegistryCredentials } from '../services/registries.js';
-import { extractRepoName } from '../lib/image-utils.js';
+import { extractRepoName, findLatestInFamily } from '../lib/image-utils.js';
 
 const createContainerImageSchema = z.object({
   name: z.string().min(1),
@@ -281,8 +281,9 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
         const client = RegistryFactory.create(creds);
         const repoName = extractRepoName(image.imageName, creds.repositoryPrefix);
 
-        // Get the latest tag from the registry
-        const latestTag = await client.getLatestTag(repoName);
+        // Get all tags and find the latest within the same tag family
+        const allTags = await client.listTags(repoName);
+        const { latestTag, currentDigest } = findLatestInFamily(allTags, image.currentTag);
         if (!latestTag) {
           return {
             hasUpdate: false,
@@ -290,14 +291,6 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
             latestTag: null,
             message: 'Could not determine latest tag from registry',
           };
-        }
-
-        // Also check the digest for the current tag (handles "latest" tag updates)
-        let currentDigest: string | null = null;
-        try {
-          currentDigest = await client.getManifestDigest(repoName, image.currentTag);
-        } catch {
-          // If we can't get current digest, we'll compare by tag only
         }
 
         // Update the containerImage with latest available info
