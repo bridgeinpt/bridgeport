@@ -22,6 +22,8 @@ import { formatDistanceToNow } from 'date-fns';
 import { Modal } from '../components/Modal';
 import { CheckIcon, WarningIcon, RefreshIcon } from '../components/Icons';
 import { useToast } from '../components/Toast';
+import { TopologyDiagram } from '../components/topology';
+import { useAuthStore } from '../lib/store';
 
 interface DeployAllResult {
   serviceId: string;
@@ -53,6 +55,7 @@ interface DatabaseWithBackups extends Database {
 
 export default function Dashboard() {
   const { selectedEnvironment, autoRefreshEnabled, setAutoRefreshEnabled, dismissedAlerts, dismissAlert, clearDismissedAlerts } = useAppStore();
+  const { user } = useAuthStore();
   const toast = useToast();
   const [environment, setEnvironment] = useState<EnvironmentWithServers | null>(null);
   const [metrics, setMetrics] = useState<MetricsSummaryServer[]>([]);
@@ -561,6 +564,18 @@ export default function Dashboard() {
           </div>
         </Link>
       </div>
+
+      {/* Service Topology Diagram */}
+      {environment.servers.length > 0 && (
+        <div className="mb-5">
+          <TopologyDiagram
+            servers={environment.servers}
+            databases={databases}
+            environmentId={environment.id}
+            userRole={user?.role || 'viewer'}
+          />
+        </div>
+      )}
 
       {/* Deploy All Results Modal */}
       <Modal

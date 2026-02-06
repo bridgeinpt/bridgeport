@@ -2368,3 +2368,56 @@ export const testDatabaseConnection = (envId: string, dbId: string) =>
 export const updateDatabaseMonitoring = (envId: string, dbId: string, config: { monitoringEnabled?: boolean; collectionIntervalSec?: number }) =>
   api.patch<{ database: Database }>(`/environments/${envId}/databases/${dbId}/monitoring`, config);
 
+// ==================== Service Topology ====================
+
+export interface ServiceConnection {
+  id: string;
+  environmentId: string;
+  sourceType: 'service' | 'database';
+  sourceId: string;
+  targetType: 'service' | 'database';
+  targetId: string;
+  port: number | null;
+  protocol: string | null;
+  label: string | null;
+  direction: 'forward' | 'none';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ServiceConnectionInput {
+  environmentId: string;
+  sourceType: 'service' | 'database';
+  sourceId: string;
+  targetType: 'service' | 'database';
+  targetId: string;
+  port?: number | null;
+  protocol?: string | null;
+  label?: string | null;
+  direction?: 'forward' | 'none';
+}
+
+export const listConnections = (environmentId: string) =>
+  api.get<{ connections: ServiceConnection[] }>(`/connections?environmentId=${environmentId}`);
+
+export const createConnection = (data: ServiceConnectionInput) =>
+  api.post<{ connection: ServiceConnection }>('/connections', data);
+
+export const deleteConnection = (id: string) =>
+  api.delete<{ success: boolean }>(`/connections/${id}`);
+
+// Diagram Layout
+export interface DiagramLayoutPositions {
+  [nodeKey: string]: { x: number; y: number };
+}
+
+export const getDiagramLayout = (environmentId: string) =>
+  api.get<{ layout: { id: string; positions: DiagramLayoutPositions } | null }>(`/diagram-layout?environmentId=${environmentId}`);
+
+export const saveDiagramLayout = (environmentId: string, positions: DiagramLayoutPositions) =>
+  api.put<{ layout: { id: string; positions: DiagramLayoutPositions } }>('/diagram-layout', { environmentId, positions });
+
+// Diagram Export
+export const exportDiagramMermaid = (environmentId: string) =>
+  api.get<{ mermaid: string }>(`/diagram-export?environmentId=${environmentId}&format=mermaid`);
+

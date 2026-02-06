@@ -63,6 +63,8 @@ model Environment {
   containerImages      ContainerImage[]
   deploymentPlans      DeploymentPlan[]
   healthCheckLogs      HealthCheckLog[]
+  serviceConnections   ServiceConnection[]
+  diagramLayout        DiagramLayout?
 }
 
 model Server {
@@ -953,4 +955,43 @@ model DatabaseMetrics {
   collectedAt DateTime @default(now())
 
   @@index([databaseId, collectedAt(sort: Desc)])
+}
+
+// ==================== Service Topology ====================
+
+// User-defined connections between services and/or databases
+model ServiceConnection {
+  id            String   @id @default(cuid())
+  environmentId String
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+
+  // Source node
+  sourceType    String   // "service" | "database"
+  sourceId      String   // Service.id or Database.id
+
+  // Target node
+  targetType    String   // "service" | "database"
+  targetId      String   // Service.id or Database.id
+
+  // Connection metadata
+  port          Int?     // Port number (e.g., 5432, 6379)
+  protocol      String?  // "tcp" | "http" | "grpc" | etc.
+  label         String?  // Optional description (e.g., "Primary DB", "Redis cache")
+  direction     String   @default("none") // "forward" (source→target) | "none" (undirected)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([environmentId, sourceType, sourceId, targetType, targetId, port])
+}
+
+// Persisted node positions per environment for the topology diagram
+model DiagramLayout {
+  id            String   @id @default(cuid())
+  environmentId String   @unique
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+
+  positions     String   // JSON: { "service:<id>": {"x": 100, "y": 200}, ... }
+
+  updatedAt     DateTime @updatedAt
 }
