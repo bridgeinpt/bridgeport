@@ -53,7 +53,7 @@ const ChartCard = memo(function ChartCard({ title, data, names, formatTime, unit
               borderRadius: '8px',
             }}
             labelFormatter={formatTime}
-            formatter={(value: number) => [`${value?.toFixed(1)}${unit || ''}`, '']}
+            formatter={(value: unknown) => [`${Number(value).toFixed(1)}${unit || ''}`, '']}
           />
           <Legend wrapperStyle={{ fontSize: 12 }} />
           {names.map((name, i) => (
