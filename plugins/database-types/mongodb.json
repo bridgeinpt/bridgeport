@@ -1,0 +1,18 @@
+{
+  "$schema": "../schemas/database-type.schema.json",
+  "name": "mongodb",
+  "displayName": "MongoDB",
+  "defaultPort": 27017,
+  "connectionFields": [
+    { "name": "host", "label": "Host", "type": "text", "required": true, "default": "localhost" },
+    { "name": "port", "label": "Port", "type": "number", "required": true, "default": 27017 },
+    { "name": "databaseName", "label": "Database Name", "type": "text", "required": true },
+    { "name": "username", "label": "Username", "type": "text" },
+    { "name": "password", "label": "Password", "type": "password" }
+  ],
+  "backupCommand": "mongodump --host {{host}} --port {{port}} --db {{databaseName}} --out \"{{outputFile}}\"",
+  "restoreCommand": "mongorestore --host {{host}} --port {{port}} --db {{databaseName}} \"{{inputFile}}\"",
+  "commands": [
+    { "name": "shell", "displayName": "Mongo Shell", "command": "mongosh --host {{host}} --port {{port}} {{databaseName}}", "description": "Interactive MongoDB shell", "sortOrder": 0 }
+  ]
+}

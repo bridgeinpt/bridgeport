@@ -28,6 +28,7 @@ import DeploymentPlanDetail from './pages/DeploymentPlanDetail';
 // Admin pages
 import AdminSystemSettings from './pages/admin/SystemSettings';
 import AdminServiceTypes from './pages/admin/ServiceTypes';
+import AdminDatabaseTypes from './pages/admin/DatabaseTypes';
 import AdminStorage from './pages/admin/Storage';
 import AdminUsers from './pages/admin/Users';
 import AdminAudit from './pages/admin/Audit';
@@ -62,6 +63,7 @@ export default function App() {
                 <Route index element={<Navigate to="/admin/about" replace />} />
                 <Route path="system" element={<AdminSystemSettings />} />
                 <Route path="service-types" element={<AdminServiceTypes />} />
+                <Route path="database-types" element={<AdminDatabaseTypes />} />
                 <Route path="storage" element={<AdminStorage />} />
                 <Route path="users" element={<AdminUsers />} />
                 <Route path="audit" element={<AdminAudit />} />

@@ -129,6 +129,7 @@ COPY --from=agent-build /build/agent-version.txt ./agent/agent-version.txt
 COPY --from=cli-build /build/dist/ ./cli/
 COPY --from=cli-build /build/cli-version.txt ./cli/cli-version.txt
 
+COPY plugins/ ./plugins/
 COPY package.json ./
 COPY docker/entrypoint.sh ./entrypoint.sh
 

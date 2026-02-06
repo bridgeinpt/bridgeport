@@ -31,7 +31,7 @@ export interface PgDumpOptions {
 
 export interface DatabaseInput {
   name: string;
-  type: 'postgres' | 'mysql' | 'sqlite';
+  type: string;
   host?: string;
   port?: number;
   databaseName?: string;
@@ -66,6 +66,12 @@ export interface ScheduleInfo {
   nextRunAt: Date | null;
 }
 
+export interface DatabaseTypeInfo {
+  id: string;
+  name: string;
+  displayName: string;
+}
+
 export interface DatabaseOutput {
   id: string;
   name: string;
@@ -76,6 +82,8 @@ export interface DatabaseOutput {
   hasCredentials: boolean;
   filePath: string | null;
   serverId: string | null;
+  databaseTypeId: string | null;
+  databaseType: DatabaseTypeInfo | null;
   backupStorageType: string;
   backupLocalPath: string | null;
   backupSpacesBucket: string | null;
@@ -95,7 +103,8 @@ export interface DatabaseOutput {
 
 export async function createDatabase(
   environmentId: string,
-  input: DatabaseInput
+  input: DatabaseInput,
+  databaseTypeId?: string
 ): Promise<DatabaseOutput> {
   const data: {
     name: string;
@@ -107,6 +116,7 @@ export async function createDatabase(
     credentialsNonce?: string;
     filePath?: string;
     serverId?: string;
+    databaseTypeId?: string;
     backupStorageType: string;
     backupLocalPath?: string;
     backupSpacesBucket?: string;
@@ -125,6 +135,7 @@ export async function createDatabase(
     databaseName: input.databaseName,
     filePath: input.filePath,
     serverId: input.serverId,
+    databaseTypeId,
     backupStorageType: input.backupStorageType || 'local',
     backupLocalPath: input.backupLocalPath,
     backupSpacesBucket: input.backupSpacesBucket,
@@ -149,7 +160,10 @@ export async function createDatabase(
 
   const db = await prisma.database.create({
     data,
-    include: { _count: { select: { backups: true, services: true } } },
+    include: {
+      _count: { select: { backups: true, services: true } },
+      databaseType: { select: { id: true, name: true, displayName: true } },
+    },
   });
 
   return toOutput(db);
@@ -193,7 +207,10 @@ export async function updateDatabase(
   const db = await prisma.database.update({
     where: { id },
     data,
-    include: { _count: { select: { backups: true, services: true } } },
+    include: {
+      _count: { select: { backups: true, services: true } },
+      databaseType: { select: { id: true, name: true, displayName: true } },
+    },
   });
 
   return toOutput(db);
@@ -202,7 +219,10 @@ export async function updateDatabase(
 export async function getDatabase(id: string): Promise<DatabaseOutput | null> {
   const db = await prisma.database.findUnique({
     where: { id },
-    include: { _count: { select: { backups: true, services: true } } },
+    include: {
+      _count: { select: { backups: true, services: true } },
+      databaseType: { select: { id: true, name: true, displayName: true } },
+    },
   });
 
   return db ? toOutput(db) : null;
@@ -214,6 +234,7 @@ export async function listDatabases(environmentId: string): Promise<DatabaseOutp
     orderBy: { name: 'asc' },
     include: {
       _count: { select: { backups: true, services: true } },
+      databaseType: { select: { id: true, name: true, displayName: true } },
       backups: {
         orderBy: { createdAt: 'desc' },
         take: 1,
@@ -259,6 +280,8 @@ function toOutput(db: {
   encryptedCredentials: string | null;
   filePath: string | null;
   serverId: string | null;
+  databaseTypeId: string | null;
+  databaseType?: { id: string; name: string; displayName: string } | null;
   backupStorageType: string;
   backupLocalPath: string | null;
   backupSpacesBucket: string | null;
@@ -291,6 +314,8 @@ function toOutput(db: {
     hasCredentials: !!db.encryptedCredentials,
     filePath: db.filePath,
     serverId: db.serverId,
+    databaseTypeId: db.databaseTypeId,
+    databaseType: db.databaseType || null,
     backupStorageType: db.backupStorageType,
     backupLocalPath: db.backupLocalPath,
     backupSpacesBucket: db.backupSpacesBucket,
@@ -365,7 +390,7 @@ async function executeBackup(backupId: string): Promise<void> {
     data: { status: 'in_progress', progress: 10 },
     include: {
       database: {
-        include: { environment: true, server: true },
+        include: { environment: true, server: true, databaseType: true },
       },
     },
   });
@@ -408,15 +433,51 @@ async function executeBackup(backupId: string): Promise<void> {
     let password = '';
     let execOptions: LocalExecOptions | undefined;
 
-    if (db.type === 'postgres' && db.host) {
+    // Decrypt credentials if available
+    let username = '';
+    if (db.encryptedCredentials && db.credentialsNonce) {
+      const creds = decrypt(db.encryptedCredentials, db.credentialsNonce);
+      [username, password] = creds.split(':');
+    }
+
+    // Check for template-based backup command from DatabaseType
+    const backupTemplate = db.databaseType?.backupCommand;
+
+    if (backupTemplate) {
+      // Template-based backup: substitute placeholders
+      const vars: Record<string, string> = {
+        host: db.host || 'localhost',
+        port: String(db.port || ''),
+        databaseName: db.databaseName || '',
+        username,
+        password,
+        filePath: db.filePath || '',
+        outputFile: targetPath,
+      };
+      dumpCommand = backupTemplate.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] || '');
+
+      // Determine client based on whether we need SSH
+      if (db.server && !isLocalhost(db.server.hostname)) {
+        const sshCreds = await getEnvironmentSshKey(db.environmentId);
+        if (!sshCreds) {
+          throw new Error('SSH key not configured for this environment');
+        }
+        client = new SSHClient({
+          hostname: db.server.hostname,
+          username: sshCreds.username,
+          privateKey: sshCreds.privateKey,
+        });
+      } else {
+        client = new LocalClient();
+      }
+
+      // Set PGPASSWORD env for postgres-compatible templates
+      if (password && (db.type === 'postgres' || dumpCommand.includes('pg_dump') || dumpCommand.includes('psql'))) {
+        execOptions = { env: { PGPASSWORD: password, PGSSLMODE: 'require' }, timeout: db.pgDumpTimeoutMs || DEFAULT_PG_DUMP_TIMEOUT_MS };
+      }
+    } else if (db.type === 'postgres' && db.host) {
       // Postgres: run pg_dump locally (connects remotely to database)
       client = new LocalClient();
-
-      let username = '';
-      if (db.encryptedCredentials && db.credentialsNonce) {
-        const creds = decrypt(db.encryptedCredentials, db.credentialsNonce);
-        [username, password] = creds.split(':');
-      }
 
       // Build pg_dump command with format and options
       const cmdParts = ['pg_dump', '--no-password'];

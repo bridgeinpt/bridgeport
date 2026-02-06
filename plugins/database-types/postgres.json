@@ -1,0 +1,19 @@
+{
+  "$schema": "../schemas/database-type.schema.json",
+  "name": "postgres",
+  "displayName": "PostgreSQL",
+  "defaultPort": 5432,
+  "connectionFields": [
+    { "name": "host", "label": "Host", "type": "text", "required": true, "default": "localhost" },
+    { "name": "port", "label": "Port", "type": "number", "required": true, "default": 5432 },
+    { "name": "databaseName", "label": "Database Name", "type": "text", "required": true },
+    { "name": "username", "label": "Username", "type": "text", "required": true },
+    { "name": "password", "label": "Password", "type": "password", "required": true }
+  ],
+  "backupCommand": "pg_dump --no-password -h {{host}} -p {{port}} -U {{username}} -d {{databaseName}} -f \"{{outputFile}}\"",
+  "restoreCommand": "pg_restore --no-password -h {{host}} -p {{port}} -U {{username}} -d {{databaseName}} \"{{inputFile}}\"",
+  "commands": [
+    { "name": "shell", "displayName": "PostgreSQL Shell", "command": "psql -h {{host}} -p {{port}} -U {{username}} {{databaseName}}", "description": "Interactive PostgreSQL shell", "sortOrder": 0 },
+    { "name": "vacuum", "displayName": "Vacuum Analyze", "command": "psql -h {{host}} -p {{port}} -U {{username}} -d {{databaseName}} -c \"VACUUM ANALYZE\"", "description": "Run VACUUM ANALYZE", "sortOrder": 1 }
+  ]
+}

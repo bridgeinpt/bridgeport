@@ -1,0 +1,18 @@
+{
+  "$schema": "../schemas/database-type.schema.json",
+  "name": "mysql",
+  "displayName": "MySQL",
+  "defaultPort": 3306,
+  "connectionFields": [
+    { "name": "host", "label": "Host", "type": "text", "required": true, "default": "localhost" },
+    { "name": "port", "label": "Port", "type": "number", "required": true, "default": 3306 },
+    { "name": "databaseName", "label": "Database Name", "type": "text", "required": true },
+    { "name": "username", "label": "Username", "type": "text", "required": true },
+    { "name": "password", "label": "Password", "type": "password", "required": true }
+  ],
+  "backupCommand": "mysqldump -h {{host}} -P {{port}} -u {{username}} {{databaseName}} > \"{{outputFile}}\"",
+  "restoreCommand": "mysql -h {{host}} -P {{port}} -u {{username}} {{databaseName}} < \"{{inputFile}}\"",
+  "commands": [
+    { "name": "shell", "displayName": "MySQL Shell", "command": "mysql -h {{host}} -P {{port}} -u {{username}} {{databaseName}}", "description": "Interactive MySQL shell", "sortOrder": 0 }
+  ]
+}

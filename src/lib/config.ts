@@ -27,6 +27,8 @@ const envSchema = z.object({
   METRICS_RETENTION_DAYS: z.coerce.number().default(7), // Keep metrics for 7 days
   // CORS origin(s) - comma-separated list or single origin
   CORS_ORIGIN: z.string().optional(), // e.g., "https://deploy.bridgein.com"
+  // Plugin directory for service types and database types
+  PLUGINS_DIR: z.string().default('./plugins'),
 });
 
 export type Config = z.infer<typeof envSchema>;

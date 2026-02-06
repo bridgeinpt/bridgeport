@@ -18,7 +18,6 @@ import {
 import { logAudit } from '../services/audit.js';
 import { prisma } from '../lib/db.js';
 
-const databaseTypeSchema = z.enum(['postgres', 'mysql', 'sqlite']);
 const storageTypeSchema = z.enum(['local', 'spaces']);
 const backupFormatSchema = z.enum(['plain', 'custom', 'tar']);
 const backupCompressionSchema = z.enum(['none', 'gzip']);
@@ -33,7 +32,8 @@ const pgDumpOptionsSchema = z.object({
 
 const createDatabaseSchema = z.object({
   name: z.string().min(1),
-  type: databaseTypeSchema,
+  type: z.string().min(1),
+  databaseTypeId: z.string().optional(),
   host: z.string().optional(),
   port: z.number().optional(),
   databaseName: z.string().optional(),
@@ -85,7 +85,19 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       try {
-        const database = await createDatabase(envId, body.data);
+        // Resolve databaseTypeId if provided
+        let databaseTypeId = body.data.databaseTypeId;
+        if (!databaseTypeId) {
+          // Look up DatabaseType by name for backward compat
+          const dbType = await prisma.databaseType.findUnique({
+            where: { name: body.data.type },
+          });
+          if (dbType) {
+            databaseTypeId = dbType.id;
+          }
+        }
+
+        const database = await createDatabase(envId, body.data, databaseTypeId);
 
         await logAudit({
           action: 'create',

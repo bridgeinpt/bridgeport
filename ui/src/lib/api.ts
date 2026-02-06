@@ -1112,7 +1112,7 @@ export const regenerateAgentToken = (id: string) =>
   api.post<{ agentToken: string }>(`/servers/${id}/regenerate-agent-token`);
 
 // Databases
-export type DatabaseType = 'postgres' | 'mysql' | 'sqlite';
+export type DatabaseType = string;
 export type BackupStorageType = 'local' | 'spaces';
 export type BackupFormat = 'plain' | 'custom' | 'tar';
 export type BackupCompression = 'none' | 'gzip';
@@ -1151,6 +1151,8 @@ export interface Database {
   hasCredentials: boolean;
   filePath: string | null;
   serverId: string | null;
+  databaseTypeId: string | null;
+  databaseType: { id: string; name: string; displayName: string } | null;
   backupStorageType: BackupStorageType;
   backupLocalPath: string | null;
   backupSpacesBucket: string | null;
@@ -1171,6 +1173,7 @@ export interface Database {
 export interface DatabaseInput {
   name: string;
   type: DatabaseType;
+  databaseTypeId?: string;
   host?: string;
   port?: number;
   databaseName?: string;
@@ -1673,6 +1676,8 @@ export interface ServiceType {
   id: string;
   name: string;
   displayName: string;
+  isCustomized: boolean;
+  source: string;
   createdAt: string;
   updatedAt: string;
   commands: ServiceTypeCommand[];
@@ -1719,6 +1724,113 @@ export const deleteServiceTypeCommand = (typeId: string, commandId: string) =>
 
 export const reorderServiceTypeCommands = (typeId: string, commandIds: string[]) =>
   api.put<{ commands: ServiceTypeCommand[] }>(`/settings/service-types/${typeId}/commands/reorder`, commandIds);
+
+export const resetServiceTypeDefaults = (id: string) =>
+  api.post<{ serviceType: ServiceType }>(`/settings/service-types/${id}/reset`);
+
+export const exportServiceTypeJson = (id: string) =>
+  api.post<{ written: boolean; error?: string }>(`/settings/service-types/${id}/export`);
+
+// Database Types
+export interface DatabaseTypeField {
+  name: string;
+  label: string;
+  type: 'text' | 'number' | 'password';
+  required?: boolean;
+  default?: unknown;
+}
+
+export interface DatabaseTypeCommand {
+  id: string;
+  name: string;
+  displayName: string;
+  command: string;
+  description: string | null;
+  sortOrder: number;
+  databaseTypeId: string;
+}
+
+export interface DatabaseTypeRecord {
+  id: string;
+  name: string;
+  displayName: string;
+  isCustomized: boolean;
+  source: string;
+  connectionFields: string;
+  backupCommand: string | null;
+  restoreCommand: string | null;
+  defaultPort: number | null;
+  createdAt: string;
+  updatedAt: string;
+  commands: DatabaseTypeCommand[];
+  _count?: { databases: number };
+}
+
+export interface DatabaseTypeInput {
+  name: string;
+  displayName: string;
+  connectionFields: DatabaseTypeField[];
+  backupCommand?: string;
+  restoreCommand?: string;
+  defaultPort?: number;
+}
+
+export interface DatabaseTypeCommandInput {
+  name: string;
+  displayName: string;
+  command: string;
+  description?: string;
+  sortOrder?: number;
+}
+
+export interface PluginSyncStatus {
+  serviceTypes: {
+    created: string[];
+    updated: string[];
+    skippedCustomized: string[];
+    errors: Array<{ file: string; error: string }>;
+  };
+  databaseTypes: {
+    created: string[];
+    updated: string[];
+    skippedCustomized: string[];
+    errors: Array<{ file: string; error: string }>;
+  };
+  timestamp: string;
+}
+
+export const listDatabaseTypes = () =>
+  api.getCached<{ databaseTypes: DatabaseTypeRecord[] }>('/settings/database-types', 300000);
+
+export const getDatabaseType = (id: string) =>
+  api.get<{ databaseType: DatabaseTypeRecord }>(`/settings/database-types/${id}`);
+
+export const createDatabaseType = (data: DatabaseTypeInput) =>
+  api.post<{ databaseType: DatabaseTypeRecord }>('/settings/database-types', data);
+
+export const updateDatabaseType = (id: string, data: Partial<DatabaseTypeInput>) =>
+  api.patch<{ databaseType: DatabaseTypeRecord }>(`/settings/database-types/${id}`, data);
+
+export const deleteDatabaseType = (id: string) =>
+  api.delete<{ success: boolean }>(`/settings/database-types/${id}`);
+
+export const addDatabaseTypeCommand = (typeId: string, data: DatabaseTypeCommandInput) =>
+  api.post<{ command: DatabaseTypeCommand }>(`/settings/database-types/${typeId}/commands`, data);
+
+export const updateDatabaseTypeCommand = (typeId: string, commandId: string, data: Partial<DatabaseTypeCommandInput>) =>
+  api.patch<{ command: DatabaseTypeCommand }>(`/settings/database-types/${typeId}/commands/${commandId}`, data);
+
+export const deleteDatabaseTypeCommand = (typeId: string, commandId: string) =>
+  api.delete<{ success: boolean }>(`/settings/database-types/${typeId}/commands/${commandId}`);
+
+export const resetDatabaseTypeDefaults = (id: string) =>
+  api.post<{ databaseType: DatabaseTypeRecord }>(`/settings/database-types/${id}/reset`);
+
+export const exportDatabaseTypeJson = (id: string) =>
+  api.post<{ written: boolean; error?: string }>(`/settings/database-types/${id}/export`);
+
+export const getPluginSyncStatus = () =>
+  api.get<{ status: PluginSyncStatus | null }>('/settings/plugin-sync-status');
 
 // Global Spaces Configuration
 export interface GlobalSpacesConfig {

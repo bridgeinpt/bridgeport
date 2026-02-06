@@ -1,0 +1,11 @@
+{
+  "$schema": "../schemas/service-type.schema.json",
+  "name": "nodejs",
+  "displayName": "Node.js",
+  "commands": [
+    { "name": "repl", "displayName": "Node REPL", "command": "node", "description": "Interactive Node.js REPL", "sortOrder": 0 },
+    { "name": "npm-install", "displayName": "Install Dependencies", "command": "npm install", "description": "Install npm packages", "sortOrder": 1 },
+    { "name": "npm-build", "displayName": "Build", "command": "npm run build", "description": "Build the project", "sortOrder": 2 },
+    { "name": "npm-test", "displayName": "Run Tests", "command": "npm test", "description": "Run test suite", "sortOrder": 3 }
+  ]
+}

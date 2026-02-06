@@ -1,0 +1,14 @@
+{
+  "$schema": "../schemas/database-type.schema.json",
+  "name": "redis",
+  "displayName": "Redis",
+  "defaultPort": 6379,
+  "connectionFields": [
+    { "name": "host", "label": "Host", "type": "text", "required": true, "default": "localhost" },
+    { "name": "port", "label": "Port", "type": "number", "required": true, "default": 6379 },
+    { "name": "password", "label": "Password", "type": "password" }
+  ],
+  "commands": [
+    { "name": "cli", "displayName": "Redis CLI", "command": "redis-cli -h {{host}} -p {{port}}", "description": "Interactive Redis CLI", "sortOrder": 0 }
+  ]
+}

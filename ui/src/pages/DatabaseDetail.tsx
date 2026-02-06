@@ -24,11 +24,6 @@ import {
 import { formatDistanceToNow, format } from 'date-fns';
 import Pagination from '../components/Pagination';
 
-const DATABASE_TYPES = [
-  { value: 'postgres', label: 'PostgreSQL' },
-  { value: 'mysql', label: 'MySQL' },
-  { value: 'sqlite', label: 'SQLite' },
-] as const;
 
 const BACKUP_FORMATS = [
   { value: 'plain', label: 'Plain SQL (.sql)', description: 'Standard SQL dump, human-readable' },
@@ -419,7 +414,7 @@ export default function DatabaseDetail() {
             <div className="flex items-center gap-3">
               <span className="text-2xl font-bold text-white">{database.name}</span>
               <span className="badge bg-slate-700 text-slate-300">
-                {DATABASE_TYPES.find(t => t.value === database.type)?.label}
+                {database.databaseType?.displayName || database.type}
               </span>
             </div>
             <p className="text-slate-400 font-mono text-sm mt-1">

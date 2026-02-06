@@ -1,0 +1,14 @@
+{
+  "$schema": "../schemas/database-type.schema.json",
+  "name": "sqlite",
+  "displayName": "SQLite",
+  "connectionFields": [
+    { "name": "filePath", "label": "File Path", "type": "text", "required": true },
+    { "name": "serverId", "label": "Server", "type": "text", "required": true }
+  ],
+  "backupCommand": "sqlite3 \"{{filePath}}\" \".dump\" > \"{{outputFile}}\"",
+  "restoreCommand": "sqlite3 \"{{filePath}}\" < \"{{inputFile}}\"",
+  "commands": [
+    { "name": "shell", "displayName": "SQLite Shell", "command": "sqlite3 \"{{filePath}}\"", "description": "Interactive SQLite shell", "sortOrder": 0 }
+  ]
+}

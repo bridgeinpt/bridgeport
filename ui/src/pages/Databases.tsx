@@ -10,8 +10,10 @@ import {
   createDatabaseBackup,
   listServers,
   listSpacesBuckets,
+  listDatabaseTypes,
   type Database,
   type DatabaseInput,
+  type DatabaseTypeRecord,
   type Server,
 } from '../lib/api.js';
 import { formatDistanceToNow } from 'date-fns';
@@ -20,12 +22,6 @@ import { usePagination } from '../hooks/usePagination.js';
 import { DatabaseIcon, EyeIcon, PencilIcon, TrashIcon } from '../components/Icons.js';
 import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
 import { EmptyState } from '../components/EmptyState.js';
-
-const DATABASE_TYPES = [
-  { value: 'postgres', label: 'PostgreSQL' },
-  { value: 'mysql', label: 'MySQL' },
-  { value: 'sqlite', label: 'SQLite' },
-] as const;
 
 const STORAGE_TYPES = [
   { value: 'local', label: 'Local Storage' },
@@ -37,6 +33,7 @@ export default function Databases() {
   const toast = useToast();
   const [databases, setDatabases] = useState<Database[]>([]);
   const [servers, setServers] = useState<Server[]>([]);
+  const [databaseTypes, setDatabaseTypes] = useState<DatabaseTypeRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -70,12 +67,14 @@ export default function Databases() {
     if (!selectedEnvironment?.id) return;
     setLoading(true);
     try {
-      const [dbRes, serverRes] = await Promise.all([
+      const [dbRes, serverRes, dbTypeRes] = await Promise.all([
         listDatabases(selectedEnvironment.id),
         listServers(selectedEnvironment.id),
+        listDatabaseTypes(),
       ]);
       setDatabases(dbRes.databases);
       setServers(serverRes.servers);
+      setDatabaseTypes(dbTypeRes.databaseTypes);
     } finally {
       setLoading(false);
     }
@@ -118,6 +117,7 @@ export default function Databases() {
       const data: DatabaseInput = {
         name: formData.name,
         type: formData.type,
+        databaseTypeId: formData.databaseTypeId,
         backupStorageType: formData.backupStorageType,
       };
       if (formData.host) data.host = formData.host;
@@ -284,16 +284,32 @@ export default function Databases() {
                 <label className="block text-sm text-slate-400 mb-1">Type</label>
                 <select
                   value={formData.type}
-                  onChange={(e) =>
-                    setFormData({ ...formData, type: e.target.value as 'postgres' | 'mysql' | 'sqlite', serverId: '' })
-                  }
+                  onChange={(e) => {
+                    const selectedType = e.target.value;
+                    const dbType = databaseTypes.find((t) => t.name === selectedType);
+                    setFormData({
+                      ...formData,
+                      type: selectedType,
+                      databaseTypeId: dbType?.id,
+                      port: dbType?.defaultPort || undefined,
+                      serverId: '',
+                    });
+                  }}
                   className="input"
                 >
-                  {DATABASE_TYPES.map((t) => (
-                    <option key={t.value} value={t.value}>
-                      {t.label}
-                    </option>
-                  ))}
+                  {databaseTypes.length > 0 ? (
+                    databaseTypes.map((t) => (
+                      <option key={t.name} value={t.name}>
+                        {t.displayName}
+                      </option>
+                    ))
+                  ) : (
+                    <>
+                      <option value="postgres">PostgreSQL</option>
+                      <option value="mysql">MySQL</option>
+                      <option value="sqlite">SQLite</option>
+                    </>
+                  )}
                 </select>
               </div>
 
@@ -516,7 +532,7 @@ export default function Databases() {
                 <label className="block text-sm text-slate-400 mb-1">Type</label>
                 <input
                   type="text"
-                  value={DATABASE_TYPES.find((t) => t.value === editingDb.type)?.label}
+                  value={editingDb.databaseType?.displayName || databaseTypes.find((t) => t.name === editingDb.type)?.displayName || editingDb.type}
                   className="input bg-slate-800"
                   disabled
                 />
@@ -752,7 +768,7 @@ export default function Databases() {
                     <div className="flex items-center gap-2">
                       <h3 className="text-lg font-semibold text-white">{db.name}</h3>
                       <span className="badge bg-slate-700 text-slate-300 text-xs">
-                        {DATABASE_TYPES.find((t) => t.value === db.type)?.label}
+                        {db.databaseType?.displayName || databaseTypes.find((t) => t.name === db.type)?.displayName || db.type}
                       </span>
                     </div>
                     <p className="text-slate-400 text-sm mt-1 font-mono">

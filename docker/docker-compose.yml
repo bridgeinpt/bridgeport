@@ -37,6 +37,9 @@ services:
       # Security note: This gives BridgePort full access to the Docker daemon.
       # - /var/run/docker.sock:/var/run/docker.sock
       #
+      # Custom plugins (optional - mount to add/override plugin JSON files)
+      # - ./plugins:/app/plugins
+      #
       # SSH keys are configured via the UI per environment (Settings > SSH)
       # Each environment has its own SSH key for security isolation
       # Keys are encrypted and stored in the BridgePort database

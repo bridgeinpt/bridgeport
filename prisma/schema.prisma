@@ -410,6 +410,10 @@ model Database {
   serverId String?
   server   Server? @relation(fields: [serverId], references: [id], onDelete: SetNull)
 
+  // Plugin-based database type
+  databaseTypeId String?
+  databaseType   DatabaseType? @relation(fields: [databaseTypeId], references: [id], onDelete: SetNull)
+
   backups  DatabaseBackup[]
   schedule BackupSchedule?
   services ServiceDatabase[]
@@ -745,14 +749,49 @@ model SystemSettings {
 
 // Service Types for predefined commands (e.g., Django, Node.js)
 model ServiceType {
-  id          String   @id @default(cuid())
-  name        String   @unique // "django", "nodejs", "generic"
-  displayName String // "Django", "Node.js", "Generic"
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String   @id @default(cuid())
+  name         String   @unique // "django", "nodejs", "generic"
+  displayName  String // "Django", "Node.js", "Generic"
+  isCustomized Boolean  @default(false) // true if admin edited via UI
+  source       String   @default("plugin") // "plugin" | "user"
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   commands ServiceTypeCommand[]
   services Service[]
+}
+
+// Database Types for plugin-based database definitions
+model DatabaseType {
+  id               String   @id @default(cuid())
+  name             String   @unique // "postgres", "mysql", "sqlite", etc.
+  displayName      String // "PostgreSQL", "MySQL", "SQLite"
+  isCustomized     Boolean  @default(false)
+  source           String   @default("plugin") // "plugin" | "user"
+  connectionFields String // JSON string of field definitions
+  backupCommand    String? // Template with {{placeholders}}
+  restoreCommand   String?
+  defaultPort      Int?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  commands  DatabaseTypeCommand[]
+  databases Database[]
+}
+
+// Predefined commands for a database type
+model DatabaseTypeCommand {
+  id          String  @id @default(cuid())
+  name        String // "shell", "vacuum"
+  displayName String // "PostgreSQL Shell"
+  command     String // "psql -h {{host}} -p {{port}} -U {{username}} {{databaseName}}"
+  description String?
+  sortOrder   Int     @default(0)
+
+  databaseTypeId String
+  databaseType   DatabaseType @relation(fields: [databaseTypeId], references: [id], onDelete: Cascade)
+
+  @@unique([databaseTypeId, name])
 }
 
 // Predefined commands for a service type

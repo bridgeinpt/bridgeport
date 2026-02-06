@@ -31,7 +31,7 @@ import { smtpRoutes } from './routes/admin/smtp.js';
 import { webhookAdminRoutes } from './routes/admin/webhooks.js';
 import { slackAdminRoutes } from './routes/admin/slack.js';
 import { initializeNotificationTypes } from './services/notifications.js';
-import { initializeServiceTypes } from './services/service-types.js';
+import { syncPlugins } from './services/plugin-loader.js';
 import { containerImageRoutes } from './routes/container-images.js';
 import { serviceDependencyRoutes } from './routes/service-dependencies.js';
 import { deploymentPlanRoutes } from './routes/deployment-plans.js';
@@ -101,8 +101,8 @@ async function buildServer() {
   // Initialize notification types
   await initializeNotificationTypes();
 
-  // Initialize default service types
-  await initializeServiceTypes();
+  // Sync plugin-based types (service types + database types)
+  await syncPlugins();
 
   // Ensure upload directory exists
   await mkdir(config.UPLOAD_DIR, { recursive: true });

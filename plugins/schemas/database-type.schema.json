@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BridgePort Database Type Plugin",
+  "type": "object",
+  "required": ["name", "displayName", "connectionFields"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$",
+      "description": "Unique identifier (lowercase, hyphens allowed)"
+    },
+    "displayName": {
+      "type": "string",
+      "description": "Human-readable name"
+    },
+    "defaultPort": {
+      "type": "integer",
+      "description": "Default connection port"
+    },
+    "connectionFields": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "label", "type"],
+        "properties": {
+          "name": { "type": "string" },
+          "label": { "type": "string" },
+          "type": { "type": "string", "enum": ["text", "number", "password"] },
+          "required": { "type": "boolean" },
+          "default": {}
+        },
+        "additionalProperties": false
+      }
+    },
+    "backupCommand": {
+      "type": "string",
+      "description": "Backup command template with {{placeholders}}"
+    },
+    "restoreCommand": {
+      "type": "string",
+      "description": "Restore command template with {{placeholders}}"
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "displayName", "command"],
+        "properties": {
+          "name": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+          "displayName": { "type": "string" },
+          "command": { "type": "string" },
+          "description": { "type": "string" },
+          "sortOrder": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

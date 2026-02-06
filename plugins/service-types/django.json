@@ -1,0 +1,13 @@
+{
+  "$schema": "../schemas/service-type.schema.json",
+  "name": "django",
+  "displayName": "Django",
+  "commands": [
+    { "name": "shell", "displayName": "Django Shell", "command": "python manage.py shell", "description": "Interactive Django shell", "sortOrder": 0 },
+    { "name": "dbshell", "displayName": "Database Shell", "command": "python manage.py dbshell", "description": "Database CLI shell", "sortOrder": 1 },
+    { "name": "migrate", "displayName": "Run Migrations", "command": "python manage.py migrate", "description": "Apply database migrations", "sortOrder": 2 },
+    { "name": "makemigrations", "displayName": "Make Migrations", "command": "python manage.py makemigrations", "description": "Create new migrations", "sortOrder": 3 },
+    { "name": "collectstatic", "displayName": "Collect Static", "command": "python manage.py collectstatic --noinput", "description": "Collect static files", "sortOrder": 4 },
+    { "name": "createsuperuser", "displayName": "Create Superuser", "command": "python manage.py createsuperuser", "description": "Create admin user", "sortOrder": 5 }
+  ]
+}

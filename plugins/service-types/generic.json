@@ -1,0 +1,9 @@
+{
+  "$schema": "../schemas/service-type.schema.json",
+  "name": "generic",
+  "displayName": "Generic",
+  "commands": [
+    { "name": "sh", "displayName": "Shell", "command": "/bin/sh", "description": "Basic shell", "sortOrder": 0 },
+    { "name": "bash", "displayName": "Bash", "command": "/bin/bash", "description": "Bash shell (if available)", "sortOrder": 1 }
+  ]
+}
