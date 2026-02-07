@@ -5,7 +5,6 @@ import { useToast } from '../components/Toast.js';
 import {
   listDatabases,
   createDatabase,
-  updateDatabase,
   deleteDatabase,
   createDatabaseBackup,
   listServers,
@@ -19,7 +18,7 @@ import {
 import { formatDistanceToNow } from 'date-fns';
 import Pagination from '../components/Pagination.js';
 import { usePagination } from '../hooks/usePagination.js';
-import { DatabaseIcon, EyeIcon, PencilIcon, TrashIcon } from '../components/Icons.js';
+import { DatabaseIcon, EyeIcon, TrashIcon } from '../components/Icons.js';
 import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
 import { EmptyState } from '../components/EmptyState.js';
 
@@ -37,8 +36,6 @@ export default function Databases() {
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [editingDb, setEditingDb] = useState<Database | null>(null);
-  const [saving, setSaving] = useState(false);
   const [backingUpId, setBackingUpId] = useState<string | null>(null);
   const [spacesBuckets, setSpacesBuckets] = useState<string[]>([]);
   const [loadingBuckets, setLoadingBuckets] = useState(false);
@@ -148,67 +145,6 @@ export default function Databases() {
       toast.success('Database deleted');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Delete failed');
-    }
-  };
-
-  const openEditModal = (db: Database) => {
-    setEditingDb(db);
-    setFormData({
-      name: db.name,
-      type: db.type,
-      host: db.host || '',
-      port: db.port || (db.type === 'mysql' ? 3306 : 5432),
-      databaseName: db.databaseName || '',
-      username: '',
-      password: '',
-      serverId: db.serverId || '',
-      filePath: db.filePath || '',
-      backupStorageType: db.backupStorageType || 'local',
-      backupLocalPath: db.backupLocalPath || '/var/backups',
-      backupSpacesBucket: db.backupSpacesBucket || '',
-      backupSpacesPrefix: db.backupSpacesPrefix || '',
-    });
-    // Load buckets if using Spaces storage
-    if (db.backupStorageType === 'spaces') {
-      loadBuckets();
-    }
-  };
-
-  const handleEdit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingDb) return;
-    setSaving(true);
-    try {
-      const data: Partial<DatabaseInput> = {
-        name: formData.name,
-        backupStorageType: formData.backupStorageType,
-      };
-      if (formData.type !== 'sqlite') {
-        if (formData.host) data.host = formData.host;
-        if (formData.port) data.port = formData.port;
-        if (formData.databaseName) data.databaseName = formData.databaseName;
-        if (formData.username) data.username = formData.username;
-        if (formData.password) data.password = formData.password;
-      } else {
-        if (formData.serverId) data.serverId = formData.serverId;
-        if (formData.filePath) data.filePath = formData.filePath;
-      }
-      if (formData.backupStorageType === 'local') {
-        if (formData.backupLocalPath) data.backupLocalPath = formData.backupLocalPath;
-      } else {
-        if (formData.backupSpacesBucket) data.backupSpacesBucket = formData.backupSpacesBucket;
-        if (formData.backupSpacesPrefix) data.backupSpacesPrefix = formData.backupSpacesPrefix;
-      }
-
-      const { database } = await updateDatabase(editingDb.id, data);
-      setDatabases((prev) => prev.map((d) => (d.id === database.id ? database : d)));
-      setEditingDb(null);
-      resetForm();
-      toast.success('Database updated');
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Update failed');
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -510,243 +446,6 @@ export default function Databases() {
         </div>
       )}
 
-      {/* Edit Modal */}
-      {editingDb && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-lg font-semibold text-white mb-4">Edit Database</h3>
-            <form onSubmit={handleEdit} className="space-y-4">
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Name</label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="my-database"
-                  className="input"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Type</label>
-                <input
-                  type="text"
-                  value={editingDb.databaseType?.displayName || databaseTypes.find((t) => t.name === editingDb.type)?.displayName || editingDb.type}
-                  className="input bg-slate-800"
-                  disabled
-                />
-                <p className="text-xs text-slate-500 mt-1">Database type cannot be changed</p>
-              </div>
-
-              {editingDb.type !== 'sqlite' && (
-                <>
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="col-span-2">
-                      <label className="block text-sm text-slate-400 mb-1">Host</label>
-                      <input
-                        type="text"
-                        value={formData.host}
-                        onChange={(e) => setFormData({ ...formData, host: e.target.value })}
-                        placeholder="localhost"
-                        className="input"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm text-slate-400 mb-1">Port</label>
-                      <input
-                        type="number"
-                        value={formData.port}
-                        onChange={(e) => setFormData({ ...formData, port: parseInt(e.target.value) })}
-                        className="input"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-1">Database Name</label>
-                    <input
-                      type="text"
-                      value={formData.databaseName}
-                      onChange={(e) => setFormData({ ...formData, databaseName: e.target.value })}
-                      placeholder="mydb"
-                      className="input"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm text-slate-400 mb-1">Username</label>
-                      <input
-                        type="text"
-                        value={formData.username}
-                        onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                        placeholder={editingDb.hasCredentials ? '(unchanged)' : ''}
-                        className="input"
-                      />
-                      {editingDb.hasCredentials && (
-                        <p className="text-xs text-slate-500 mt-1">Leave empty to keep current</p>
-                      )}
-                    </div>
-                    <div>
-                      <label className="block text-sm text-slate-400 mb-1">Password</label>
-                      <input
-                        type="password"
-                        value={formData.password}
-                        onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                        placeholder={editingDb.hasCredentials ? '(unchanged)' : ''}
-                        className="input"
-                      />
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {editingDb.type === 'sqlite' && (
-                <>
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-1">Server</label>
-                    <select
-                      value={formData.serverId}
-                      onChange={(e) => setFormData({ ...formData, serverId: e.target.value })}
-                      className="input"
-                      required
-                    >
-                      <option value="">Select server...</option>
-                      {servers.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.name}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-xs text-slate-500 mt-1">Server where the SQLite file is located</p>
-                  </div>
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-1">File Path</label>
-                    <input
-                      type="text"
-                      value={formData.filePath}
-                      onChange={(e) => setFormData({ ...formData, filePath: e.target.value })}
-                      placeholder="/path/to/database.db"
-                      className="input font-mono text-sm"
-                    />
-                  </div>
-                </>
-              )}
-
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Backup Storage</label>
-                <select
-                  value={formData.backupStorageType}
-                  onChange={(e) => {
-                    const newType = e.target.value as 'local' | 'spaces';
-                    setFormData({ ...formData, backupStorageType: newType });
-                    if (newType === 'spaces' && spacesBuckets.length === 0) {
-                      loadBuckets();
-                    }
-                  }}
-                  className="input"
-                >
-                  {STORAGE_TYPES.map((t) => (
-                    <option key={t.value} value={t.value}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {formData.backupStorageType === 'local' && (
-                <div>
-                  <label className="block text-sm text-slate-400 mb-1">Local Path</label>
-                  <input
-                    type="text"
-                    value={formData.backupLocalPath}
-                    onChange={(e) => setFormData({ ...formData, backupLocalPath: e.target.value })}
-                    placeholder="/var/backups"
-                    className="input font-mono text-sm"
-                  />
-                </div>
-              )}
-
-              {formData.backupStorageType === 'spaces' && (
-                <>
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-1">Spaces Bucket</label>
-                    <div className="flex gap-2">
-                      <select
-                        value={formData.backupSpacesBucket || ''}
-                        onChange={(e) => setFormData({ ...formData, backupSpacesBucket: e.target.value })}
-                        className="input flex-1"
-                      >
-                        <option value="">Select a bucket...</option>
-                        {spacesBuckets.map((bucket) => (
-                          <option key={bucket} value={bucket}>
-                            {bucket}
-                          </option>
-                        ))}
-                        {/* Keep current value as option if not in list */}
-                        {formData.backupSpacesBucket && !spacesBuckets.includes(formData.backupSpacesBucket) && (
-                          <option value={formData.backupSpacesBucket}>
-                            {formData.backupSpacesBucket}
-                          </option>
-                        )}
-                      </select>
-                      <button
-                        type="button"
-                        onClick={loadBuckets}
-                        disabled={loadingBuckets}
-                        className="btn btn-ghost px-3"
-                        title="Refresh bucket list"
-                      >
-                        {loadingBuckets ? (
-                          <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                          </svg>
-                        ) : (
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                          </svg>
-                        )}
-                      </button>
-                    </div>
-                    {spacesBuckets.length === 0 && !loadingBuckets && (
-                      <p className="text-xs text-slate-500 mt-1">
-                        No buckets found. Configure Spaces in Settings first.
-                      </p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-1">Spaces Prefix</label>
-                    <input
-                      type="text"
-                      value={formData.backupSpacesPrefix || ''}
-                      onChange={(e) => setFormData({ ...formData, backupSpacesPrefix: e.target.value })}
-                      placeholder="{environment}/{name}/"
-                      className="input font-mono text-sm"
-                    />
-                  </div>
-                </>
-              )}
-
-              <div className="flex gap-2 justify-end pt-4">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditingDb(null);
-                    resetForm();
-                  }}
-                  className="btn btn-ghost"
-                >
-                  Cancel
-                </button>
-                <button type="submit" disabled={saving} className="btn btn-primary">
-                  {saving ? 'Saving...' : 'Save'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       {/* Databases List */}
       {databases.length === 0 ? (
         <EmptyState
@@ -847,13 +546,6 @@ export default function Databases() {
                   >
                     <EyeIcon className="w-4 h-4" />
                   </Link>
-                  <button
-                    onClick={() => openEditModal(db)}
-                    className="p-1.5 text-slate-400 hover:text-white rounded"
-                    title="Edit"
-                  >
-                    <PencilIcon className="w-4 h-4" />
-                  </button>
                   <button
                     onClick={() => handleDelete(db)}
                     className="p-1.5 text-slate-400 hover:text-red-400 rounded"

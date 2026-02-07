@@ -229,7 +229,6 @@ async function executeRedisQueries(
     connectTimeout: 10000,
     commandTimeout: 10000,
     lazyConnect: true,
-    enableReadyCheck: false,
   });
 
   try {
@@ -384,7 +383,6 @@ export async function pingDatabase(
       password: credentials?.password || undefined,
       connectTimeout: 10000,
       lazyConnect: true,
-      enableReadyCheck: false,
     });
 
     try {
