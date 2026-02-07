@@ -68,6 +68,7 @@ const navigationGroups: NavGroup[] = [
       { name: 'Dashboard', href: '/', icon: HomeIcon },
       { name: 'Services', href: '/services', icon: CubeIcon },
       { name: 'Servers', href: '/servers', icon: ServerIcon },
+      { name: 'Environment', href: '/settings', icon: SettingsIcon, adminOnly: true },
     ],
   },
   {
@@ -93,14 +94,8 @@ const navigationGroups: NavGroup[] = [
     name: 'Data',
     items: [
       { name: 'Databases', href: '/databases', icon: DatabaseIcon },
-    ],
-  },
-  {
-    name: 'Configuration',
-    items: [
       { name: 'Secrets', href: '/secrets', icon: KeyIcon },
       { name: 'Config Files', href: '/config-files', icon: FileIcon },
-      { name: 'Environment', href: '/settings', icon: SettingsIcon, adminOnly: true },
     ],
   },
 ];
