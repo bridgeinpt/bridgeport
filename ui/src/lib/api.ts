@@ -2394,7 +2394,7 @@ export const getDatabaseMetrics = (envId: string, dbId: string, hours: number = 
   api.get<{ metrics: DatabaseMetricsEntry[] }>(`/environments/${envId}/databases/${dbId}/metrics?hours=${hours}`);
 
 export const testDatabaseConnection = (envId: string, dbId: string) =>
-  api.post<{ success: boolean; status: string; metrics?: Record<string, unknown>; error?: string }>(
+  api.post<{ success: boolean; latencyMs: number | null; serverVersion?: string; error?: string }>(
     `/environments/${envId}/databases/${dbId}/test-connection`
   );
 

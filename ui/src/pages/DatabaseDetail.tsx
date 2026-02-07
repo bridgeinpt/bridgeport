@@ -124,7 +124,7 @@ export default function DatabaseDetail() {
   const [monitoringEnabled, setMonitoringEnabled] = useState(true);
   const [collectionInterval, setCollectionInterval] = useState(300);
   const [testingConnection, setTestingConnection] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; error?: string } | null>(null);
+  const [testResult, setTestResult] = useState<{ success: boolean; latencyMs: number | null; serverVersion?: string; error?: string } | null>(null);
   const [savingMonitoring, setSavingMonitoring] = useState(false);
 
   const loadDatabase = useCallback(async () => {
@@ -504,50 +504,165 @@ export default function DatabaseDetail() {
               </div>
             </div>
           ) : (
-            <dl className="space-y-3 text-sm">
-              {database.type !== 'sqlite' ? (
-                <>
-                  <div className="flex justify-between">
-                    <dt className="text-slate-400">Host</dt>
-                    <dd className="text-white font-mono">{database.host || '--'}</dd>
-                  </div>
-                  <div className="flex justify-between">
-                    <dt className="text-slate-400">Port</dt>
-                    <dd className="text-white">{database.port || '--'}</dd>
-                  </div>
-                  <div className="flex justify-between">
-                    <dt className="text-slate-400">Database</dt>
-                    <dd className="text-white font-mono">{database.databaseName || '--'}</dd>
-                  </div>
-                  <div className="flex justify-between">
-                    <dt className="text-slate-400">Credentials</dt>
-                    <dd className="text-white">{database.hasCredentials ? 'Configured' : 'Not set'}</dd>
-                  </div>
-                  <div className="flex justify-between">
-                    <dt className="text-slate-400">Server</dt>
-                    <dd className="text-slate-500">None (direct connection)</dd>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="flex justify-between">
-                    <dt className="text-slate-400">File Path</dt>
-                    <dd className="text-white font-mono text-xs">{database.filePath || '--'}</dd>
-                  </div>
-                  <div className="flex justify-between">
-                    <dt className="text-slate-400">Server</dt>
-                    <dd className="text-white">
-                      {database.serverId
-                        ? servers.find(s => s.id === database.serverId)?.name || 'Unknown'
-                        : <span className="text-yellow-400">Not configured</span>}
-                    </dd>
-                  </div>
-                </>
-              )}
-            </dl>
+            <div className="space-y-4">
+              <dl className="space-y-3 text-sm">
+                {database.type !== 'sqlite' ? (
+                  <>
+                    <div className="flex justify-between">
+                      <dt className="text-slate-400">Host</dt>
+                      <dd className="text-white font-mono">{database.host || '--'}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-slate-400">Port</dt>
+                      <dd className="text-white">{database.port || '--'}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-slate-400">Database</dt>
+                      <dd className="text-white font-mono">{database.databaseName || '--'}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-slate-400">Credentials</dt>
+                      <dd className="text-white">{database.hasCredentials ? 'Configured' : 'Not set'}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-slate-400">Server</dt>
+                      <dd className="text-slate-500">None (direct connection)</dd>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex justify-between">
+                      <dt className="text-slate-400">File Path</dt>
+                      <dd className="text-white font-mono text-xs">{database.filePath || '--'}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-slate-400">Server</dt>
+                      <dd className="text-white">
+                        {database.serverId
+                          ? servers.find(s => s.id === database.serverId)?.name || 'Unknown'
+                          : <span className="text-yellow-400">Not configured</span>}
+                      </dd>
+                    </div>
+                  </>
+                )}
+              </dl>
+              <div className="pt-2 border-t border-slate-700">
+                <div className="flex items-center justify-between">
+                  <button
+                    onClick={async () => {
+                      if (!selectedEnvironment?.id || !id) return;
+                      setTestingConnection(true);
+                      setTestResult(null);
+                      try {
+                        const result = await testDatabaseConnection(selectedEnvironment.id, id);
+                        setTestResult(result);
+                      } catch (error) {
+                        setTestResult({ success: false, latencyMs: null, error: error instanceof Error ? error.message : 'Connection test failed' });
+                      } finally {
+                        setTestingConnection(false);
+                      }
+                    }}
+                    disabled={testingConnection}
+                    className="btn btn-secondary text-sm"
+                  >
+                    {testingConnection ? 'Testing...' : 'Test Connection'}
+                  </button>
+                  {testResult && (
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2 h-2 rounded-full ${testResult.success ? 'bg-green-400' : 'bg-red-400'}`} />
+                      {testResult.success ? (
+                        <span className="text-xs text-slate-400">
+                          {testResult.latencyMs}ms
+                          {testResult.serverVersion && (
+                            <span className="ml-1 text-slate-500">({testResult.serverVersion.split(' ').slice(0, 2).join(' ')})</span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-red-400">{testResult.error}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           )}
         </div>
 
+        {/* Monitoring Card */}
+        <div className="card">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-white">Monitoring</h3>
+            <Link
+              to={`/monitoring/databases/${database.id}`}
+              className="btn btn-ghost text-sm"
+            >
+              View Metrics
+            </Link>
+          </div>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-white">Enable Monitoring</p>
+                <p className="text-xs text-slate-500">Collect database metrics on a schedule</p>
+              </div>
+              <button
+                onClick={async () => {
+                  if (!selectedEnvironment?.id || !id) return;
+                  setSavingMonitoring(true);
+                  try {
+                    await updateDatabaseMonitoring(selectedEnvironment.id, id, { monitoringEnabled: !monitoringEnabled });
+                    setMonitoringEnabled(!monitoringEnabled);
+                    toast.success(monitoringEnabled ? 'Monitoring disabled' : 'Monitoring enabled');
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : 'Failed to update monitoring');
+                  } finally {
+                    setSavingMonitoring(false);
+                  }
+                }}
+                disabled={savingMonitoring}
+                className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                  monitoringEnabled
+                    ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
+                    : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+                }`}
+              >
+                {monitoringEnabled ? 'Enabled' : 'Disabled'}
+              </button>
+            </div>
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">Collection Interval</label>
+              <select
+                value={collectionInterval}
+                onChange={async (e) => {
+                  if (!selectedEnvironment?.id || !id) return;
+                  const newInterval = parseInt(e.target.value);
+                  setSavingMonitoring(true);
+                  try {
+                    await updateDatabaseMonitoring(selectedEnvironment.id, id, { collectionIntervalSec: newInterval });
+                    setCollectionInterval(newInterval);
+                    toast.success('Collection interval updated');
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : 'Failed to update interval');
+                  } finally {
+                    setSavingMonitoring(false);
+                  }
+                }}
+                disabled={savingMonitoring}
+                className="input w-48"
+              >
+                <option value={60}>1 minute</option>
+                <option value={300}>5 minutes</option>
+                <option value={900}>15 minutes</option>
+                <option value={1800}>30 minutes</option>
+                <option value={3600}>1 hour</option>
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Backup Configuration + Schedule Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         {/* Backup Configuration */}
         <div className="card">
           <div className="flex items-center justify-between mb-4">
@@ -786,126 +901,23 @@ export default function DatabaseDetail() {
             </dl>
           )}
         </div>
-      </div>
 
-      {/* Monitoring Card */}
-      <div className="card mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white">Monitoring</h3>
-          <Link
-            to={`/monitoring/databases/${database.id}`}
-            className="btn btn-ghost text-sm"
-          >
-            View Metrics
-          </Link>
-        </div>
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-white">Enable Monitoring</p>
-              <p className="text-xs text-slate-500">Collect database metrics on a schedule</p>
-            </div>
-            <button
-              onClick={async () => {
-                if (!selectedEnvironment?.id || !id) return;
-                setSavingMonitoring(true);
-                try {
-                  await updateDatabaseMonitoring(selectedEnvironment.id, id, { monitoringEnabled: !monitoringEnabled });
-                  setMonitoringEnabled(!monitoringEnabled);
-                  toast.success(monitoringEnabled ? 'Monitoring disabled' : 'Monitoring enabled');
-                } catch (error) {
-                  toast.error(error instanceof Error ? error.message : 'Failed to update monitoring');
-                } finally {
-                  setSavingMonitoring(false);
-                }
-              }}
-              disabled={savingMonitoring}
-              className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-                monitoringEnabled
-                  ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
-                  : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
-              }`}
-            >
-              {monitoringEnabled ? 'Enabled' : 'Disabled'}
-            </button>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="flex-1">
-              <label className="block text-sm text-slate-400 mb-1">Collection Interval</label>
-              <select
-                value={collectionInterval}
-                onChange={async (e) => {
-                  if (!selectedEnvironment?.id || !id) return;
-                  const newInterval = parseInt(e.target.value);
-                  setSavingMonitoring(true);
-                  try {
-                    await updateDatabaseMonitoring(selectedEnvironment.id, id, { collectionIntervalSec: newInterval });
-                    setCollectionInterval(newInterval);
-                    toast.success('Collection interval updated');
-                  } catch (error) {
-                    toast.error(error instanceof Error ? error.message : 'Failed to update interval');
-                  } finally {
-                    setSavingMonitoring(false);
-                  }
-                }}
-                disabled={savingMonitoring}
-                className="input w-48"
-              >
-                <option value={60}>1 minute</option>
-                <option value={300}>5 minutes</option>
-                <option value={900}>15 minutes</option>
-                <option value={1800}>30 minutes</option>
-                <option value={3600}>1 hour</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">Test Connection</label>
+        {/* Schedule Card */}
+        <div className="card">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-white">Backup Schedule</h3>
+            {!editingSchedule && (
               <button
-                onClick={async () => {
-                  if (!selectedEnvironment?.id || !id) return;
-                  setTestingConnection(true);
-                  setTestResult(null);
-                  try {
-                    const result = await testDatabaseConnection(selectedEnvironment.id, id);
-                    setTestResult({ success: result.success, error: result.error });
-                  } catch (error) {
-                    setTestResult({ success: false, error: error instanceof Error ? error.message : 'Connection test failed' });
-                  } finally {
-                    setTestingConnection(false);
-                  }
-                }}
-                disabled={testingConnection}
-                className="btn btn-secondary"
+                onClick={() => setEditingSchedule(true)}
+                className="btn btn-ghost text-sm"
               >
-                {testingConnection ? 'Testing...' : 'Test'}
+                {schedule ? 'Edit' : 'Set Schedule'}
               </button>
-            </div>
+            )}
           </div>
-          {testResult && (
-            <div className={`p-3 rounded-lg text-sm ${testResult.success ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
-              {testResult.success ? 'Connection successful' : `Connection failed: ${testResult.error}`}
-            </div>
-          )}
-        </div>
-      </div>
 
-      {/* Schedule Card */}
-      <div className="card mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white">Backup Schedule</h3>
-          {!editingSchedule && (
-            <button
-              onClick={() => setEditingSchedule(true)}
-              className="btn btn-ghost text-sm"
-            >
-              {schedule ? 'Edit' : 'Set Schedule'}
-            </button>
-          )}
-        </div>
-
-        {editingSchedule ? (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+          {editingSchedule ? (
+            <div className="space-y-4">
               <div>
                 <label className="block text-sm text-slate-400 mb-1">Cron Expression</label>
                 <input
@@ -928,65 +940,72 @@ export default function DatabaseDetail() {
                   className="input"
                 />
               </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                id="scheduleEnabled"
-                checked={scheduleForm.enabled}
-                onChange={e => setScheduleForm({ ...scheduleForm, enabled: e.target.checked })}
-                className="rounded bg-slate-700 border-slate-600 text-primary-500"
-              />
-              <label htmlFor="scheduleEnabled" className="text-sm text-slate-300">Enabled</label>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={handleSaveSchedule} disabled={saving} className="btn btn-primary">
-                {saving ? 'Saving...' : 'Save'}
-              </button>
-              <button onClick={() => setEditingSchedule(false)} className="btn btn-ghost">
-                Cancel
-              </button>
-              {schedule && (
-                <button onClick={handleDeleteSchedule} className="btn btn-ghost text-red-400 hover:text-red-300">
-                  Delete Schedule
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="scheduleEnabled"
+                  checked={scheduleForm.enabled}
+                  onChange={e => setScheduleForm({ ...scheduleForm, enabled: e.target.checked })}
+                  className="rounded bg-slate-700 border-slate-600 text-primary-500"
+                />
+                <label htmlFor="scheduleEnabled" className="text-sm text-slate-300">Enabled</label>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={handleSaveSchedule} disabled={saving} className="btn btn-primary">
+                  {saving ? 'Saving...' : 'Save'}
                 </button>
-              )}
+                <button onClick={() => setEditingSchedule(false)} className="btn btn-ghost">
+                  Cancel
+                </button>
+                {schedule && (
+                  <button onClick={handleDeleteSchedule} className="btn btn-ghost text-red-400 hover:text-red-300">
+                    Delete Schedule
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
-        ) : schedule ? (
-          <div className="flex items-center justify-between">
-            <div className="space-y-1">
-              <div className="flex items-center gap-4">
-                <span className="text-slate-400">Cron:</span>
-                <code className="font-mono text-white bg-slate-800 px-2 py-1 rounded">
+          ) : schedule ? (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400 text-sm">Status</span>
+                <button
+                  onClick={handleToggleSchedule}
+                  className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                    schedule.enabled
+                      ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
+                      : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+                  }`}
+                >
+                  {schedule.enabled ? 'Enabled' : 'Disabled'}
+                </button>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-400">Cron</span>
+                <code className="font-mono text-white bg-slate-800 px-2 py-0.5 rounded text-xs">
                   {schedule.cronExpression}
                 </code>
-                <span className="text-slate-400">Retention:</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-400">Retention</span>
                 <span className="text-white">{schedule.retentionDays} days</span>
               </div>
-              <div className="text-sm text-slate-400">
-                {schedule.lastRunAt && (
-                  <span>Last run: {formatDistanceToNow(new Date(schedule.lastRunAt), { addSuffix: true })}</span>
-                )}
-                {schedule.nextRunAt && (
-                  <span className="ml-4">Next run: {formatDistanceToNow(new Date(schedule.nextRunAt), { addSuffix: true })}</span>
-                )}
-              </div>
+              {schedule.lastRunAt && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-400">Last run</span>
+                  <span className="text-white">{formatDistanceToNow(new Date(schedule.lastRunAt), { addSuffix: true })}</span>
+                </div>
+              )}
+              {schedule.nextRunAt && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-400">Next run</span>
+                  <span className="text-white">{formatDistanceToNow(new Date(schedule.nextRunAt), { addSuffix: true })}</span>
+                </div>
+              )}
             </div>
-            <button
-              onClick={handleToggleSchedule}
-              className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-                schedule.enabled
-                  ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
-                  : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
-              }`}
-            >
-              {schedule.enabled ? 'Enabled' : 'Disabled'}
-            </button>
-          </div>
-        ) : (
-          <p className="text-slate-400 text-sm">No schedule configured</p>
-        )}
+          ) : (
+            <p className="text-slate-400 text-sm">No schedule configured</p>
+          )}
+        </div>
       </div>
 
       {/* Backups Table */}

@@ -2,6 +2,7 @@ import pg from 'pg';
 import mysql from 'mysql2/promise';
 import { SSHClient, LocalClient, isLocalhost, type CommandClient } from '../lib/ssh.js';
 import { decrypt } from '../lib/crypto.js';
+import { getEnvironmentSshKey } from '../routes/environments.js';
 
 export interface MonitoringQuery {
   name: string;
@@ -172,6 +173,129 @@ async function executeSSHQueries(
   }
 
   return results;
+}
+
+export interface PingResult {
+  success: boolean;
+  latencyMs: number | null;
+  serverVersion?: string;
+  error?: string;
+}
+
+interface DatabaseForPing {
+  type: string;
+  host: string | null;
+  port: number | null;
+  databaseName: string | null;
+  encryptedCredentials: string | null;
+  credentialsNonce: string | null;
+  filePath: string | null;
+  server: { hostname: string } | null;
+}
+
+/**
+ * Lightweight connection test for a database.
+ * For SQL databases: connects and runs SELECT 1.
+ * For SQLite: SSH to server and check file exists.
+ */
+export async function pingDatabase(
+  database: DatabaseForPing,
+  environmentId: string,
+): Promise<PingResult> {
+  const start = Date.now();
+
+  // Decrypt credentials if present
+  let credentials: { username?: string; password?: string } | undefined;
+  if (database.encryptedCredentials && database.credentialsNonce) {
+    const decrypted = decrypt(database.encryptedCredentials, database.credentialsNonce);
+    if (decrypted.includes(':')) {
+      const [username, ...rest] = decrypted.split(':');
+      credentials = { username, password: rest.join(':') };
+    } else {
+      credentials = { password: decrypted };
+    }
+  }
+
+  if (database.type === 'postgres') {
+    const client = new pg.Client({
+      host: database.host || 'localhost',
+      port: database.port || 5432,
+      database: database.databaseName || 'postgres',
+      user: credentials?.username || 'postgres',
+      password: credentials?.password,
+      ssl: { rejectUnauthorized: false },
+      connectionTimeoutMillis: 10000,
+      statement_timeout: 5000,
+    });
+
+    try {
+      await client.connect();
+      const res = await client.query('SELECT version()');
+      const latencyMs = Date.now() - start;
+      const serverVersion = res.rows[0]?.version as string | undefined;
+      return { success: true, latencyMs, serverVersion };
+    } finally {
+      await client.end().catch(() => {});
+    }
+  }
+
+  if (database.type === 'mysql') {
+    const connection = await mysql.createConnection({
+      host: database.host || 'localhost',
+      port: database.port || 3306,
+      database: database.databaseName || undefined,
+      user: credentials?.username || 'root',
+      password: credentials?.password,
+      connectTimeout: 10000,
+    });
+
+    try {
+      const [rows] = await connection.execute('SELECT VERSION() AS version');
+      const latencyMs = Date.now() - start;
+      const serverVersion = (rows as { version: string }[])[0]?.version;
+      return { success: true, latencyMs, serverVersion };
+    } finally {
+      await connection.end().catch(() => {});
+    }
+  }
+
+  if (database.type === 'sqlite') {
+    if (!database.server) {
+      throw new Error('SQLite databases require a server for connection testing');
+    }
+
+    const sshCreds = await getEnvironmentSshKey(environmentId);
+    if (!sshCreds) {
+      throw new Error('SSH key not configured for environment');
+    }
+
+    let client: CommandClient;
+    if (isLocalhost(database.server.hostname)) {
+      client = new LocalClient();
+    } else {
+      const sshClient = new SSHClient({
+        hostname: database.server.hostname,
+        username: sshCreds.username,
+        privateKey: sshCreds.privateKey,
+      });
+      await sshClient.connect();
+      client = sshClient;
+    }
+
+    try {
+      const filePath = database.filePath || '/tmp/test.db';
+      const result = await client.exec(`sqlite3 "${filePath}" "SELECT sqlite_version()"`);
+      const latencyMs = Date.now() - start;
+      const serverVersion = `SQLite ${result.stdout.trim()}`;
+      return { success: true, latencyMs, serverVersion };
+    } finally {
+      if ('disconnect' in client && typeof client.disconnect === 'function') {
+        client.disconnect();
+      }
+    }
+  }
+
+  throw new Error(`Unsupported database type: ${database.type}`);
 }
 
 function parseScalarOutput(stdout: string): number | string {

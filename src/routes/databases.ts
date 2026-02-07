@@ -19,6 +19,7 @@ import { logAudit } from '../services/audit.js';
 import { prisma } from '../lib/db.js';
 import { requireOperator } from '../plugins/authorize.js';
 import { collectDatabaseMetrics } from '../services/database-monitoring-collector.js';
+import { pingDatabase } from '../services/database-query-executor.js';
 
 const storageTypeSchema = z.enum(['local', 'spaces']);
 const backupFormatSchema = z.enum(['plain', 'custom', 'tar']);
@@ -619,24 +620,27 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
-  // Test database monitoring connection
+  // Test database connection (lightweight ping)
   fastify.post(
     '/api/environments/:envId/databases/:id/test-connection',
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
-      const { id } = request.params as { envId: string; id: string };
+      const { envId, id } = request.params as { envId: string; id: string };
 
-      const database = await prisma.database.findUnique({ where: { id } });
+      const database = await prisma.database.findUnique({
+        where: { id },
+        include: { databaseType: true, server: true },
+      });
       if (!database) {
         return reply.code(404).send({ error: 'Database not found' });
       }
 
       try {
-        await collectDatabaseMetrics(id);
-        return { success: true, message: 'Connection successful, metrics collected' };
+        const result = await pingDatabase(database, envId);
+        return result;
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Connection failed';
-        return { success: false, message };
+        return { success: false, latencyMs: null, error: message };
       }
     }
   );
