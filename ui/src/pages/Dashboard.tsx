@@ -259,21 +259,6 @@ export default function Dashboard() {
     return { healthy, total: allServices.length };
   }, [allServices]);
 
-  // Database backup status
-  const databaseBackupStatus = useMemo(() => {
-    const withBackup = databases.filter((db) => db.lastBackup !== null).length;
-    // Find next scheduled backup
-    const nextBackup = databases
-      .filter((db) => db.schedule?.enabled && db.schedule?.nextRunAt)
-      .map((db) => new Date(db.schedule!.nextRunAt!))
-      .sort((a, b) => a.getTime() - b.getTime())[0];
-    return { withBackup, total: databases.length, nextBackup };
-  }, [databases]);
-
-  // Unhealthy servers
-  const unhealthyServers = useMemo(() => {
-    return environment?.servers.filter((s) => s.status !== 'healthy') || [];
-  }, [environment]);
 
   const handleDeploy = async (serviceId: string, imageTag: string) => {
     setDeploying(serviceId);
@@ -386,10 +371,6 @@ export default function Dashboard() {
   }
 
   const serverCount = environment.servers.length;
-  const serviceCount = environment.servers.reduce(
-    (acc, s) => acc + s.services.length,
-    0
-  );
   const healthyServers = environment.servers.filter(
     (s) => s.status === 'healthy'
   ).length;
@@ -485,85 +466,6 @@ export default function Dashboard() {
           )}
         </div>
       )}
-
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
-        <Link to="/servers" className="panel hover:border-slate-600 transition-colors">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-slate-400 text-sm">Servers</p>
-              <p className="text-2xl font-bold text-white mt-1">{serverCount}</p>
-            </div>
-            <div className="w-12 h-12 bg-primary-900/50 rounded-lg flex items-center justify-center">
-              <svg className="w-6 h-6 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
-              </svg>
-            </div>
-          </div>
-          <div className="mt-3">
-            {unhealthyServers.length > 0 ? (
-              <div>
-                <span className="badge badge-error">{unhealthyServers.length} unhealthy</span>
-                <p className="text-xs text-slate-500 mt-1">
-                  {unhealthyServers.slice(0, 2).map((s) => s.name).join(', ')}
-                  {unhealthyServers.length > 2 && ` +${unhealthyServers.length - 2} more`}
-                </p>
-              </div>
-            ) : (
-              <span className="badge badge-success">{healthyServers} healthy</span>
-            )}
-          </div>
-        </Link>
-
-        <Link to="/services" className="panel hover:border-slate-600 transition-colors">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-slate-400 text-sm">Services</p>
-              <p className="text-2xl font-bold text-white mt-1">{serviceCount}</p>
-            </div>
-            <div className="w-12 h-12 bg-green-900/50 rounded-lg flex items-center justify-center">
-              <svg className="w-6 h-6 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-              </svg>
-            </div>
-          </div>
-          <div className="mt-3">
-            <span className={`badge ${serviceHealthCounts.healthy === serviceHealthCounts.total ? 'badge-success' : 'badge-warning'}`}>
-              {serviceHealthCounts.healthy}/{serviceHealthCounts.total} healthy
-            </span>
-          </div>
-        </Link>
-
-        <Link to="/databases" className="panel hover:border-slate-600 transition-colors">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-slate-400 text-sm">Databases</p>
-              <p className="text-2xl font-bold text-white mt-1">{databases.length}</p>
-            </div>
-            <div className="w-12 h-12 bg-purple-900/50 rounded-lg flex items-center justify-center">
-              <svg className="w-6 h-6 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
-              </svg>
-            </div>
-          </div>
-          <div className="mt-3 space-y-1">
-            {databases.length > 0 ? (
-              <>
-                <span className={`badge ${databaseBackupStatus.withBackup === databaseBackupStatus.total ? 'badge-success' : 'badge-warning'}`}>
-                  {databaseBackupStatus.withBackup}/{databaseBackupStatus.total} backed up
-                </span>
-                {databaseBackupStatus.nextBackup && (
-                  <p className="text-xs text-slate-500">
-                    Next: {formatDistanceToNow(databaseBackupStatus.nextBackup, { addSuffix: true })}
-                  </p>
-                )}
-              </>
-            ) : (
-              <span className="badge badge-info">No databases</span>
-            )}
-          </div>
-        </Link>
-      </div>
 
       {/* Service Topology Diagram */}
       {environment.servers.length > 0 && (
@@ -826,6 +728,41 @@ export default function Dashboard() {
                 >
                   <span className={`w-2 h-2 rounded-full ${statusColor}`} />
                   <span className="text-sm text-white">{service.name}</span>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Databases Health Grid */}
+      {databases.length > 0 && (
+        <div className="panel mb-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-white">
+              Databases Health
+              <span className="ml-2 text-sm font-normal text-slate-400">
+                ({databases.filter((db) => db.lastBackup !== null).length}/{databases.length} backed up)
+              </span>
+            </h2>
+            <Link to="/databases" className="text-sm text-primary-400 hover:text-primary-300">
+              View All
+            </Link>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {databases.map((db) => {
+              const hasBackup = db.lastBackup !== null;
+              const hasSchedule = db.schedule?.enabled;
+              const statusColor = hasBackup ? 'bg-green-500' : hasSchedule ? 'bg-yellow-500' : 'bg-red-500';
+              return (
+                <Link
+                  key={db.id}
+                  to={`/databases/${db.id}`}
+                  className="flex items-center gap-2 px-3 py-2 bg-slate-800/50 rounded-lg border border-slate-700 hover:border-slate-600 transition-colors"
+                  title={`${db.name} - ${hasBackup ? 'Backed up' : hasSchedule ? 'Scheduled, no backup yet' : 'No backup'}`}
+                >
+                  <span className={`w-2 h-2 rounded-full ${statusColor}`} />
+                  <span className="text-sm text-white">{db.name}</span>
                 </Link>
               );
             })}
