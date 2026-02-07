@@ -31,9 +31,14 @@ var rootCmd = &cobra.Command{
 tools for your BridgePort-managed infrastructure.
 
 Get started:
-  bridgeport login          # Authenticate with BridgePort
-  bridgeport list           # List all servers
-  bridgeport ssh env server # SSH into a server`,
+  bridgeport login            # Authenticate with BridgePort
+  bridgeport whoami           # Show current user info
+  bridgeport list             # List all servers
+  bridgeport services         # List all services
+  bridgeport ssh env server   # SSH into a server
+  bridgeport databases        # List databases
+  bridgeport health env       # View health check logs
+  bridgeport audit            # View audit logs`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Skip auth check for login, help, version, and completion commands
 		skipAuth := cmd.Name() == "login" || cmd.Name() == "help" || cmd.Name() == "version" || cmd.Name() == "completion"

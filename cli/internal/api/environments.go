@@ -155,3 +155,35 @@ func (c *Client) GetServerMetrics(serverID string) (*ServerMetrics, error) {
 	}
 	return &metrics, nil
 }
+
+// GetEnvironmentByName finds an environment by name and returns it
+func (c *Client) GetEnvironmentByName(name string) (*Environment, error) {
+	envs, err := c.ListEnvironments()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, env := range envs {
+		if env.Name == name {
+			return &env, nil
+		}
+	}
+
+	return nil, &APIError{StatusCode: 404, Message: fmt.Sprintf("environment '%s' not found", name)}
+}
+
+// GetDatabaseByName finds a database by name within an environment
+func (c *Client) GetDatabaseByName(environmentID, name string) (*Database, error) {
+	databases, err := c.ListDatabases(environmentID)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, db := range databases {
+		if db.Name == name {
+			return &db, nil
+		}
+	}
+
+	return nil, &APIError{StatusCode: 404, Message: fmt.Sprintf("database '%s' not found", name)}
+}

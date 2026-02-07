@@ -15,9 +15,10 @@ type LoginResponse struct {
 }
 
 type User struct {
-	ID    string `json:"id"`
-	Email string `json:"email"`
-	Role  string `json:"role"`
+	ID    string  `json:"id"`
+	Email string  `json:"email"`
+	Name  *string `json:"name"`
+	Role  string  `json:"role"`
 }
 
 // Login authenticates with the API and returns a token
@@ -35,11 +36,13 @@ func (c *Client) Login(email, password string) (*LoginResponse, error) {
 
 // GetCurrentUser returns the currently authenticated user
 func (c *Client) GetCurrentUser() (*User, error) {
-	var user User
-	if err := c.Get("/api/auth/me", &user); err != nil {
+	var resp struct {
+		User User `json:"user"`
+	}
+	if err := c.Get("/api/auth/me", &resp); err != nil {
 		return nil, err
 	}
-	return &user, nil
+	return &resp.User, nil
 }
 
 // ValidateToken checks if the current token is valid

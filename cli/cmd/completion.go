@@ -212,4 +212,23 @@ func registerCompletions() {
 		// TODO: Could add command name completion here
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
+
+	// Environment-only commands (first arg = environment name)
+	envOnlyCommands := []*cobra.Command{healthCmd, secretsCmd, configsCmd, registriesCmd, imagesCmd}
+	for _, c := range envOnlyCommands {
+		c.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			if len(args) == 0 {
+				return envCompletion(cmd, args, toComplete)
+			}
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+	}
+
+	// Database-related commands (env + database name)
+	backupsCmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) == 0 {
+			return envCompletion(cmd, args, toComplete)
+		}
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
 }

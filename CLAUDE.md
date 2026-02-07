@@ -130,6 +130,7 @@ For legacy databases without migration history, the entrypoint auto-baselines th
 - **Frontend**: React, Vite, Tailwind CSS, Recharts (charts)
 - **Database**: SQLite with Prisma ORM
 - **Encryption**: XChaCha20-Poly1305 for secrets
+- **Error Monitoring**: Sentry (optional, backend + frontend)
 - **Monitoring Agent**: Go
 - **CLI**: Go (Cobra framework)
 
@@ -140,36 +141,71 @@ bridgeport/
 ├── src/                      # Backend
 │   ├── server.ts             # Fastify entry point
 │   ├── lib/                  # Core utilities
-│   │   ├── config.ts         # Environment configuration
+│   │   ├── config.ts         # Environment configuration (Zod schema)
 │   │   ├── crypto.ts         # Encryption utilities
 │   │   ├── db.ts             # Prisma client
 │   │   ├── docker.ts         # Docker client abstraction (socket + SSH)
 │   │   ├── ssh.ts            # SSH client wrapper
-│   │   └── scheduler.ts      # Background job scheduler
+│   │   ├── scheduler.ts      # Background job scheduler
+│   │   ├── registry.ts       # Container registry client factory
+│   │   ├── image-utils.ts    # Image name parsing + tag utilities
+│   │   └── sentry.ts         # Sentry error monitoring init
 │   ├── routes/               # API routes
-│   │   ├── auth.ts           # Authentication
+│   │   ├── auth.ts           # Authentication (login, token refresh)
 │   │   ├── users.ts          # User management (RBAC)
-│   │   ├── environments.ts   # Environment settings
+│   │   ├── environments.ts   # Environment CRUD
+│   │   ├── environment-settings.ts # Per-module env settings (GET/PATCH/reset)
 │   │   ├── servers.ts        # Server management
 │   │   ├── services.ts       # Container management
 │   │   ├── secrets.ts        # Secret management + env templates
 │   │   ├── config-files.ts   # Config files with history
 │   │   ├── registries.ts     # Registry connections
+│   │   ├── container-images.ts # Container image management + deploy triggers
+│   │   ├── service-dependencies.ts # Service dependency CRUD
+│   │   ├── deployment-plans.ts # Orchestrated deployment plans
+│   │   ├── compose.ts        # Docker compose template preview/generation
 │   │   ├── databases.ts      # Database backup + monitoring management
-│   │   ├── metrics.ts        # Server/service metrics
-│   │   ├── monitoring.ts     # Health logs, metrics history, SSH testing, monitoring overview
+│   │   ├── metrics.ts        # Server/service metrics + agent ingest
+│   │   ├── monitoring.ts     # Health logs, metrics history, SSH testing, overview
+│   │   ├── topology.ts       # Service topology connections + diagram layouts
+│   │   ├── notifications.ts  # User notifications + preferences + types
 │   │   ├── settings.ts       # Service types CRUD
 │   │   ├── spaces.ts         # Global Spaces configuration
 │   │   ├── system-settings.ts # System-wide operational settings
 │   │   ├── audit.ts          # Audit logs
-│   │   └── webhooks.ts       # CI/CD webhooks
+│   │   ├── webhooks.ts       # CI/CD webhooks (incoming)
+│   │   ├── downloads.ts      # CLI binary downloads
+│   │   └── admin/            # Admin-only route modules
+│   │       ├── smtp.ts       # SMTP email configuration
+│   │       ├── webhooks.ts   # Outgoing webhook configuration
+│   │       └── slack.ts      # Slack channel + routing configuration
 │   ├── services/             # Business logic
 │   │   ├── metrics.ts        # SSH metrics collection
+│   │   ├── deploy.ts         # Service deployment logic
+│   │   ├── orchestration.ts  # Deployment plan builder + executor
+│   │   ├── image-management.ts # Container image CRUD + tag history
+│   │   ├── compose.ts        # Compose template rendering + artifacts
+│   │   ├── health-checks.ts  # Health check business logic + scheduler config
+│   │   ├── health-verification.ts # Post-deploy health verification
 │   │   ├── database-backup.ts # Backup execution
 │   │   ├── database-monitoring-collector.ts # Database metrics collection scheduler
 │   │   ├── database-query-executor.ts # Generic SQL/SSH query executor
 │   │   ├── host-detection.ts # Docker host detection + bootstrap
+│   │   ├── notifications.ts  # Notification creation + delivery + type management
+│   │   ├── bounce-tracker.ts # Consecutive failure tracking for bounce logic
+│   │   ├── email.ts          # SMTP email sender
+│   │   ├── slack-notifications.ts # Slack webhook sender
+│   │   ├── agent-deploy.ts   # Agent auto-deployment via SSH
+│   │   ├── agent-events.ts   # Agent lifecycle event logging
+│   │   ├── audit.ts          # Audit log helper
+│   │   ├── auth.ts           # Auth bootstrap + user management
+│   │   ├── servers.ts        # Server business logic
+│   │   ├── services.ts       # Service business logic
+│   │   ├── secrets.ts        # Secret CRUD helpers
+│   │   ├── registries.ts     # Registry connection helpers
 │   │   ├── service-types.ts  # Service type utilities
+│   │   ├── plugin-loader.ts  # Plugin sync, reset, export
+│   │   ├── environment-settings.ts # Per-module settings registry + CRUD
 │   │   ├── system-settings.ts # Cached system settings singleton
 │   │   └── outgoing-webhooks.ts # Webhook delivery with retries
 │   └── plugins/              # Fastify plugins
@@ -179,14 +215,52 @@ bridgeport/
 │   ├── src/
 │   │   ├── components/       # Reusable components
 │   │   │   ├── Layout.tsx    # Navigation sidebar with env selector
-│   │   │   └── monitoring/   # Shared monitoring components
-│   │   │       ├── ChartCard.tsx       # Recharts line chart wrapper
-│   │   │       ├── StatCard.tsx        # Stat card with color variants
-│   │   │       ├── MetricGauge.tsx     # Progress bar gauge
-│   │   │       ├── TimeRangeSelector.tsx # Time range segmented buttons
-│   │   │       └── AutoRefreshToggle.tsx # Auto-refresh checkbox
+│   │   │   ├── AdminLayout.tsx # Admin area layout wrapper
+│   │   │   ├── AdminSidebar.tsx # Admin navigation sidebar
+│   │   │   ├── TopBar.tsx    # Top bar with breadcrumbs
+│   │   │   ├── Breadcrumbs.tsx # Route-aware breadcrumbs
+│   │   │   ├── NotificationBell.tsx # Notification dropdown
+│   │   │   ├── DependencyGraph.tsx # Service dependency visualization
+│   │   │   ├── DependencyEditor.tsx # Dependency CRUD modal
+│   │   │   ├── DependencyFlow.tsx # Flow diagram for dependencies
+│   │   │   ├── DeploymentProgress.tsx # Deployment plan progress tracker
+│   │   │   ├── HealthConfigEditor.tsx # Per-service health check config
+│   │   │   ├── monitoring/   # Shared monitoring components
+│   │   │   │   ├── ChartCard.tsx       # Recharts line chart wrapper
+│   │   │   │   ├── StatCard.tsx        # Stat card with color variants
+│   │   │   │   ├── MetricGauge.tsx     # Progress bar gauge
+│   │   │   │   ├── TimeRangeSelector.tsx # Time range segmented buttons
+│   │   │   │   └── AutoRefreshToggle.tsx # Auto-refresh checkbox
+│   │   │   └── topology/     # Topology diagram components
+│   │   │       ├── TopologyDiagram.tsx  # Main diagram canvas
+│   │   │       ├── ServiceNode.tsx      # Service node renderer
+│   │   │       ├── DatabaseNode.tsx     # Database node renderer
+│   │   │       ├── ServerGroupNode.tsx  # Server group renderer
+│   │   │       ├── NodePopover.tsx      # Node detail popover
+│   │   │       └── AddConnectionModal.tsx # Connection creation modal
 │   │   ├── pages/            # Page components
-│   │   │   ├── Dashboard.tsx # Overview with server metrics
+│   │   │   ├── Dashboard.tsx # Overview with topology diagram + stats
+│   │   │   ├── Servers.tsx   # Server list
+│   │   │   ├── ServerDetail.tsx # Server config + monitoring
+│   │   │   ├── Services.tsx  # Service list
+│   │   │   ├── ServiceDetail.tsx # Service deploy + health checks
+│   │   │   │   └── service-detail/ # Service detail sub-components
+│   │   │   │       ├── DeployCard.tsx        # Deploy UI card
+│   │   │   │       ├── DeploymentHistory.tsx # Past deployments
+│   │   │   │       ├── ActionHistory.tsx     # Service action log
+│   │   │   │       ├── ConfigFilesCard.tsx   # Config file attachments
+│   │   │   │       └── HealthCheckResultCard.tsx # Health check display
+│   │   │   ├── ContainerImages.tsx # Container image management
+│   │   │   ├── DeploymentPlans.tsx # Deployment plan list
+│   │   │   ├── DeploymentPlanDetail.tsx # Deployment plan detail + progress
+│   │   │   ├── Registries.tsx # Registry connection list
+│   │   │   ├── Databases.tsx # Database list
+│   │   │   ├── DatabaseDetail.tsx # Database config + backups + monitoring
+│   │   │   ├── Secrets.tsx   # Secret management
+│   │   │   ├── ConfigFiles.tsx # Config file grid
+│   │   │   ├── Settings.tsx  # Per-environment settings (tabbed)
+│   │   │   ├── Notifications.tsx # User notification inbox
+│   │   │   ├── Login.tsx     # Login page
 │   │   │   ├── Monitoring.tsx # Monitoring overview summary hub
 │   │   │   ├── MonitoringServers.tsx   # Server metrics + charts
 │   │   │   ├── MonitoringServices.tsx  # Service metrics + charts
@@ -194,20 +268,25 @@ bridgeport/
 │   │   │   ├── DatabaseMonitoringDetail.tsx # Database monitoring detail + charts
 │   │   │   ├── MonitoringHealth.tsx # Health check logs
 │   │   │   ├── MonitoringAgents.tsx # Agent management, SSH testing
-│   │   │   ├── Servers.tsx   # Server list
-│   │   │   ├── ServerDetail.tsx # Server config + monitoring
-│   │   │   ├── Services.tsx  # Service list
-│   │   │   ├── ServiceDetail.tsx # Service deploy + health checks
-│   │   │   ├── Databases.tsx # Database list
-│   │   │   ├── DatabaseDetail.tsx # Database config + backups + monitoring
-│   │   │   ├── Settings.tsx  # Environment settings + scheduler config
-│   │   │   ├── settings/
-│   │   │   │   ├── ServiceTypes.tsx # Service type management
-│   │   │   │   ├── GlobalSpaces.tsx # Global Spaces configuration
-│   │   │   │   └── SystemSettings.tsx # System-wide settings
-│   │   │   └── ...           # Other pages
-│   │   └── lib/              # API client, store
+│   │   │   └── admin/        # Admin-only pages
+│   │   │       ├── About.tsx          # App version + CLI downloads
+│   │   │       ├── SystemSettings.tsx # System-wide settings
+│   │   │       ├── ServiceTypes.tsx   # Service type management
+│   │   │       ├── DatabaseTypes.tsx  # Database type management
+│   │   │       ├── Storage.tsx        # Global Spaces configuration
+│   │   │       ├── Users.tsx          # User management
+│   │   │       ├── Audit.tsx          # Audit log viewer
+│   │   │       └── NotificationSettings.tsx # Notification type + channel config
+│   │   └── lib/              # Utilities
+│   │       ├── api.ts        # API client
+│   │       ├── store.ts      # Zustand stores (persisted)
+│   │       ├── status.ts     # Status color/label utilities
+│   │       ├── topology.ts   # Topology graph helpers
+│   │       └── sentry.ts     # Sentry frontend init
 │   └── public/               # Static assets
+├── plugins/                  # Plugin JSON definitions
+│   ├── service-types/        # Service type definitions (Django, Node.js, etc.)
+│   └── database-types/       # Database type definitions with monitoring queries
 ├── bridgeport-agent/         # Go monitoring agent
 │   ├── main.go               # Agent entry point
 │   ├── collector/
@@ -248,8 +327,8 @@ cd ui && npm install && cd ..
 # Generate Prisma client (required after schema changes)
 npm run db:generate
 
-# Run migrations
-npm run db:push
+# Run migrations (development)
+npx prisma migrate dev --name descriptive_name
 
 # Start backend (port 3000)
 npm run dev
@@ -347,6 +426,23 @@ Plugin-driven monitoring for PostgreSQL, MySQL, and SQLite databases:
 4. **Collector** (`src/services/database-monitoring-collector.ts`): Scheduled collection respecting per-database intervals
 5. **Query executor** (`src/services/database-query-executor.ts`): Generic executor supporting scalar, row, and rows result types
 
+### Deployment Orchestration
+Multi-service deployment with dependency-aware ordering:
+
+1. **Container Images** (`src/services/image-management.ts`): Central image entity shared across services
+2. **Dependencies** (`ServiceDependency` model): `health_before` and `deploy_after` types control ordering
+3. **Orchestration** (`src/services/orchestration.ts`): Plan builder resolves dependency order, executor runs steps
+4. **Health Verification** (`src/services/health-verification.ts`): Post-deploy health checks with retries
+5. **Auto-Rollback**: On failure, all previously deployed services roll back to previous tags
+
+### Notification System
+Multi-channel notification delivery:
+
+1. **Types** defined in `src/services/notifications.ts` with templates and severity
+2. **Channels**: In-app, email (SMTP), outgoing webhooks, Slack
+3. **Bounce logic** (`src/services/bounce-tracker.ts`): Prevents alert storms from repeated failures
+4. **Preferences**: Per-user, per-type channel selection with optional environment filtering
+
 ## Environment Variables
 
 Required for development:
@@ -357,47 +453,120 @@ MASTER_KEY=<openssl rand -base64 32>
 JWT_SECRET=<openssl rand -base64 32>
 ```
 
-Optional scheduler settings:
+Optional settings:
 
 ```bash
+HOST=0.0.0.0
+PORT=3000
+UPLOAD_DIR=./uploads
+CORS_ORIGIN=https://deploy.example.com  # Comma-separated origins
+PLUGINS_DIR=./plugins                    # Plugin JSON directory
+
+# Initial admin (created on first boot if no users exist)
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=your-secure-password
+
+# Scheduler intervals (all in seconds)
 SCHEDULER_ENABLED=true
-SCHEDULER_METRICS_INTERVAL=300      # SSH metrics collection (seconds)
-SCHEDULER_BACKUP_CHECK_INTERVAL=60  # Backup schedule check (seconds)
+SCHEDULER_SERVER_HEALTH_INTERVAL=60     # Server health checks
+SCHEDULER_SERVICE_HEALTH_INTERVAL=60    # Service health checks
+SCHEDULER_DISCOVERY_INTERVAL=300        # Container discovery
+SCHEDULER_UPDATE_CHECK_INTERVAL=1800    # Registry update checks
+SCHEDULER_METRICS_INTERVAL=300          # SSH metrics collection
+SCHEDULER_BACKUP_CHECK_INTERVAL=60      # Backup schedule check
+
+# Sentry error monitoring (opt-in)
+SENTRY_BACKEND_DSN=https://key@sentry.io/12345
+SENTRY_FRONTEND_DSN=https://key@sentry.io/67890
+SENTRY_ENVIRONMENT=production
+SENTRY_TRACES_SAMPLE_RATE=0            # 0.0-1.0
+SENTRY_ENABLED=true                     # Kill switch
 ```
 
 ## Key Models
 
 ```
-User           - Authentication with role (admin/operator/viewer), lastActiveAt for session tracking
-Environment    - Logical grouping with SSH key, allowSecretReveal, schedulerConfig (per-env scheduler)
-Server         - Physical/virtual machine with metricsMode, dockerMode (ssh/socket)
-Service        - Docker container with optional serviceTypeId
-Secret         - Encrypted key-value with neverReveal flag
-ConfigFile     - Synced configuration files (including .env files with secret placeholders)
-FileHistory    - Edit history for config files
-Database       - Registered database for backups + monitoring (editable after creation)
-DatabaseBackup - Backup record with status
-DatabaseMetrics - Time-series database monitoring metrics (JSON blob per collection)
-BackupSchedule - Cron-based backup scheduling
-ServerMetrics  - Time-series server metrics
-ServiceMetrics - Time-series container metrics
+# Core Resources
+User               - Authentication with role (admin/operator/viewer), lastActiveAt, apiTokens
+ApiToken           - Per-user API tokens with hash, expiry, last used tracking
+Environment        - Logical grouping with SSH key, per-module settings (General/Monitoring/Operations/Data/Configuration)
+Server             - Physical/virtual machine with metricsMode, dockerMode (ssh/socket), agent status tracking
+Service            - Docker container linked to ContainerImage, with dependencies, health config, TCP/cert checks
+Secret             - Encrypted key-value with neverReveal flag
+ConfigFile         - Synced configuration files (text + binary support with isBinary, mimeType)
+FileHistory        - Edit history for config files
+Deployment         - Deployment record with logs, duration, linked to ContainerImageHistory
+DeploymentArtifact - Generated compose/env/config files per deployment
+
+# Orchestration
+ContainerImage        - Central image entity linked to services, with currentTag/latestTag/autoUpdate
+ContainerImageHistory - Tag deployment history per image (success/failed/rolled_back)
+ServiceDependency     - Deployment order dependencies (health_before, deploy_after)
+DeploymentPlan        - Orchestrated multi-service deployment with auto-rollback
+DeploymentPlanStep    - Individual steps in a deployment plan (deploy/health_check/rollback)
+
+# Data Management
+Database           - Registered database for backups + monitoring (editable after creation)
+DatabaseBackup     - Backup record with status, progress, duration
+DatabaseMetrics    - Time-series database monitoring metrics (JSON blob per collection)
+BackupSchedule     - Cron-based backup scheduling
+ServiceDatabase    - Links services to databases with connection env var
+
+# Monitoring & Metrics
+ServerMetrics      - Time-series server metrics (CPU, memory, disk, load, TCP, FDs)
+ServiceMetrics     - Time-series container metrics (CPU, memory, network, block I/O)
+HealthCheckLog     - Health check results with duration, status, response details
+AgentContainerSnapshot - Agent-reported container discovery data (latest per server)
+AgentProcessSnapshot   - Agent-reported top processes (latest per server)
+AgentEvent         - Agent lifecycle events (deploy, status change, token regen)
+
+# Registry & Images
 RegistryConnection - Container registry with refreshIntervalMinutes, autoLinkPattern
-HealthCheckLog - Health check results with duration, status, response details
+
+# Notifications
+NotificationType       - Notification type definitions with templates, severity, bounce settings
+Notification           - Individual notifications sent to users (in-app, email, webhook)
+NotificationPreference - Per-user, per-type notification channel preferences
+BounceTracker          - Consecutive failure tracking for bounce logic
+
+# Integrations
+SmtpConfig         - SMTP email configuration (singleton-like)
+WebhookConfig      - Outgoing webhook endpoints with filtering
+SlackChannel       - Slack incoming webhook channels
+SlackTypeRouting   - Routes notification types to Slack channels
+
+# Service Topology
+ServiceConnection  - User-defined connections between services/databases (port, protocol, direction)
+DiagramLayout      - Persisted node positions per environment for topology diagram
 
 # Global Settings
 ServiceType        - Predefined service types (Django, Node.js, etc.) with commands
 ServiceTypeCommand - Commands for a service type (shell, migrate, etc.)
 DatabaseType       - Database engine types (PostgreSQL, MySQL, SQLite) with monitoring queries
+DatabaseTypeCommand - Commands for a database type (shell, vacuum, etc.)
 SpacesConfig       - Global DO Spaces credentials
 SpacesEnvironment  - Per-environment Spaces enable/disable
-SystemSettings     - System-wide operational settings (timeouts, limits, retries)
+SystemSettings     - System-wide operational settings (timeouts, limits, retries, URLs)
+
+# Per-Environment Settings (one row each per environment)
+GeneralSettings       - sshUser
+MonitoringSettings    - Intervals, retention, metric toggles, bounce thresholds
+OperationsSettings    - Default docker/metrics modes
+DataSettings          - Backup download, default monitoring settings
+ConfigurationSettings - Secret reveal permissions
 ```
 
 ## UI Features
 
-### Navigation
+### Navigation (Sidebar Groups)
+- **Operations**: Dashboard, Services, Servers, Environment Settings (admin)
+- **Monitoring**: Overview, Servers, Services, Databases, Health Checks, Agents & SSH
+- **Orchestration**: Container Images, Deployment Plans, Registries
+- **Data**: Databases, Secrets, Config Files
 - **Clickable Logo**: Click sidebar logo to navigate to dashboard
 - **My Account Modal**: Click user icon in sidebar to access profile and password change (all users)
+- **Notification Bell**: In-app notification dropdown with unread count
+- **Collapsible Groups**: Sidebar groups collapse/expand, state persisted to localStorage
 
 ### Server Management
 - **Monitoring Card**: Configure metrics mode (disabled/SSH/agent), view real-time metrics
@@ -405,11 +574,28 @@ SystemSettings     - System-wide operational settings (timeouts, limits, retries
 - **Discover Containers**: Auto-discover running Docker containers
 
 ### Service Management
-- **Deploy**: Deploy new image tags with pull
+- **Deploy**: Deploy new image tags with pull, linked to ContainerImage
 - **Health Checks**: Manual health checks with detailed results (container + URL)
+- **Health Check Config**: Per-service health wait, retries, interval for deployment orchestration
+- **TCP/Cert Checks**: Agent-performed TCP port connectivity and TLS certificate expiry checks
+- **Dependencies**: Define deployment order dependencies between services
 - **Health Check History**: View past health check results from audit log
 - **Deployment History**: View past deployments with expandable logs
 - **Config Files**: Attach and sync config files to servers
+- **Compose Templates**: Docker compose template management with placeholder substitution
+
+### Container Image Management (`/container-images`)
+- **Central Image Entity**: One image can be linked to multiple services
+- **Tag History**: Track all deployed tags with success/failure/rollback status
+- **Registry Integration**: Check for updates from linked registries
+- **Auto-Update**: Per-image toggle for automatic deployment on new tags
+- **Deploy All**: Deploy a tag to all linked services via orchestration
+
+### Deployment Orchestration (`/deployment-plans`)
+- **Multi-Service Deployment**: Deploy to multiple services with dependency-aware ordering
+- **Auto-Rollback**: Automatically roll back all services on failure
+- **Step Tracking**: Real-time progress of deploy/health_check/rollback steps
+- **Parallel Execution**: Option to run same-level services in parallel
 
 ### Database Management
 - **Edit Databases**: Edit existing database configurations (name, connection, backup settings)
@@ -417,9 +603,10 @@ SystemSettings     - System-wide operational settings (timeouts, limits, retries
 - **Database Monitoring**: Enable/disable monitoring, configure collection intervals, test connections
 - **Monitoring Queries**: Plugin-driven (defined in database type JSON files), supports PostgreSQL, MySQL, SQLite
 
-### User Management (Admin)
-- **Active Users**: Shows which users are currently online (active in last 15 minutes)
-- **Session Tracking**: lastActiveAt updated on each authenticated request
+### Notifications (`/notifications`)
+- **In-App Inbox**: Notification list with read/unread, filtering by category
+- **Preferences**: Per-user, per-type channel preferences (in-app, email, webhook)
+- **Bounce Logic**: Consecutive failure tracking to avoid alert storms
 
 ### Monitoring Hub (`/monitoring/*`)
 - **Overview** (`/monitoring`): Summary hub with quick stats and links to sub-pages
@@ -432,20 +619,26 @@ SystemSettings     - System-wide operational settings (timeouts, limits, retries
 - Shared components in `ui/src/components/monitoring/` (ChartCard, StatCard, MetricGauge, etc.)
 - Auto-refresh every 30 seconds
 
+### Service Topology (Dashboard)
+- **Interactive Diagram**: Visual service/database topology on the dashboard
+- **Connections**: User-defined connections with port, protocol, direction
+- **Draggable Nodes**: Positions persisted per environment
+- **Server Groups**: Services grouped by server visually
+
 ### Agent Upgrade Indicators
 - Server detail page shows "Update available" badge when deployed agent differs from bundled version
 - Monitoring Agents page shows upgrade status column for all agents
 - Bundled agent version exposed via `/health` and agent status API
 
-### Global Settings (`/settings/*`)
-- **System** (`/settings/system`): SSH timeouts, webhook retries, backup timeouts, limits
-- **Service Types** (`/settings/service-types`): Manage predefined service types and commands
-- **Spaces** (`/settings/spaces`): Global DO Spaces config with per-environment toggles
-
-### About Page
-- App version displayed (baked in at build time via Vite)
-- CLI tool downloads with version info and file sizes
-- Links to all supported platforms (macOS Intel/Silicon, Linux x64/ARM64)
+### Admin Area (`/admin/*`) - Separate Layout
+- **About** (`/admin/about`): App version + CLI tool downloads
+- **System** (`/admin/system`): SSH timeouts, webhook retries, backup timeouts, limits, URLs
+- **Service Types** (`/admin/service-types`): Manage predefined service types and commands
+- **Database Types** (`/admin/database-types`): Manage database type definitions and monitoring queries
+- **Storage** (`/admin/storage`): Global DO Spaces config with per-environment toggles
+- **Users** (`/admin/users`): User management with active status tracking
+- **Audit** (`/admin/audit`): Audit log viewer
+- **Notifications** (`/admin/notifications`): Notification type config, SMTP, Slack channels, webhooks
 
 ## Important Notes
 
@@ -457,6 +650,11 @@ SystemSettings     - System-wide operational settings (timeouts, limits, retries
 - Agent tokens are per-server, generated when enabling agent mode
 - System settings use a cached singleton pattern - call `getSystemSettings()` for current values
 - Health check logs are stored in `HealthCheckLog` with automatic cleanup based on retention settings
+- Notification types are initialized on startup via `initializeNotificationTypes()`
+- Plugins are synced on startup via `syncPlugins()` from the `PLUGINS_DIR` directory
+- Per-environment settings are created eagerly on environment creation via `createDefaultSettings()`
+- Admin pages use a separate layout (`AdminLayout` + `AdminSidebar`) at `/admin/*` routes
+- ContainerImage is required for every Service - central entity for image management
 
 ## UI/UX Guidelines
 
