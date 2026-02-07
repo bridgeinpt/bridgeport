@@ -524,7 +524,8 @@ export async function createDockerClientForServer(
     const { client: sshClient, error } = await createClientForServer(
       server.hostname,
       server.environmentId,
-      getCredentials
+      getCredentials,
+      { serverType: server.serverType }
     );
 
     return {
@@ -540,7 +541,8 @@ export async function createDockerClientForServer(
   const { client: sshClient, error } = await createClientForServer(
     server.hostname,
     server.environmentId,
-    getCredentials
+    getCredentials,
+    { serverType: server.serverType }
   );
 
   if (!sshClient) {

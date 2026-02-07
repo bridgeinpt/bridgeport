@@ -581,7 +581,8 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
       const { client, error: clientError } = await createClientForServer(
         service.server.hostname,
         service.server.environmentId,
-        getEnvironmentSshKey
+        getEnvironmentSshKey,
+        { serverType: service.server.serverType }
       );
       if (!client) {
         return reply.code(400).send({ error: clientError });
@@ -846,7 +847,8 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
       const { client, error: clientError } = await createClientForServer(
         server.hostname,
         server.environmentId,
-        getEnvironmentSshKey
+        getEnvironmentSshKey,
+        { serverType: server.serverType }
       );
 
       if (!client) {
@@ -1007,7 +1009,8 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         const { client, error: clientError } = await createClientForServer(
           server.hostname,
           server.environmentId,
-          getEnvironmentSshKey
+          getEnvironmentSshKey,
+          { serverType: server.serverType }
         );
 
         if (!client) {

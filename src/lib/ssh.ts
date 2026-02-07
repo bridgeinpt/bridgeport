@@ -335,15 +335,76 @@ export interface CreateClientResult {
 }
 
 /**
+ * Detect the Docker host gateway IP from inside the container.
+ * Used when a host-type server is registered as 'localhost' but we need
+ * SSH access to the actual Docker host for file operations.
+ */
+async function detectHostGateway(): Promise<string | null> {
+  // Check for host.docker.internal (Docker Desktop)
+  try {
+    const { stdout } = await execAsync('getent hosts host.docker.internal 2>/dev/null || true', {
+      timeout: 2000,
+    });
+    if (stdout.trim()) {
+      return 'host.docker.internal';
+    }
+  } catch {
+    // Not available
+  }
+
+  // Check /etc/hosts for host-gateway entry (Docker 20.10+)
+  try {
+    const hosts = await readFile('/etc/hosts', 'utf-8');
+    for (const line of hosts.split('\n')) {
+      if (line.includes('host-gateway') || line.includes('host.docker.internal')) {
+        const parts = line.trim().split(/\s+/);
+        if (parts[0] && !parts[0].startsWith('#')) {
+          return parts[0];
+        }
+      }
+    }
+  } catch {
+    // File not accessible
+  }
+
+  // Default Docker bridge gateway
+  return '172.17.0.1';
+}
+
+/**
  * Create appropriate client (SSH or Local) for a server, handling credential lookup.
  * Returns the client or an error message if SSH credentials are not configured.
+ *
+ * For host-type servers with localhost hostname, resolves to the Docker host gateway
+ * IP and uses SSH, since file operations need to target the host filesystem, not the
+ * container's filesystem.
  */
 export async function createClientForServer(
   hostname: string,
   environmentId: string,
-  getCredentials: GetSSHCredentials
+  getCredentials: GetSSHCredentials,
+  options?: { serverType?: string }
 ): Promise<CreateClientResult> {
   if (isLocalhost(hostname)) {
+    // Host-type servers registered as 'localhost' need SSH to the Docker host
+    // for file operations (the LocalClient runs inside the container)
+    if (options?.serverType === 'host') {
+      const gatewayIp = await detectHostGateway();
+      if (!gatewayIp) {
+        return { client: null, error: 'Cannot detect Docker host gateway for file operations' };
+      }
+      const sshCreds = await getCredentials(environmentId);
+      if (!sshCreds) {
+        return { client: null, error: 'SSH key not configured — required for host server file operations' };
+      }
+      return {
+        client: new SSHClient({
+          hostname: gatewayIp,
+          username: sshCreds.username,
+          privateKey: sshCreds.privateKey,
+        }),
+      };
+    }
     return { client: new LocalClient() };
   }
 
