@@ -13,15 +13,6 @@ import ChartCard from '../components/monitoring/ChartCard';
 import TimeRangeSelector from '../components/monitoring/TimeRangeSelector';
 import AutoRefreshToggle from '../components/monitoring/AutoRefreshToggle';
 
-function parseTags(tagsJson: string): string[] {
-  if (!tagsJson) return [];
-  try {
-    return JSON.parse(tagsJson);
-  } catch {
-    return [];
-  }
-}
-
 export default function MonitoringServices() {
   const {
     selectedEnvironment,
@@ -29,8 +20,8 @@ export default function MonitoringServices() {
     setMonitoringTimeRange,
     autoRefreshEnabled,
     setAutoRefreshEnabled,
-    monitoringTagFilter,
-    setMonitoringTagFilter,
+    monitoringServiceFilter,
+    setMonitoringServiceFilter,
   } = useAppStore();
 
   const [servers, setServers] = useState<MetricsSummaryServer[]>([]);
@@ -69,43 +60,38 @@ export default function MonitoringServices() {
     return () => clearInterval(interval);
   }, [selectedEnvironment?.id, monitoringTimeRange, autoRefreshEnabled]);
 
-  // Collect unique tags from all servers
-  const allTags = useMemo(() => {
-    const tagSet = new Set<string>();
-    servers.forEach((server) => {
-      parseTags(server.tags).forEach((tag) => tagSet.add(tag));
-    });
-    return Array.from(tagSet).sort();
-  }, [servers]);
+  // All service names for the filter (from history, sorted)
+  const allServices = useMemo(() => {
+    return serviceMetricsHistory
+      .map((s) => ({ id: s.id, name: s.name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [serviceMetricsHistory]);
 
-  // Convert tag filter to Set for O(1) lookups
-  const tagFilterSet = useMemo(() => new Set(monitoringTagFilter), [monitoringTagFilter]);
+  // Filter by service ID
+  const filterSet = useMemo(() => new Set(monitoringServiceFilter), [monitoringServiceFilter]);
 
-  // Filter servers based on selected tags
   const filteredServers = useMemo(() => {
-    if (tagFilterSet.size === 0) return servers;
-    return servers.filter((server) => {
-      const serverTags = parseTags(server.tags);
-      return serverTags.some((tag) => tagFilterSet.has(tag));
-    });
-  }, [servers, tagFilterSet]);
+    if (filterSet.size === 0) return servers;
+    // Only include servers that have at least one selected service
+    const matchingServerIds = new Set(
+      serviceMetricsHistory.filter((s) => filterSet.has(s.id)).map((s) => s.serverId)
+    );
+    return servers.filter((s) => matchingServerIds.has(s.id));
+  }, [servers, filterSet, serviceMetricsHistory]);
 
-  // Filter service metrics based on selected tags (by server)
   const filteredServiceMetricsHistory = useMemo(() => {
-    if (tagFilterSet.size === 0) return serviceMetricsHistory;
-    const matchingServerIds = new Set(filteredServers.map((s) => s.id));
-    return serviceMetricsHistory.filter((service) => matchingServerIds.has(service.serverId));
-  }, [serviceMetricsHistory, tagFilterSet, filteredServers]);
+    if (filterSet.size === 0) return serviceMetricsHistory;
+    return serviceMetricsHistory.filter((s) => filterSet.has(s.id));
+  }, [serviceMetricsHistory, filterSet]);
 
-  // Stable callback for tag toggle
-  const handleTagToggle = useCallback(
-    (tag: string) => {
-      const newFilter = monitoringTagFilter.includes(tag)
-        ? monitoringTagFilter.filter((t) => t !== tag)
-        : [...monitoringTagFilter, tag];
-      setMonitoringTagFilter(newFilter);
+  const handleFilterToggle = useCallback(
+    (id: string) => {
+      const newFilter = monitoringServiceFilter.includes(id)
+        ? monitoringServiceFilter.filter((i) => i !== id)
+        : [...monitoringServiceFilter, id];
+      setMonitoringServiceFilter(newFilter);
     },
-    [monitoringTagFilter, setMonitoringTagFilter]
+    [monitoringServiceFilter, setMonitoringServiceFilter]
   );
 
   // Prepare chart data for service metrics
@@ -206,26 +192,26 @@ export default function MonitoringServices() {
           onChange={setMonitoringTimeRange}
         />
 
-        {allTags.length > 0 && (
+        {allServices.length > 1 && (
           <div className="flex items-center gap-2">
-            <span className="text-sm text-slate-400">Tags:</span>
+            <span className="text-sm text-slate-400">Services:</span>
             <div className="flex flex-wrap gap-1">
-              {allTags.map((tag) => (
+              {allServices.map((service) => (
                 <button
-                  key={tag}
-                  onClick={() => handleTagToggle(tag)}
+                  key={service.id}
+                  onClick={() => handleFilterToggle(service.id)}
                   className={`px-2 py-1 text-xs rounded-full transition-colors ${
-                    tagFilterSet.has(tag)
+                    filterSet.has(service.id)
                       ? 'bg-brand-600 text-white'
                       : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
                   }`}
                 >
-                  {tag}
+                  {service.name}
                 </button>
               ))}
-              {tagFilterSet.size > 0 && (
+              {filterSet.size > 0 && (
                 <button
-                  onClick={() => setMonitoringTagFilter([])}
+                  onClick={() => setMonitoringServiceFilter([])}
                   className="px-2 py-1 text-xs rounded-full bg-slate-800 text-slate-400 hover:bg-slate-700"
                 >
                   Clear

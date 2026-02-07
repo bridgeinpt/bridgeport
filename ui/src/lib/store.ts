@@ -55,8 +55,12 @@ interface AppState {
   setMonitoringTimeRange: (hours: number) => void;
   autoRefreshEnabled: boolean;
   setAutoRefreshEnabled: (enabled: boolean) => void;
-  monitoringTagFilter: string[];
-  setMonitoringTagFilter: (tags: string[]) => void;
+  monitoringServerFilter: string[];
+  setMonitoringServerFilter: (ids: string[]) => void;
+  monitoringServiceFilter: string[];
+  setMonitoringServiceFilter: (ids: string[]) => void;
+  monitoringDatabaseFilter: string[];
+  setMonitoringDatabaseFilter: (ids: string[]) => void;
 
   // Dashboard alert dismissals (session-only, not persisted)
   dismissedAlerts: string[];
@@ -103,8 +107,12 @@ export const useAppStore = create<AppState>()(
       setMonitoringTimeRange: (hours) => set({ monitoringTimeRange: hours }),
       autoRefreshEnabled: true,
       setAutoRefreshEnabled: (enabled) => set({ autoRefreshEnabled: enabled }),
-      monitoringTagFilter: [],
-      setMonitoringTagFilter: (tags) => set({ monitoringTagFilter: tags }),
+      monitoringServerFilter: [],
+      setMonitoringServerFilter: (ids) => set({ monitoringServerFilter: ids }),
+      monitoringServiceFilter: [],
+      setMonitoringServiceFilter: (ids) => set({ monitoringServiceFilter: ids }),
+      monitoringDatabaseFilter: [],
+      setMonitoringDatabaseFilter: (ids) => set({ monitoringDatabaseFilter: ids }),
 
       // Dashboard alert dismissals (session-only)
       dismissedAlerts: [],
@@ -138,7 +146,9 @@ export const useAppStore = create<AppState>()(
         collapsedGroups: state.collapsedGroups,
         monitoringTimeRange: state.monitoringTimeRange,
         autoRefreshEnabled: state.autoRefreshEnabled,
-        monitoringTagFilter: state.monitoringTagFilter,
+        monitoringServerFilter: state.monitoringServerFilter,
+        monitoringServiceFilter: state.monitoringServiceFilter,
+        monitoringDatabaseFilter: state.monitoringDatabaseFilter,
         // Note: dismissedAlerts NOT persisted (session-only)
         servicesShowUpdatesOnly: state.servicesShowUpdatesOnly,
         configFilesAttachedFilter: state.configFilesAttachedFilter,

@@ -14,15 +14,6 @@ import MetricGauge from '../components/monitoring/MetricGauge';
 import TimeRangeSelector from '../components/monitoring/TimeRangeSelector';
 import AutoRefreshToggle from '../components/monitoring/AutoRefreshToggle';
 
-function parseTags(tagsJson: string): string[] {
-  if (!tagsJson) return [];
-  try {
-    return JSON.parse(tagsJson);
-  } catch {
-    return [];
-  }
-}
-
 export default function MonitoringServers() {
   const {
     selectedEnvironment,
@@ -30,8 +21,8 @@ export default function MonitoringServers() {
     setMonitoringTimeRange,
     autoRefreshEnabled,
     setAutoRefreshEnabled,
-    monitoringTagFilter,
-    setMonitoringTagFilter,
+    monitoringServerFilter,
+    setMonitoringServerFilter,
   } = useAppStore();
 
   const [servers, setServers] = useState<MetricsSummaryServer[]>([]);
@@ -74,45 +65,27 @@ export default function MonitoringServers() {
     return () => clearInterval(interval);
   }, [selectedEnvironment?.id, monitoringTimeRange, autoRefreshEnabled]);
 
-  // Collect unique tags from all servers
-  const allTags = useMemo(() => {
-    const tagSet = new Set<string>();
-    servers.forEach((server) => {
-      parseTags(server.tags).forEach((tag) => tagSet.add(tag));
-    });
-    return Array.from(tagSet).sort();
-  }, [servers]);
+  // Filter by server ID
+  const filterSet = useMemo(() => new Set(monitoringServerFilter), [monitoringServerFilter]);
 
-  // Convert tag filter to Set for O(1) lookups
-  const tagFilterSet = useMemo(() => new Set(monitoringTagFilter), [monitoringTagFilter]);
-
-  // Filter servers based on selected tags
   const filteredServers = useMemo(() => {
-    if (tagFilterSet.size === 0) return servers;
-    return servers.filter((server) => {
-      const serverTags = parseTags(server.tags);
-      return serverTags.some((tag) => tagFilterSet.has(tag));
-    });
-  }, [servers, tagFilterSet]);
+    if (filterSet.size === 0) return servers;
+    return servers.filter((s) => filterSet.has(s.id));
+  }, [servers, filterSet]);
 
-  // Filter metrics history based on selected tags
   const filteredMetricsHistory = useMemo(() => {
-    if (tagFilterSet.size === 0) return metricsHistory;
-    return metricsHistory.filter((server) => {
-      const serverTags = parseTags(server.tags);
-      return serverTags.some((tag) => tagFilterSet.has(tag));
-    });
-  }, [metricsHistory, tagFilterSet]);
+    if (filterSet.size === 0) return metricsHistory;
+    return metricsHistory.filter((s) => filterSet.has(s.id));
+  }, [metricsHistory, filterSet]);
 
-  // Stable callback for tag toggle to avoid creating new closures on each render
-  const handleTagToggle = useCallback(
-    (tag: string) => {
-      const newFilter = monitoringTagFilter.includes(tag)
-        ? monitoringTagFilter.filter((t) => t !== tag)
-        : [...monitoringTagFilter, tag];
-      setMonitoringTagFilter(newFilter);
+  const handleFilterToggle = useCallback(
+    (id: string) => {
+      const newFilter = monitoringServerFilter.includes(id)
+        ? monitoringServerFilter.filter((i) => i !== id)
+        : [...monitoringServerFilter, id];
+      setMonitoringServerFilter(newFilter);
     },
-    [monitoringTagFilter, setMonitoringTagFilter]
+    [monitoringServerFilter, setMonitoringServerFilter]
   );
 
   // Prepare chart data for server metrics - combine all servers into single timeline
@@ -188,26 +161,26 @@ export default function MonitoringServers() {
           onChange={setMonitoringTimeRange}
         />
 
-        {allTags.length > 0 && (
+        {servers.length > 1 && (
           <div className="flex items-center gap-2">
-            <span className="text-sm text-slate-400">Tags:</span>
+            <span className="text-sm text-slate-400">Servers:</span>
             <div className="flex flex-wrap gap-1">
-              {allTags.map((tag) => (
+              {servers.map((server) => (
                 <button
-                  key={tag}
-                  onClick={() => handleTagToggle(tag)}
+                  key={server.id}
+                  onClick={() => handleFilterToggle(server.id)}
                   className={`px-2 py-1 text-xs rounded-full transition-colors ${
-                    tagFilterSet.has(tag)
+                    filterSet.has(server.id)
                       ? 'bg-brand-600 text-white'
                       : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
                   }`}
                 >
-                  {tag}
+                  {server.name}
                 </button>
               ))}
-              {tagFilterSet.size > 0 && (
+              {filterSet.size > 0 && (
                 <button
-                  onClick={() => setMonitoringTagFilter([])}
+                  onClick={() => setMonitoringServerFilter([])}
                   className="px-2 py-1 text-xs rounded-full bg-slate-800 text-slate-400 hover:bg-slate-700"
                 >
                   Clear

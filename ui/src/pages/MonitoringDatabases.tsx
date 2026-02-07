@@ -4,26 +4,15 @@ import { useAppStore } from '../lib/store';
 import {
   getDatabaseMonitoringSummary,
   getDatabaseMetricsHistory,
-  getEnvironmentMetricsSummary,
   type DatabaseMonitoringSummaryItem,
   type DatabaseMetricsHistoryItem,
   type DatabaseQueryMeta,
-  type MetricsSummaryServer,
 } from '../lib/api';
 import { format, formatDistanceToNow } from 'date-fns';
 import ChartCard from '../components/monitoring/ChartCard';
 import TimeRangeSelector from '../components/monitoring/TimeRangeSelector';
 import AutoRefreshToggle from '../components/monitoring/AutoRefreshToggle';
 import { DatabaseIcon } from '../components/Icons';
-
-function parseTags(tagsJson: string): string[] {
-  if (!tagsJson) return [];
-  try {
-    return JSON.parse(tagsJson);
-  } catch {
-    return [];
-  }
-}
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';
@@ -60,14 +49,13 @@ export default function MonitoringDatabases() {
     setMonitoringTimeRange,
     autoRefreshEnabled,
     setAutoRefreshEnabled,
-    monitoringTagFilter,
-    setMonitoringTagFilter,
+    monitoringDatabaseFilter,
+    setMonitoringDatabaseFilter,
   } = useAppStore();
 
   const [summary, setSummary] = useState<DatabaseMonitoringSummaryItem[]>([]);
   const [metricsHistory, setMetricsHistory] = useState<DatabaseMetricsHistoryItem[]>([]);
   const [queryMeta, setQueryMeta] = useState<DatabaseQueryMeta[]>([]);
-  const [servers, setServers] = useState<MetricsSummaryServer[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -77,15 +65,13 @@ export default function MonitoringDatabases() {
     else setLoading(true);
 
     try {
-      const [summaryRes, historyRes, serverRes] = await Promise.all([
+      const [summaryRes, historyRes] = await Promise.all([
         getDatabaseMonitoringSummary(selectedEnvironment.id),
         getDatabaseMetricsHistory(selectedEnvironment.id, monitoringTimeRange),
-        getEnvironmentMetricsSummary(selectedEnvironment.id),
       ]);
       setSummary(summaryRes.databases);
       setMetricsHistory(historyRes.databases);
       setQueryMeta(historyRes.queryMeta);
-      setServers(serverRes.servers);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -102,45 +88,34 @@ export default function MonitoringDatabases() {
     return () => clearInterval(interval);
   }, [selectedEnvironment?.id, monitoringTimeRange, autoRefreshEnabled]);
 
-  // Collect unique tags from servers that have databases
-  const allTags = useMemo(() => {
-    const tagSet = new Set<string>();
-    servers.forEach((server) => {
-      parseTags(server.tags).forEach((tag) => tagSet.add(tag));
-    });
-    return Array.from(tagSet).sort();
-  }, [servers]);
+  // All databases for the filter
+  const allDatabases = useMemo(() => {
+    return summary
+      .map((db) => ({ id: db.id, name: db.name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [summary]);
 
-  const tagFilterSet = useMemo(() => new Set(monitoringTagFilter), [monitoringTagFilter]);
+  // Filter by database ID
+  const filterSet = useMemo(() => new Set(monitoringDatabaseFilter), [monitoringDatabaseFilter]);
 
-  // Filter databases based on selected tags (via server)
   const filteredMetricsHistory = useMemo(() => {
-    if (tagFilterSet.size === 0) return metricsHistory;
-    return metricsHistory.filter((db) => {
-      const dbTags = parseTags(db.serverTags);
-      return dbTags.some((tag) => tagFilterSet.has(tag));
-    });
-  }, [metricsHistory, tagFilterSet]);
+    if (filterSet.size === 0) return metricsHistory;
+    return metricsHistory.filter((db) => filterSet.has(db.id));
+  }, [metricsHistory, filterSet]);
 
   const filteredSummary = useMemo(() => {
-    if (tagFilterSet.size === 0) return summary;
-    // Build set of server IDs matching tags
-    const matchingServerIds = new Set(
-      servers
-        .filter((s) => parseTags(s.tags).some((tag) => tagFilterSet.has(tag)))
-        .map((s) => s.id)
-    );
-    return summary.filter((db) => !db.serverId || matchingServerIds.has(db.serverId));
-  }, [summary, servers, tagFilterSet]);
+    if (filterSet.size === 0) return summary;
+    return summary.filter((db) => filterSet.has(db.id));
+  }, [summary, filterSet]);
 
-  const handleTagToggle = useCallback(
-    (tag: string) => {
-      const newFilter = monitoringTagFilter.includes(tag)
-        ? monitoringTagFilter.filter((t) => t !== tag)
-        : [...monitoringTagFilter, tag];
-      setMonitoringTagFilter(newFilter);
+  const handleFilterToggle = useCallback(
+    (id: string) => {
+      const newFilter = monitoringDatabaseFilter.includes(id)
+        ? monitoringDatabaseFilter.filter((i) => i !== id)
+        : [...monitoringDatabaseFilter, id];
+      setMonitoringDatabaseFilter(newFilter);
     },
-    [monitoringTagFilter, setMonitoringTagFilter]
+    [monitoringDatabaseFilter, setMonitoringDatabaseFilter]
   );
 
   // Prepare chart data for a given query metric
@@ -283,26 +258,26 @@ export default function MonitoringDatabases() {
           onChange={setMonitoringTimeRange}
         />
 
-        {allTags.length > 0 && (
+        {allDatabases.length > 1 && (
           <div className="flex items-center gap-2">
-            <span className="text-sm text-slate-400">Tags:</span>
+            <span className="text-sm text-slate-400">Databases:</span>
             <div className="flex flex-wrap gap-1">
-              {allTags.map((tag) => (
+              {allDatabases.map((db) => (
                 <button
-                  key={tag}
-                  onClick={() => handleTagToggle(tag)}
+                  key={db.id}
+                  onClick={() => handleFilterToggle(db.id)}
                   className={`px-2 py-1 text-xs rounded-full transition-colors ${
-                    tagFilterSet.has(tag)
+                    filterSet.has(db.id)
                       ? 'bg-brand-600 text-white'
                       : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
                   }`}
                 >
-                  {tag}
+                  {db.name}
                 </button>
               ))}
-              {tagFilterSet.size > 0 && (
+              {filterSet.size > 0 && (
                 <button
-                  onClick={() => setMonitoringTagFilter([])}
+                  onClick={() => setMonitoringDatabaseFilter([])}
                   className="px-2 py-1 text-xs rounded-full bg-slate-800 text-slate-400 hover:bg-slate-700"
                 >
                   Clear
