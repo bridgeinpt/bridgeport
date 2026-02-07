@@ -499,6 +499,7 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
       const dataUrl = await toPng(viewport, {
         backgroundColor: '#0f172a',
         pixelRatio: 2,
+        skipFonts: true,
       });
       const a = document.createElement('a');
       a.href = dataUrl;
