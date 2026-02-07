@@ -1,5 +1,5 @@
 import { memo, useState, useCallback } from 'react';
-import { type NodeProps } from '@xyflow/react';
+import { Handle, Position, type NodeProps } from '@xyflow/react';
 
 export interface ServerGroupNodeData {
   label: string;
@@ -73,6 +73,9 @@ function ServerGroupNodeComponent({ data }: NodeProps) {
           {/* Child nodes are positioned by React Flow inside this parent */}
         </div>
       )}
+      {/* Handles for aggregated edges when collapsed */}
+      <Handle type="target" position={Position.Left} className="!bg-slate-500 !w-2 !h-2 !border-slate-700" style={{ opacity: nodeData.collapsed ? 1 : 0 }} />
+      <Handle type="source" position={Position.Right} className="!bg-slate-500 !w-2 !h-2 !border-slate-700" style={{ opacity: nodeData.collapsed ? 1 : 0 }} />
     </div>
   );
 }

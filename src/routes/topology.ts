@@ -159,14 +159,16 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
       });
 
       if (!layout) {
-        return { environmentId, positions: {} };
+        return { layout: null };
       }
 
       return {
-        id: layout.id,
-        environmentId: layout.environmentId,
-        positions: JSON.parse(layout.positions),
-        updatedAt: layout.updatedAt,
+        layout: {
+          id: layout.id,
+          environmentId: layout.environmentId,
+          positions: JSON.parse(layout.positions),
+          updatedAt: layout.updatedAt,
+        },
       };
     }
   );
@@ -198,10 +200,12 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
       });
 
       return {
-        id: layout.id,
-        environmentId: layout.environmentId,
-        positions: JSON.parse(layout.positions),
-        updatedAt: layout.updatedAt,
+        layout: {
+          id: layout.id,
+          environmentId: layout.environmentId,
+          positions: JSON.parse(layout.positions),
+          updatedAt: layout.updatedAt,
+        },
       };
     }
   );
@@ -291,9 +295,7 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
         lines.push(`  ${sourceId} ${arrow}${label} ${targetId}`);
       }
 
-      return reply
-        .header('Content-Type', 'text/plain; charset=utf-8')
-        .send(lines.join('\n'));
+      return { mermaid: lines.join('\n') };
     }
   );
 }

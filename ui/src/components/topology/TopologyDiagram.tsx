@@ -28,6 +28,7 @@ import type { ServerWithServices, Database, UserRole, ExposedPort, ServiceConnec
 import { listConnections, deleteConnection, getDiagramLayout, saveDiagramLayout, exportDiagramMermaid } from '../../lib/api';
 import { inferConnections, mergeConnections, aggregateCollapsedEdges, type TopologyEdge } from '../../lib/topology';
 import { EmptyState } from '../EmptyState';
+import { toPng } from 'html-to-image';
 
 function downloadFile(filename: string, content: string, mimeType: string) {
   const blob = new Blob([content], { type: mimeType });
@@ -311,6 +312,21 @@ function topologyEdgesToReactFlow(
   });
 }
 
+const reactFlowDarkStyles = `
+.react-flow__controls-button {
+  background: #1e293b !important;
+  border-color: #334155 !important;
+  fill: #94a3b8 !important;
+}
+.react-flow__controls-button:hover {
+  background: #334155 !important;
+  fill: #f1f5f9 !important;
+}
+.react-flow__controls-button svg {
+  fill: inherit !important;
+}
+`;
+
 function DiagramInner({ servers, databases, environmentId, userRole }: TopologyDiagramProps) {
   const [mode, setMode] = useState<DiagramMode>('compact');
   const [collapsedServers, setCollapsedServers] = useState<Set<string>>(new Set());
@@ -435,15 +451,22 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     }
   }, [environmentId]);
 
-  const handleExportSvg = useCallback(() => {
+  const handleExportPng = useCallback(async () => {
     setShowExportMenu(false);
-    const viewport = document.querySelector('.react-flow__viewport') as SVGElement | null;
+    const viewport = document.querySelector('.react-flow__viewport') as HTMLElement | null;
     if (!viewport) return;
-    const svgEl = viewport.closest('svg');
-    if (!svgEl) return;
-    const clone = svgEl.cloneNode(true) as SVGElement;
-    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-    downloadFile('topology.svg', clone.outerHTML, 'image/svg+xml');
+    try {
+      const dataUrl = await toPng(viewport, {
+        backgroundColor: '#0f172a',
+        pixelRatio: 2,
+      });
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = 'topology.png';
+      a.click();
+    } catch {
+      // Export failed silently
+    }
   }, []);
 
   const { nodes, serviceToServer, databaseToServer } = useMemo(
@@ -458,8 +481,11 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     return topologyEdgesToReactFlow(aggregated, canInteract ? handleDeleteConnection : undefined);
   }, [servers, databases, manualConnections, collapsedServers, serviceToServer, databaseToServer, canInteract, handleDeleteConnection]);
 
-  const [, , onNodesChange] = useNodesState(nodes);
-  const [, , onEdgesChange] = useEdgesState(edges);
+  const [flowNodes, setFlowNodes, onNodesChange] = useNodesState(nodes);
+  const [flowEdges, setFlowEdges, onEdgesChange] = useEdgesState(edges);
+
+  useEffect(() => { setFlowNodes(nodes); }, [nodes, setFlowNodes]);
+  useEffect(() => { setFlowEdges(edges); }, [edges, setFlowEdges]);
 
   const heightClass = mode === 'compact' ? 'h-[350px]' : mode === 'expanded' ? 'h-[700px]' : '';
   const totalServices = servers.reduce((acc, s) => acc + s.services.length, 0);
@@ -481,8 +507,8 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
   }
 
   const flowProps = {
-    nodes,
-    edges,
+    nodes: flowNodes,
+    edges: flowEdges,
     onNodesChange: canInteract ? onNodesChange : undefined,
     onEdgesChange,
     onNodeDragStop: canInteract ? handleNodeDragStop : undefined,
@@ -498,6 +524,7 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
   if (mode === 'fullscreen') {
     return (
       <>
+        <style>{reactFlowDarkStyles}</style>
         <div className="fixed inset-0 bg-slate-900 z-50 flex flex-col">
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700">
             <div className="flex items-center gap-3">
@@ -527,8 +554,8 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
                     <button onClick={handleExportMermaid} className="w-full text-left px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-700">
                       Mermaid (.md)
                     </button>
-                    <button onClick={handleExportSvg} className="w-full text-left px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-700">
-                      SVG (.svg)
+                    <button onClick={handleExportPng} className="w-full text-left px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-700">
+                      PNG (.png)
                     </button>
                   </div>
                 )}
@@ -588,6 +615,7 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
 
   return (
     <>
+      <style>{reactFlowDarkStyles}</style>
       <div className="panel">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
@@ -617,8 +645,8 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
                   <button onClick={handleExportMermaid} className="w-full text-left px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-700">
                     Mermaid (.md)
                   </button>
-                  <button onClick={handleExportSvg} className="w-full text-left px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-700">
-                    SVG (.svg)
+                  <button onClick={handleExportPng} className="w-full text-left px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-700">
+                    PNG (.png)
                   </button>
                 </div>
               )}
