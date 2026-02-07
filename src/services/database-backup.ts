@@ -348,7 +348,7 @@ function toOutput(db: {
 
 export async function createBackup(
   databaseId: string,
-  triggeredById: string,
+  triggeredById: string | null,
   type: 'manual' | 'scheduled' = 'manual'
 ): Promise<{ backupId: string }> {
   const db = await prisma.database.findUnique({
@@ -384,7 +384,7 @@ export async function createBackup(
         ? `${db.backupLocalPath || '/var/backups'}/${filename}`
         : `${db.backupSpacesPrefix || ''}${filename}`,
       databaseId,
-      triggeredById,
+      triggeredById: triggeredById || undefined,
       progress: 0,
     },
   });
@@ -847,10 +847,11 @@ export async function setBackupSchedule(
   retentionDays: number = 7,
   enabled: boolean = true
 ) {
+  const nextRunAt = enabled ? getNextRunTime(cronExpression, new Date()) : null;
   return prisma.backupSchedule.upsert({
     where: { databaseId },
-    update: { cronExpression, retentionDays, enabled },
-    create: { databaseId, cronExpression, retentionDays, enabled },
+    update: { cronExpression, retentionDays, enabled, nextRunAt },
+    create: { databaseId, cronExpression, retentionDays, enabled, nextRunAt },
   });
 }
 
@@ -977,8 +978,8 @@ export async function checkDueBackups(): Promise<void> {
           data: { lastRunAt: now, nextRunAt: getNextRunTime(schedule.cronExpression, now) },
         });
 
-        // Create backup (uses 'scheduler' as the trigger user ID)
-        await createBackup(schedule.databaseId, 'scheduler', 'scheduled');
+        // Create backup (null triggeredById for scheduler-triggered backups)
+        await createBackup(schedule.databaseId, null, 'scheduled');
 
         // Clean up old backups based on retention policy
         await enforceRetention(schedule.databaseId, schedule.retentionDays);
