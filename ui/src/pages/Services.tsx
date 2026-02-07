@@ -1,16 +1,17 @@
 import { useEffect, useState, useMemo, lazy, Suspense } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { useAppStore } from '../lib/store.js';
-import { getEnvironment, deployService, getDependencyGraph, type Service, type ExposedPort, type DependencyGraphNode, type DependencyGraphEdge } from '../lib/api.js';
+import { useAppStore, useAuthStore, isAdmin } from '../lib/store.js';
+import { getEnvironment, deployService, checkServiceHealth, deleteService, getDependencyGraph, type Service, type ExposedPort, type DependencyGraphNode, type DependencyGraphEdge } from '../lib/api.js';
 import { formatDistanceToNow } from 'date-fns';
 import { getContainerStatusColor, getHealthStatusColor } from '../lib/status.js';
-import { RefreshIcon, CubeIcon } from '../components/Icons.js';
+import { RefreshIcon, CubeIcon, HeartPulseIcon, TrashIcon } from '../components/Icons.js';
 import { useToast } from '../components/Toast.js';
 import Pagination from '../components/Pagination.js';
 import { usePagination } from '../hooks/usePagination.js';
 import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { OperationResultsModal, type OperationResult } from '../components/OperationResultsModal.js';
+import { Modal } from '../components/Modal.js';
 
 // Lazy load DependencyFlow to avoid loading @xyflow/react (~80KB) until needed
 const DependencyFlow = lazy(() =>
@@ -45,6 +46,7 @@ type TabType = 'list' | 'dependencies';
 
 export default function Services() {
   const { selectedEnvironment, servicesShowUpdatesOnly, setServicesShowUpdatesOnly } = useAppStore();
+  const { user } = useAuthStore();
   const location = useLocation();
   const navigate = useNavigate();
   const toast = useToast();
@@ -68,6 +70,11 @@ export default function Services() {
   const [bulkDeploying, setBulkDeploying] = useState(false);
   const [deployResults, setDeployResults] = useState<OperationResult[] | null>(null);
   const [showDeployResults, setShowDeployResults] = useState(false);
+
+  // Action state
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [serviceToDelete, setServiceToDelete] = useState<ServiceWithServer | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   // Dependency graph data
   const [dependencyNodes, setDependencyNodes] = useState<Map<string, DependencyGraphNode>>(new Map());
@@ -175,6 +182,51 @@ export default function Services() {
     }
   };
 
+  const reloadServices = async () => {
+    if (!selectedEnvironment?.id) return;
+    const { environment } = await getEnvironment(selectedEnvironment.id);
+    const allServices: ServiceWithServer[] = [];
+    environment.servers.forEach((server) => {
+      server.services.forEach((svc) => {
+        allServices.push({ ...svc, serverName: server.name });
+      });
+    });
+    setServices(allServices);
+  };
+
+  const handleHealthCheck = async (serviceId: string) => {
+    setActionLoading(serviceId);
+    try {
+      const result = await checkServiceHealth(serviceId);
+      setServices((prev) =>
+        prev.map((s) =>
+          s.id === serviceId
+            ? { ...s, healthStatus: result.healthStatus, containerStatus: result.containerStatus, lastCheckedAt: new Date().toISOString() }
+            : s
+        )
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Health check failed');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!serviceToDelete) return;
+    setDeleting(true);
+    try {
+      await deleteService(serviceToDelete.id);
+      setServices((prev) => prev.filter((s) => s.id !== serviceToDelete.id));
+      toast.success(`Service "${serviceToDelete.name}" deleted`);
+      setServiceToDelete(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to delete service');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   // Pagination
   const {
     paginatedData,
@@ -244,6 +296,41 @@ export default function Services() {
           Dependencies
         </button>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      <Modal
+        isOpen={!!serviceToDelete}
+        onClose={() => setServiceToDelete(null)}
+        title="Delete Service"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <p className="text-slate-300">
+            Are you sure you want to delete <span className="font-semibold text-white">{serviceToDelete?.name}</span>?
+          </p>
+          <p className="text-sm text-slate-400">
+            This will remove the service from BridgePort. The container will not be stopped or removed. This action cannot be undone.
+          </p>
+          <div className="flex gap-2 justify-end">
+            <button
+              type="button"
+              onClick={() => setServiceToDelete(null)}
+              className="btn btn-ghost"
+              disabled={deleting}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={deleting}
+              className="btn bg-red-600 hover:bg-red-700 text-white"
+            >
+              {deleting ? 'Deleting...' : 'Delete Service'}
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Bulk Deploy Results Modal */}
       <OperationResultsModal
@@ -371,18 +458,7 @@ export default function Services() {
                               pullImage: true,
                             }).then(() => {
                               toast.success(`Deployed ${service.name} to ${service.latestAvailableTag}`);
-                              // Reload
-                              if (selectedEnvironment?.id) {
-                                getEnvironment(selectedEnvironment.id).then(({ environment }) => {
-                                  const allServices: ServiceWithServer[] = [];
-                                  environment.servers.forEach((server) => {
-                                    server.services.forEach((svc) => {
-                                      allServices.push({ ...svc, serverName: server.name });
-                                    });
-                                  });
-                                  setServices(allServices);
-                                });
-                              }
+                              reloadServices();
                             }).catch((err) => {
                               toast.error(err instanceof Error ? err.message : 'Deploy failed');
                             });
@@ -390,6 +466,23 @@ export default function Services() {
                           className="btn btn-primary text-sm"
                         >
                           Deploy {service.latestAvailableTag}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => handleHealthCheck(service.id)}
+                        disabled={actionLoading === service.id}
+                        className="p-1.5 text-slate-400 hover:text-white rounded"
+                        title="Health Check"
+                      >
+                        <HeartPulseIcon className="w-4 h-4" />
+                      </button>
+                      {isAdmin(user) && (
+                        <button
+                          onClick={() => setServiceToDelete(service)}
+                          className="p-1.5 text-slate-400 hover:text-red-400 rounded"
+                          title="Delete"
+                        >
+                          <TrashIcon className="w-4 h-4" />
                         </button>
                       )}
                     </div>
