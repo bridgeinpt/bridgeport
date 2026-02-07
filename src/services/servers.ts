@@ -108,11 +108,25 @@ export async function getServer(serverId: string): Promise<ServerWithServices | 
   });
 }
 
-export async function listServers(environmentId: string): Promise<Server[]> {
-  return prisma.server.findMany({
-    where: { environmentId },
-    orderBy: { name: 'asc' },
-  });
+export async function listServers(
+  environmentId: string,
+  options?: { limit?: number; offset?: number }
+): Promise<{ servers: Server[]; total: number }> {
+  const limit = options?.limit ?? 25;
+  const offset = options?.offset ?? 0;
+  const where = { environmentId };
+
+  const [servers, total] = await Promise.all([
+    prisma.server.findMany({
+      where,
+      orderBy: { name: 'asc' },
+      take: limit,
+      skip: offset,
+    }),
+    prisma.server.count({ where }),
+  ]);
+
+  return { servers, total };
 }
 
 export async function deleteServer(serverId: string): Promise<void> {

@@ -71,8 +71,11 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request) => {
       const { envId } = request.params as { envId: string };
-      const databases = await listDatabases(envId);
-      return { databases };
+      const { limit, offset } = request.query as { limit?: string; offset?: string };
+      return listDatabases(envId, {
+        limit: limit ? parseInt(limit) : 25,
+        offset: offset ? parseInt(offset) : 0,
+      });
     }
   );
 

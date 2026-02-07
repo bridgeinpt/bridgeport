@@ -94,7 +94,7 @@ export default function Dashboard() {
           }
           try {
             const [backupsRes, scheduleRes] = await Promise.all([
-              listDatabaseBackups(db.id),
+              listDatabaseBackups(db.id, 1, 0),
               getBackupSchedule(db.id),
             ]);
             const completedBackups = backupsRes.backups.filter(b => b.status === 'completed');

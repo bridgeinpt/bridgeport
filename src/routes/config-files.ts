@@ -39,37 +39,46 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
     { preHandler: [fastify.authenticate] },
     async (request) => {
       const { envId } = request.params as { envId: string };
+      const { limit: limitStr, offset: offsetStr } = request.query as { limit?: string; offset?: string };
+      const limit = limitStr ? parseInt(limitStr) : 25;
+      const offset = offsetStr ? parseInt(offsetStr) : 0;
+      const where = { environmentId: envId };
 
-      const configFiles = await prisma.configFile.findMany({
-        where: { environmentId: envId },
-        select: {
-          id: true,
-          name: true,
-          filename: true,
-          description: true,
-          isBinary: true,
-          mimeType: true,
-          fileSize: true,
-          createdAt: true,
-          updatedAt: true,
-          _count: { select: { services: true } },
-          services: {
-            select: {
-              id: true,
-              targetPath: true,
-              lastSyncedAt: true,
-              service: {
-                select: {
-                  id: true,
-                  name: true,
-                  server: { select: { id: true, name: true } },
+      const [configFiles, total] = await Promise.all([
+        prisma.configFile.findMany({
+          where,
+          select: {
+            id: true,
+            name: true,
+            filename: true,
+            description: true,
+            isBinary: true,
+            mimeType: true,
+            fileSize: true,
+            createdAt: true,
+            updatedAt: true,
+            _count: { select: { services: true } },
+            services: {
+              select: {
+                id: true,
+                targetPath: true,
+                lastSyncedAt: true,
+                service: {
+                  select: {
+                    id: true,
+                    name: true,
+                    server: { select: { id: true, name: true } },
+                  },
                 },
               },
             },
           },
-        },
-        orderBy: { name: 'asc' },
-      });
+          orderBy: { name: 'asc' },
+          take: limit,
+          skip: offset,
+        }),
+        prisma.configFile.count({ where }),
+      ]);
 
       // Compute sync status for each config file
       const configFilesWithSyncStatus = configFiles.map((file) => {
@@ -112,7 +121,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         };
       });
 
-      return { configFiles: configFilesWithSyncStatus };
+      return { configFiles: configFilesWithSyncStatus, total };
     }
   );
 

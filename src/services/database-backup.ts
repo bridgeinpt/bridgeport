@@ -244,42 +244,56 @@ export async function getDatabase(id: string): Promise<DatabaseOutput | null> {
   return db ? toOutput(db) : null;
 }
 
-export async function listDatabases(environmentId: string): Promise<DatabaseOutput[]> {
-  const dbs = await prisma.database.findMany({
-    where: { environmentId },
-    orderBy: { name: 'asc' },
-    include: {
-      _count: { select: { backups: true, services: true } },
-      databaseType: { select: { id: true, name: true, displayName: true, backupCommand: true } },
-      backups: {
-        orderBy: { createdAt: 'desc' },
-        take: 1,
-        select: {
-          id: true,
-          status: true,
-          type: true,
-          createdAt: true,
-          completedAt: true,
-          error: true,
-        },
-      },
-      schedule: {
-        select: {
-          enabled: true,
-          cronExpression: true,
-          lastRunAt: true,
-          nextRunAt: true,
-        },
-      },
-    },
-  });
+export async function listDatabases(
+  environmentId: string,
+  options?: { limit?: number; offset?: number }
+): Promise<{ databases: DatabaseOutput[]; total: number }> {
+  const limit = options?.limit ?? 25;
+  const offset = options?.offset ?? 0;
+  const where = { environmentId };
 
-  return dbs.map((db) => {
+  const [dbs, total] = await Promise.all([
+    prisma.database.findMany({
+      where,
+      orderBy: { name: 'asc' },
+      take: limit,
+      skip: offset,
+      include: {
+        _count: { select: { backups: true, services: true } },
+        databaseType: { select: { id: true, name: true, displayName: true, backupCommand: true } },
+        backups: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: {
+            id: true,
+            status: true,
+            type: true,
+            createdAt: true,
+            completedAt: true,
+            error: true,
+          },
+        },
+        schedule: {
+          select: {
+            enabled: true,
+            cronExpression: true,
+            lastRunAt: true,
+            nextRunAt: true,
+          },
+        },
+      },
+    }),
+    prisma.database.count({ where }),
+  ]);
+
+  const databases = dbs.map((db) => {
     const output = toOutput(db);
     output.lastBackup = db.backups[0] || null;
     output.schedule = db.schedule || null;
     return output;
   });
+
+  return { databases, total };
 }
 
 export async function deleteDatabase(id: string): Promise<void> {

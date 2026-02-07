@@ -20,7 +20,6 @@ import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { getSyncStatusColor } from '../lib/status.js';
 import { RefreshIcon } from '../components/Icons.js';
 import Pagination from '../components/Pagination.js';
-import { usePagination } from '../hooks/usePagination.js';
 import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { OperationResultsModal, type OperationResult } from '../components/OperationResultsModal.js';
@@ -65,19 +64,24 @@ export default function ConfigFiles() {
   const [syncingFile, setSyncingFile] = useState<ConfigFile | null>(null);
   const [syncResults, setSyncResults] = useState<OperationResult[] | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<ConfigFile | null>(null);
+  const [totalItems, setTotalItems] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   useEffect(() => {
     if (selectedEnvironment?.id) {
       loadConfigFiles();
     }
-  }, [selectedEnvironment?.id]);
+  }, [selectedEnvironment?.id, currentPage, pageSize]);
 
   const loadConfigFiles = async () => {
     if (!selectedEnvironment?.id) return;
     setLoading(true);
     try {
-      const configFilesRes = await listConfigFiles(selectedEnvironment.id);
+      const offset = (currentPage - 1) * pageSize;
+      const configFilesRes = await listConfigFiles(selectedEnvironment.id, { limit: pageSize, offset });
       setConfigFiles(configFilesRes.configFiles);
+      setTotalItems(configFilesRes.total);
 
       // Build unique service options from config file attachments
       const serviceMap = new Map<string, ServiceOption>();
@@ -107,13 +111,13 @@ export default function ConfigFiles() {
     if (!selectedEnvironment?.id) return;
     setCreating(true);
     try {
-      const { configFile } = await createConfigFile(selectedEnvironment.id, {
+      await createConfigFile(selectedEnvironment.id, {
         name: newName,
         filename: newFilename,
         content: newContent,
         description: newDescription || undefined,
       });
-      setConfigFiles((prev) => [...prev, configFile]);
+      await loadConfigFiles();
       setShowCreate(false);
       setNewName('');
       setNewFilename('');
@@ -126,23 +130,21 @@ export default function ConfigFiles() {
 
   const handleEdit = async () => {
     if (!editingFile) return;
-    const { configFile } = await updateConfigFile(editingFile.id, {
+    await updateConfigFile(editingFile.id, {
       content: editContent,
       description: editDescription || undefined,
     });
-    setConfigFiles((prev) =>
-      prev.map((f) => (f.id === configFile.id ? { ...configFile, _count: f._count } : f))
-    );
     setEditingFile(null);
     setEditContent('');
     setEditDescription('');
+    await loadConfigFiles();
   };
 
   const handleDelete = async () => {
     if (!deleteConfirm) return;
     await deleteConfigFile(deleteConfirm.id);
-    setConfigFiles((prev) => prev.filter((f) => f.id !== deleteConfirm.id));
     setDeleteConfirm(null);
+    await loadConfigFiles();
   };
 
   const handleSyncAll = async (file: ConfigFile) => {
@@ -199,15 +201,13 @@ export default function ConfigFiles() {
   const handleRestore = async () => {
     if (!historyFile || !restoreConfirm) return;
 
-    const { configFile } = await restoreConfigFile(historyFile.id, restoreConfirm.id);
-    setConfigFiles((prev) =>
-      prev.map((f) => (f.id === configFile.id ? { ...configFile, _count: f._count, syncStatus: f.syncStatus, syncCounts: f.syncCounts } : f))
-    );
+    await restoreConfigFile(historyFile.id, restoreConfirm.id);
     // Reload history to show the new entry
     const { history: updatedHistory } = await getConfigFileHistory(historyFile.id);
     setHistory(updatedHistory);
     setSelectedHistoryEntry(null);
     setRestoreConfirm(null);
+    await loadConfigFiles();
   };
 
   const handleUpload = async (e: React.FormEvent) => {
@@ -215,14 +215,14 @@ export default function ConfigFiles() {
     if (!selectedEnvironment?.id || !uploadFile) return;
     setUploading(true);
     try {
-      const { configFile } = await uploadAssetFile(
+      await uploadAssetFile(
         selectedEnvironment.id,
         uploadFile,
         uploadName,
         uploadFilename || uploadFile.name,
         uploadDescription || undefined
       );
-      setConfigFiles((prev) => [...prev, configFile]);
+      await loadConfigFiles();
       setShowUpload(false);
       setUploadFile(null);
       setUploadName('');
@@ -256,16 +256,7 @@ export default function ConfigFiles() {
     return true;
   });
 
-  // Pagination
-  const {
-    paginatedData,
-    currentPage,
-    totalPages,
-    totalItems,
-    pageSize,
-    setPage,
-    setPageSize,
-  } = usePagination({ data: filteredConfigFiles, defaultPageSize: 25 });
+  const totalPages = Math.ceil(totalItems / pageSize);
 
   if (!selectedEnvironment) {
     return (
@@ -787,7 +778,7 @@ export default function ConfigFiles() {
 
       {/* Config Files Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {paginatedData.map((file) => (
+        {filteredConfigFiles.map((file) => (
           <div key={file.id} className="panel hover:border-slate-600 transition-colors">
             <div className="flex items-start justify-between mb-2">
               <div className="flex-1 min-w-0">
@@ -885,7 +876,7 @@ export default function ConfigFiles() {
           </div>
         )}
 
-        {configFiles.length === 0 && (
+        {totalItems === 0 && (
           <div className="col-span-full">
             <EmptyState
               message="No config files yet"
@@ -895,14 +886,14 @@ export default function ConfigFiles() {
           </div>
         )}
       </div>
-      {filteredConfigFiles.length > 0 && (
+      {totalItems > 0 && (
         <Pagination
           currentPage={currentPage}
           totalPages={totalPages}
           totalItems={totalItems}
           pageSize={pageSize}
-          onPageChange={setPage}
-          onPageSizeChange={setPageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={(size) => { setPageSize(size); setCurrentPage(1); }}
         />
       )}
     </div>

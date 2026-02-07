@@ -1,13 +1,12 @@
 import { useEffect, useState, useMemo, lazy, Suspense } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAppStore, useAuthStore, isAdmin } from '../lib/store.js';
-import { getEnvironment, deployService, checkServiceHealth, deleteService, getDependencyGraph, type Service, type ExposedPort, type DependencyGraphNode, type DependencyGraphEdge } from '../lib/api.js';
+import { listServices, deployService, checkServiceHealth, deleteService, getDependencyGraph, type Service, type ExposedPort, type DependencyGraphNode, type DependencyGraphEdge } from '../lib/api.js';
 import { formatDistanceToNow } from 'date-fns';
 import { getContainerStatusColor, getHealthStatusColor } from '../lib/status.js';
 import { RefreshIcon, CubeIcon, HeartPulseIcon, TrashIcon } from '../components/Icons.js';
 import { useToast } from '../components/Toast.js';
 import Pagination from '../components/Pagination.js';
-import { usePagination } from '../hooks/usePagination.js';
 import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { OperationResultsModal, type OperationResult } from '../components/OperationResultsModal.js';
@@ -20,6 +19,7 @@ const DependencyFlow = lazy(() =>
 
 interface ServiceWithServer extends Service {
   serverName: string;
+  server?: { id: string; name: string };
 }
 
 function parseExposedPorts(portsJson: string | null): ExposedPort[] {
@@ -58,6 +58,9 @@ export default function Services() {
   };
 
   const [services, setServices] = useState<ServiceWithServer[]>([]);
+  const [totalItems, setTotalItems] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const [loading, setLoading] = useState(true);
 
   const activeTab = getTabFromHash();
@@ -85,21 +88,18 @@ export default function Services() {
   useEffect(() => {
     if (selectedEnvironment?.id) {
       setLoading(true);
+      const offset = (currentPage - 1) * pageSize;
       Promise.all([
-        getEnvironment(selectedEnvironment.id),
+        listServices(selectedEnvironment.id, { limit: pageSize, offset }),
         getDependencyGraph(selectedEnvironment.id).catch(() => ({ nodes: [], edges: [], deploymentOrder: [] })),
       ])
-        .then(([{ environment }, graph]) => {
-          const allServices: ServiceWithServer[] = [];
-          environment.servers.forEach((server) => {
-            server.services.forEach((service) => {
-              allServices.push({
-                ...service,
-                serverName: server.name,
-              });
-            });
-          });
+        .then(([servicesRes, graph]) => {
+          const allServices: ServiceWithServer[] = servicesRes.services.map((svc) => ({
+            ...svc,
+            serverName: svc.server?.name || '',
+          }));
           setServices(allServices);
+          setTotalItems(servicesRes.total);
 
           // Store full graph data for visualization
           setGraphNodes(graph.nodes);
@@ -113,7 +113,7 @@ export default function Services() {
         })
         .finally(() => setLoading(false));
     }
-  }, [selectedEnvironment?.id]);
+  }, [selectedEnvironment?.id, currentPage, pageSize]);
 
   // Services with available updates (memoized)
   const servicesWithUpdates = useMemo(
@@ -164,14 +164,10 @@ export default function Services() {
 
     // Reload services
     if (selectedEnvironment?.id) {
-      const { environment } = await getEnvironment(selectedEnvironment.id);
-      const allServices: ServiceWithServer[] = [];
-      environment.servers.forEach((server) => {
-        server.services.forEach((service) => {
-          allServices.push({ ...service, serverName: server.name });
-        });
-      });
-      setServices(allServices);
+      const offset = (currentPage - 1) * pageSize;
+      const res = await listServices(selectedEnvironment.id, { limit: pageSize, offset });
+      setServices(res.services.map((svc) => ({ ...svc, serverName: svc.server?.name || '' })));
+      setTotalItems(res.total);
     }
 
     const successCount = results.filter((r) => r.success).length;
@@ -184,14 +180,10 @@ export default function Services() {
 
   const reloadServices = async () => {
     if (!selectedEnvironment?.id) return;
-    const { environment } = await getEnvironment(selectedEnvironment.id);
-    const allServices: ServiceWithServer[] = [];
-    environment.servers.forEach((server) => {
-      server.services.forEach((svc) => {
-        allServices.push({ ...svc, serverName: server.name });
-      });
-    });
-    setServices(allServices);
+    const offset = (currentPage - 1) * pageSize;
+    const res = await listServices(selectedEnvironment.id, { limit: pageSize, offset });
+    setServices(res.services.map((svc) => ({ ...svc, serverName: svc.server?.name || '' })));
+    setTotalItems(res.total);
   };
 
   const handleHealthCheck = async (serviceId: string) => {
@@ -217,7 +209,7 @@ export default function Services() {
     setDeleting(true);
     try {
       await deleteService(serviceToDelete.id);
-      setServices((prev) => prev.filter((s) => s.id !== serviceToDelete.id));
+      await reloadServices();
       toast.success(`Service "${serviceToDelete.name}" deleted`);
       setServiceToDelete(null);
     } catch (error) {
@@ -227,16 +219,7 @@ export default function Services() {
     }
   };
 
-  // Pagination
-  const {
-    paginatedData,
-    currentPage,
-    totalPages,
-    totalItems,
-    pageSize,
-    setPage,
-    setPageSize,
-  } = usePagination({ data: filteredServices, defaultPageSize: 25 });
+  const totalPages = Math.ceil(totalItems / pageSize);
 
   if (loading) {
     return <LoadingSkeleton rows={3} rowHeight="h-20" />;
@@ -363,7 +346,7 @@ export default function Services() {
       <div className="space-y-4">
         {filteredServices.length > 0 ? (
           <>
-            {paginatedData.map((service) => {
+            {filteredServices.map((service) => {
               const ports = parseExposedPorts(service.exposedPorts);
               const hasUpdate = service.latestAvailableTag && service.latestAvailableTag !== service.imageTag;
               const depNode = dependencyNodes.get(service.id);
@@ -495,8 +478,8 @@ export default function Services() {
               totalPages={totalPages}
               totalItems={totalItems}
               pageSize={pageSize}
-              onPageChange={setPage}
-              onPageSizeChange={setPageSize}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={(size) => { setPageSize(size); setCurrentPage(1); }}
             />
           </>
         ) : (

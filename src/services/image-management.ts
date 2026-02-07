@@ -90,19 +90,33 @@ export async function getContainerImage(id: string): Promise<ContainerImage & { 
 /**
  * List container images for an environment
  */
-export async function listContainerImages(environmentId: string): Promise<(ContainerImage & { services: Service[] })[]> {
-  return prisma.containerImage.findMany({
-    where: { environmentId },
-    include: {
-      services: {
-        include: {
-          server: true,
+export async function listContainerImages(
+  environmentId: string,
+  options?: { limit?: number; offset?: number }
+): Promise<{ images: (ContainerImage & { services: Service[] })[]; total: number }> {
+  const limit = options?.limit ?? 25;
+  const offset = options?.offset ?? 0;
+  const where = { environmentId };
+
+  const [images, total] = await Promise.all([
+    prisma.containerImage.findMany({
+      where,
+      include: {
+        services: {
+          include: {
+            server: true,
+          },
         },
+        registryConnection: true,
       },
-      registryConnection: true,
-    },
-    orderBy: { name: 'asc' },
-  });
+      orderBy: { name: 'asc' },
+      take: limit,
+      skip: offset,
+    }),
+    prisma.containerImage.count({ where }),
+  ]);
+
+  return { images, total };
 }
 
 /**

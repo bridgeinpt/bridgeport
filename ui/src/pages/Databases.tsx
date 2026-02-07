@@ -17,7 +17,6 @@ import {
 } from '../lib/api.js';
 import { formatDistanceToNow } from 'date-fns';
 import Pagination from '../components/Pagination.js';
-import { usePagination } from '../hooks/usePagination.js';
 import { DatabaseIcon, TrashIcon } from '../components/Icons.js';
 import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
 import { EmptyState } from '../components/EmptyState.js';
@@ -31,6 +30,9 @@ export default function Databases() {
   const { selectedEnvironment } = useAppStore();
   const toast = useToast();
   const [databases, setDatabases] = useState<Database[]>([]);
+  const [totalItems, setTotalItems] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const [servers, setServers] = useState<Server[]>([]);
   const [databaseTypes, setDatabaseTypes] = useState<DatabaseTypeRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,18 +60,20 @@ export default function Databases() {
     if (selectedEnvironment?.id) {
       loadData();
     }
-  }, [selectedEnvironment?.id]);
+  }, [selectedEnvironment?.id, currentPage, pageSize]);
 
   const loadData = async () => {
     if (!selectedEnvironment?.id) return;
     setLoading(true);
     try {
+      const offset = (currentPage - 1) * pageSize;
       const [dbRes, serverRes, dbTypeRes] = await Promise.all([
-        listDatabases(selectedEnvironment.id),
+        listDatabases(selectedEnvironment.id, { limit: pageSize, offset }),
         listServers(selectedEnvironment.id),
         listDatabaseTypes(),
       ]);
       setDatabases(dbRes.databases);
+      setTotalItems(dbRes.total);
       setServers(serverRes.servers);
       setDatabaseTypes(dbTypeRes.databaseTypes);
     } finally {
@@ -163,16 +167,7 @@ export default function Databases() {
     }
   };
 
-  // Pagination
-  const {
-    paginatedData,
-    currentPage,
-    totalPages,
-    totalItems,
-    pageSize,
-    setPage,
-    setPageSize,
-  } = usePagination({ data: databases, defaultPageSize: 25 });
+  const totalPages = Math.ceil(totalItems / pageSize);
 
   if (!selectedEnvironment) {
     return (
@@ -458,7 +453,7 @@ export default function Databases() {
       )}
 
       {/* Databases List */}
-      {databases.length === 0 ? (
+      {totalItems === 0 ? (
         <EmptyState
           icon={DatabaseIcon}
           message="No databases configured"
@@ -467,7 +462,7 @@ export default function Databases() {
         />
       ) : (
         <div className="space-y-4">
-          {paginatedData.map((db) => {
+          {databases.map((db) => {
             const supportsBackup = db.databaseType?.hasBackupCommand !== false;
             return (
             <div key={db.id} className="panel">
@@ -583,8 +578,8 @@ export default function Databases() {
             totalPages={totalPages}
             totalItems={totalItems}
             pageSize={pageSize}
-            onPageChange={setPage}
-            onPageSizeChange={setPageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={(size) => { setPageSize(size); setCurrentPage(1); }}
           />
         </div>
       )}

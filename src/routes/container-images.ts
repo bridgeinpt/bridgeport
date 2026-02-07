@@ -42,8 +42,11 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
     { preHandler: [fastify.authenticate] },
     async (request) => {
       const { envId } = request.params as { envId: string };
-      const images = await listContainerImages(envId);
-      return { images };
+      const { limit, offset } = request.query as { limit?: string; offset?: string };
+      return listContainerImages(envId, {
+        limit: limit ? parseInt(limit) : 25,
+        offset: offset ? parseInt(offset) : 0,
+      });
     }
   );
 

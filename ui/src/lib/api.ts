@@ -338,8 +338,13 @@ export const registerHost = (envId: string, data: RegisterHostInput = {}) =>
   api.post<{ server: Server; success: boolean }>(`/environments/${envId}/servers/register-host`, data);
 
 // Servers
-export const listServers = (envId: string) =>
-  api.get<{ servers: Server[] }>(`/environments/${envId}/servers`);
+export const listServers = (envId: string, options?: { limit?: number; offset?: number }) => {
+  const params = new URLSearchParams();
+  if (options?.limit) params.append('limit', options.limit.toString());
+  if (options?.offset) params.append('offset', options.offset.toString());
+  const query = params.toString();
+  return api.get<{ servers: Server[]; total: number }>(`/environments/${envId}/servers${query ? `?${query}` : ''}`);
+};
 
 export interface CreateServerInput {
   name: string;
@@ -409,6 +414,18 @@ export const setMetricsMode = (id: string, mode: 'ssh' | 'agent' | 'disabled') =
   api.patch<{ metricsMode: string }>(`/servers/${id}/metrics-mode`, { mode });
 
 // Services
+export interface ServiceWithServerName extends Service {
+  server: { id: string; name: string };
+}
+
+export const listServices = (envId: string, options?: { limit?: number; offset?: number }) => {
+  const params = new URLSearchParams();
+  if (options?.limit) params.append('limit', options.limit.toString());
+  if (options?.offset) params.append('offset', options.offset.toString());
+  const query = params.toString();
+  return api.get<{ services: ServiceWithServerName[]; total: number }>(`/environments/${envId}/services${query ? `?${query}` : ''}`);
+};
+
 export const getService = (id: string) =>
   api.get<{ service: ServiceWithServer }>(`/services/${id}`);
 
@@ -460,8 +477,8 @@ export const getServiceHistory = (id: string, limit?: number) =>
 export const getServiceLogs = (id: string, tail?: number) =>
   api.get<{ logs: string }>(`/services/${id}/logs${tail ? `?tail=${tail}` : ''}`);
 
-export const getDeploymentHistory = (id: string) =>
-  api.get<{ deployments: Deployment[] }>(`/services/${id}/deployments`);
+export const getDeploymentHistory = (id: string, limit?: number) =>
+  api.get<{ deployments: Deployment[] }>(`/services/${id}/deployments${limit ? `?limit=${limit}` : ''}`);
 
 // Secrets
 export const listSecrets = (envId: string) =>
@@ -792,8 +809,13 @@ export interface SyncResult {
   error?: string;
 }
 
-export const listConfigFiles = (envId: string) =>
-  api.get<{ configFiles: ConfigFile[] }>(`/environments/${envId}/config-files`);
+export const listConfigFiles = (envId: string, options?: { limit?: number; offset?: number }) => {
+  const params = new URLSearchParams();
+  if (options?.limit) params.append('limit', options.limit.toString());
+  if (options?.offset) params.append('offset', options.offset.toString());
+  const query = params.toString();
+  return api.get<{ configFiles: ConfigFile[]; total: number }>(`/environments/${envId}/config-files${query ? `?${query}` : ''}`);
+};
 
 export const getConfigFile = (id: string) =>
   api.get<{ configFile: ConfigFile & { services: Array<{ targetPath: string; service: { id: string; name: string; server: { id: string; name: string } } }> } }>(`/config-files/${id}`);
@@ -1255,8 +1277,13 @@ export interface BackupSchedule {
   nextRunAt: string | null;
 }
 
-export const listDatabases = (envId: string) =>
-  api.get<{ databases: Database[] }>(`/environments/${envId}/databases`);
+export const listDatabases = (envId: string, options?: { limit?: number; offset?: number }) => {
+  const params = new URLSearchParams();
+  if (options?.limit) params.append('limit', options.limit.toString());
+  if (options?.offset) params.append('offset', options.offset.toString());
+  const query = params.toString();
+  return api.get<{ databases: Database[]; total: number }>(`/environments/${envId}/databases${query ? `?${query}` : ''}`);
+};
 
 export const createDatabase = (envId: string, data: DatabaseInput) =>
   api.post<{ database: Database }>(`/environments/${envId}/databases`, data);
@@ -1528,8 +1555,13 @@ export interface ContainerImageHistory {
   deploymentCount?: number;
 }
 
-export const listContainerImages = (envId: string) =>
-  api.get<{ images: ContainerImage[] }>(`/environments/${envId}/container-images`);
+export const listContainerImages = (envId: string, options?: { limit?: number; offset?: number }) => {
+  const params = new URLSearchParams();
+  if (options?.limit) params.append('limit', options.limit.toString());
+  if (options?.offset) params.append('offset', options.offset.toString());
+  const query = params.toString();
+  return api.get<{ images: ContainerImage[]; total: number }>(`/environments/${envId}/container-images${query ? `?${query}` : ''}`);
+};
 
 export const createContainerImage = (envId: string, data: ContainerImageInput) =>
   api.post<{ image: ContainerImage }>(`/environments/${envId}/container-images`, data);

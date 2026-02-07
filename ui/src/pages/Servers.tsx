@@ -5,7 +5,6 @@ import { listServers, checkServerHealth, discoverContainers, createServer, delet
 import { formatDistanceToNow } from 'date-fns';
 import { Modal } from '../components/Modal.js';
 import Pagination from '../components/Pagination.js';
-import { usePagination } from '../hooks/usePagination.js';
 import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { Alert } from '../components/Alert.js';
@@ -17,6 +16,9 @@ export default function Servers() {
   const { user } = useAuthStore();
   const toast = useToast();
   const [servers, setServers] = useState<Server[]>([]);
+  const [totalItems, setTotalItems] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -44,26 +46,32 @@ export default function Servers() {
   useEffect(() => {
     if (selectedEnvironment?.id) {
       setLoading(true);
+      const offset = (currentPage - 1) * pageSize;
       Promise.all([
-        listServers(selectedEnvironment.id),
+        listServers(selectedEnvironment.id, { limit: pageSize, offset }),
         getHostInfo(selectedEnvironment.id).catch(() => null),
       ])
         .then(([serversRes, hostInfoRes]) => {
           setServers(serversRes.servers);
+          setTotalItems(serversRes.total);
           setHostInfo(hostInfoRes);
         })
         .finally(() => setLoading(false));
 
       loadHealthLogs(selectedEnvironment.id);
     }
-  }, [selectedEnvironment?.id]);
+  }, [selectedEnvironment?.id, currentPage, pageSize]);
 
   const handleRegisterHost = async () => {
     if (!selectedEnvironment?.id || !hostInfo?.detected) return;
     setRegisteringHost(true);
     try {
       const { server } = await registerHost(selectedEnvironment.id);
-      setServers((prev) => [...prev, server]);
+      // Re-fetch to update paginated list
+      const offset = (currentPage - 1) * pageSize;
+      const res = await listServers(selectedEnvironment.id, { limit: pageSize, offset });
+      setServers(res.servers);
+      setTotalItems(res.total);
       setHostInfo((prev) => prev ? { ...prev, registered: true, serverId: server.id } : null);
       toast.success('Host server registered successfully');
     } catch (error) {
@@ -99,8 +107,10 @@ export default function Servers() {
       await discoverContainers(serverId);
       // Reload to see new services
       if (selectedEnvironment?.id) {
-        const { servers } = await listServers(selectedEnvironment.id);
-        setServers(servers);
+        const offset = (currentPage - 1) * pageSize;
+        const res = await listServers(selectedEnvironment.id, { limit: pageSize, offset });
+        setServers(res.servers);
+        setTotalItems(res.total);
       }
     } finally {
       setActionLoading(null);
@@ -116,13 +126,17 @@ export default function Servers() {
         .split(',')
         .map((t) => t.trim())
         .filter(Boolean);
-      const { server } = await createServer(selectedEnvironment.id, {
+      await createServer(selectedEnvironment.id, {
         name: newName,
         hostname: newHostname,
         publicIp: newPublicIp || undefined,
         tags: tags.length > 0 ? tags : undefined,
       });
-      setServers((prev) => [...prev, server]);
+      // Re-fetch to update paginated list
+      const offset = (currentPage - 1) * pageSize;
+      const res = await listServers(selectedEnvironment.id, { limit: pageSize, offset });
+      setServers(res.servers);
+      setTotalItems(res.total);
       setShowCreate(false);
       setNewName('');
       setNewHostname('');
@@ -134,11 +148,15 @@ export default function Servers() {
   };
 
   const handleDelete = async () => {
-    if (!serverToDelete) return;
+    if (!serverToDelete || !selectedEnvironment?.id) return;
     setDeleting(true);
     try {
       await deleteServer(serverToDelete.id);
-      setServers((prev) => prev.filter((s) => s.id !== serverToDelete.id));
+      // Re-fetch to update paginated list
+      const offset = (currentPage - 1) * pageSize;
+      const res = await listServers(selectedEnvironment.id, { limit: pageSize, offset });
+      setServers(res.servers);
+      setTotalItems(res.total);
       toast.success(`Server "${serverToDelete.name}" deleted`);
       setServerToDelete(null);
     } catch (error) {
@@ -148,16 +166,7 @@ export default function Servers() {
     }
   };
 
-  // Pagination
-  const {
-    paginatedData,
-    currentPage,
-    totalPages,
-    totalItems,
-    pageSize,
-    setPage,
-    setPageSize,
-  } = usePagination({ data: servers, defaultPageSize: 25 });
+  const totalPages = Math.ceil(totalItems / pageSize);
 
   if (loading) {
     return <LoadingSkeleton rows={3} rowHeight="h-20" />;
@@ -335,7 +344,7 @@ export default function Servers() {
       </Modal>
 
       <div className="space-y-4">
-        {paginatedData.map((server) => {
+        {servers.map((server) => {
           const tags = server.tags ? JSON.parse(server.tags) : [];
           return (
             <div key={server.id} className="panel">
@@ -423,7 +432,7 @@ export default function Servers() {
           );
         })}
 
-        {servers.length === 0 && (
+        {totalItems === 0 && (
           <EmptyState
             icon={ServerIcon}
             message="No servers configured"
@@ -431,14 +440,14 @@ export default function Servers() {
             action={{ label: 'Add Your First Server', onClick: () => setShowCreate(true) }}
           />
         )}
-        {servers.length > 0 && (
+        {totalItems > 0 && (
           <Pagination
             currentPage={currentPage}
             totalPages={totalPages}
             totalItems={totalItems}
             pageSize={pageSize}
-            onPageChange={setPage}
-            onPageSizeChange={setPageSize}
+            onPageChange={setCurrentPage}
+            onPageSizeChange={(size) => { setPageSize(size); setCurrentPage(1); }}
           />
         )}
       </div>

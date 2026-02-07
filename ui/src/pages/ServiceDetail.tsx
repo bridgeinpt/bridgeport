@@ -207,7 +207,7 @@ export default function ServiceDetail() {
               .catch(() => setContainerImage(null));
           }
         }),
-        getDeploymentHistory(id).then(({ deployments }) => setDeployments(deployments)),
+        getDeploymentHistory(id, 20).then(({ deployments }) => setDeployments(deployments)),
         listServiceFiles(id).then(({ files }) => setAttachedFiles(files)),
         getAuditLogs({ resourceType: 'service', resourceId: id, action: 'health_check', limit: 10 })
           .then(({ logs }) => setHealthCheckHistory(logs)),
@@ -359,7 +359,7 @@ export default function ServiceDetail() {
       const message = error instanceof Error ? error.message : 'Deployment failed';
       setDeployError(message);
       // Refresh deployment history to get the failed deployment
-      getDeploymentHistory(id).then(({ deployments }) => setDeployments(deployments));
+      getDeploymentHistory(id, 20).then(({ deployments }) => setDeployments(deployments));
     } finally {
       setDeploying(false);
     }

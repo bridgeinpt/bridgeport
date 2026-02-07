@@ -65,6 +65,39 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
+  // List services for environment (paginated)
+  fastify.get(
+    '/api/environments/:envId/services',
+    { preHandler: [fastify.authenticate] },
+    async (request) => {
+      const { envId } = request.params as { envId: string };
+      const { limit: limitStr, offset: offsetStr } = request.query as { limit?: string; offset?: string };
+      const limit = limitStr ? parseInt(limitStr) : 25;
+      const offset = offsetStr ? parseInt(offsetStr) : 0;
+
+      const where = { server: { environmentId: envId } };
+
+      const [services, total] = await Promise.all([
+        prisma.service.findMany({
+          where,
+          include: {
+            containerImage: true,
+            serviceType: {
+              include: { commands: true },
+            },
+            server: { select: { id: true, name: true } },
+          },
+          orderBy: { name: 'asc' },
+          take: limit,
+          skip: offset,
+        }),
+        prisma.service.count({ where }),
+      ]);
+
+      return { services, total };
+    }
+  );
+
   // Get service
   fastify.get(
     '/api/services/:id',

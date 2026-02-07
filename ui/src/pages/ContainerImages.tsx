@@ -22,6 +22,7 @@ import {
 } from '../lib/api';
 import { formatDistanceToNow, format } from 'date-fns';
 import { PencilIcon, TrashIcon } from '../components/Icons';
+import Pagination from '../components/Pagination';
 
 export default function ContainerImages() {
   const { selectedEnvironment } = useAppStore();
@@ -49,6 +50,11 @@ export default function ContainerImages() {
   const [linkableServices, setLinkableServices] = useState<Service[]>([]);
   const [loadingLinkable, setLoadingLinkable] = useState(false);
 
+  // Pagination
+  const [totalItems, setTotalItems] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+
   // Check updates state
   const [checkingUpdatesId, setCheckingUpdatesId] = useState<string | null>(null);
 
@@ -66,17 +72,27 @@ export default function ContainerImages() {
   useEffect(() => {
     if (selectedEnvironment?.id) {
       setLoading(true);
+      const offset = (currentPage - 1) * pageSize;
       Promise.all([
-        listContainerImages(selectedEnvironment.id),
+        listContainerImages(selectedEnvironment.id, { limit: pageSize, offset }),
         listRegistryConnections(selectedEnvironment.id),
       ])
         .then(([imagesRes, registriesRes]) => {
           setImages(imagesRes.images);
+          setTotalItems(imagesRes.total);
           setRegistries(registriesRes.registries);
         })
         .finally(() => setLoading(false));
     }
-  }, [selectedEnvironment?.id]);
+  }, [selectedEnvironment?.id, currentPage, pageSize]);
+
+  const reloadImages = async () => {
+    if (!selectedEnvironment?.id) return;
+    const offset = (currentPage - 1) * pageSize;
+    const res = await listContainerImages(selectedEnvironment.id, { limit: pageSize, offset });
+    setImages(res.images);
+    setTotalItems(res.total);
+  };
 
   const resetForm = () => {
     setFormData({
@@ -113,19 +129,17 @@ export default function ContainerImages() {
     setSaving(true);
     try {
       if (editingId) {
-        const { image } = await updateContainerImage(editingId, formData);
+        await updateContainerImage(editingId, formData);
         // Also update autoUpdate setting if it has a registry
         if (formData.registryConnectionId) {
           await updateContainerImageSettings(editingId, { autoUpdate: editAutoUpdate });
-          image.autoUpdate = editAutoUpdate;
         }
-        setImages((prev) => prev.map((i) => (i.id === editingId ? image : i)));
         toast.success('Image updated');
       } else {
-        const { image } = await createContainerImage(selectedEnvironment.id, formData);
-        setImages((prev) => [...prev, image]);
+        await createContainerImage(selectedEnvironment.id, formData);
         toast.success('Image created');
       }
+      await reloadImages();
       setShowCreate(false);
       resetForm();
     } catch (error) {
@@ -142,8 +156,8 @@ export default function ContainerImages() {
 
     try {
       await deleteContainerImage(id);
-      setImages((prev) => prev.filter((i) => i.id !== id));
       toast.success('Image deleted');
+      await reloadImages();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Delete failed');
     }
@@ -163,11 +177,7 @@ export default function ContainerImages() {
       const { plan } = await deployContainerImage(deployingImage.id, deployTag, deployAutoRollback);
       toast.success(`Deployment plan created: ${plan.name}`);
       setDeployingImage(null);
-      // Refresh images to get updated currentTag
-      if (selectedEnvironment?.id) {
-        const { images: updated } = await listContainerImages(selectedEnvironment.id);
-        setImages(updated);
-      }
+      await reloadImages();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Deployment failed');
     } finally {
@@ -211,13 +221,9 @@ export default function ContainerImages() {
     try {
       await linkServiceToContainerImage(linkingImage.id, serviceId);
       toast.success('Service linked');
-      // Refresh
-      if (selectedEnvironment?.id) {
-        const { images: updated } = await listContainerImages(selectedEnvironment.id);
-        setImages(updated);
-        const { services } = await getLinkableServices(linkingImage.id);
-        setLinkableServices(services);
-      }
+      await reloadImages();
+      const { services } = await getLinkableServices(linkingImage.id);
+      setLinkableServices(services);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to link');
     }
@@ -227,11 +233,7 @@ export default function ContainerImages() {
     setCheckingUpdatesId(imageId);
     try {
       const result = await checkContainerImageUpdates(imageId);
-      // Refresh images to get updated latestTag
-      if (selectedEnvironment?.id) {
-        const { images: updated } = await listContainerImages(selectedEnvironment.id);
-        setImages(updated);
-      }
+      await reloadImages();
       if (result.hasUpdate) {
         toast.success(`Update available: ${result.latestTag}`);
       } else {
@@ -257,6 +259,8 @@ export default function ContainerImages() {
         return 'bg-slate-700 text-slate-300';
     }
   };
+
+  const totalPages = Math.ceil(totalItems / pageSize);
 
   if (!selectedEnvironment) {
     return (
@@ -286,7 +290,7 @@ export default function ContainerImages() {
             <div className="h-12 bg-slate-700 rounded"></div>
           </div>
         </div>
-      ) : images.length === 0 ? (
+      ) : totalItems === 0 ? (
         <div className="panel text-center py-12">
           <ImageIcon className="w-12 h-12 text-slate-500 mx-auto mb-4" />
           <p className="text-slate-400 mb-4">No container images configured</p>
@@ -486,6 +490,16 @@ export default function ContainerImages() {
             </div>
           ))}
         </div>
+      )}
+      {totalItems > 0 && (
+        <Pagination
+          currentPage={currentPage}
+          totalPages={totalPages}
+          totalItems={totalItems}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={(size) => { setPageSize(size); setCurrentPage(1); }}
+        />
       )}
 
       {/* Create/Edit Modal */}
