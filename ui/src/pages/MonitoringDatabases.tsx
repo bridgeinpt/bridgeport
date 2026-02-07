@@ -158,15 +158,18 @@ export default function MonitoringDatabases() {
     return { data, names: Array.from(nameSet) };
   };
 
-  // Get latest "rows" snapshot across filtered databases
-  const getRowsSnapshot = (queryName: string): Array<Record<string, unknown>> | null => {
+  // Get latest "rows" snapshot per database
+  const getRowsPerDatabase = (queryName: string): Array<{ dbName: string; rows: Array<Record<string, unknown>> }> => {
+    const results: Array<{ dbName: string; rows: Array<Record<string, unknown>> }> = [];
     for (const db of filteredDatabases) {
       if (db.data.length === 0) continue;
       const latest = db.data[db.data.length - 1];
       const val = latest[queryName];
-      if (Array.isArray(val) && val.length > 0) return val as Array<Record<string, unknown>>;
+      if (Array.isArray(val) && val.length > 0) {
+        results.push({ dbName: db.name, rows: val as Array<Record<string, unknown>> });
+      }
     }
-    return null;
+    return results;
   };
 
   const formatTime = (time: string) => {
@@ -328,21 +331,26 @@ export default function MonitoringDatabases() {
                 />
               );
             })}
+          </div>
 
-            {/* Rows queries (latest snapshot tables) */}
-            {activeGroup.queryMeta.filter(m => m.resultType === 'rows').map(meta => {
-              const rows = getRowsSnapshot(meta.name);
-              if (!rows || rows.length === 0) return null;
+          {/* Rows queries (latest snapshot tables, e.g. Top Tables by Size) */}
+          {activeGroup.queryMeta.filter(m => m.resultType === 'rows').map(meta => {
+            const perDb = getRowsPerDatabase(meta.name);
+            if (perDb.length === 0) return null;
+            return perDb.map(({ dbName, rows }) => {
               const columns = Object.keys(rows[0]);
               return (
-                <div key={meta.name} className="col-span-1 md:col-span-2 card">
-                  <h3 className="text-sm font-medium text-white mb-4">{meta.displayName}</h3>
+                <div key={`${meta.name}-${dbName}`} className="card mt-6">
+                  <h3 className="text-sm font-medium text-white mb-1">{meta.displayName}</h3>
+                  {filteredDatabases.length > 1 && (
+                    <p className="text-xs text-slate-500 mb-3">{dbName}</p>
+                  )}
                   <div className="overflow-x-auto">
                     <table className="w-full">
                       <thead>
                         <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
                           {columns.map(col => (
-                            <th key={col} className="pb-3 pr-4 font-medium">{col}</th>
+                            <th key={col} className="pb-3 pr-4 font-medium capitalize">{col}</th>
                           ))}
                         </tr>
                       </thead>
@@ -351,7 +359,7 @@ export default function MonitoringDatabases() {
                           <tr key={i} className="text-slate-300">
                             {columns.map(col => (
                               <td key={col} className="py-3 pr-4 text-sm font-mono">
-                                {formatTableValue(row[col], meta.unit)}
+                                {formatTableValue(row[col], col.toLowerCase().includes('size') ? 'bytes' : meta.unit)}
                               </td>
                             ))}
                           </tr>
@@ -361,8 +369,8 @@ export default function MonitoringDatabases() {
                   </div>
                 </div>
               );
-            })}
-          </div>
+            });
+          })}
         </>
       ) : (
         <EmptyState
