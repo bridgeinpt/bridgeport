@@ -228,8 +228,11 @@ async function executeRedisQueries(
     password: conn.password || undefined,
     connectTimeout: 10000,
     commandTimeout: 10000,
+    maxRetriesPerRequest: 0,
+    retryStrategy: () => null,
     lazyConnect: true,
   });
+  client.on('error', () => {}); // Prevent unhandled error events
 
   try {
     await client.connect();
@@ -382,8 +385,12 @@ export async function pingDatabase(
       port: database.port || 6379,
       password: credentials?.password || undefined,
       connectTimeout: 10000,
+      commandTimeout: 10000,
+      maxRetriesPerRequest: 0,
+      retryStrategy: () => null,
       lazyConnect: true,
     });
+    client.on('error', () => {}); // Prevent unhandled error events
 
     try {
       await client.connect();
