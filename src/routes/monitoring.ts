@@ -797,9 +797,51 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         })
       );
 
+      // Get all monitored databases in this environment
+      const databases = await prisma.database.findMany({
+        where: { environmentId: envId, monitoringEnabled: true },
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          monitoringStatus: true,
+          lastCollectedAt: true,
+          lastMonitoringError: true,
+          server: { select: { name: true } },
+          databaseType: { select: { displayName: true } },
+        },
+      });
+
+      const databaseHealthStatus = databases.map((db) => {
+        let status: 'healthy' | 'unhealthy' | 'unknown' = 'unknown';
+        if (db.monitoringStatus === 'connected') {
+          status = 'healthy';
+        } else if (db.monitoringStatus === 'error') {
+          status = 'unhealthy';
+        }
+
+        return {
+          id: db.id,
+          name: db.name,
+          type: 'database' as const,
+          status,
+          serverName: db.server?.name || null,
+          dbType: db.databaseType?.displayName || db.type,
+          lastCheck: db.lastCollectedAt
+            ? {
+                timestamp: db.lastCollectedAt.toISOString(),
+                checkType: 'monitoring',
+                durationMs: null as number | null,
+                errorMessage: db.lastMonitoringError,
+              }
+            : null,
+        };
+      });
+
       return {
         servers: serverHealthStatus,
         services: serviceHealthStatus,
+        databases: databaseHealthStatus,
       };
     }
   );

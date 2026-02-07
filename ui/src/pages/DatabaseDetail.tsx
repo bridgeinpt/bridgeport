@@ -593,7 +593,7 @@ export default function DatabaseDetail() {
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-white">Monitoring</h3>
             <Link
-              to={`/monitoring/databases/${database.id}`}
+              to="/monitoring/databases"
               className="btn btn-ghost text-sm"
             >
               View Metrics

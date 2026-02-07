@@ -470,40 +470,44 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
         })
       );
 
-      // Collect union of query metadata from all database types (scalar + row only)
-      const queryMetaMap = new Map<string, { name: string; displayName: string; resultType: string; unit?: string; resultMapping?: Record<string, string> }>();
-      const seenTypeIds = new Set<string>();
+      // Group databases by type
+      const typeGroups = new Map<string, {
+        type: string;
+        typeName: string;
+        queryMeta: Array<{ name: string; displayName: string; resultType: string; unit?: string; chartGroup?: string; resultMapping?: Record<string, string> }>;
+        databases: Array<{ id: string; name: string; serverId: string | null; serverName: string | null; data: Array<Record<string, unknown>> }>;
+      }>();
 
-      for (const { db } of metricsPerDb) {
-        if (!db.databaseType?.monitoringConfig) continue;
-        if (seenTypeIds.has(db.databaseType.id)) continue;
-        seenTypeIds.add(db.databaseType.id);
+      for (const { db, metrics } of metricsPerDb) {
+        const dbType = db.type;
+        const typeName = db.databaseType?.displayName || db.type;
 
-        const config = JSON.parse(db.databaseType.monitoringConfig) as {
-          queries: Array<{ name: string; displayName: string; resultType: string; unit?: string; resultMapping?: Record<string, string> }>;
-        };
-
-        for (const q of config.queries) {
-          if (q.resultType === 'rows') continue; // Skip table queries — can't chart them
-          if (!queryMetaMap.has(q.name)) {
-            queryMetaMap.set(q.name, {
-              name: q.name,
-              displayName: q.displayName,
-              resultType: q.resultType,
-              unit: q.unit,
-              resultMapping: q.resultMapping,
-            });
+        if (!typeGroups.has(dbType)) {
+          // Build queryMeta for this type
+          const queryMeta: Array<{ name: string; displayName: string; resultType: string; unit?: string; chartGroup?: string; resultMapping?: Record<string, string> }> = [];
+          if (db.databaseType?.monitoringConfig) {
+            const config = JSON.parse(db.databaseType.monitoringConfig) as {
+              queries: Array<{ name: string; displayName: string; resultType: string; unit?: string; chartGroup?: string; resultMapping?: Record<string, string> }>;
+            };
+            for (const q of config.queries) {
+              queryMeta.push({
+                name: q.name,
+                displayName: q.displayName,
+                resultType: q.resultType,
+                unit: q.unit,
+                chartGroup: q.chartGroup,
+                resultMapping: q.resultMapping,
+              });
+            }
           }
+          typeGroups.set(dbType, { type: dbType, typeName, queryMeta, databases: [] });
         }
-      }
 
-      // Build per-database time-series data
-      const dbResults = metricsPerDb.map(({ db, metrics }) => {
+        // Build time-series data for this database
         const data = metrics.map((m) => {
           const parsed = JSON.parse(m.metricsJson) as Record<string, unknown>;
           const point: Record<string, unknown> = { time: m.collectedAt.toISOString() };
 
-          // Flatten scalar and row values
           for (const [key, value] of Object.entries(parsed)) {
             if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
               // Row result — flatten fields
@@ -511,27 +515,24 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
                 point[`${key}.${field}`] = fieldValue;
               }
             } else {
+              // Scalar or rows (array) — keep as-is
               point[key] = value;
             }
           }
           return point;
         });
 
-        return {
+        typeGroups.get(dbType)!.databases.push({
           id: db.id,
           name: db.name,
-          type: db.type,
-          typeName: db.databaseType?.displayName || db.type,
           serverId: db.server?.id || null,
           serverName: db.server?.name || null,
-          serverTags: db.server?.tags || '[]',
           data,
-        };
-      });
+        });
+      }
 
       return {
-        databases: dbResults,
-        queryMeta: Array.from(queryMetaMap.values()),
+        types: Array.from(typeGroups.values()),
       };
     }
   );

@@ -2067,9 +2067,10 @@ export const runHealthChecks = (envId: string, type?: 'all' | 'servers' | 'servi
 export interface ResourceHealthStatus {
   id: string;
   name: string;
-  type: 'server' | 'service';
+  type: 'server' | 'service' | 'database';
   status: 'healthy' | 'unhealthy' | 'unknown';
-  serverName?: string; // Only for services
+  serverName?: string; // For services and databases
+  dbType?: string; // Only for databases
   lastCheck: {
     timestamp: string;
     checkType: string;
@@ -2081,6 +2082,7 @@ export interface ResourceHealthStatus {
 export interface HealthStatusResponse {
   servers: ResourceHealthStatus[];
   services: ResourceHealthStatus[];
+  databases: ResourceHealthStatus[];
 }
 
 export const getHealthStatus = (envId: string) =>
@@ -2377,15 +2379,29 @@ export interface DatabaseMetricsHistoryItem {
 export interface DatabaseQueryMeta {
   name: string;
   displayName: string;
-  resultType: 'scalar' | 'row';
+  resultType: 'scalar' | 'row' | 'rows';
   unit?: string;
+  chartGroup?: string;
   resultMapping?: Record<string, string>;
+}
+
+export interface DatabaseMetricsTypeGroup {
+  type: string;
+  typeName: string;
+  queryMeta: DatabaseQueryMeta[];
+  databases: Array<{
+    id: string;
+    name: string;
+    serverId: string | null;
+    serverName: string | null;
+    data: Array<Record<string, unknown>>;
+  }>;
 }
 
 export const getDatabaseMetricsHistory = (envId: string, hours: number = 24) => {
   const params = new URLSearchParams();
   params.append('hours', hours.toString());
-  return api.get<{ databases: DatabaseMetricsHistoryItem[]; queryMeta: DatabaseQueryMeta[] }>(
+  return api.get<{ types: DatabaseMetricsTypeGroup[] }>(
     `/environments/${envId}/databases/metrics/history?${params.toString()}`
   );
 };

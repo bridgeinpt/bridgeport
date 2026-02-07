@@ -86,6 +86,8 @@ interface AppState {
   setMonitoringHealthStatus: (status: string) => void;
   monitoringHealthTab: 'status' | 'logs';
   setMonitoringHealthTab: (tab: 'status' | 'logs') => void;
+  monitoringDatabaseTypeTab: string;
+  setMonitoringDatabaseTypeTab: (type: string) => void;
 }
 
 export const useAppStore = create<AppState>()(
@@ -148,6 +150,8 @@ export const useAppStore = create<AppState>()(
       setMonitoringHealthStatus: (status) => set({ monitoringHealthStatus: status }),
       monitoringHealthTab: 'status',
       setMonitoringHealthTab: (tab) => set({ monitoringHealthTab: tab }),
+      monitoringDatabaseTypeTab: '',
+      setMonitoringDatabaseTypeTab: (type) => set({ monitoringDatabaseTypeTab: type }),
     }),
     {
       name: 'app-storage',
@@ -168,6 +172,7 @@ export const useAppStore = create<AppState>()(
         monitoringHealthType: state.monitoringHealthType,
         monitoringHealthStatus: state.monitoringHealthStatus,
         monitoringHealthTab: state.monitoringHealthTab,
+        monitoringDatabaseTypeTab: state.monitoringDatabaseTypeTab,
       }),
     }
   )

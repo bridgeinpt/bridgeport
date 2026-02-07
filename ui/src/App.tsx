@@ -22,7 +22,6 @@ import MonitoringAgents from './pages/MonitoringAgents';
 import MonitoringServers from './pages/MonitoringServers';
 import MonitoringServices from './pages/MonitoringServices';
 import MonitoringDatabases from './pages/MonitoringDatabases';
-import DatabaseMonitoringDetail from './pages/DatabaseMonitoringDetail';
 import Settings from './pages/Settings';
 import Notifications from './pages/Notifications';
 import ContainerImages from './pages/ContainerImages';
@@ -108,7 +107,6 @@ export default function App() {
                 <Route path="/monitoring/servers" element={<MonitoringServers />} />
                 <Route path="/monitoring/services" element={<MonitoringServices />} />
                 <Route path="/monitoring/databases" element={<MonitoringDatabases />} />
-                <Route path="/monitoring/databases/:id" element={<DatabaseMonitoringDetail />} />
                 <Route path="/monitoring/health" element={<MonitoringHealth />} />
                 <Route path="/monitoring/agents" element={<MonitoringAgents />} />
                 <Route path="/servers" element={<Servers />} />

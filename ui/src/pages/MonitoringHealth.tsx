@@ -7,6 +7,7 @@ import {
   runHealthChecks,
   testServerSSH,
   checkServiceHealth,
+  testDatabaseConnection,
   type HealthLogsResponse,
   type HealthStatusResponse,
   type ResourceHealthStatus,
@@ -122,6 +123,17 @@ export default function MonitoringHealth() {
     }
   };
 
+  const handleTestDatabase = async (dbId: string) => {
+    if (!selectedEnvironment?.id) return;
+    setTestingResource(dbId);
+    try {
+      await testDatabaseConnection(selectedEnvironment.id, dbId);
+      await fetchStatusData();
+    } finally {
+      setTestingResource(null);
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'success':
@@ -182,19 +194,22 @@ export default function MonitoringHealth() {
   const healthyCounts = {
     servers: statusData?.servers.filter(s => s.status === 'healthy').length ?? 0,
     services: statusData?.services.filter(s => s.status === 'healthy').length ?? 0,
+    databases: statusData?.databases?.filter(s => s.status === 'healthy').length ?? 0,
   };
   const unhealthyCounts = {
     servers: statusData?.servers.filter(s => s.status === 'unhealthy').length ?? 0,
     services: statusData?.services.filter(s => s.status === 'unhealthy').length ?? 0,
+    databases: statusData?.databases?.filter(s => s.status === 'unhealthy').length ?? 0,
   };
   const unknownCounts = {
     servers: statusData?.servers.filter(s => s.status === 'unknown').length ?? 0,
     services: statusData?.services.filter(s => s.status === 'unknown').length ?? 0,
+    databases: statusData?.databases?.filter(s => s.status === 'unknown').length ?? 0,
   };
-  const totalResources = (statusData?.servers.length ?? 0) + (statusData?.services.length ?? 0);
-  const totalHealthy = healthyCounts.servers + healthyCounts.services;
-  const totalUnhealthy = unhealthyCounts.servers + unhealthyCounts.services;
-  const totalUnknown = unknownCounts.servers + unknownCounts.services;
+  const totalResources = (statusData?.servers.length ?? 0) + (statusData?.services.length ?? 0) + (statusData?.databases?.length ?? 0);
+  const totalHealthy = healthyCounts.servers + healthyCounts.services + healthyCounts.databases;
+  const totalUnhealthy = unhealthyCounts.servers + unhealthyCounts.services + unhealthyCounts.databases;
+  const totalUnknown = unknownCounts.servers + unknownCounts.services + unknownCounts.databases;
 
   // Sort resources: unhealthy first, then healthy, then unknown
   const sortByStatus = (a: ResourceHealthStatus, b: ResourceHealthStatus) => {
@@ -204,6 +219,7 @@ export default function MonitoringHealth() {
 
   const sortedServers = [...(statusData?.servers ?? [])].sort(sortByStatus);
   const sortedServices = [...(statusData?.services ?? [])].sort(sortByStatus);
+  const sortedDatabases = [...(statusData?.databases ?? [])].sort(sortByStatus);
 
   return (
     <div className="p-6">
@@ -426,12 +442,88 @@ export default function MonitoringHealth() {
                 </div>
               )}
 
+              {/* Databases Section */}
+              {sortedDatabases.length > 0 && (
+                <div className="mb-6">
+                  <h2 className="text-lg font-semibold text-white mb-3">
+                    Databases
+                    <span className="ml-2 text-sm font-normal text-slate-400">
+                      ({healthyCounts.databases} healthy, {unhealthyCounts.databases} unhealthy, {unknownCounts.databases} unknown)
+                    </span>
+                  </h2>
+                  <div className="card overflow-hidden">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
+                          <th className="pb-3 font-medium">Name</th>
+                          <th className="pb-3 font-medium">Type</th>
+                          <th className="pb-3 font-medium">Server</th>
+                          <th className="pb-3 font-medium">Status</th>
+                          <th className="pb-3 font-medium">Last Collection</th>
+                          <th className="pb-3 font-medium">Error</th>
+                          <th className="pb-3 font-medium text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-700">
+                        {sortedDatabases.map((db) => (
+                          <tr key={db.id} className="text-slate-300">
+                            <td className="py-3">
+                              <Link
+                                to={`/databases/${db.id}`}
+                                className="text-white hover:text-primary-400 font-medium"
+                              >
+                                {db.name}
+                              </Link>
+                            </td>
+                            <td className="py-3 text-sm">
+                              <span className="badge bg-slate-700 text-slate-300 text-xs">{db.dbType}</span>
+                            </td>
+                            <td className="py-3 text-sm text-slate-400">
+                              {db.serverName || '-'}
+                            </td>
+                            <td className="py-3">
+                              <div className="flex items-center gap-1.5">
+                                {getStatusIcon(db.status)}
+                                <span className={getStatusColor(db.status)}>
+                                  {db.status}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="py-3 text-sm text-slate-400">
+                              {db.lastCheck ? (
+                                <span title={format(new Date(db.lastCheck.timestamp), 'PPpp')}>
+                                  {formatDistanceToNow(new Date(db.lastCheck.timestamp), { addSuffix: true })}
+                                </span>
+                              ) : (
+                                'Never'
+                              )}
+                            </td>
+                            <td className="py-3 text-sm text-red-400 max-w-xs truncate" title={db.lastCheck?.errorMessage || undefined}>
+                              {db.lastCheck?.errorMessage || '-'}
+                            </td>
+                            <td className="py-3 text-right">
+                              <button
+                                onClick={() => handleTestDatabase(db.id)}
+                                disabled={testingResource === db.id}
+                                className="btn btn-ghost text-sm"
+                              >
+                                {testingResource === db.id ? 'Testing...' : 'Test'}
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
               {/* Empty State */}
-              {sortedServers.length === 0 && sortedServices.length === 0 && (
+              {sortedServers.length === 0 && sortedServices.length === 0 && sortedDatabases.length === 0 && (
                 <div className="card text-center py-12">
                   <p className="text-slate-400">No resources found in this environment</p>
                   <p className="text-slate-500 text-sm mt-1">
-                    Add servers and services to monitor their health
+                    Add servers, services, or databases to monitor their health
                   </p>
                 </div>
               )}
