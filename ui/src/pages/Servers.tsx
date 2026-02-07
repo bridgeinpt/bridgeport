@@ -396,7 +396,7 @@ export default function Servers() {
                   <button
                     onClick={() => handleDiscover(server.id)}
                     disabled={actionLoading === server.id}
-                    className="btn btn-ghost text-sm"
+                    className="btn btn-primary text-sm"
                   >
                     {actionLoading === server.id ? 'Loading...' : 'Discover'}
                   </button>

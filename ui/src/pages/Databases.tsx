@@ -18,7 +18,7 @@ import {
 import { formatDistanceToNow } from 'date-fns';
 import Pagination from '../components/Pagination.js';
 import { usePagination } from '../hooks/usePagination.js';
-import { DatabaseIcon, EyeIcon, TrashIcon } from '../components/Icons.js';
+import { DatabaseIcon, TrashIcon } from '../components/Icons.js';
 import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
 import { EmptyState } from '../components/EmptyState.js';
 
@@ -465,7 +465,12 @@ export default function Databases() {
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <h3 className="text-lg font-semibold text-white">{db.name}</h3>
+                      <Link
+                        to={`/databases/${db.id}`}
+                        className="text-lg font-semibold text-white hover:text-primary-400"
+                      >
+                        {db.name}
+                      </Link>
                       <span className="badge bg-slate-700 text-slate-300 text-xs">
                         {db.databaseType?.displayName || databaseTypes.find((t) => t.name === db.type)?.displayName || db.type}
                       </span>
@@ -539,13 +544,6 @@ export default function Databases() {
                   >
                     {backingUpId === db.id ? 'Starting...' : 'Backup'}
                   </button>
-                  <Link
-                    to={`/databases/${db.id}`}
-                    className="p-1.5 text-slate-400 hover:text-white rounded"
-                    title="View"
-                  >
-                    <EyeIcon className="w-4 h-4" />
-                  </Link>
                   <button
                     onClick={() => handleDelete(db)}
                     className="p-1.5 text-slate-400 hover:text-red-400 rounded"

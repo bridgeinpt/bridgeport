@@ -92,6 +92,12 @@ export default function DatabaseDetail() {
 
   // Form states
   const [connectionForm, setConnectionForm] = useState({
+    name: '',
+    host: '',
+    port: 5432,
+    databaseName: '',
+    username: '',
+    password: '',
     serverId: '' as string | null,
     filePath: '',
   });
@@ -134,6 +140,12 @@ export default function DatabaseDetail() {
       setDatabase(db);
       setBreadcrumbName(id, db.name);
       setConnectionForm({
+        name: db.name,
+        host: db.host || '',
+        port: db.port || 5432,
+        databaseName: db.databaseName || '',
+        username: '',
+        password: '',
         serverId: db.serverId,
         filePath: db.filePath || '',
       });
@@ -280,13 +292,23 @@ export default function DatabaseDetail() {
     setSaving(true);
     try {
       const data: Partial<DatabaseInput> = {};
+      if (connectionForm.name && connectionForm.name !== database.name) {
+        data.name = connectionForm.name;
+      }
       if (database.type === 'sqlite') {
         data.serverId = connectionForm.serverId || undefined;
         data.filePath = connectionForm.filePath;
+      } else {
+        if (connectionForm.host) data.host = connectionForm.host;
+        if (connectionForm.port) data.port = connectionForm.port;
+        if (connectionForm.databaseName) data.databaseName = connectionForm.databaseName;
+        if (connectionForm.username) data.username = connectionForm.username;
+        if (connectionForm.password) data.password = connectionForm.password;
       }
 
       const { database: updated } = await updateDatabase(id, data);
       setDatabase(updated);
+      setBreadcrumbName(id, updated.name);
       setEditingConnection(false);
       toast.success('Connection info saved');
     } catch (error) {
@@ -452,7 +474,7 @@ export default function DatabaseDetail() {
         <div className="card">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-white">Connection Info</h3>
-            {database.type === 'sqlite' && !editingConnection && (
+            {!editingConnection && (
               <button
                 onClick={() => setEditingConnection(true)}
                 className="btn btn-ghost text-sm"
@@ -462,32 +484,102 @@ export default function DatabaseDetail() {
             )}
           </div>
 
-          {editingConnection && database.type === 'sqlite' ? (
+          {editingConnection ? (
             <div className="space-y-4">
               <div>
-                <label className="label">Server</label>
-                <select
-                  value={connectionForm.serverId || ''}
-                  onChange={e => setConnectionForm({ ...connectionForm, serverId: e.target.value || null })}
-                  className="input"
-                >
-                  <option value="">Select server...</option>
-                  {servers.map(server => (
-                    <option key={server.id} value={server.id}>{server.name}</option>
-                  ))}
-                </select>
-                <p className="help-text">Server to SSH into for SQLite backups</p>
-              </div>
-              <div>
-                <label className="label">File Path</label>
+                <label className="label">Name</label>
                 <input
                   type="text"
-                  value={connectionForm.filePath}
-                  onChange={e => setConnectionForm({ ...connectionForm, filePath: e.target.value })}
-                  placeholder="/path/to/database.db"
-                  className="input font-mono text-sm"
+                  value={connectionForm.name}
+                  onChange={e => setConnectionForm({ ...connectionForm, name: e.target.value })}
+                  placeholder="my-database"
+                  className="input"
                 />
               </div>
+              {database.type === 'sqlite' ? (
+                <>
+                  <div>
+                    <label className="label">Server</label>
+                    <select
+                      value={connectionForm.serverId || ''}
+                      onChange={e => setConnectionForm({ ...connectionForm, serverId: e.target.value || null })}
+                      className="input"
+                    >
+                      <option value="">Select server...</option>
+                      {servers.map(server => (
+                        <option key={server.id} value={server.id}>{server.name}</option>
+                      ))}
+                    </select>
+                    <p className="help-text">Server to SSH into for SQLite backups</p>
+                  </div>
+                  <div>
+                    <label className="label">File Path</label>
+                    <input
+                      type="text"
+                      value={connectionForm.filePath}
+                      onChange={e => setConnectionForm({ ...connectionForm, filePath: e.target.value })}
+                      placeholder="/path/to/database.db"
+                      className="input font-mono text-sm"
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="col-span-2">
+                      <label className="label">Host</label>
+                      <input
+                        type="text"
+                        value={connectionForm.host}
+                        onChange={e => setConnectionForm({ ...connectionForm, host: e.target.value })}
+                        placeholder="localhost"
+                        className="input"
+                      />
+                    </div>
+                    <div>
+                      <label className="label">Port</label>
+                      <input
+                        type="number"
+                        value={connectionForm.port}
+                        onChange={e => setConnectionForm({ ...connectionForm, port: parseInt(e.target.value) })}
+                        className="input"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="label">Database Name</label>
+                    <input
+                      type="text"
+                      value={connectionForm.databaseName}
+                      onChange={e => setConnectionForm({ ...connectionForm, databaseName: e.target.value })}
+                      placeholder="mydb"
+                      className="input"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="label">Username</label>
+                      <input
+                        type="text"
+                        value={connectionForm.username}
+                        onChange={e => setConnectionForm({ ...connectionForm, username: e.target.value })}
+                        className="input"
+                        placeholder={database.hasCredentials ? '(unchanged)' : ''}
+                      />
+                    </div>
+                    <div>
+                      <label className="label">Password</label>
+                      <input
+                        type="password"
+                        value={connectionForm.password}
+                        onChange={e => setConnectionForm({ ...connectionForm, password: e.target.value })}
+                        className="input"
+                        placeholder={database.hasCredentials ? '(unchanged)' : ''}
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
               <div className="flex gap-2 pt-2">
                 <button onClick={handleSaveConnection} disabled={saving} className="btn btn-primary">
                   {saving ? 'Saving...' : 'Save'}
@@ -495,7 +587,16 @@ export default function DatabaseDetail() {
                 <button
                   onClick={() => {
                     setEditingConnection(false);
-                    setConnectionForm({ serverId: database.serverId, filePath: database.filePath || '' });
+                    setConnectionForm({
+                      name: database.name,
+                      host: database.host || '',
+                      port: database.port || 5432,
+                      databaseName: database.databaseName || '',
+                      username: '',
+                      password: '',
+                      serverId: database.serverId,
+                      filePath: database.filePath || '',
+                    });
                   }}
                   className="btn btn-ghost"
                 >
