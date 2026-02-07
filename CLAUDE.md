@@ -559,10 +559,10 @@ ConfigurationSettings - Secret reveal permissions
 ## UI Features
 
 ### Navigation (Sidebar Groups)
-- **Operations**: Dashboard, Services, Servers, Environment Settings (admin)
+- **Operations**: Dashboard, Servers, Services, Databases
 - **Monitoring**: Overview, Servers, Services, Databases, Health Checks, Agents & SSH
 - **Orchestration**: Container Images, Deployment Plans, Registries
-- **Data**: Databases, Secrets, Config Files
+- **Configuration**: Environment Settings (admin), Secrets, Config Files
 - **Clickable Logo**: Click sidebar logo to navigate to dashboard
 - **My Account Modal**: Click user icon in sidebar to access profile and password change (all users)
 - **Notification Bell**: In-app notification dropdown with unread count
