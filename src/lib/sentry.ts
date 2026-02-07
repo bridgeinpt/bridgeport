@@ -3,21 +3,38 @@ import { config } from './config.js';
 
 let initialized = false;
 
+const IGNORED_ERROR_CODES = new Set([
+  'ECONNREFUSED',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EHOSTUNREACH',
+  'ENETUNREACH',
+  'ENOTFOUND',
+]);
+
 export function initSentry(release?: string): void {
-  if (!config.SENTRY_DSN || !config.SENTRY_ENABLED) {
+  if (!config.SENTRY_BACKEND_DSN || !config.SENTRY_ENABLED) {
     return;
   }
 
   Sentry.init({
-    dsn: config.SENTRY_DSN,
+    dsn: config.SENTRY_BACKEND_DSN,
     environment: config.SENTRY_ENVIRONMENT || config.NODE_ENV,
     release,
     tracesSampleRate: config.SENTRY_TRACES_SAMPLE_RATE,
     sendDefaultPii: false,
+    beforeSend(event) {
+      // Filter out expected operational errors (SSH/network to unreachable servers)
+      const code = (event.exception?.values?.[0]?.value ?? '').match(/code[:\s]+['"]?(\w+)/i)?.[1];
+      if (code && IGNORED_ERROR_CODES.has(code)) {
+        return null;
+      }
+      return event;
+    },
   });
 
   initialized = true;
-  console.log('[Sentry] Initialized error monitoring');
+  console.log('[Sentry] Initialized backend error monitoring');
 }
 
 export function captureException(error: unknown, context?: Record<string, unknown>): void {
@@ -26,10 +43,15 @@ export function captureException(error: unknown, context?: Record<string, unknow
   Sentry.captureException(error, context ? { extra: context } : undefined);
 }
 
-export function getSentryConfig(): { dsn: string | undefined; environment: string } {
+export function getSentryConfig(appVersion: string): {
+  frontendDsn: string | undefined;
+  environment: string;
+  release: string;
+} {
   return {
-    dsn: config.SENTRY_ENABLED ? config.SENTRY_DSN : undefined,
+    frontendDsn: config.SENTRY_ENABLED ? config.SENTRY_FRONTEND_DSN : undefined,
     environment: config.SENTRY_ENVIRONMENT || config.NODE_ENV,
+    release: appVersion,
   };
 }
 

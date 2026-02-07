@@ -1,8 +1,8 @@
 import { useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { useAuthStore } from './lib/store';
+import { useAuthStore, useAppStore } from './lib/store';
 import { api } from './lib/api';
-import { setSentryUser } from './lib/sentry';
+import { setSentryUser, setSentryEnvironment } from './lib/sentry';
 import Layout from './components/Layout';
 import AdminLayout from './components/AdminLayout';
 import Login from './pages/Login';
@@ -41,14 +41,23 @@ import AdminAbout from './pages/admin/About';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { token, user } = useAuthStore();
+  const selectedEnvironment = useAppStore((s) => s.selectedEnvironment);
 
   useEffect(() => {
     if (user) {
-      setSentryUser({ id: user.id, email: user.email });
+      setSentryUser({ id: user.id });
     } else {
       setSentryUser(null);
     }
   }, [user]);
+
+  useEffect(() => {
+    if (selectedEnvironment) {
+      setSentryEnvironment({ id: selectedEnvironment.id, name: selectedEnvironment.name });
+    } else {
+      setSentryEnvironment(null);
+    }
+  }, [selectedEnvironment]);
 
   if (!token) {
     return <Navigate to="/login" replace />;

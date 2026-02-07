@@ -185,10 +185,11 @@ async function buildServer() {
 
   // Client config (public endpoint for frontend Sentry init)
   fastify.get('/api/client-config', async () => {
-    const sentry = getSentryConfig();
+    const sentry = getSentryConfig(appVersion);
     return {
-      sentryDsn: sentry.dsn || null,
+      sentryDsn: sentry.frontendDsn || null,
       sentryEnvironment: sentry.environment,
+      sentryRelease: sentry.release,
     };
   });
 

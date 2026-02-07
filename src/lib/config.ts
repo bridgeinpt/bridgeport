@@ -6,7 +6,6 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(1, 'JWT_SECRET is required'),
   HOST: z.string().default('0.0.0.0'),
   PORT: z.coerce.number().default(3000),
-  DO_REGISTRY_TOKEN: z.string().optional(),
   // Legacy fallback SSH settings - prefer per-environment keys configured via UI
   SSH_KEY_PATH: z.string().optional(),
   SSH_USER: z.string().default('root'),
@@ -29,8 +28,9 @@ const envSchema = z.object({
   CORS_ORIGIN: z.string().optional(), // e.g., "https://deploy.bridgein.com"
   // Plugin directory for service types and database types
   PLUGINS_DIR: z.string().default('./plugins'),
-  // Sentry error monitoring (opt-in via SENTRY_DSN)
-  SENTRY_DSN: z.string().url().optional(),
+  // Sentry error monitoring (opt-in via DSN)
+  SENTRY_BACKEND_DSN: z.string().url().optional(),
+  SENTRY_FRONTEND_DSN: z.string().url().optional(),
   SENTRY_ENVIRONMENT: z.string().optional(),
   SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0),
   SENTRY_ENABLED: z.coerce.boolean().default(true),
