@@ -353,7 +353,8 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
       const { client, error } = await createClientForServer(
         service.server.hostname,
         service.server.environmentId,
-        getEnvironmentSshKey
+        getEnvironmentSshKey,
+        { serverType: service.server.serverType }
       );
       if (!client) {
         return reply.code(400).send({ error });
@@ -429,7 +430,8 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
       const { client, error } = await createClientForServer(
         service.server.hostname,
         service.server.environmentId,
-        getEnvironmentSshKey
+        getEnvironmentSshKey,
+        { serverType: service.server.serverType }
       );
       if (!client) {
         return reply.code(400).send({ error });
@@ -493,7 +495,8 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
       const { client, error } = await createClientForServer(
         service.server.hostname,
         service.server.environmentId,
-        getEnvironmentSshKey
+        getEnvironmentSshKey,
+        { serverType: service.server.serverType }
       );
       if (!client) {
         return reply.code(400).send({ error });
