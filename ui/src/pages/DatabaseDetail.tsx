@@ -98,6 +98,7 @@ export default function DatabaseDetail() {
     databaseName: '',
     username: '',
     password: '',
+    useSsl: false,
     serverId: '' as string | null,
     filePath: '',
   });
@@ -146,6 +147,7 @@ export default function DatabaseDetail() {
         databaseName: db.databaseName || '',
         username: '',
         password: '',
+        useSsl: db.useSsl,
         serverId: db.serverId,
         filePath: db.filePath || '',
       });
@@ -304,6 +306,7 @@ export default function DatabaseDetail() {
         if (connectionForm.databaseName) data.databaseName = connectionForm.databaseName;
         if (connectionForm.username) data.username = connectionForm.username;
         if (connectionForm.password) data.password = connectionForm.password;
+        data.useSsl = connectionForm.useSsl;
       }
 
       const { database: updated } = await updateDatabase(id, data);
@@ -580,6 +583,16 @@ export default function DatabaseDetail() {
                       />
                     </div>
                   </div>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={connectionForm.useSsl}
+                      onChange={e => setConnectionForm({ ...connectionForm, useSsl: e.target.checked })}
+                      className="rounded bg-slate-700 border-slate-600 text-primary-500"
+                    />
+                    <span className="text-white">Use SSL/TLS</span>
+                    <span className="text-slate-500">- Required for managed database services</span>
+                  </label>
                 </>
               )}
               <div className="flex gap-2 pt-2">
@@ -596,6 +609,7 @@ export default function DatabaseDetail() {
                       databaseName: database.databaseName || '',
                       username: '',
                       password: '',
+                      useSsl: database.useSsl,
                       serverId: database.serverId,
                       filePath: database.filePath || '',
                     });
@@ -626,6 +640,10 @@ export default function DatabaseDetail() {
                     <div className="flex justify-between">
                       <dt className="text-slate-400">Credentials</dt>
                       <dd className="text-white">{database.hasCredentials ? 'Configured' : 'Not set'}</dd>
+                    </div>
+                    <div className="flex justify-between">
+                      <dt className="text-slate-400">SSL/TLS</dt>
+                      <dd className={database.useSsl ? 'text-green-400' : 'text-slate-500'}>{database.useSsl ? 'Enabled' : 'Disabled'}</dd>
                     </div>
                     <div className="flex justify-between">
                       <dt className="text-slate-400">Server</dt>

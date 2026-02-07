@@ -57,6 +57,7 @@ export async function collectDatabaseMetrics(databaseId: string): Promise<void> 
         database: database.databaseName || 'postgres',
         user: credentials?.username || 'postgres',
         password: credentials?.password,
+        useSsl: database.useSsl,
       };
     } else if (monitoringConfig.connectionMode === 'ssh') {
       if (!database.server) {
@@ -79,6 +80,7 @@ export async function collectDatabaseMetrics(databaseId: string): Promise<void> 
         host: database.host || 'localhost',
         port: database.port || 6379,
         password: credentials?.password,
+        useSsl: database.useSsl,
       };
     }
 

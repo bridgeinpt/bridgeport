@@ -43,6 +43,7 @@ const createDatabaseSchema = z.object({
   username: z.string().optional(),
   password: z.string().optional(),
   filePath: z.string().optional(),
+  useSsl: z.boolean().optional(),
   serverId: z.string().optional(),
   backupStorageType: storageTypeSchema.optional(),
   backupLocalPath: z.string().optional(),

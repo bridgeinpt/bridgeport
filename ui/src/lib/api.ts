@@ -1184,6 +1184,7 @@ export interface Database {
   databaseName: string | null;
   hasCredentials: boolean;
   filePath: string | null;
+  useSsl: boolean;
   serverId: string | null;
   databaseTypeId: string | null;
   databaseType: { id: string; name: string; displayName: string; hasBackupCommand?: boolean } | null;
@@ -1216,6 +1217,7 @@ export interface DatabaseInput {
   username?: string;
   password?: string;
   filePath?: string;
+  useSsl?: boolean;
   serverId?: string;
   backupStorageType?: BackupStorageType;
   backupLocalPath?: string;

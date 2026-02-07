@@ -120,6 +120,7 @@ export async function createDatabase(
     encryptedCredentials?: string;
     credentialsNonce?: string;
     filePath?: string;
+    useSsl?: boolean;
     serverId?: string;
     databaseTypeId?: string;
     backupStorageType: string;
@@ -139,6 +140,7 @@ export async function createDatabase(
     port: input.port,
     databaseName: input.databaseName,
     filePath: input.filePath,
+    useSsl: input.useSsl,
     serverId: input.serverId,
     databaseTypeId,
     backupStorageType: input.backupStorageType || 'local',
@@ -194,6 +196,7 @@ export async function updateDatabase(
   if (input.port !== undefined) data.port = input.port;
   if (input.databaseName !== undefined) data.databaseName = input.databaseName;
   if (input.filePath !== undefined) data.filePath = input.filePath;
+  if (input.useSsl !== undefined) data.useSsl = input.useSsl;
   if (input.serverId !== undefined) data.serverId = input.serverId;
   if (input.backupStorageType !== undefined) data.backupStorageType = input.backupStorageType;
   if (input.backupLocalPath !== undefined) data.backupLocalPath = input.backupLocalPath;
@@ -292,6 +295,7 @@ function toOutput(db: {
   databaseName: string | null;
   encryptedCredentials: string | null;
   filePath: string | null;
+  useSsl: boolean;
   serverId: string | null;
   databaseTypeId: string | null;
   databaseType?: { id: string; name: string; displayName: string; backupCommand: string | null } | null;
@@ -328,6 +332,7 @@ function toOutput(db: {
     databaseName: db.databaseName,
     hasCredentials: !!db.encryptedCredentials,
     filePath: db.filePath,
+    useSsl: db.useSsl,
     serverId: db.serverId,
     databaseTypeId: db.databaseTypeId,
     databaseType: db.databaseType ? {

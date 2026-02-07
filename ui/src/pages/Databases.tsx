@@ -122,6 +122,7 @@ export default function Databases() {
       if (formData.databaseName) data.databaseName = formData.databaseName;
       if (formData.username) data.username = formData.username;
       if (formData.password) data.password = formData.password;
+      if (formData.useSsl) data.useSsl = formData.useSsl;
       if (formData.serverId) data.serverId = formData.serverId;
       if (formData.filePath) data.filePath = formData.filePath;
       if (formData.backupLocalPath) data.backupLocalPath = formData.backupLocalPath;
@@ -302,6 +303,16 @@ export default function Databases() {
                       />
                     </div>
                   </div>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={formData.useSsl || false}
+                      onChange={(e) => setFormData({ ...formData, useSsl: e.target.checked })}
+                      className="rounded bg-slate-700 border-slate-600 text-primary-500"
+                    />
+                    <span className="text-white">Use SSL/TLS</span>
+                    <span className="text-slate-500">- Required for managed database services</span>
+                  </label>
                 </>
               )}
 

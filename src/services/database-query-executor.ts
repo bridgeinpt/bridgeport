@@ -27,6 +27,7 @@ export interface SQLConnectionInfo {
   database: string;
   user: string;
   password?: string;
+  useSsl?: boolean;
 }
 
 export interface SSHConnectionInfo {
@@ -41,6 +42,7 @@ export interface RedisConnectionInfo {
   host: string;
   port: number;
   password?: string;
+  useSsl?: boolean;
 }
 
 /**
@@ -76,7 +78,7 @@ async function executeSQLQueries(
       database: conn.database,
       user: conn.user,
       password: conn.password,
-      ssl: { rejectUnauthorized: false },
+      ssl: conn.useSsl ? { rejectUnauthorized: false } : false,
       connectionTimeoutMillis: 10000,
       statement_timeout: 30000,
     });
@@ -102,6 +104,7 @@ async function executeSQLQueries(
       database: conn.database,
       user: conn.user,
       password: conn.password,
+      ssl: conn.useSsl ? { rejectUnauthorized: false } : undefined,
       connectTimeout: 10000,
     });
 
@@ -226,10 +229,12 @@ async function executeRedisQueries(
     host: conn.host,
     port: conn.port,
     password: conn.password || undefined,
+    tls: conn.useSsl ? { rejectUnauthorized: false } : undefined,
     connectTimeout: 10000,
     commandTimeout: 10000,
-    maxRetriesPerRequest: 0,
-    retryStrategy: () => null,
+    maxRetriesPerRequest: 1,
+    retryStrategy: (times) => (times <= 2 ? 500 : null),
+    enableOfflineQueue: false,
     lazyConnect: true,
   });
   client.on('error', () => {}); // Prevent unhandled error events
@@ -310,6 +315,7 @@ interface DatabaseForPing {
   encryptedCredentials: string | null;
   credentialsNonce: string | null;
   filePath: string | null;
+  useSsl: boolean;
   server: { hostname: string } | null;
 }
 
@@ -343,7 +349,7 @@ export async function pingDatabase(
       database: database.databaseName || 'postgres',
       user: credentials?.username || 'postgres',
       password: credentials?.password,
-      ssl: { rejectUnauthorized: false },
+      ssl: database.useSsl ? { rejectUnauthorized: false } : false,
       connectionTimeoutMillis: 10000,
       statement_timeout: 5000,
     });
@@ -366,6 +372,7 @@ export async function pingDatabase(
       database: database.databaseName || undefined,
       user: credentials?.username || 'root',
       password: credentials?.password,
+      ssl: database.useSsl ? { rejectUnauthorized: false } : undefined,
       connectTimeout: 10000,
     });
 
@@ -384,10 +391,12 @@ export async function pingDatabase(
       host: database.host || 'localhost',
       port: database.port || 6379,
       password: credentials?.password || undefined,
+      tls: database.useSsl ? { rejectUnauthorized: false } : undefined,
       connectTimeout: 10000,
       commandTimeout: 10000,
-      maxRetriesPerRequest: 0,
-      retryStrategy: () => null,
+      maxRetriesPerRequest: 1,
+      retryStrategy: (times) => (times <= 2 ? 500 : null),
+      enableOfflineQueue: false,
       lazyConnect: true,
     });
     client.on('error', () => {}); // Prevent unhandled error events

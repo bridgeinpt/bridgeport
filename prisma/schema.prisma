@@ -449,6 +449,7 @@ model Database {
   encryptedCredentials String? // Encrypted username:password
   credentialsNonce     String?
   filePath             String? // For SQLite: path on server
+  useSsl               Boolean @default(false) // Use TLS/SSL for connections
 
   // Backup storage configuration
   backupStorageType  String  @default("local") // "local" | "spaces"
