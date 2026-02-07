@@ -19,43 +19,31 @@
         "displayName": "File Size",
         "query": "stat -c %s \"{{filePath}}\" 2>/dev/null || stat -f %z \"{{filePath}}\"",
         "resultType": "scalar",
-        "unit": "bytes",
-        "chartGroup": "storage"
+        "unit": "bytes"
       },
       {
         "name": "tableCount",
         "displayName": "Table Count",
         "query": "sqlite3 \"{{filePath}}\" \"SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';\"",
-        "resultType": "scalar",
-        "chartGroup": "overview"
+        "resultType": "scalar"
       },
       {
         "name": "pageCount",
         "displayName": "Page Count",
         "query": "sqlite3 \"{{filePath}}\" \"PRAGMA page_count;\"",
-        "resultType": "scalar",
-        "chartGroup": "storage"
+        "resultType": "scalar"
       },
       {
         "name": "freelistCount",
         "displayName": "Freelist Pages",
         "query": "sqlite3 \"{{filePath}}\" \"PRAGMA freelist_count;\"",
-        "resultType": "scalar",
-        "chartGroup": "storage"
-      },
-      {
-        "name": "journalMode",
-        "displayName": "Journal Mode",
-        "query": "sqlite3 \"{{filePath}}\" \"PRAGMA journal_mode;\"",
-        "resultType": "scalar",
-        "chartGroup": "overview"
+        "resultType": "scalar"
       },
       {
         "name": "topTableSizes",
         "displayName": "Top Tables by Rows",
         "query": "sqlite3 -json \"{{filePath}}\" \"SELECT name, (SELECT count(*) FROM [\" || name || \"]) as rows FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY 2 DESC LIMIT 10;\"",
         "resultType": "rows",
-        "chartGroup": "storage",
         "resultMapping": { "name": "name", "rows": "rows" }
       }
     ]

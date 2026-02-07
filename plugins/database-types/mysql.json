@@ -24,45 +24,32 @@
         "displayName": "Database Size",
         "query": "SELECT SUM(data_length + index_length) AS value FROM information_schema.TABLES WHERE table_schema = DATABASE()",
         "resultType": "scalar",
-        "unit": "bytes",
-        "chartGroup": "storage"
+        "unit": "bytes"
       },
       {
         "name": "tableCount",
         "displayName": "Table Count",
         "query": "SELECT count(*) AS value FROM information_schema.TABLES WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'",
-        "resultType": "scalar",
-        "chartGroup": "overview"
-      },
-      {
-        "name": "connections",
-        "displayName": "Connections",
-        "query": "SELECT (SELECT count(*) FROM information_schema.PROCESSLIST WHERE DB = DATABASE()) AS active, (SELECT @@max_connections) AS max",
-        "resultType": "row",
-        "chartGroup": "connections",
-        "resultMapping": { "active": "active", "max": "max" }
+        "resultType": "scalar"
       },
       {
         "name": "bufferPoolHitRatio",
         "displayName": "Buffer Pool Hit Ratio",
         "query": "SELECT ROUND((1 - (SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME = 'Innodb_buffer_pool_reads') / NULLIF((SELECT VARIABLE_VALUE FROM performance_schema.global_status WHERE VARIABLE_NAME = 'Innodb_buffer_pool_read_requests'), 0)) * 100, 2) AS value",
         "resultType": "scalar",
-        "unit": "%",
-        "chartGroup": "performance"
+        "unit": "%"
       },
       {
         "name": "slowQueries",
         "displayName": "Slow Queries",
         "query": "SELECT VARIABLE_VALUE AS value FROM performance_schema.global_status WHERE VARIABLE_NAME = 'Slow_queries'",
-        "resultType": "scalar",
-        "chartGroup": "performance"
+        "resultType": "scalar"
       },
       {
         "name": "topTableSizes",
         "displayName": "Top Tables by Size",
         "query": "SELECT table_name AS name, (data_length + index_length) AS size, table_rows AS `rows` FROM information_schema.TABLES WHERE table_schema = DATABASE() ORDER BY (data_length + index_length) DESC LIMIT 10",
         "resultType": "rows",
-        "chartGroup": "storage",
         "resultMapping": { "name": "name", "size": "size", "rows": "rows" }
       }
     ]

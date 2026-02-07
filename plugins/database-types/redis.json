@@ -19,59 +19,26 @@
         "displayName": "Used Memory",
         "query": "INFO:used_memory",
         "resultType": "scalar",
-        "unit": "bytes",
-        "chartGroup": "memory"
+        "unit": "bytes"
       },
       {
         "name": "peakMemory",
         "displayName": "Peak Memory",
         "query": "INFO:used_memory_peak",
         "resultType": "scalar",
-        "unit": "bytes",
-        "chartGroup": "memory"
+        "unit": "bytes"
       },
       {
         "name": "memFragRatio",
         "displayName": "Memory Fragmentation",
         "query": "INFO:mem_fragmentation_ratio",
-        "resultType": "scalar",
-        "chartGroup": "memory"
-      },
-      {
-        "name": "connectedClients",
-        "displayName": "Connected Clients",
-        "query": "INFO:connected_clients",
-        "resultType": "scalar",
-        "chartGroup": "clients"
-      },
-      {
-        "name": "opsPerSec",
-        "displayName": "Operations/sec",
-        "query": "INFO:instantaneous_ops_per_sec",
-        "resultType": "scalar",
-        "chartGroup": "performance"
-      },
-      {
-        "name": "hitRatio",
-        "displayName": "Hit Ratio",
-        "query": "COMPUTED:hit_ratio",
-        "resultType": "scalar",
-        "unit": "%",
-        "chartGroup": "performance"
-      },
-      {
-        "name": "evictedKeys",
-        "displayName": "Evicted Keys",
-        "query": "INFO:evicted_keys",
-        "resultType": "scalar",
-        "chartGroup": "performance"
+        "resultType": "scalar"
       },
       {
         "name": "totalKeys",
         "displayName": "Total Keys",
         "query": "KEYSPACE:keys",
-        "resultType": "scalar",
-        "chartGroup": "overview"
+        "resultType": "scalar"
       }
     ]
   }
