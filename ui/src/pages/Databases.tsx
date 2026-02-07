@@ -456,7 +456,9 @@ export default function Databases() {
         />
       ) : (
         <div className="space-y-4">
-          {paginatedData.map((db) => (
+          {paginatedData.map((db) => {
+            const supportsBackup = db.databaseType?.hasBackupCommand !== false;
+            return (
             <div key={db.id} className="panel">
               <div className="flex items-start justify-between">
                 <div className="flex items-start gap-4">
@@ -479,22 +481,27 @@ export default function Databases() {
                       {db.host ? `${db.host}:${db.port}/${db.databaseName}` : db.filePath}
                     </p>
                     <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
-                      <span>{db._count?.backups || 0} backups</span>
-                      <span>Storage: {STORAGE_TYPES.find((t) => t.value === db.backupStorageType)?.label}</span>
-                      {db.schedule && (
+                      {supportsBackup && (
                         <>
-                          <span className={db.schedule.enabled ? 'text-green-400' : 'text-slate-500'}>
-                            {db.schedule.enabled ? 'Scheduled' : 'Schedule disabled'}
-                          </span>
-                          {db.schedule.enabled && db.schedule.nextRunAt && (
-                            <span className="text-slate-400">
-                              Next: {formatDistanceToNow(new Date(db.schedule.nextRunAt), { addSuffix: true })}
-                            </span>
+                          <span>{db._count?.backups || 0} backups</span>
+                          <span>Storage: {STORAGE_TYPES.find((t) => t.value === db.backupStorageType)?.label}</span>
+                          {db.schedule && (
+                            <>
+                              <span className={db.schedule.enabled ? 'text-green-400' : 'text-slate-500'}>
+                                {db.schedule.enabled ? 'Scheduled' : 'Schedule disabled'}
+                              </span>
+                              {db.schedule.enabled && db.schedule.nextRunAt && (
+                                <span className="text-slate-400">
+                                  Next: {formatDistanceToNow(new Date(db.schedule.nextRunAt), { addSuffix: true })}
+                                </span>
+                              )}
+                            </>
                           )}
                         </>
                       )}
                     </div>
                     {/* Backup Status Row */}
+                    {supportsBackup && (
                     <div className="flex items-center gap-3 mt-2">
                       {db.lastBackup ? (
                         <>
@@ -534,9 +541,11 @@ export default function Databases() {
                         <span className="text-xs text-slate-500 italic">No backups yet</span>
                       )}
                     </div>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  {supportsBackup && (
                   <button
                     onClick={() => handleQuickBackup(db)}
                     disabled={backingUpId === db.id}
@@ -544,18 +553,20 @@ export default function Databases() {
                   >
                     {backingUpId === db.id ? 'Starting...' : 'Backup'}
                   </button>
+                  )}
                   <button
                     onClick={() => handleDelete(db)}
                     className="p-1.5 text-slate-400 hover:text-red-400 rounded"
-                    disabled={(db._count?.backups || 0) > 0}
-                    title={(db._count?.backups || 0) > 0 ? 'Delete backups first' : 'Delete'}
+                    disabled={supportsBackup && (db._count?.backups || 0) > 0}
+                    title={supportsBackup && (db._count?.backups || 0) > 0 ? 'Delete backups first' : 'Delete'}
                   >
                     <TrashIcon className="w-4 h-4" />
                   </button>
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
           <Pagination
             currentPage={currentPage}
             totalPages={totalPages}

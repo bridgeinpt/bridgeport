@@ -86,9 +86,12 @@ export default function Dashboard() {
       setMetrics(metricsRes.servers);
       setAuditLogs(logsRes.logs);
 
-      // Fetch backup info for each database
+      // Fetch backup info for each database (skip types without backup support)
       const dbsWithBackups = await Promise.all(
         dbRes.databases.map(async (db) => {
+          if (db.databaseType?.hasBackupCommand === false) {
+            return { ...db, lastBackup: null, schedule: null };
+          }
           try {
             const [backupsRes, scheduleRes] = await Promise.all([
               listDatabaseBackups(db.id),
@@ -741,9 +744,11 @@ export default function Dashboard() {
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-white">
               Databases Health
+              {databases.some((db) => db.databaseType?.hasBackupCommand !== false) && (
               <span className="ml-2 text-sm font-normal text-slate-400">
-                ({databases.filter((db) => db.lastBackup !== null).length}/{databases.length} backed up)
+                ({databases.filter((db) => db.databaseType?.hasBackupCommand !== false && db.lastBackup !== null).length}/{databases.filter((db) => db.databaseType?.hasBackupCommand !== false).length} backed up)
               </span>
+              )}
             </h2>
             <Link to="/databases" className="text-sm text-primary-400 hover:text-primary-300">
               View All
@@ -751,15 +756,17 @@ export default function Dashboard() {
           </div>
           <div className="flex flex-wrap gap-2">
             {databases.map((db) => {
+              const supportsBackup = db.databaseType?.hasBackupCommand !== false;
               const hasBackup = db.lastBackup !== null;
               const hasSchedule = db.schedule?.enabled;
-              const statusColor = hasBackup ? 'bg-green-500' : hasSchedule ? 'bg-yellow-500' : 'bg-red-500';
+              const statusColor = !supportsBackup ? 'bg-slate-500' : hasBackup ? 'bg-green-500' : hasSchedule ? 'bg-yellow-500' : 'bg-red-500';
+              const statusTitle = !supportsBackup ? 'Backups not supported' : hasBackup ? 'Backed up' : hasSchedule ? 'Scheduled, no backup yet' : 'No backup';
               return (
                 <Link
                   key={db.id}
                   to={`/databases/${db.id}`}
                   className="flex items-center gap-2 px-3 py-2 bg-slate-800/50 rounded-lg border border-slate-700 hover:border-slate-600 transition-colors"
-                  title={`${db.name} - ${hasBackup ? 'Backed up' : hasSchedule ? 'Scheduled, no backup yet' : 'No backup'}`}
+                  title={`${db.name} - ${statusTitle}`}
                 >
                   <span className={`w-2 h-2 rounded-full ${statusColor}`} />
                   <span className="text-sm text-white">{db.name}</span>
@@ -817,7 +824,7 @@ export default function Dashboard() {
           )}
 
           {/* Database Backups */}
-          {databases.length > 0 && (
+          {databases.some((db) => db.databaseType?.hasBackupCommand !== false) && (
             <div className="panel">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold text-white">Database Backups</h2>
@@ -826,7 +833,7 @@ export default function Dashboard() {
                 </Link>
               </div>
               <div className="space-y-4">
-                {databases.map((db) => (
+                {databases.filter((db) => db.databaseType?.hasBackupCommand !== false).map((db) => (
                   <div
                     key={db.id}
                     className="p-3 bg-slate-800/50 rounded-lg border border-slate-700"

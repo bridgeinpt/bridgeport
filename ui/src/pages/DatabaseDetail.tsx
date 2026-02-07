@@ -457,6 +457,7 @@ export default function DatabaseDetail() {
             </p>
           </div>
         </div>
+        {database.databaseType?.hasBackupCommand !== false && (
         <div className="flex gap-2">
           <button
             onClick={handleBackup}
@@ -466,6 +467,7 @@ export default function DatabaseDetail() {
             {backingUp ? 'Starting...' : 'Backup Now'}
           </button>
         </div>
+        )}
       </div>
 
       {/* Info Cards */}
@@ -763,6 +765,7 @@ export default function DatabaseDetail() {
       </div>
 
       {/* Backup Configuration + Schedule Row */}
+      {database.databaseType?.hasBackupCommand !== false && (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         {/* Backup Configuration */}
         <div className="card">
@@ -1108,8 +1111,10 @@ export default function DatabaseDetail() {
           )}
         </div>
       </div>
+      )}
 
       {/* Backups Table */}
+      {database.databaseType?.hasBackupCommand !== false && (
       <div className="card">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-white">
@@ -1262,6 +1267,7 @@ export default function DatabaseDetail() {
           </>
         )}
       </div>
+      )}
     </div>
   );
 }

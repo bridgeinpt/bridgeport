@@ -1186,7 +1186,7 @@ export interface Database {
   filePath: string | null;
   serverId: string | null;
   databaseTypeId: string | null;
-  databaseType: { id: string; name: string; displayName: string } | null;
+  databaseType: { id: string; name: string; displayName: string; hasBackupCommand?: boolean } | null;
   backupStorageType: BackupStorageType;
   backupLocalPath: string | null;
   backupSpacesBucket: string | null;
@@ -2345,7 +2345,7 @@ export interface DatabaseMonitoringSummaryItem {
   id: string;
   name: string;
   type: string;
-  databaseType: { id: string; name: string; displayName: string } | null;
+  databaseType: { id: string; name: string; displayName: string; hasBackupCommand?: boolean } | null;
   serverId: string | null;
   serverName: string | null;
   monitoringEnabled: boolean;

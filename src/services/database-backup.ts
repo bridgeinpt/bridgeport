@@ -38,6 +38,7 @@ export interface DatabaseInput {
   username?: string;
   password?: string;
   filePath?: string;
+  useSsl?: boolean;
   serverId?: string;
   backupStorageType?: 'local' | 'spaces';
   backupLocalPath?: string;
@@ -70,6 +71,7 @@ export interface DatabaseTypeInfo {
   id: string;
   name: string;
   displayName: string;
+  hasBackupCommand: boolean;
 }
 
 export interface DatabaseOutput {
@@ -81,6 +83,7 @@ export interface DatabaseOutput {
   databaseName: string | null;
   hasCredentials: boolean;
   filePath: string | null;
+  useSsl: boolean;
   serverId: string | null;
   databaseTypeId: string | null;
   databaseType: DatabaseTypeInfo | null;
@@ -172,7 +175,7 @@ export async function createDatabase(
     data,
     include: {
       _count: { select: { backups: true, services: true } },
-      databaseType: { select: { id: true, name: true, displayName: true } },
+      databaseType: { select: { id: true, name: true, displayName: true, backupCommand: true } },
     },
   });
 
@@ -219,7 +222,7 @@ export async function updateDatabase(
     data,
     include: {
       _count: { select: { backups: true, services: true } },
-      databaseType: { select: { id: true, name: true, displayName: true } },
+      databaseType: { select: { id: true, name: true, displayName: true, backupCommand: true } },
     },
   });
 
@@ -231,7 +234,7 @@ export async function getDatabase(id: string): Promise<DatabaseOutput | null> {
     where: { id },
     include: {
       _count: { select: { backups: true, services: true } },
-      databaseType: { select: { id: true, name: true, displayName: true } },
+      databaseType: { select: { id: true, name: true, displayName: true, backupCommand: true } },
     },
   });
 
@@ -244,7 +247,7 @@ export async function listDatabases(environmentId: string): Promise<DatabaseOutp
     orderBy: { name: 'asc' },
     include: {
       _count: { select: { backups: true, services: true } },
-      databaseType: { select: { id: true, name: true, displayName: true } },
+      databaseType: { select: { id: true, name: true, displayName: true, backupCommand: true } },
       backups: {
         orderBy: { createdAt: 'desc' },
         take: 1,
@@ -291,7 +294,7 @@ function toOutput(db: {
   filePath: string | null;
   serverId: string | null;
   databaseTypeId: string | null;
-  databaseType?: { id: string; name: string; displayName: string } | null;
+  databaseType?: { id: string; name: string; displayName: string; backupCommand: string | null } | null;
   backupStorageType: string;
   backupLocalPath: string | null;
   backupSpacesBucket: string | null;
@@ -327,7 +330,12 @@ function toOutput(db: {
     filePath: db.filePath,
     serverId: db.serverId,
     databaseTypeId: db.databaseTypeId,
-    databaseType: db.databaseType || null,
+    databaseType: db.databaseType ? {
+      id: db.databaseType.id,
+      name: db.databaseType.name,
+      displayName: db.databaseType.displayName,
+      hasBackupCommand: !!db.databaseType.backupCommand,
+    } : null,
     backupStorageType: db.backupStorageType,
     backupLocalPath: db.backupLocalPath,
     backupSpacesBucket: db.backupSpacesBucket,
