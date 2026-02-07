@@ -1,4 +1,4 @@
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { useAuthStore, useAppStore, isAdmin } from '../lib/store';
 import { listEnvironments, type Environment } from '../lib/api';
@@ -108,6 +108,7 @@ const navigationGroups: NavGroup[] = [
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const { user } = useAuthStore();
   const { selectedEnvironment, setSelectedEnvironment, clearSelectedEnvironment, sidebarCollapsed, toggleSidebar, collapsedGroups, toggleGroup } = useAppStore();
   const [environments, setEnvironments] = useState<Environment[]>([]);
@@ -173,6 +174,18 @@ export default function Layout({ children }: { children: React.ReactNode }) {
               onChange={(e) => {
                 const env = environments.find((env) => env.id === e.target.value);
                 setSelectedEnvironment(env || null);
+                // Navigate away from detail pages since the object won't exist in the new environment
+                const segments = location.pathname.split('/').filter(Boolean);
+                const hasId = segments.some((s) => /^[0-9a-f-]{36}$|^\d+$/.test(s));
+                if (hasId) {
+                  // Go to parent list page (remove ID and anything after it)
+                  const parentSegments = [];
+                  for (const s of segments) {
+                    if (/^[0-9a-f-]{36}$|^\d+$/.test(s)) break;
+                    parentSegments.push(s);
+                  }
+                  navigate(parentSegments.length > 0 ? '/' + parentSegments.join('/') : '/');
+                }
               }}
               className="mt-1 w-full bg-slate-800 border border-slate-600 rounded px-2 py-1.5 text-sm text-white"
             >
