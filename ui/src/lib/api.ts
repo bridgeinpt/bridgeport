@@ -741,7 +741,7 @@ export interface ConfigFile {
   id: string;
   name: string;
   filename: string;
-  content: string;
+  content?: string;
   description: string | null;
   isBinary: boolean;
   mimeType: string | null;
@@ -877,7 +877,7 @@ export const syncAllServerFiles = (serverId: string) =>
 // File History
 export interface FileHistoryEntry {
   id: string;
-  content: string;
+  content?: string;
   editedAt: string;
   editedBy: { id: string; email: string; name: string | null } | null;
 }

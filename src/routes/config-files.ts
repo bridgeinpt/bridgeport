@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma, isPrismaNotFoundError } from '../lib/db.js';
 import { createClientForServer, type CommandClient } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from './environments.js';
+import { requireOperator } from '../plugins/authorize.js';
 import { logAudit } from '../services/audit.js';
 import { resolveSecretPlaceholders } from '../services/secrets.js';
 
@@ -151,14 +152,18 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         };
       });
 
-      return { configFile: { ...configFile, services: servicesWithSyncStatus } };
+      // Strip binary content from response — frontend only needs metadata
+      const responseFile = configFile.isBinary
+        ? { ...configFile, content: '', services: servicesWithSyncStatus }
+        : { ...configFile, services: servicesWithSyncStatus };
+      return { configFile: responseFile };
     }
   );
 
   // Create config file
   fastify.post(
     '/api/environments/:envId/config-files',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       const body = createConfigFileSchema.safeParse(request.body);
@@ -184,6 +189,10 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           environmentId: envId,
         });
 
+        // Strip binary content from response — frontend only needs metadata
+        if (configFile.isBinary) {
+          return { configFile: { ...configFile, content: '' } };
+        }
         return { configFile };
       } catch (error) {
         if (error instanceof Error && error.message.includes('Unique constraint')) {
@@ -197,7 +206,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // Update config file
   fastify.patch(
     '/api/config-files/:id',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = updateConfigFileSchema.safeParse(request.body);
@@ -237,6 +246,10 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           environmentId: existing.environmentId,
         });
 
+        // Strip binary content from response
+        if (configFile.isBinary) {
+          return { configFile: { ...configFile, content: '' } };
+        }
         return { configFile };
       } catch (error) {
         if (isPrismaNotFoundError(error)) {
@@ -263,7 +276,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         where: { configFileId: id },
         select: {
           id: true,
-          content: true,
+          content: !configFile.isBinary, // Exclude content for binary files
           editedAt: true,
           editedBy: { select: { id: true, email: true, name: true } },
         },
@@ -278,7 +291,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // Restore config file from history
   fastify.post(
     '/api/config-files/:id/restore/:historyId',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { id, historyId } = request.params as { id: string; historyId: string };
 
@@ -317,6 +330,10 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         environmentId: configFile.environmentId,
       });
 
+      // Strip binary content from response
+      if (updated.isBinary) {
+        return { configFile: { ...updated, content: '' } };
+      }
       return { configFile: updated };
     }
   );
@@ -324,7 +341,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // Delete config file
   fastify.delete(
     '/api/config-files/:id',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -392,7 +409,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // Attach file to service
   fastify.post(
     '/api/services/:id/files',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = attachFileSchema.safeParse(request.body);
@@ -451,7 +468,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // Detach file from service
   fastify.delete(
     '/api/services/:serviceId/files/:fileId',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { serviceId, fileId } = request.params as { serviceId: string; fileId: string };
 
@@ -492,7 +509,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // Update service file target path
   fastify.patch(
     '/api/services/:serviceId/files/:fileId',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { serviceId, fileId } = request.params as { serviceId: string; fileId: string };
       const body = z.object({ targetPath: z.string().min(1) }).safeParse(request.body);
@@ -555,7 +572,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // Sync files to server (copy all attached files to their target paths)
   fastify.post(
     '/api/services/:id/sync-files',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -798,7 +815,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // Sync all config files for all services on a server
   fastify.post(
     '/api/servers/:serverId/sync-all-files',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { serverId } = request.params as { serverId: string };
 
@@ -959,7 +976,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // Sync a config file to all attached services
   fastify.post(
     '/api/config-files/:id/sync-all',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -1142,7 +1159,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // Upload asset file (binary)
   fastify.post(
     '/api/environments/:envId/asset-files/upload',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
 
@@ -1220,7 +1237,8 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           environmentId: envId,
         });
 
-        return { configFile };
+        // Strip binary content from response — no need to echo back the base64 payload
+        return { configFile: { ...configFile, content: '' } };
       } catch (error) {
         if (error instanceof Error && error.message.includes('Unique constraint')) {
           return reply.code(409).send({ error: 'Config file with this name already exists' });

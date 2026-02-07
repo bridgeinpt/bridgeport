@@ -567,7 +567,7 @@ export default function ServiceDetail() {
   const handleViewFileContent = async (fileId: string, fileName: string, filename: string) => {
     try {
       const { configFile } = await getConfigFile(fileId);
-      setViewingFileContent({ name: fileName, filename, content: configFile.content });
+      setViewingFileContent({ name: fileName, filename, content: configFile.content || '' });
     } catch {
       toast.error('Failed to load file content');
     }

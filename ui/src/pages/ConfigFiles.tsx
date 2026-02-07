@@ -179,7 +179,7 @@ export default function ConfigFiles() {
 
   const startEdit = (file: ConfigFile) => {
     setEditingFile(file);
-    setEditContent(file.content);
+    setEditContent(file.content || '');
     setEditDescription(file.description || '');
   };
 
@@ -601,14 +601,14 @@ export default function ConfigFiles() {
               </div>
             ) : (
               <pre className="flex-1 overflow-auto p-4 bg-slate-950 rounded-lg text-sm font-mono text-slate-300">
-                {viewingFile.content}
+                {viewingFile.content || ''}
               </pre>
             )}
 
             <div className="mt-4 flex justify-end gap-2">
-              {!viewingFile.isBinary && (
+              {!viewingFile.isBinary && viewingFile.content && (
                 <button
-                  onClick={() => navigator.clipboard.writeText(viewingFile.content)}
+                  onClick={() => navigator.clipboard.writeText(viewingFile.content!)}
                   className="btn btn-secondary"
                 >
                   Copy Content
@@ -698,9 +698,15 @@ export default function ConfigFiles() {
                       Restore This Version
                     </button>
                   </div>
-                  <pre className="flex-1 overflow-auto p-4 bg-slate-950 rounded-lg text-sm font-mono text-slate-300">
-                    {selectedHistoryEntry.content}
-                  </pre>
+                  {historyFile?.isBinary ? (
+                    <div className="flex-1 flex items-center justify-center p-8 bg-slate-950 rounded-lg text-slate-400">
+                      Binary file — content not available
+                    </div>
+                  ) : (
+                    <pre className="flex-1 overflow-auto p-4 bg-slate-950 rounded-lg text-sm font-mono text-slate-300">
+                      {selectedHistoryEntry.content || ''}
+                    </pre>
+                  )}
                 </>
               ) : (
                 <div className="flex-1 flex items-center justify-center text-slate-400">
