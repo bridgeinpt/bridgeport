@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useAppStore } from '../lib/store';
 import {
   getServer,
   checkServerHealth,
@@ -95,6 +96,7 @@ function getAgentStatusBadge(status: AgentStatusType) {
 
 export default function ServerDetail() {
   const { id } = useParams<{ id: string }>();
+  const setBreadcrumbName = useAppStore((s) => s.setBreadcrumbName);
   const toast = useToast();
   const [server, setServer] = useState<ServerWithServices | null>(null);
   const [loading, setLoading] = useState(true);
@@ -161,6 +163,7 @@ export default function ServerDetail() {
       ])
         .then(([serverRes, statusRes, metricsRes, processRes]) => {
           setServer(serverRes.server);
+          if (id) setBreadcrumbName(id, serverRes.server.name);
           setAgentStatus(statusRes);
           if (metricsRes.metrics.length > 0) {
             setLatestMetrics(metricsRes.metrics[0]);
@@ -412,6 +415,7 @@ export default function ServerDetail() {
         tags: editServerData.tags,
       });
       setServer((prev) => prev ? { ...prev, ...updatedServer } : null);
+      setBreadcrumbName(id, updatedServer.name);
       setShowEditServer(false);
       toast.success('Server updated');
     } catch (error) {

@@ -121,6 +121,7 @@ export default function DatabaseMonitoringDetail() {
     setMonitoringTimeRange,
     autoRefreshEnabled,
     setAutoRefreshEnabled,
+    setBreadcrumbName,
   } = useAppStore();
 
   const [database, setDatabase] = useState<DatabaseInfo | null>(null);
@@ -139,6 +140,7 @@ export default function DatabaseMonitoringDetail() {
         `/databases/${id}`
       );
       setDatabase(res.database);
+      if (id) setBreadcrumbName(id, res.database.name);
       return res.database;
     } catch {
       // Ignore - will show not found state

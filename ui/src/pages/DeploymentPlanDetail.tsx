@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useAppStore } from '../lib/store';
 import { useToast } from '../components/Toast';
 import {
   getDeploymentPlan,
@@ -34,6 +35,7 @@ const STEP_STATUS_COLORS: Record<DeploymentStepStatus, { bg: string; text: strin
 export default function DeploymentPlanDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const setBreadcrumbName = useAppStore((s) => s.setBreadcrumbName);
   const toast = useToast();
   const [plan, setPlan] = useState<DeploymentPlan | null>(null);
   const [loading, setLoading] = useState(true);
@@ -50,6 +52,7 @@ export default function DeploymentPlanDetail() {
     getDeploymentPlan(id)
       .then(({ plan }) => {
         setPlan(plan);
+        if (id) setBreadcrumbName(id, plan.name);
         // Start SSE if plan is running
         if (plan.status === 'running') {
           startEventStream(id);

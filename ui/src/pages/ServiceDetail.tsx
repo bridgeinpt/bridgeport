@@ -101,7 +101,7 @@ function parseCertCheckResults(jsonStr: string | null): CertCheckResult[] {
 export default function ServiceDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { selectedEnvironment } = useAppStore();
+  const { selectedEnvironment, setBreadcrumbName } = useAppStore();
   const toast = useToast();
   const [service, setService] = useState<ServiceWithServer | null>(null);
   const [deployments, setDeployments] = useState<Deployment[]>([]);
@@ -198,6 +198,7 @@ export default function ServiceDetail() {
       Promise.all([
         getService(id).then(({ service }) => {
           setService(service);
+          setBreadcrumbName(id, service.name);
           setImageTag(service.imageTag);
           // Load container image if linked
           if (service.containerImageId) {
@@ -279,6 +280,7 @@ export default function ServiceDetail() {
     try {
       const { service: updated } = await updateService(id, { name: editName.trim() });
       setService((prev) => (prev ? { ...prev, name: updated.name } : null));
+      setBreadcrumbName(id, updated.name);
       setEditingName(false);
       toast.success('Service name updated');
     } catch (error) {

@@ -65,7 +65,7 @@ function parseBackupError(error: string | null): BackupError | string | null {
 export default function DatabaseDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { selectedEnvironment } = useAppStore();
+  const { selectedEnvironment, setBreadcrumbName } = useAppStore();
   const toast = useToast();
 
   const [database, setDatabase] = useState<Database | null>(null);
@@ -132,6 +132,7 @@ export default function DatabaseDetail() {
     try {
       const { database: db } = await getDatabase(id);
       setDatabase(db);
+      setBreadcrumbName(id, db.name);
       setConnectionForm({
         serverId: db.serverId,
         filePath: db.filePath || '',

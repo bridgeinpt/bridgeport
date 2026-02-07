@@ -62,6 +62,10 @@ interface AppState {
   monitoringDatabaseFilter: string[];
   setMonitoringDatabaseFilter: (ids: string[]) => void;
 
+  // Breadcrumb name resolution (session-only, not persisted)
+  breadcrumbNames: Record<string, string>;
+  setBreadcrumbName: (id: string, name: string) => void;
+
   // Dashboard alert dismissals (session-only, not persisted)
   dismissedAlerts: string[];
   dismissAlert: (alertId: string) => void;
@@ -113,6 +117,13 @@ export const useAppStore = create<AppState>()(
       setMonitoringServiceFilter: (ids) => set({ monitoringServiceFilter: ids }),
       monitoringDatabaseFilter: [],
       setMonitoringDatabaseFilter: (ids) => set({ monitoringDatabaseFilter: ids }),
+
+      // Breadcrumb name resolution (session-only)
+      breadcrumbNames: {},
+      setBreadcrumbName: (id, name) =>
+        set((state) => ({
+          breadcrumbNames: { ...state.breadcrumbNames, [id]: name },
+        })),
 
       // Dashboard alert dismissals (session-only)
       dismissedAlerts: [],

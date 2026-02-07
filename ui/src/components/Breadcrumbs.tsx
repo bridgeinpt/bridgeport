@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router-dom';
 import { ChevronRightIcon } from './Icons';
+import { useAppStore } from '../lib/store';
 
 // Route name mappings
 const routeNames: Record<string, string> = {
@@ -35,6 +36,7 @@ interface Crumb {
 
 export default function Breadcrumbs() {
   const location = useLocation();
+  const breadcrumbNames = useAppStore((s) => s.breadcrumbNames);
   const pathSegments = location.pathname.split('/').filter(Boolean);
   const isAdminSection = pathSegments[0] === 'admin';
 
@@ -50,9 +52,8 @@ export default function Breadcrumbs() {
     const isId = /^[0-9a-f-]{36}$|^\d+$/.test(segment);
 
     if (isId) {
-      // For detail pages, show generic "Details" or infer from previous segment
       crumbs.push({
-        name: 'Details',
+        name: breadcrumbNames[segment] || 'Details',
         href: currentPath,
         isLast,
       });
