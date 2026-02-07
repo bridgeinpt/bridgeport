@@ -11,6 +11,7 @@ import {
 import { DockerSSH, createClientForServer } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from './environments.js';
 import { logAudit } from '../services/audit.js';
+import { logHealthCheck } from '../services/health-checks.js';
 import { checkServiceUpdate } from '../lib/scheduler.js';
 import { determineHealthStatus, determineOverallStatus } from '../services/servers.js';
 import { getSystemSettings } from '../services/system-settings.js';
@@ -503,6 +504,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       const docker = new DockerSSH(client);
+      const start = Date.now();
 
       try {
         await client.connect();
@@ -578,6 +580,9 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           console.error(`[HealthCheck] Failed to check updates for ${service.name}:`, err);
         }
 
+        const durationMs = Date.now() - start;
+        const isHealthy = containerInfo.running && (urlHealth === null || urlHealth.success);
+
         await logAudit({
           action: 'health_check',
           resourceType: 'service',
@@ -586,6 +591,18 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           details: { status, containerStatus, healthStatus, containerHealth, urlHealth, exposedPorts, updateInfo },
           userId: request.authUser!.id,
           environmentId: service.server.environmentId,
+        });
+
+        await logHealthCheck({
+          environmentId: service.server.environmentId,
+          resourceType: 'service',
+          resourceId: id,
+          resourceName: service.name,
+          checkType: urlHealth ? 'url' : 'container_health',
+          status: isHealthy ? 'success' : 'failure',
+          durationMs,
+          httpStatus: urlHealth?.statusCode,
+          errorMessage: urlHealth?.error,
         });
 
         return {
@@ -600,6 +617,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           updateInfo,
         };
       } catch (error) {
+        const durationMs = Date.now() - start;
         const message = error instanceof Error ? error.message : 'Health check failed';
 
         // Update status to unknown on error
@@ -622,6 +640,17 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           error: message,
           userId: request.authUser!.id,
           environmentId: service.server.environmentId,
+        });
+
+        await logHealthCheck({
+          environmentId: service.server.environmentId,
+          resourceType: 'service',
+          resourceId: id,
+          resourceName: service.name,
+          checkType: 'url',
+          status: 'failure',
+          durationMs,
+          errorMessage: message,
         });
 
         return reply.code(500).send({ error: message });
