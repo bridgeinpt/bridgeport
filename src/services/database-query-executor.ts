@@ -1,5 +1,6 @@
 import pg from 'pg';
 import mysql from 'mysql2/promise';
+import Redis from 'ioredis';
 import { SSHClient, LocalClient, isLocalhost, type CommandClient } from '../lib/ssh.js';
 import { decrypt } from '../lib/crypto.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
@@ -15,7 +16,7 @@ export interface MonitoringQuery {
 }
 
 export interface MonitoringConfig {
-  connectionMode: 'sql' | 'ssh';
+  connectionMode: 'sql' | 'ssh' | 'redis';
   driver?: 'pg' | 'mysql2';
   queries: MonitoringQuery[];
 }
@@ -36,6 +37,12 @@ export interface SSHConnectionInfo {
   placeholders?: Record<string, string>;
 }
 
+export interface RedisConnectionInfo {
+  host: string;
+  port: number;
+  password?: string;
+}
+
 /**
  * Execute all monitoring queries and return results as a record.
  * Each query result is keyed by its name. Errors per-query are captured without aborting others.
@@ -44,11 +51,14 @@ export async function executeMonitoringQueries(
   config: MonitoringConfig,
   sqlConn?: SQLConnectionInfo,
   sshConn?: SSHConnectionInfo,
+  redisConn?: RedisConnectionInfo,
 ): Promise<Record<string, unknown>> {
   if (config.connectionMode === 'sql' && sqlConn) {
     return executeSQLQueries(config, sqlConn);
   } else if (config.connectionMode === 'ssh' && sshConn) {
     return executeSSHQueries(config, sshConn);
+  } else if (config.connectionMode === 'redis' && redisConn) {
+    return executeRedisQueries(config, redisConn);
   }
   throw new Error(`Unsupported connection mode: ${config.connectionMode}`);
 }
@@ -175,6 +185,114 @@ async function executeSSHQueries(
   return results;
 }
 
+/**
+ * Parse Redis INFO output into a key-value map.
+ */
+function parseRedisInfo(info: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const line of info.split('\r\n')) {
+    if (line.startsWith('#') || !line.includes(':')) continue;
+    const colonIdx = line.indexOf(':');
+    map.set(line.slice(0, colonIdx), line.slice(colonIdx + 1));
+  }
+  return map;
+}
+
+/**
+ * Parse keyspace entries (e.g. "keys=5,expires=0,avg_ttl=0") from Redis INFO.
+ */
+function parseKeyspaceField(infoMap: Map<string, string>, field: string): number {
+  let total = 0;
+  for (const [key, value] of infoMap.entries()) {
+    if (!key.startsWith('db')) continue;
+    // value format: "keys=123,expires=45,avg_ttl=0"
+    for (const part of value.split(',')) {
+      const [k, v] = part.split('=');
+      if (k === field) {
+        total += Number(v) || 0;
+      }
+    }
+  }
+  return total;
+}
+
+async function executeRedisQueries(
+  config: MonitoringConfig,
+  conn: RedisConnectionInfo,
+): Promise<Record<string, unknown>> {
+  const results: Record<string, unknown> = {};
+
+  const client = new Redis({
+    host: conn.host,
+    port: conn.port,
+    password: conn.password || undefined,
+    connectTimeout: 10000,
+    commandTimeout: 10000,
+    lazyConnect: true,
+    enableReadyCheck: false,
+  });
+
+  try {
+    await client.connect();
+
+    // Fetch all INFO sections at once
+    const infoRaw = await client.info();
+    const infoMap = parseRedisInfo(infoRaw);
+
+    for (const query of config.queries) {
+      try {
+        const dsl = query.query;
+
+        if (dsl.startsWith('INFO:')) {
+          const fields = dsl.slice(5).split(',');
+          if (fields.length === 1) {
+            // Scalar: single field
+            const raw = infoMap.get(fields[0]);
+            const num = Number(raw);
+            results[query.name] = raw === undefined ? null : isNaN(num) ? raw : num;
+          } else {
+            // Row: multiple fields
+            const row: Record<string, unknown> = {};
+            for (const f of fields) {
+              const raw = infoMap.get(f.trim());
+              const num = Number(raw);
+              row[f.trim()] = raw === undefined ? null : isNaN(num) ? raw : num;
+            }
+            results[query.name] = row;
+          }
+        } else if (dsl.startsWith('CMD:')) {
+          const cmd = dsl.slice(4).trim();
+          const parts = cmd.split(/\s+/);
+          const res = await (client as unknown as { call: (cmd: string, ...args: string[]) => Promise<unknown> }).call(parts[0], ...parts.slice(1));
+          const num = Number(res);
+          results[query.name] = isNaN(num) ? res : num;
+        } else if (dsl.startsWith('KEYSPACE:')) {
+          const field = dsl.slice(9).trim();
+          results[query.name] = parseKeyspaceField(infoMap, field);
+        } else if (dsl.startsWith('COMPUTED:')) {
+          const expr = dsl.slice(9).trim();
+          if (expr === 'hit_ratio') {
+            const hits = Number(infoMap.get('keyspace_hits')) || 0;
+            const misses = Number(infoMap.get('keyspace_misses')) || 0;
+            const total = hits + misses;
+            results[query.name] = total === 0 ? 0 : Math.round((hits / total) * 10000) / 100;
+          } else {
+            results[query.name] = { error: `Unknown computed expression: ${expr}` };
+          }
+        } else {
+          results[query.name] = { error: `Unknown Redis query DSL: ${dsl}` };
+        }
+      } catch (err) {
+        results[query.name] = { error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+  } finally {
+    await client.quit().catch(() => {});
+  }
+
+  return results;
+}
+
 export interface PingResult {
   success: boolean;
   latencyMs: number | null;
@@ -256,6 +374,28 @@ export async function pingDatabase(
       return { success: true, latencyMs, serverVersion };
     } finally {
       await connection.end().catch(() => {});
+    }
+  }
+
+  if (database.type === 'redis') {
+    const client = new Redis({
+      host: database.host || 'localhost',
+      port: database.port || 6379,
+      password: credentials?.password || undefined,
+      connectTimeout: 10000,
+      lazyConnect: true,
+      enableReadyCheck: false,
+    });
+
+    try {
+      await client.connect();
+      const info = await client.info('server');
+      const latencyMs = Date.now() - start;
+      const versionMatch = info.match(/redis_version:(\S+)/);
+      const serverVersion = versionMatch ? `Redis ${versionMatch[1]}` : 'Redis';
+      return { success: true, latencyMs, serverVersion };
+    } finally {
+      await client.quit().catch(() => {});
     }
   }
 

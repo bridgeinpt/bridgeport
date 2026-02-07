@@ -108,6 +108,8 @@ function getTypeColor(type: string): string {
       return 'bg-orange-500/20 text-orange-400';
     case 'sqlite':
       return 'bg-emerald-500/20 text-emerald-400';
+    case 'redis':
+      return 'bg-red-500/20 text-red-400';
     default:
       return 'bg-slate-500/20 text-slate-400';
   }

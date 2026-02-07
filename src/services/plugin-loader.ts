@@ -27,7 +27,7 @@ interface MonitoringQueryJson {
 }
 
 interface MonitoringConfigJson {
-  connectionMode: 'sql' | 'ssh';
+  connectionMode: 'sql' | 'ssh' | 'redis';
   driver?: 'pg' | 'mysql2';
   queries: MonitoringQueryJson[];
 }

@@ -1,7 +1,7 @@
 import { prisma } from '../lib/db.js';
 import { decrypt } from '../lib/crypto.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
-import { executeMonitoringQueries, type MonitoringConfig, type SQLConnectionInfo, type SSHConnectionInfo } from './database-query-executor.js';
+import { executeMonitoringQueries, type MonitoringConfig, type SQLConnectionInfo, type SSHConnectionInfo, type RedisConnectionInfo } from './database-query-executor.js';
 
 /**
  * Collect metrics for a single database
@@ -48,6 +48,7 @@ export async function collectDatabaseMetrics(databaseId: string): Promise<void> 
   try {
     let sqlConn: SQLConnectionInfo | undefined;
     let sshConn: SSHConnectionInfo | undefined;
+    let redisConn: RedisConnectionInfo | undefined;
 
     if (monitoringConfig.connectionMode === 'sql') {
       sqlConn = {
@@ -73,9 +74,15 @@ export async function collectDatabaseMetrics(databaseId: string): Promise<void> 
         sshPrivateKey: sshCreds.privateKey,
         filePath: database.filePath || undefined,
       };
+    } else if (monitoringConfig.connectionMode === 'redis') {
+      redisConn = {
+        host: database.host || 'localhost',
+        port: database.port || 6379,
+        password: credentials?.password,
+      };
     }
 
-    const metricsResult = await executeMonitoringQueries(monitoringConfig, sqlConn, sshConn);
+    const metricsResult = await executeMonitoringQueries(monitoringConfig, sqlConn, sshConn, redisConn);
 
     // Store metrics
     await prisma.databaseMetrics.create({
