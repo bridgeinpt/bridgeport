@@ -10,7 +10,7 @@ export interface DatabaseNodeData {
   status: string; // 'connected' | 'error' | 'unknown'
 }
 
-function getStatusDotColor(status: string): string {
+function getStatusDotColor(status: string): string | null {
   switch (status) {
     case 'connected':
     case 'healthy':
@@ -19,7 +19,7 @@ function getStatusDotColor(status: string): string {
     case 'unhealthy':
       return 'bg-red-500';
     default:
-      return 'bg-yellow-500';
+      return null;
   }
 }
 
@@ -50,7 +50,7 @@ function DatabaseNodeComponent({ data }: NodeProps) {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
           </svg>
           <span className="text-xs font-medium text-white truncate">{nodeData.label}</span>
-          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dotColor}`} />
+          {dotColor && <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dotColor}`} />}
         </div>
         <div className="flex items-center gap-2 ml-5.5 mt-0.5">
           <span className="text-[10px] text-slate-500 bg-slate-700/50 px-1 rounded">{nodeData.dbType}</span>

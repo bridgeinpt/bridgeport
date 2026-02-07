@@ -18,14 +18,15 @@ import {
   getSmoothStepPath,
   type EdgeProps,
   type OnNodeDrag,
+  type OnConnect,
+  type Connection,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { ServerGroupNode } from './ServerGroupNode';
 import { ServiceNode, type ServiceNodeData } from './ServiceNode';
 import { DatabaseNode, type DatabaseNodeData } from './DatabaseNode';
-import { AddConnectionModal } from './AddConnectionModal';
 import type { ServerWithServices, Database, UserRole, ExposedPort, ServiceConnection, DiagramLayoutPositions } from '../../lib/api';
-import { listConnections, deleteConnection, getDiagramLayout, saveDiagramLayout, exportDiagramMermaid } from '../../lib/api';
+import { listConnections, createConnection, deleteConnection, getDiagramLayout, saveDiagramLayout, exportDiagramMermaid } from '../../lib/api';
 import { inferConnections, mergeConnections, aggregateCollapsedEdges, type TopologyEdge } from '../../lib/topology';
 import { EmptyState } from '../EmptyState';
 import { toPng } from 'html-to-image';
@@ -178,7 +179,7 @@ function buildNodes(
     );
     const serverHeight = isCollapsed
       ? SERVER_HEADER_HEIGHT + 10
-      : SERVER_HEADER_HEIGHT + rows * (NODE_HEIGHT + NODE_GAP) + SERVER_PADDING;
+      : SERVER_HEADER_HEIGHT + rows * (NODE_HEIGHT + NODE_GAP) + SERVER_PADDING + NODE_GAP;
 
     const serverNodeId = `server:${server.id}`;
     const savedPos = savedPositions?.[serverNodeId];
@@ -332,7 +333,6 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
   const [collapsedServers, setCollapsedServers] = useState<Set<string>>(new Set());
   const [manualConnections, setManualConnections] = useState<ServiceConnection[]>([]);
   const [savedPositions, setSavedPositions] = useState<DiagramLayoutPositions | null>(null);
-  const [showAddConnection, setShowAddConnection] = useState(false);
   const reactFlowInstance = useReactFlow();
   const containerRef = useRef<HTMLDivElement>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -422,9 +422,49 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     }
   }, []);
 
-  const handleConnectionCreated = useCallback((connection: ServiceConnection) => {
-    setManualConnections((prev) => [...prev, connection]);
-  }, []);
+  // Handle on-diagram edge creation
+  const handleConnect: OnConnect = useCallback(async (connection: Connection) => {
+    if (!canInteract || !connection.source || !connection.target) return;
+
+    // Parse node IDs (format: "service:<id>" or "database:<id>")
+    const parseNodeId = (nodeId: string) => {
+      const [type, ...rest] = nodeId.split(':');
+      return { type: type as 'service' | 'database', id: rest.join(':') };
+    };
+
+    const source = parseNodeId(connection.source);
+    const target = parseNodeId(connection.target);
+
+    // Skip server-to-server connections
+    if (source.type !== 'service' && source.type !== 'database') return;
+    if (target.type !== 'service' && target.type !== 'database') return;
+
+    try {
+      const res = await createConnection({
+        environmentId,
+        sourceType: source.type,
+        sourceId: source.id,
+        targetType: target.type,
+        targetId: target.id,
+        direction: 'forward',
+      });
+      // Backend returns connection directly (not wrapped)
+      const conn = (res as unknown as ServiceConnection).id ? (res as unknown as ServiceConnection) : (res as { connection: ServiceConnection }).connection;
+      setManualConnections((prev) => [...prev, conn]);
+    } catch {
+      // Connection creation failed (duplicate, invalid, etc.)
+    }
+  }, [canInteract, environmentId]);
+
+  // ESC to exit fullscreen
+  useEffect(() => {
+    if (mode !== 'fullscreen') return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMode('expanded');
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [mode]);
 
   // Export
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -516,8 +556,9 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     edgeTypes,
     fitView: true,
     fitViewOptions: { padding: 0.2 },
+    onConnect: canInteract ? handleConnect : undefined,
     nodesDraggable: canInteract,
-    nodesConnectable: false,
+    nodesConnectable: canInteract,
     proOptions: { hideAttribution: true },
   };
 
@@ -560,17 +601,10 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
                   </div>
                 )}
               </div>
-              {canInteract && (
-                <button
-                  onClick={() => setShowAddConnection(true)}
-                  className="btn btn-sm btn-primary"
-                >
-                  Add Connection
-                </button>
-              )}
               <button
                 onClick={() => setMode('expanded')}
                 className="btn btn-sm btn-secondary"
+                title="Exit fullscreen (Esc)"
               >
                 Exit Fullscreen
               </button>
@@ -601,14 +635,6 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
             </div>
           </div>
         </div>
-        <AddConnectionModal
-          isOpen={showAddConnection}
-          onClose={() => setShowAddConnection(false)}
-          environmentId={environmentId}
-          servers={servers}
-          databases={databases}
-          onConnectionCreated={handleConnectionCreated}
-        />
       </>
     );
   }
@@ -651,17 +677,6 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
                 </div>
               )}
             </div>
-            {canInteract && (
-              <button
-                onClick={() => setShowAddConnection(true)}
-                className="p-1.5 text-slate-400 hover:text-green-400 rounded"
-                title="Add Connection"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                </svg>
-              </button>
-            )}
             <button
               onClick={() => setMode(mode === 'compact' ? 'expanded' : 'compact')}
               className="p-1.5 text-slate-400 hover:text-white rounded"
@@ -707,14 +722,6 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
           </div>
         )}
       </div>
-      <AddConnectionModal
-        isOpen={showAddConnection}
-        onClose={() => setShowAddConnection(false)}
-        environmentId={environmentId}
-        servers={servers}
-        databases={databases}
-        onConnectionCreated={handleConnectionCreated}
-      />
     </>
   );
 }
@@ -736,13 +743,13 @@ function ToolbarButtons({
         title="Fit to view"
       >
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
         </svg>
       </button>
       <button
         onClick={onExpandAll}
         className="p-1.5 text-slate-400 hover:text-white rounded"
-        title="Expand all"
+        title="Expand all servers"
       >
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -751,7 +758,7 @@ function ToolbarButtons({
       <button
         onClick={onCollapseAll}
         className="p-1.5 text-slate-400 hover:text-white rounded"
-        title="Collapse all"
+        title="Collapse all servers"
       >
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
