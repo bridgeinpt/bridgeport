@@ -588,9 +588,10 @@ export default function ServiceDetail() {
       setConfigFiles((prev) => [...prev, configFile]);
       setAttachConfigFileId(configFile.id);
       // Auto-suggest target path
+      const serviceName = service?.name.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase() || 'app';
       const defaultPath = service?.composePath
         ? service.composePath.replace(/[^/]+$/, configFile.filename)
-        : `/opt/app/${configFile.filename}`;
+        : `/opt/${serviceName}/${configFile.filename}`;
       setAttachTargetPath(defaultPath);
       // Close create modal, keep attach modal open
       setShowCreateFile(false);
@@ -1686,10 +1687,11 @@ export default function ServiceDetail() {
                       setAttachConfigFileId(e.target.value);
                       // Auto-suggest target path based on selected file
                       const selected = configFiles.find((f) => f.id === e.target.value);
-                      if (selected && !attachTargetPath) {
+                      if (selected) {
+                        const serviceName = service?.name.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase() || 'app';
                         const defaultPath = service?.composePath
                           ? service.composePath.replace(/[^/]+$/, selected.filename)
-                          : `/opt/app/${selected.filename}`;
+                          : `/opt/${serviceName}/${selected.filename}`;
                         setAttachTargetPath(defaultPath);
                       }
                     }}
@@ -1720,7 +1722,7 @@ export default function ServiceDetail() {
                   type="text"
                   value={attachTargetPath}
                   onChange={(e) => setAttachTargetPath(e.target.value)}
-                  placeholder="/opt/app/docker-compose.yml"
+                  placeholder={`/opt/${service?.name.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase() || 'app'}/config.yml`}
                   className="input font-mono text-sm"
                   required
                 />
