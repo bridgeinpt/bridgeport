@@ -536,7 +536,7 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     return (
       <div className="panel">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-white">Service Topology</h2>
+          <h2 className="text-lg font-semibold text-white">Environment Diagram</h2>
         </div>
         <EmptyState
           icon={NetworkIcon}
@@ -570,7 +570,7 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
         <div className="fixed inset-0 bg-slate-900 z-50 flex flex-col">
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700">
             <div className="flex items-center gap-3">
-              <h2 className="text-lg font-semibold text-white">Service Topology</h2>
+              <h2 className="text-lg font-semibold text-white">Environment Diagram</h2>
               <span className="text-xs text-slate-400">
                 {servers.length} server{servers.length !== 1 ? 's' : ''} &middot; {totalServices} service{totalServices !== 1 ? 's' : ''} &middot; {databases.length} database{databases.length !== 1 ? 's' : ''}
               </span>
@@ -646,7 +646,7 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
       <div className="panel">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
-            <h2 className="text-lg font-semibold text-white">Service Topology</h2>
+            <h2 className="text-lg font-semibold text-white">Environment Diagram</h2>
             <span className="text-xs text-slate-400">
               {servers.length} server{servers.length !== 1 ? 's' : ''} &middot; {totalServices} service{totalServices !== 1 ? 's' : ''} &middot; {databases.length} database{databases.length !== 1 ? 's' : ''}
             </span>

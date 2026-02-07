@@ -33,7 +33,7 @@ function ServerGroupNodeComponent({ data }: NodeProps) {
 
   return (
     <div
-      className="bg-slate-800/50 border border-blue-500/40 rounded-lg min-w-[180px] h-full"
+      className="bg-slate-800/50 border-2 border-blue-500/40 rounded-lg min-w-[180px] h-full"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
