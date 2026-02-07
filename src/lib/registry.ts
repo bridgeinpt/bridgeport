@@ -1,4 +1,3 @@
-import { config } from './config.js';
 import { getSystemSettings } from '../services/system-settings.js';
 
 // Common types
@@ -421,31 +420,3 @@ export class RegistryFactory {
     }
   }
 }
-
-/**
- * Get the DO registry token from system settings, falling back to env var.
- * Returns null if not configured.
- */
-export async function getDORegistryToken(): Promise<string | null> {
-  const settings = await getSystemSettings();
-  if (settings.doRegistryToken) {
-    return settings.doRegistryToken;
-  }
-  // Fall back to env var during transition
-  return config.DO_REGISTRY_TOKEN || null;
-}
-
-/**
- * Create a DORegistryClient with token from system settings or env var.
- * Throws if no token is configured.
- */
-export async function createDORegistryClient(registryName: string = 'bios-registry'): Promise<DORegistryClient> {
-  const token = await getDORegistryToken();
-  if (!token) {
-    throw new Error('DO Registry Token not configured. Set it in System Settings or DO_REGISTRY_TOKEN env var.');
-  }
-  return new DORegistryClient(token, registryName);
-}
-
-// Legacy export for backwards compatibility (uses env var only, may be empty)
-export const registryClient = new DORegistryClient(config.DO_REGISTRY_TOKEN || '');

@@ -2,7 +2,9 @@ import path from 'path';
 import { prisma } from '../lib/db.js';
 import { DockerSSH, createClientForServer, type CommandClient } from '../lib/ssh.js';
 import { createDockerClientForServer, type DockerClient } from '../lib/docker.js';
-import { registryClient } from '../lib/registry.js';
+import { RegistryFactory } from '../lib/registry.js';
+import { getRegistryCredentials } from './registries.js';
+import { extractRepoName } from '../lib/image-utils.js';
 import { generateDeploymentArtifacts, saveDeploymentArtifacts } from './compose.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 import { checkServiceUpdate } from '../lib/scheduler.js';
@@ -342,10 +344,30 @@ export async function getContainerLogs(
 }
 
 export async function getLatestImageTags(
-  repositoryName: string,
+  serviceId: string,
   limit: number = 10
 ): Promise<Array<{ tag: string; updatedAt: string }>> {
-  const tags = await registryClient.listTags(repositoryName);
+  const service = await prisma.service.findUnique({
+    where: { id: serviceId },
+    include: { containerImage: true },
+  });
+
+  if (!service?.containerImage) {
+    throw new Error('Service or container image not found');
+  }
+
+  if (!service.containerImage.registryConnectionId) {
+    throw new Error('No registry connection configured for this service');
+  }
+
+  const creds = await getRegistryCredentials(service.containerImage.registryConnectionId);
+  if (!creds) {
+    throw new Error('Could not get registry credentials');
+  }
+
+  const client = RegistryFactory.create(creds);
+  const repoName = extractRepoName(service.containerImage.imageName, creds.repositoryPrefix);
+  const tags = await client.listTags(repoName);
 
   return tags
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())

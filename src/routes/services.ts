@@ -12,7 +12,6 @@ import { DockerSSH, createClientForServer } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from './environments.js';
 import { logAudit } from '../services/audit.js';
 import { checkServiceUpdate } from '../lib/scheduler.js';
-import { stripRegistryPrefix } from '../lib/image-utils.js';
 import { determineHealthStatus, determineOverallStatus } from '../services/servers.js';
 import { getSystemSettings } from '../services/system-settings.js';
 
@@ -400,20 +399,8 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const service = await prisma.service.findUnique({
-        where: { id },
-        include: { containerImage: true },
-      });
-
-      if (!service) {
-        return reply.code(404).send({ error: 'Service not found' });
-      }
-
-      // Extract repository name from full image name (from containerImage)
-      const repoName = stripRegistryPrefix(service.containerImage.imageName);
-
       try {
-        const tags = await getLatestImageTags(repoName);
+        const tags = await getLatestImageTags(id);
         return { tags };
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to get tags';
