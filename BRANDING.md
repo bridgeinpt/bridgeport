@@ -155,8 +155,8 @@ no fine details, flat vector
 | `ui/src/components/Layout.tsx` | Update sidebar header, add About link |
 | `ui/src/pages/About.tsx` | **NEW** - About page component |
 | `ui/src/App.tsx` | Add `/about` route |
-| `ui/public/logo.svg` | **NEW** - Main logo (user provides) |
-| `ui/public/favicon.svg` | **NEW** - Favicon (user provides) |
+| `ui/public/logo.png` | **NEW** - Main logo (user provides) |
+| `ui/public/favicon.png` | **NEW** - Favicon (user provides) |
 | `package.json` | Update name to "bridgeport" |
 | `ui/package.json` | Update name to "bridgeport-ui" |
 | `README.md` | Update all branding references |
@@ -167,14 +167,14 @@ no fine details, flat vector
 
 ### Step 1: Add logo files
 - Generate logos using AI prompts above
-- Save as `ui/public/logo.svg` and `ui/public/favicon.svg`
+- Save as `ui/public/logo.png` and `ui/public/favicon.png`
 
 ### Step 2: Update index.html
 - Change `<title>BridgePort</title>` -> `<title>BridgePort</title>`
-- Add favicon: `<link rel="icon" type="image/svg+xml" href="/favicon.svg" />`
+- Add favicon: `<link rel="icon" type="image/svg+xml" href="/favicon.png" />`
 
 ### Step 3: Update Login.tsx
-- Replace rocket emoji with `<img src="/logo.svg" />`
+- Replace rocket emoji with `<img src="/logo.png" />`
 - Change "BridgePort" -> "BridgePort"
 - Change tagline to "Dock. Run. Ship. Repeat."
 

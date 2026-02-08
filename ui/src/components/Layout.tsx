@@ -161,7 +161,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 <circle cx="41" cy="27" r="3" fill="none" stroke="currentColor" strokeWidth="2" />
               </svg>
             ) : (
-              <img src="/logo.svg" alt="BridgePort" className="h-12" />
+              <img src="/logo.png" alt="BridgePort" className="h-12" />
             )}
           </Link>
         </div>

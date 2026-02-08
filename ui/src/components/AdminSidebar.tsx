@@ -97,7 +97,7 @@ export default function AdminSidebar() {
       {/* Logo area */}
       <div className="h-12 flex items-center justify-center border-b border-slate-700 flex-shrink-0">
         <Link to="/" className="flex items-center" title="Back to App">
-          <img src="/logo.svg" alt="BridgePort" className="h-12" />
+          <img src="/logo.png" alt="BridgePort" className="h-12" />
         </Link>
       </div>
 

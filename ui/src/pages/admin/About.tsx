@@ -9,7 +9,7 @@ export default function About() {
         {/* Logo and Title */}
         <div className="mb-6">
           <img
-            src="/logo.svg"
+            src="/logo.png"
             alt="BridgePort"
             className="h-28 mx-auto mb-4"
           />
