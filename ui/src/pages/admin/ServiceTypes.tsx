@@ -152,10 +152,7 @@ export default function ServiceTypes() {
 
   return (
     <div className="p-6">
-      <div className="flex items-center justify-between mb-5">
-        <p className="text-slate-400">
-          Configure predefined commands for different service types (e.g., Django, Node.js)
-        </p>
+      <div className="flex items-center justify-end mb-5">
         {isAdmin(user) && (
           <button onClick={() => setShowCreateModal(true)} className="btn btn-primary">
             Add Service Type

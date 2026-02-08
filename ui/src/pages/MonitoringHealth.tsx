@@ -13,6 +13,7 @@ import {
   type ResourceHealthStatus,
 } from '../lib/api';
 import { formatDistanceToNow, format } from 'date-fns';
+import { ServerIcon, CubeIcon, DatabaseIcon } from '../components/Icons';
 
 const timeRanges = [
   { label: '1h', hours: 1 },
@@ -305,9 +306,10 @@ export default function MonitoringHealth() {
               {/* Servers Section */}
               {sortedServers.length > 0 && (
                 <div className="mb-6">
-                  <h2 className="text-lg font-semibold text-white mb-3">
+                  <h2 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
+                    <ServerIcon className="w-5 h-5 text-blue-400" />
                     Servers
-                    <span className="ml-2 text-sm font-normal text-slate-400">
+                    <span className="text-sm font-normal text-slate-400">
                       ({healthyCounts.servers} healthy, {unhealthyCounts.servers} unhealthy, {unknownCounts.servers} unknown)
                     </span>
                   </h2>
@@ -373,9 +375,10 @@ export default function MonitoringHealth() {
               {/* Services Section */}
               {sortedServices.length > 0 && (
                 <div className="mb-6">
-                  <h2 className="text-lg font-semibold text-white mb-3">
+                  <h2 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
+                    <CubeIcon className="w-5 h-5 text-green-400" />
                     Services
-                    <span className="ml-2 text-sm font-normal text-slate-400">
+                    <span className="text-sm font-normal text-slate-400">
                       ({healthyCounts.services} healthy, {unhealthyCounts.services} unhealthy, {unknownCounts.services} unknown)
                     </span>
                   </h2>
@@ -445,9 +448,10 @@ export default function MonitoringHealth() {
               {/* Databases Section */}
               {sortedDatabases.length > 0 && (
                 <div className="mb-6">
-                  <h2 className="text-lg font-semibold text-white mb-3">
+                  <h2 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
+                    <DatabaseIcon className="w-5 h-5 text-purple-400" />
                     Databases
-                    <span className="ml-2 text-sm font-normal text-slate-400">
+                    <span className="text-sm font-normal text-slate-400">
                       ({healthyCounts.databases} healthy, {unhealthyCounts.databases} unhealthy, {unknownCounts.databases} unknown)
                     </span>
                   </h2>

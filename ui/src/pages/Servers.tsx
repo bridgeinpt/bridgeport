@@ -174,10 +174,7 @@ export default function Servers() {
 
   return (
     <div className="p-6">
-      <div className="flex items-center justify-between mb-5">
-        <p className="text-slate-400">
-          Manage servers in {selectedEnvironment?.name}
-        </p>
+      <div className="flex items-center justify-end mb-5">
         <button onClick={() => setShowCreate(true)} className="btn btn-primary">Add Server</button>
       </div>
 
@@ -350,8 +347,8 @@ export default function Servers() {
             <div key={server.id} className="panel">
               <div className="flex items-start justify-between">
                 <div className="flex items-start gap-4">
-                  <div className="p-3 bg-slate-800 rounded-lg">
-                    <ServerIcon className="w-6 h-6 text-primary-400" />
+                  <div className="p-3 bg-blue-500/10 rounded-lg">
+                    <ServerIcon className="w-6 h-6 text-blue-400" />
                   </div>
                   <div>
                     <div className="flex items-center gap-2 flex-wrap">

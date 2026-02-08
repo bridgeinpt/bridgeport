@@ -217,10 +217,7 @@ export default function DatabaseTypes() {
 
   return (
     <div className="p-6">
-      <div className="flex items-center justify-between mb-5">
-        <p className="text-slate-400">
-          Configure database types with connection fields, backup commands, and predefined operations
-        </p>
+      <div className="flex items-center justify-end mb-5">
         {isAdmin(user) && (
           <button onClick={() => setShowCreateModal(true)} className="btn btn-primary">
             Add Database Type

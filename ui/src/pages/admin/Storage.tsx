@@ -160,12 +160,6 @@ export default function Storage() {
 
   return (
     <div className="p-6">
-      <div className="mb-5">
-        <p className="text-slate-400">
-          Configure DigitalOcean Spaces for database backups across all environments
-        </p>
-      </div>
-
       {/* Configuration Card */}
       <div className="card mb-6">
         <div className="flex items-center justify-between mb-4">

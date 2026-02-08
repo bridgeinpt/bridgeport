@@ -180,8 +180,7 @@ export default function Users() {
 
   return (
     <div className="p-6">
-      <div className="flex items-center justify-between mb-5">
-        <p className="text-slate-400">Manage user accounts and permissions</p>
+      <div className="flex items-center justify-end mb-5">
         <button onClick={() => setShowCreate(true)} className="btn btn-primary">
           Add User
         </button>

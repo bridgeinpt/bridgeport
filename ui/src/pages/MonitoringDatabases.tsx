@@ -229,9 +229,6 @@ export default function MonitoringDatabases() {
   if (summary.length === 0) {
     return (
       <div className="p-6">
-        <div className="flex items-center justify-between mb-5">
-          <p className="text-slate-400">Database monitoring across {selectedEnvironment.name}</p>
-        </div>
         <EmptyState
           icon={DatabaseIcon}
           message="No database monitoring configured"
@@ -244,10 +241,7 @@ export default function MonitoringDatabases() {
 
   return (
     <div className="p-6">
-      <div className="flex items-center justify-between mb-5">
-        <p className="text-slate-400">
-          Database monitoring across {selectedEnvironment.name}
-        </p>
+      <div className="flex items-center justify-end mb-5">
         <AutoRefreshToggle
           enabled={autoRefreshEnabled}
           onChange={setAutoRefreshEnabled}

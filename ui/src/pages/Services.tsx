@@ -227,10 +227,7 @@ export default function Services() {
 
   return (
     <div className="p-6">
-      <div className="flex items-center justify-between mb-5">
-        <p className="text-slate-400">
-          All services in {selectedEnvironment?.name}
-        </p>
+      <div className="flex items-center justify-end mb-5">
         <div className="flex items-center gap-4">
           {activeTab === 'list' && servicesWithUpdates.length > 0 && (
             <>
@@ -356,8 +353,8 @@ export default function Services() {
                 <div key={service.id} className={`panel ${hasUpdate ? 'border-green-500/30' : ''}`}>
                   <div className="flex items-start justify-between">
                     <div className="flex items-start gap-4">
-                      <div className="p-3 bg-slate-800 rounded-lg">
-                        <CubeIcon className="w-6 h-6 text-primary-400" />
+                      <div className="p-3 bg-green-500/10 rounded-lg">
+                        <CubeIcon className="w-6 h-6 text-green-400" />
                       </div>
                       <div>
                         {/* Row 1: Name + badges */}

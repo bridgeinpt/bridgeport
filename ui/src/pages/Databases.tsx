@@ -185,10 +185,7 @@ export default function Databases() {
 
   return (
     <div className="p-6">
-      <div className="flex items-center justify-between mb-5">
-        <p className="text-slate-400">
-          Manage database backups for {selectedEnvironment.name}
-        </p>
+      <div className="flex items-center justify-end mb-5">
         <button onClick={() => setShowCreate(true)} className="btn btn-primary">
           Add Database
         </button>
@@ -468,8 +465,8 @@ export default function Databases() {
             <div key={db.id} className="panel">
               <div className="flex items-start justify-between">
                 <div className="flex items-start gap-4">
-                  <div className="p-3 bg-slate-800 rounded-lg">
-                    <DatabaseIcon className="w-6 h-6 text-primary-400" />
+                  <div className="p-3 bg-purple-500/10 rounded-lg">
+                    <DatabaseIcon className="w-6 h-6 text-purple-400" />
                   </div>
                   <div>
                     <div className="flex items-center gap-2">

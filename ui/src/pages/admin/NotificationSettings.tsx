@@ -438,10 +438,6 @@ export default function NotificationSettings() {
 
   return (
     <div className="p-6">
-      <div className="mb-5">
-        <p className="text-slate-400">Configure email, webhooks, Slack, and notification types</p>
-      </div>
-
       {/* Tabs */}
       <div className="flex border-b border-slate-700 mb-6">
         {[

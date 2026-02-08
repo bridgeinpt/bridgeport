@@ -20,7 +20,7 @@ import {
 } from '../lib/api';
 import { formatDistanceToNow } from 'date-fns';
 import { Modal } from '../components/Modal';
-import { CheckIcon, WarningIcon, RefreshIcon } from '../components/Icons';
+import { CheckIcon, WarningIcon, RefreshIcon, ServerIcon, CubeIcon, DatabaseIcon } from '../components/Icons';
 import { useToast } from '../components/Toast';
 import { TopologyDiagram } from '../components/topology';
 import { useAuthStore } from '../lib/store';
@@ -54,7 +54,7 @@ interface DatabaseWithBackups extends Database {
 }
 
 export default function Dashboard() {
-  const { selectedEnvironment, autoRefreshEnabled, setAutoRefreshEnabled, dismissedAlerts, dismissAlert, clearDismissedAlerts } = useAppStore();
+  const { selectedEnvironment, dismissedAlerts, dismissAlert, clearDismissedAlerts } = useAppStore();
   const { user } = useAuthStore();
   const toast = useToast();
   const [environment, setEnvironment] = useState<EnvironmentWithServers | null>(null);
@@ -117,13 +117,6 @@ export default function Dashboard() {
   useEffect(() => {
     fetchData();
   }, [selectedEnvironment?.id]);
-
-  // Auto-refresh every 30 seconds if enabled
-  useEffect(() => {
-    if (!autoRefreshEnabled) return;
-    const interval = setInterval(() => fetchData(true), 30000);
-    return () => clearInterval(interval);
-  }, [selectedEnvironment?.id, autoRefreshEnabled]);
 
   // Compute alerts from metrics and environment data
   const alerts = useMemo<Alert[]>(() => {
@@ -380,19 +373,6 @@ export default function Dashboard() {
 
   return (
     <div className="p-6">
-      <div className="flex items-center justify-between mb-5">
-        <p className="text-slate-400">Overview of {environment.name} environment infrastructure</p>
-        <label className="flex items-center gap-2 text-sm text-slate-400">
-          <input
-            type="checkbox"
-            checked={autoRefreshEnabled}
-            onChange={(e) => setAutoRefreshEnabled(e.target.checked)}
-            className="rounded bg-slate-700 border-slate-600"
-          />
-          Auto-refresh: 30s
-        </label>
-      </div>
-
       {/* Alerts & Warnings - Moved to top */}
       {(alerts.length > 0 || dismissedAlerts.length > 0) && (
         <div className="panel mb-5">
@@ -672,9 +652,10 @@ export default function Dashboard() {
       {environment.servers.length > 0 && (
         <div className="panel mb-5">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-white">
+            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+              <ServerIcon className="w-5 h-5 text-blue-400" />
               Servers Health
-              <span className="ml-2 text-sm font-normal text-slate-400">
+              <span className="text-sm font-normal text-slate-400">
                 ({healthyServers}/{serverCount} healthy)
               </span>
             </h2>
@@ -707,9 +688,10 @@ export default function Dashboard() {
       {allServices.length > 0 && (
         <div className="panel mb-5">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-white">
+            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+              <CubeIcon className="w-5 h-5 text-green-400" />
               Services Health
-              <span className="ml-2 text-sm font-normal text-slate-400">
+              <span className="text-sm font-normal text-slate-400">
                 ({serviceHealthCounts.healthy}/{serviceHealthCounts.total} healthy)
               </span>
             </h2>
@@ -742,10 +724,11 @@ export default function Dashboard() {
       {databases.length > 0 && (
         <div className="panel mb-5">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-white">
+            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+              <DatabaseIcon className="w-5 h-5 text-purple-400" />
               Databases Health
               {databases.some((db) => db.databaseType?.hasBackupCommand !== false) && (
-              <span className="ml-2 text-sm font-normal text-slate-400">
+              <span className="text-sm font-normal text-slate-400">
                 ({databases.filter((db) => db.databaseType?.hasBackupCommand !== false && db.lastBackup !== null).length}/{databases.filter((db) => db.databaseType?.hasBackupCommand !== false).length} backed up)
               </span>
               )}

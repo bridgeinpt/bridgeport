@@ -230,12 +230,6 @@ export default function SystemSettings() {
 
   return (
     <div className="p-6">
-      <div className="mb-5">
-        <p className="text-slate-400">
-          Configure global operational settings for BridgePort
-        </p>
-      </div>
-
       {error && (
         <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
           <p className="text-red-400">{error}</p>

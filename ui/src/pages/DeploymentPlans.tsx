@@ -63,10 +63,7 @@ export default function DeploymentPlans() {
 
   return (
     <div className="p-6">
-      <div className="flex items-center justify-between mb-5">
-        <p className="text-slate-400">
-          Orchestrated multi-service deployments for {selectedEnvironment.name}
-        </p>
+      <div className="flex items-center justify-end mb-5">
         <Link to="/container-images" className="btn btn-primary">
           Deploy via Container Images
         </Link>
