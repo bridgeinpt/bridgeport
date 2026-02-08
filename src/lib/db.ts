@@ -21,7 +21,19 @@ export function isPrismaNotFoundError(error: unknown): boolean {
 export async function initializeDatabase(): Promise<void> {
   try {
     await prisma.$connect();
-    console.log('Database connected');
+
+    // Configure SQLite for concurrent access performance
+    // WAL mode allows concurrent readers + single writer without blocking
+    await prisma.$executeRawUnsafe('PRAGMA journal_mode = WAL');
+    // Wait up to 5 seconds when database is locked instead of failing immediately
+    await prisma.$executeRawUnsafe('PRAGMA busy_timeout = 5000');
+    // NORMAL is safe with WAL and avoids extra fsync on every commit
+    await prisma.$executeRawUnsafe('PRAGMA synchronous = NORMAL');
+    // Store temp tables in memory for faster operations
+    await prisma.$executeRawUnsafe('PRAGMA temp_store = MEMORY');
+    // Increase cache size to 64MB (negative = KiB)
+    await prisma.$executeRawUnsafe('PRAGMA cache_size = -64000');
+    console.log('Database connected (WAL mode, busy_timeout=5000ms)');
 
     // Initialize management environment with localhost server
     await initializeManagementEnvironment();
