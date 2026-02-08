@@ -42,7 +42,7 @@
       {
         "name": "totalIndexSize",
         "displayName": "Total Index Size",
-        "query": "SELECT coalesce(sum(pg_indexes_size(schemaname || '.' || tablename)), 0) AS value FROM pg_stat_user_tables",
+        "query": "SELECT coalesce(sum(pg_indexes_size(relid)), 0) AS value FROM pg_stat_user_tables",
         "resultType": "scalar",
         "unit": "bytes"
       },
@@ -69,7 +69,7 @@
       {
         "name": "topTableSizes",
         "displayName": "Top Tables by Size",
-        "query": "SELECT schemaname || '.' || tablename AS name, pg_total_relation_size(schemaname || '.' || tablename) AS size, n_live_tup AS rows FROM pg_stat_user_tables ORDER BY pg_total_relation_size(schemaname || '.' || tablename) DESC LIMIT 10",
+        "query": "SELECT schemaname || '.' || relname AS name, pg_total_relation_size(relid) AS size, n_live_tup AS rows FROM pg_stat_user_tables ORDER BY pg_total_relation_size(relid) DESC LIMIT 10",
         "resultType": "rows",
         "resultMapping": { "name": "name", "size": "size", "rows": "rows" }
       }
