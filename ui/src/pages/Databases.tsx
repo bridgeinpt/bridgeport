@@ -51,6 +51,7 @@ export default function Databases() {
     databaseName: '',
     username: '',
     password: '',
+    useSsl: true,
     serverId: '',
     backupStorageType: 'local',
     backupLocalPath: '/var/backups',
@@ -104,6 +105,7 @@ export default function Databases() {
       databaseName: '',
       username: '',
       password: '',
+      useSsl: true,
       serverId: '',
       backupStorageType: 'local',
       backupLocalPath: '/var/backups',
@@ -221,6 +223,7 @@ export default function Databases() {
                       type: selectedType,
                       databaseTypeId: dbType?.id,
                       port: dbType?.defaultPort || undefined,
+                      useSsl: selectedType !== 'sqlite',
                       serverId: '',
                     });
                   }}

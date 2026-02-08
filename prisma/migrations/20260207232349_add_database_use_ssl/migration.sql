@@ -39,5 +39,8 @@ INSERT INTO "new_Database" ("backupCompression", "backupCompressionLevel", "back
 DROP TABLE "Database";
 ALTER TABLE "new_Database" RENAME TO "Database";
 CREATE UNIQUE INDEX "Database_environmentId_name_key" ON "Database"("environmentId", "name");
+-- Set useSsl=true for existing non-sqlite databases (restores previous behavior
+-- where PostgreSQL/MySQL/Redis always connected with SSL)
+UPDATE "Database" SET "useSsl" = 1 WHERE "type" != 'sqlite';
 PRAGMA foreign_keys=ON;
 PRAGMA defer_foreign_keys=OFF;
