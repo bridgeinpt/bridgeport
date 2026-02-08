@@ -197,12 +197,6 @@ export default function Settings() {
 
   return (
     <div className="p-6">
-      <div className="mb-5">
-        <p className="text-slate-400">
-          Configure settings for {selectedEnvironment.name}
-        </p>
-      </div>
-
       {/* Tabs */}
       <div className="border-b border-slate-700 mb-6">
         <nav className="flex gap-6 -mb-px">

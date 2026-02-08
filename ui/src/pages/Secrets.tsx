@@ -156,10 +156,7 @@ export default function Secrets() {
 
   return (
     <div className="p-6">
-      <div className="flex items-center justify-between mb-5">
-        <p className="text-slate-400">
-          Encrypted secrets for {selectedEnvironment?.name}
-        </p>
+      <div className="flex items-end justify-between mb-5">
         <button onClick={() => setShowCreate(true)} className="btn btn-primary">
           Add Secret
         </button>

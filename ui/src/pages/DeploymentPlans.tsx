@@ -63,11 +63,6 @@ export default function DeploymentPlans() {
 
   return (
     <div className="p-6">
-      <div className="flex items-center justify-end mb-5">
-        <Link to="/container-images" className="btn btn-primary">
-          Deploy via Container Images
-        </Link>
-      </div>
 
       {loading ? (
         <div className="panel">

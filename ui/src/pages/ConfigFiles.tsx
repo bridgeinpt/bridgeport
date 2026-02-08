@@ -274,10 +274,7 @@ export default function ConfigFiles() {
 
   return (
     <div className="p-6">
-      <div className="flex items-center justify-between mb-5">
-        <p className="text-slate-400">
-          Manage config files (compose files, Caddyfiles, certificates) for {selectedEnvironment.name}
-        </p>
+      <div className="flex items-center justify-end mb-5">
         <div className="flex gap-2">
           <button onClick={() => setShowUpload(true)} className="btn btn-secondary">
             Upload Asset

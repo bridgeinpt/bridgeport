@@ -109,6 +109,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const [environments, setEnvironments] = useState<Environment[]>([]);
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [showCLIModal, setShowCLIModal] = useState(false);
+  const [tooltip, setTooltip] = useState<{ label: string; top: number } | null>(null);
+
+  const showTooltip = (e: React.MouseEvent, label: string) => {
+    if (!sidebarCollapsed) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    setTooltip({ label, top: rect.top + rect.height / 2 });
+  };
+  const hideTooltip = () => setTooltip(null);
 
   useEffect(() => {
     listEnvironments().then(({ environments }) => {
@@ -234,7 +242,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                                 ? 'bg-slate-800 text-white'
                                 : 'text-slate-400 hover:bg-slate-800 hover:text-white'
                             } ${sidebarCollapsed ? 'justify-center' : ''}`}
-                            title={sidebarCollapsed ? item.name : undefined}
+                            onMouseEnter={(e) => showTooltip(e, item.name)}
+                            onMouseLeave={hideTooltip}
                           >
                             {/* Burgundy accent stripe for active items */}
                             {isActive && (
@@ -260,12 +269,23 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <button
             onClick={toggleSidebar}
             className="w-full flex items-center justify-center icon-btn"
-            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            onMouseEnter={(e) => showTooltip(e, sidebarCollapsed ? 'Expand' : 'Collapse')}
+            onMouseLeave={hideTooltip}
             aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
             <ChevronLeftIcon className={`w-4 h-4 transition-transform ${sidebarCollapsed ? 'rotate-180' : ''}`} />
           </button>
         </div>
+
+        {/* Sidebar tooltip for collapsed state */}
+        {sidebarCollapsed && tooltip && (
+          <div
+            className="fixed z-50 px-2 py-1 bg-slate-800 text-white text-xs rounded shadow-lg border border-slate-600 whitespace-nowrap pointer-events-none"
+            style={{ left: 60, top: tooltip.top, transform: 'translateY(-50%)' }}
+          >
+            {tooltip.label}
+          </div>
+        )}
       </aside>
 
       {/* Main content area */}

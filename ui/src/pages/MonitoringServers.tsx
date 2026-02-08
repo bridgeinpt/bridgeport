@@ -142,10 +142,7 @@ export default function MonitoringServers() {
 
   return (
     <div className="p-6">
-      <div className="flex items-center justify-between mb-5">
-        <p className="text-slate-400">
-          Server resource usage across {selectedEnvironment?.name || 'environment'}
-        </p>
+      <div className="flex items-center justify-end mb-5">
         <AutoRefreshToggle
           enabled={autoRefreshEnabled}
           onChange={setAutoRefreshEnabled}
