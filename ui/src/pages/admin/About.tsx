@@ -44,16 +44,32 @@ export default function About() {
               Docker service orchestration
             </li>
             <li className="flex items-center gap-3">
-              <LockIcon className="w-5 h-5 text-primary-400 flex-shrink-0" />
-              Secret management
+              <DeployIcon className="w-5 h-5 text-primary-400 flex-shrink-0" />
+              Deployment orchestration with auto-rollback
             </li>
             <li className="flex items-center gap-3">
               <ChartIcon className="w-5 h-5 text-primary-400 flex-shrink-0" />
-              Real-time activity monitoring
+              Server, service &amp; database monitoring
             </li>
             <li className="flex items-center gap-3">
-              <FileIcon className="w-5 h-5 text-primary-400 flex-shrink-0" />
-              Config file distribution
+              <HeartIcon className="w-5 h-5 text-primary-400 flex-shrink-0" />
+              Health checks &amp; agent monitoring
+            </li>
+            <li className="flex items-center gap-3">
+              <DatabaseIcon className="w-5 h-5 text-primary-400 flex-shrink-0" />
+              Database backups &amp; monitoring
+            </li>
+            <li className="flex items-center gap-3">
+              <LockIcon className="w-5 h-5 text-primary-400 flex-shrink-0" />
+              Secret &amp; config file management
+            </li>
+            <li className="flex items-center gap-3">
+              <BellIcon className="w-5 h-5 text-primary-400 flex-shrink-0" />
+              Multi-channel notifications
+            </li>
+            <li className="flex items-center gap-3">
+              <TopologyIcon className="w-5 h-5 text-primary-400 flex-shrink-0" />
+              Interactive service topology
             </li>
           </ul>
         </div>
@@ -82,7 +98,7 @@ export default function About() {
 
         {/* Copyright */}
         <p className="text-slate-500 text-xs">
-          &copy; 2024-2025 BridgeIn. All rights reserved.
+          &copy; 2024-2026 BridgeIn. All rights reserved.
         </p>
       </div>
     </div>
@@ -161,20 +177,42 @@ function ChartIcon({ className }: { className?: string }) {
   );
 }
 
-function FileIcon({ className }: { className?: string }) {
+function DeployIcon({ className }: { className?: string }) {
   return (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"
-      />
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+    </svg>
+  );
+}
+
+function HeartIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+    </svg>
+  );
+}
+
+function DatabaseIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+    </svg>
+  );
+}
+
+function BellIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+    </svg>
+  );
+}
+
+function TopologyIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
     </svg>
   );
 }
