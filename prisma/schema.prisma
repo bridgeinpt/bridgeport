@@ -668,8 +668,9 @@ model ContainerImage {
   currentTag    String // Last deployed tag (to any service)
   latestTag     String? // Latest from registry (for update detection)
   latestDigest  String?
-  lastCheckedAt DateTime?
-  autoUpdate    Boolean   @default(false) // Applies to all linked services
+  lastCheckedAt   DateTime?
+  updateAvailable Boolean   @default(false) // Set by update checks, cleared on deploy
+  autoUpdate      Boolean   @default(false) // Applies to all linked services
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 

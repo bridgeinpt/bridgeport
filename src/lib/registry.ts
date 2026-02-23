@@ -90,15 +90,31 @@ export class DORegistryClient implements RegistryClient {
   }
 
   async listTags(repositoryName: string): Promise<RegistryTag[]> {
-    const data = await this.fetch<{ tags: DORegistryTag[] }>(
-      `/${this.registryName}/repositories/${repositoryName}/tags`
-    );
-    return data.tags.map((t) => ({
-      tag: t.tag,
-      digest: t.manifestDigest,
-      size: t.sizeBytes,
-      updatedAt: t.updatedAt,
-    }));
+    // Fetch with pagination - DO API defaults to 20 per page
+    const allTags: RegistryTag[] = [];
+    let page = 1;
+    const perPage = 100;
+
+    while (true) {
+      const data = await this.fetch<{ tags: DORegistryTag[]; meta?: { total: number } }>(
+        `/${this.registryName}/repositories/${repositoryName}/tags?per_page=${perPage}&page=${page}`
+      );
+
+      for (const t of data.tags) {
+        allTags.push({
+          tag: t.tag,
+          digest: t.manifestDigest,
+          size: t.sizeBytes,
+          updatedAt: t.updatedAt,
+        });
+      }
+
+      // Stop if we got fewer than requested (last page)
+      if (data.tags.length < perPage) break;
+      page++;
+    }
+
+    return allTags;
   }
 
   async getLatestTag(repositoryName: string): Promise<RegistryTag | null> {

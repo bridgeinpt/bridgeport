@@ -296,16 +296,6 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
           };
         }
 
-        // Update the containerImage with latest available info
-        await prisma.containerImage.update({
-          where: { id },
-          data: {
-            latestTag: latestTag.tag,
-            latestDigest: latestTag.digest,
-            lastCheckedAt: new Date(),
-          },
-        });
-
         // Determine if there's an update available
         let hasUpdate = false;
         if (latestTag.tag !== image.currentTag) {
@@ -321,6 +311,17 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
             hasUpdate = new Date(latestTag.updatedAt).getTime() > lastDeploy.deployedAt.getTime();
           }
         }
+
+        // Update the containerImage with latest available info
+        await prisma.containerImage.update({
+          where: { id },
+          data: {
+            latestTag: latestTag.tag,
+            latestDigest: latestTag.digest,
+            lastCheckedAt: new Date(),
+            updateAvailable: hasUpdate,
+          },
+        });
 
         return {
           hasUpdate,

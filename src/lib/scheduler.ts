@@ -279,16 +279,6 @@ async function checkServiceForUpdates(
       return { hasUpdate: false };
     }
 
-    // Update the containerImage with latest available info
-    await prisma.containerImage.update({
-      where: { id: service.containerImage.id },
-      data: {
-        latestTag: latestTag.tag,
-        latestDigest: latestTag.digest,
-        lastCheckedAt: new Date(),
-      },
-    });
-
     // Determine if there's an update available
     let hasUpdate = false;
     if (latestTag.tag !== service.imageTag) {
@@ -304,6 +294,17 @@ async function checkServiceForUpdates(
         hasUpdate = new Date(latestTag.updatedAt).getTime() > lastDeploy.deployedAt.getTime();
       }
     }
+
+    // Update the containerImage with latest available info
+    await prisma.containerImage.update({
+      where: { id: service.containerImage.id },
+      data: {
+        latestTag: latestTag.tag,
+        latestDigest: latestTag.digest,
+        lastCheckedAt: new Date(),
+        updateAvailable: hasUpdate,
+      },
+    });
 
     return {
       hasUpdate,

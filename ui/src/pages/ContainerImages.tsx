@@ -316,9 +316,9 @@ export default function ContainerImages() {
                       <span className="badge bg-slate-700 text-slate-300 text-xs font-mono">
                         {image.currentTag}
                       </span>
-                      {image.latestTag && image.latestTag !== image.currentTag && (
+                      {image.updateAvailable && (
                         <span className="badge bg-yellow-500/20 text-yellow-400 text-xs">
-                          {image.latestTag} available
+                          update available
                         </span>
                       )}
                     </div>
@@ -338,9 +338,6 @@ export default function ContainerImages() {
                           Auto-update enabled
                         </span>
                       )}
-                      <span>
-                        Updated {formatDistanceToNow(new Date(image.updatedAt), { addSuffix: true })}
-                      </span>
                       {image.lastCheckedAt && (
                         <span>
                           Checked {formatDistanceToNow(new Date(image.lastCheckedAt), { addSuffix: true })}

@@ -1524,6 +1524,7 @@ export interface ContainerImage {
   latestTag: string | null;
   latestDigest: string | null;
   lastCheckedAt: string | null;
+  updateAvailable: boolean;
   autoUpdate: boolean;
   createdAt: string;
   updatedAt: string;

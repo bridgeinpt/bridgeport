@@ -155,7 +155,7 @@ export async function recordTagDeployment(
   if (status === 'success') {
     await prisma.containerImage.update({
       where: { id: containerImageId },
-      data: { currentTag: tag },
+      data: { currentTag: tag, updateAvailable: false },
     });
   }
 
