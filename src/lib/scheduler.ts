@@ -5,7 +5,8 @@ import { checkServiceHealth } from '../services/services.js';
 import { RegistryFactory, type RegistryCredentials } from './registry.js';
 import { getRegistryCredentials } from '../services/registries.js';
 import { deployService } from '../services/deploy.js';
-import { extractRepoName, findLatestInFamily } from './image-utils.js';
+import { extractRepoName } from './image-utils.js';
+import { detectUpdate } from '../services/image-management.js';
 import {
   collectServerMetricsSSH,
   saveServerMetrics,
@@ -240,79 +241,28 @@ async function runDiscovery(): Promise<void> {
 }
 
 /**
- * Check for updates on a single service (uses containerImage for registry info)
+ * Check for updates on a container image using shared detectUpdate logic
  */
-async function checkServiceForUpdates(
-  serviceId: string,
+async function checkImageForUpdates(
+  imageId: string,
+  imageName: string,
+  currentTag: string,
+  deployedDigest: string | null,
   creds: RegistryCredentials
 ): Promise<{ hasUpdate: boolean; latestTag?: string; latestDigest?: string }> {
-  const service = await prisma.service.findUnique({
-    where: { id: serviceId },
-    select: {
-      id: true,
-      name: true,
-      imageTag: true,
-      containerImage: {
-        select: {
-          id: true,
-          imageName: true,
-          latestDigest: true,
-        },
-      },
-    },
-  });
-
-  if (!service || !service.containerImage) {
-    return { hasUpdate: false };
-  }
-
-  const imageName = service.containerImage.imageName;
-
   try {
     const client = RegistryFactory.create(creds);
     const repoName = extractRepoName(imageName, creds.repositoryPrefix);
 
-    // Get all tags and find the latest within the same tag family
     const allTags = await client.listTags(repoName);
-    const { latestTag, currentDigest } = findLatestInFamily(allTags, service.imageTag);
-    if (!latestTag) {
-      return { hasUpdate: false };
-    }
-
-    // Determine if there's an update available
-    let hasUpdate = false;
-    if (latestTag.tag !== service.imageTag) {
-      // Different tag name (version upgrade): confirm digests actually differ
-      hasUpdate = currentDigest === null || currentDigest !== latestTag.digest;
-    } else {
-      // Same tag name (rolling tag like "latest"): check if registry was updated after last deploy
-      const lastDeploy = await prisma.containerImageHistory.findFirst({
-        where: { containerImageId: service.containerImage.id, tag: service.imageTag, status: 'success' },
-        orderBy: { deployedAt: 'desc' },
-      });
-      if (lastDeploy) {
-        hasUpdate = new Date(latestTag.updatedAt).getTime() > lastDeploy.deployedAt.getTime();
-      }
-    }
-
-    // Update the containerImage with latest available info
-    await prisma.containerImage.update({
-      where: { id: service.containerImage.id },
-      data: {
-        latestTag: latestTag.tag,
-        latestDigest: latestTag.digest,
-        lastCheckedAt: new Date(),
-        updateAvailable: hasUpdate,
-      },
-    });
-
+    const result = await detectUpdate(imageId, currentTag, deployedDigest, allTags);
     return {
-      hasUpdate,
-      latestTag: latestTag.tag,
-      latestDigest: latestTag.digest,
+      hasUpdate: result.hasUpdate,
+      latestTag: result.latestTag ?? undefined,
+      latestDigest: result.latestDigest ?? undefined,
     };
   } catch (error) {
-    console.error(`[Scheduler] Failed to check updates for ${service.name}:`, error);
+    console.error(`[Scheduler] Failed to check updates for image ${imageName}:`, error);
     return { hasUpdate: false };
   }
 }
@@ -334,6 +284,7 @@ async function runUpdateChecks(): Promise<void> {
         imageName: true,
         currentTag: true,
         latestDigest: true,
+        deployedDigest: true,
         autoUpdate: true,
         registryConnectionId: true,
         environmentId: true,
@@ -379,8 +330,13 @@ async function runUpdateChecks(): Promise<void> {
         if (image.services.length === 0) continue;
 
         try {
-          // Use the first service to check for updates (they all share the same image)
-          const result = await checkServiceForUpdates(image.services[0].id, creds);
+          const result = await checkImageForUpdates(
+            image.id,
+            image.imageName,
+            image.currentTag,
+            image.deployedDigest,
+            creds
+          );
 
           if (result.hasUpdate) {
             console.log(
@@ -427,10 +383,13 @@ export async function checkServiceUpdate(serviceId: string): Promise<{
 }> {
   const service = await prisma.service.findUnique({
     where: { id: serviceId },
-    select: {
-      id: true,
+    include: {
       containerImage: {
         select: {
+          id: true,
+          imageName: true,
+          currentTag: true,
+          deployedDigest: true,
           registryConnectionId: true,
         },
       },
@@ -450,7 +409,13 @@ export async function checkServiceUpdate(serviceId: string): Promise<{
     return { hasUpdate: false, error: 'Could not get registry credentials' };
   }
 
-  return checkServiceForUpdates(serviceId, creds);
+  return checkImageForUpdates(
+    service.containerImage.id,
+    service.containerImage.imageName,
+    service.containerImage.currentTag,
+    service.containerImage.deployedDigest,
+    creds
+  );
 }
 
 /**

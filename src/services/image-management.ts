@@ -1,5 +1,7 @@
 import { prisma } from '../lib/db.js';
 import type { ContainerImage, ContainerImageHistory, Service } from '@prisma/client';
+import type { RegistryTag } from '../lib/registry.js';
+import { findLatestInFamily, findCompanionTag } from '../lib/image-utils.js';
 
 export interface CreateContainerImageInput {
   name: string;
@@ -14,6 +16,7 @@ export interface UpdateContainerImageInput {
   currentTag?: string;
   latestTag?: string;
   latestDigest?: string;
+  deployedDigest?: string | null;
   lastCheckedAt?: Date;
   registryConnectionId?: string | null;
   autoUpdate?: boolean;
@@ -153,9 +156,26 @@ export async function recordTagDeployment(
 ): Promise<ContainerImageHistory> {
   // Only update the container image's current tag on success
   if (status === 'success') {
+    // Resolve the deployed digest: use provided digest, or fall back to latestDigest
+    // if we're deploying the same tag that was just checked
+    let resolvedDigest = digest;
+    if (!resolvedDigest) {
+      const image = await prisma.containerImage.findUnique({
+        where: { id: containerImageId },
+        select: { latestTag: true, latestDigest: true },
+      });
+      if (image?.latestDigest && image.latestTag === tag) {
+        resolvedDigest = image.latestDigest;
+      }
+    }
+
     await prisma.containerImage.update({
       where: { id: containerImageId },
-      data: { currentTag: tag, updateAvailable: false },
+      data: {
+        currentTag: tag,
+        updateAvailable: false,
+        ...(resolvedDigest ? { deployedDigest: resolvedDigest } : {}),
+      },
     });
   }
 
@@ -349,4 +369,76 @@ export async function findOrCreateContainerImage(
       registryConnectionId,
     },
   });
+}
+
+/**
+ * Shared update detection logic for container images.
+ * Handles both version tags (tag name changes) and rolling tags (digest comparison).
+ * Also discovers companion tags for rolling tags.
+ */
+export interface DetectUpdateResult {
+  hasUpdate: boolean;
+  latestTag: string | null;
+  latestDigest: string | null;
+}
+
+export async function detectUpdate(
+  imageId: string,
+  currentTag: string,
+  deployedDigest: string | null,
+  allTags: RegistryTag[]
+): Promise<DetectUpdateResult> {
+  const { latestTag, currentDigest } = findLatestInFamily(allTags, currentTag);
+
+  if (!latestTag) {
+    return { hasUpdate: false, latestTag: null, latestDigest: null };
+  }
+
+  let hasUpdate = false;
+  let resolvedLatestTag = latestTag.tag;
+
+  if (latestTag.tag !== currentTag) {
+    // Different tag name (version upgrade): confirm digests actually differ
+    hasUpdate = currentDigest === null || currentDigest !== latestTag.digest;
+  } else {
+    // Same tag name (rolling tag like "latest"): compare digests
+    if (deployedDigest) {
+      hasUpdate = latestTag.digest !== deployedDigest;
+    } else {
+      // No deployedDigest yet — set baseline, no update
+      hasUpdate = false;
+    }
+  }
+
+  // For rolling tags, try to find a companion tag (e.g., "latest" → "20260223-30a4f0b")
+  if (latestTag.digest) {
+    const companion = findCompanionTag(allTags, latestTag.tag, latestTag.digest);
+    if (companion) {
+      resolvedLatestTag = companion;
+    }
+  }
+
+  // Update the containerImage with latest available info
+  const updateData: Record<string, unknown> = {
+    latestTag: resolvedLatestTag,
+    latestDigest: latestTag.digest,
+    lastCheckedAt: new Date(),
+    updateAvailable: hasUpdate,
+  };
+
+  // Set deployedDigest as baseline if it's missing (first check)
+  if (!deployedDigest && latestTag.digest) {
+    updateData.deployedDigest = latestTag.digest;
+  }
+
+  await prisma.containerImage.update({
+    where: { id: imageId },
+    data: updateData,
+  });
+
+  return {
+    hasUpdate,
+    latestTag: resolvedLatestTag,
+    latestDigest: latestTag.digest ?? null,
+  };
 }

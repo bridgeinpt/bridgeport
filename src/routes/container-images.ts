@@ -9,12 +9,13 @@ import {
   listContainerImages,
   linkServiceToContainerImage,
   getTagHistory,
+  detectUpdate,
 } from '../services/image-management.js';
 import { buildDeploymentPlan, executePlan } from '../services/orchestration.js';
 import { logAudit } from '../services/audit.js';
 import { RegistryFactory } from '../lib/registry.js';
 import { getRegistryCredentials } from '../services/registries.js';
-import { extractRepoName, findLatestInFamily } from '../lib/image-utils.js';
+import { extractRepoName } from '../lib/image-utils.js';
 
 const createContainerImageSchema = z.object({
   name: z.string().min(1),
@@ -284,10 +285,16 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
         const client = RegistryFactory.create(creds);
         const repoName = extractRepoName(image.imageName, creds.repositoryPrefix);
 
-        // Get all tags and find the latest within the same tag family
+        // Get all tags and run shared update detection
         const allTags = await client.listTags(repoName);
-        const { latestTag, currentDigest } = findLatestInFamily(allTags, image.currentTag);
-        if (!latestTag) {
+        const result = await detectUpdate(
+          image.id,
+          image.currentTag,
+          image.deployedDigest,
+          allTags
+        );
+
+        if (!result.latestTag) {
           return {
             hasUpdate: false,
             currentTag: image.currentTag,
@@ -296,38 +303,11 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
           };
         }
 
-        // Determine if there's an update available
-        let hasUpdate = false;
-        if (latestTag.tag !== image.currentTag) {
-          // Different tag name (version upgrade): confirm digests actually differ
-          hasUpdate = currentDigest === null || currentDigest !== latestTag.digest;
-        } else {
-          // Same tag name (rolling tag like "latest"): check if registry was updated after last deploy
-          const lastDeploy = await prisma.containerImageHistory.findFirst({
-            where: { containerImageId: image.id, tag: image.currentTag, status: 'success' },
-            orderBy: { deployedAt: 'desc' },
-          });
-          if (lastDeploy) {
-            hasUpdate = new Date(latestTag.updatedAt).getTime() > lastDeploy.deployedAt.getTime();
-          }
-        }
-
-        // Update the containerImage with latest available info
-        await prisma.containerImage.update({
-          where: { id },
-          data: {
-            latestTag: latestTag.tag,
-            latestDigest: latestTag.digest,
-            lastCheckedAt: new Date(),
-            updateAvailable: hasUpdate,
-          },
-        });
-
         return {
-          hasUpdate,
+          hasUpdate: result.hasUpdate,
           currentTag: image.currentTag,
-          latestTag: latestTag.tag,
-          latestDigest: latestTag.digest,
+          latestTag: result.latestTag,
+          latestDigest: result.latestDigest,
           lastCheckedAt: new Date().toISOString(),
         };
       } catch (error) {

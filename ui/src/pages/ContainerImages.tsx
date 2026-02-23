@@ -318,7 +318,7 @@ export default function ContainerImages() {
                       </span>
                       {image.updateAvailable && (
                         <span className="badge bg-yellow-500/20 text-yellow-400 text-xs">
-                          update available
+                          {image.latestTag ? `${image.latestTag} available` : 'update available'}
                         </span>
                       )}
                     </div>

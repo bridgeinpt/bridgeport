@@ -667,7 +667,8 @@ model ContainerImage {
   imageName     String // Full path: registry.digitalocean.com/bios-registry/bios-backend
   currentTag    String // Last deployed tag (to any service)
   latestTag     String? // Latest from registry (for update detection)
-  latestDigest  String?
+  latestDigest    String?
+  deployedDigest  String? // Digest of what was actually deployed (for rolling tag update detection)
   lastCheckedAt   DateTime?
   updateAvailable Boolean   @default(false) // Set by update checks, cleared on deploy
   autoUpdate      Boolean   @default(false) // Applies to all linked services

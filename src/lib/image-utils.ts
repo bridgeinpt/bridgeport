@@ -144,6 +144,42 @@ export function findLatestInFamily(
 }
 
 /**
+ * Find a "companion" tag that shares the same digest as the given tag.
+ * Useful for rolling tags like "latest" — finds the concrete build tag
+ * (e.g., "20260223-30a4f0b") that the rolling tag currently points to.
+ *
+ * Returns the best non-rolling companion tag, or null if none found.
+ */
+export function findCompanionTag(
+  allTags: RegistryTag[],
+  currentTag: string,
+  currentDigest: string
+): string | null {
+  // Find all tags sharing the same digest, excluding the current tag
+  const companions = allTags.filter(
+    (t) => t.digest === currentDigest && t.tag !== currentTag
+  );
+
+  if (companions.length === 0) return null;
+
+  // Prefer non-rolling tags (build/version tags) over rolling tags
+  const nonRolling = companions.filter(
+    (t) => !SPECIAL_TAGS.has(t.tag.toLowerCase())
+  );
+
+  if (nonRolling.length > 0) {
+    // Sort by updatedAt descending, return the most recent
+    nonRolling.sort(
+      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    );
+    return nonRolling[0].tag;
+  }
+
+  // Fall back to the first companion (even if it's a rolling tag)
+  return companions[0].tag;
+}
+
+/**
  * Strip registry prefix from an image name to get the repository path.
  * Examples:
  *   registry.digitalocean.com/bios-registry/app-api -> bios-registry/app-api

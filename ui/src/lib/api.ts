@@ -1523,6 +1523,7 @@ export interface ContainerImage {
   currentTag: string;
   latestTag: string | null;
   latestDigest: string | null;
+  deployedDigest: string | null;
   lastCheckedAt: string | null;
   updateAvailable: boolean;
   autoUpdate: boolean;
