@@ -10,6 +10,7 @@ import {
   deleteContainerImage,
   deployContainerImage,
   getContainerImageHistory,
+  getContainerImageTags,
   linkServiceToContainerImage,
   getLinkableServices,
   listRegistryConnections,
@@ -17,6 +18,7 @@ import {
   type ContainerImage,
   type ContainerImageInput,
   type ContainerImageHistory,
+  type RegistryTag,
   type Service,
   type RegistryConnection,
 } from '../lib/api';
@@ -57,6 +59,13 @@ export default function ContainerImages() {
 
   // Check updates state
   const [checkingUpdatesId, setCheckingUpdatesId] = useState<string | null>(null);
+
+  // Registry tags browser
+  const [viewingTags, setViewingTags] = useState<string | null>(null);
+  const [registryTags, setRegistryTags] = useState<RegistryTag[]>([]);
+  const [tagCurrentTag, setTagCurrentTag] = useState<string>('');
+  const [tagDeployedDigest, setTagDeployedDigest] = useState<string | null>(null);
+  const [loadingTags, setLoadingTags] = useState(false);
 
   // Edit form auto-update state
   const [editAutoUpdate, setEditAutoUpdate] = useState(false);
@@ -191,6 +200,11 @@ export default function ContainerImages() {
       setHistory([]);
       return;
     }
+    // Close tags if open
+    if (viewingTags) {
+      setViewingTags(null);
+      setRegistryTags([]);
+    }
     setViewingHistory(imageId);
     setLoadingHistory(true);
     try {
@@ -244,6 +258,40 @@ export default function ContainerImages() {
     } finally {
       setCheckingUpdatesId(null);
     }
+  };
+
+  const handleViewTags = async (imageId: string) => {
+    if (viewingTags === imageId) {
+      setViewingTags(null);
+      setRegistryTags([]);
+      return;
+    }
+    // Close history if open
+    if (viewingHistory) {
+      setViewingHistory(null);
+      setHistory([]);
+    }
+    setViewingTags(imageId);
+    setLoadingTags(true);
+    try {
+      const result = await getContainerImageTags(imageId);
+      setRegistryTags(result.tags);
+      setTagCurrentTag(result.currentTag);
+      setTagDeployedDigest(result.deployedDigest);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to load tags');
+      setViewingTags(null);
+    } finally {
+      setLoadingTags(false);
+    }
+  };
+
+  const formatBytes = (bytes: number): string => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
   };
 
   // Helper function to get status badge color
@@ -366,25 +414,33 @@ export default function ContainerImages() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {/* Check updates button */}
+                  {/* Registry buttons */}
                   {image.registryConnectionId && (
-                    <button
-                      onClick={() => handleCheckUpdates(image.id)}
-                      disabled={checkingUpdatesId === image.id}
-                      className="btn btn-ghost text-sm"
-                      title="Check for updates from registry"
-                    >
-                      {checkingUpdatesId === image.id ? (
-                        <span className="flex items-center gap-1">
-                          <span className="animate-spin">
-                            <RefreshIcon className="w-4 h-4" />
+                    <>
+                      <button
+                        onClick={() => handleViewTags(image.id)}
+                        className="btn btn-ghost text-sm"
+                      >
+                        {viewingTags === image.id ? 'Hide Tags' : 'Registry Tags'}
+                      </button>
+                      <button
+                        onClick={() => handleCheckUpdates(image.id)}
+                        disabled={checkingUpdatesId === image.id}
+                        className="btn btn-ghost text-sm"
+                        title="Check for updates from registry"
+                      >
+                        {checkingUpdatesId === image.id ? (
+                          <span className="flex items-center gap-1">
+                            <span className="animate-spin">
+                              <RefreshIcon className="w-4 h-4" />
+                            </span>
+                            Checking...
                           </span>
-                          Checking...
-                        </span>
-                      ) : (
-                        'Check Updates'
-                      )}
-                    </button>
+                        ) : (
+                          'Check Updates'
+                        )}
+                      </button>
+                    </>
                   )}
                   {image.services.length > 0 && (
                     <button
@@ -422,6 +478,79 @@ export default function ContainerImages() {
                   </button>
                 </div>
               </div>
+
+              {/* Registry Tags */}
+              {viewingTags === image.id && (
+                <div className="mt-4 pt-4 border-t border-slate-700">
+                  <h4 className="text-sm font-medium text-slate-400 mb-3">Registry Tags</h4>
+                  {loadingTags ? (
+                    <div className="animate-pulse space-y-2">
+                      <div className="h-8 bg-slate-700 rounded"></div>
+                      <div className="h-8 bg-slate-700 rounded"></div>
+                    </div>
+                  ) : registryTags.length === 0 ? (
+                    <p className="text-sm text-slate-500">No tags found in registry</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead>
+                          <tr className="text-left text-slate-400 text-xs border-b border-slate-700">
+                            <th className="pb-2 font-medium">Tag</th>
+                            <th className="pb-2 font-medium">Digest</th>
+                            <th className="pb-2 font-medium">Size</th>
+                            <th className="pb-2 font-medium">Updated</th>
+                            <th className="pb-2 font-medium text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-700/50">
+                          {registryTags.map((tag) => (
+                            <tr key={tag.digest + tag.tag} className="text-sm">
+                              <td className="py-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-mono text-white">{tag.tag}</span>
+                                  {tag.tag === tagCurrentTag && (
+                                    <span className="badge bg-primary-500/20 text-primary-400 text-xs">current</span>
+                                  )}
+                                  {tagDeployedDigest && tag.digest === tagDeployedDigest && (
+                                    <span className="badge bg-green-500/20 text-green-400 text-xs">deployed</span>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-2">
+                                <span className="font-mono text-slate-400 text-xs">
+                                  {tag.digest ? tag.digest.substring(0, 19) : '—'}
+                                </span>
+                              </td>
+                              <td className="py-2 text-slate-400">
+                                {tag.size ? formatBytes(tag.size) : '—'}
+                              </td>
+                              <td className="py-2 text-slate-400">
+                                {tag.updatedAt
+                                  ? formatDistanceToNow(new Date(tag.updatedAt), { addSuffix: true })
+                                  : '—'}
+                              </td>
+                              <td className="py-2 text-right">
+                                {image.services.length > 0 && (
+                                  <button
+                                    onClick={() => {
+                                      setDeployingImage(image);
+                                      setDeployTag(tag.tag);
+                                      setDeployAutoRollback(true);
+                                    }}
+                                    className="btn btn-primary text-xs px-2 py-1"
+                                  >
+                                    Deploy
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* History */}
               {viewingHistory === image.id && (

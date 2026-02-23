@@ -1,7 +1,8 @@
 import { prisma } from '../lib/db.js';
 import type { ContainerImage, ContainerImageHistory, Service } from '@prisma/client';
-import type { RegistryTag } from '../lib/registry.js';
-import { findLatestInFamily, findCompanionTag } from '../lib/image-utils.js';
+import { RegistryFactory, type RegistryTag } from '../lib/registry.js';
+import { findLatestInFamily, findCompanionTag, extractRepoName } from '../lib/image-utils.js';
+import { getRegistryCredentials } from './registries.js';
 
 export interface CreateContainerImageInput {
   name: string;
@@ -405,8 +406,20 @@ export async function detectUpdate(
     if (deployedDigest) {
       hasUpdate = latestTag.digest !== deployedDigest;
     } else {
-      // No deployedDigest yet — set baseline, no update
-      hasUpdate = false;
+      // No deployedDigest yet — check history for the last successful deploy's digest
+      const lastSuccessful = await prisma.containerImageHistory.findFirst({
+        where: { containerImageId: imageId, status: 'success' },
+        orderBy: { deployedAt: 'desc' },
+        select: { digest: true },
+      });
+
+      if (lastSuccessful?.digest) {
+        // History has a digest — compare it to the registry
+        hasUpdate = latestTag.digest !== lastSuccessful.digest;
+      } else {
+        // No history digest at all — conservative: show as update available
+        hasUpdate = true;
+      }
     }
   }
 
@@ -426,11 +439,6 @@ export async function detectUpdate(
     updateAvailable: hasUpdate,
   };
 
-  // Set deployedDigest as baseline if it's missing (first check)
-  if (!deployedDigest && latestTag.digest) {
-    updateData.deployedDigest = latestTag.digest;
-  }
-
   await prisma.containerImage.update({
     where: { id: imageId },
     data: updateData,
@@ -440,5 +448,41 @@ export async function detectUpdate(
     hasUpdate,
     latestTag: resolvedLatestTag,
     latestDigest: latestTag.digest ?? null,
+  };
+}
+
+/**
+ * List tags from the registry for a container image.
+ * Encapsulates registry client creation and repo name extraction.
+ */
+export async function listImageTags(
+  imageId: string
+): Promise<{ tags: RegistryTag[]; currentTag: string; deployedDigest: string | null }> {
+  const image = await prisma.containerImage.findUnique({
+    where: { id: imageId },
+    include: { registryConnection: true },
+  });
+
+  if (!image) {
+    throw new Error('Container image not found');
+  }
+
+  if (!image.registryConnectionId) {
+    throw new Error('No registry connection configured for this image');
+  }
+
+  const creds = await getRegistryCredentials(image.registryConnectionId);
+  if (!creds) {
+    throw new Error('Could not get registry credentials');
+  }
+
+  const client = RegistryFactory.create(creds);
+  const repoName = extractRepoName(image.imageName, creds.repositoryPrefix);
+  const tags = await client.listTags(repoName);
+
+  return {
+    tags,
+    currentTag: image.currentTag,
+    deployedDigest: image.deployedDigest,
   };
 }

@@ -2289,6 +2289,9 @@ export const checkContainerImageUpdates = (id: string) =>
 export const getEnhancedContainerImageHistory = (id: string, limit?: number) =>
   api.get<{ history: EnhancedContainerImageHistory[] }>(`/container-images/${id}/history${limit ? `?limit=${limit}` : ''}`);
 
+export const getContainerImageTags = (id: string) =>
+  api.get<{ tags: RegistryTag[]; currentTag: string; deployedDigest: string | null }>(`/container-images/${id}/tags`);
+
 // ==================== Slack Integration ====================
 
 export interface SlackChannel {
