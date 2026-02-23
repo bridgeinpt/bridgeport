@@ -290,13 +290,20 @@ async function checkServiceForUpdates(
     });
 
     // Determine if there's an update available
-    // 1. Different tag name (version upgrade): confirm digests actually differ
-    // 2. Same tag name (rolling tag like "latest"): detect digest change since last check
-    const hasUpdate =
-      latestTag.tag !== service.imageTag
-        ? currentDigest === null || currentDigest !== latestTag.digest
-        : service.containerImage.latestDigest !== null &&
-          latestTag.digest !== service.containerImage.latestDigest;
+    let hasUpdate = false;
+    if (latestTag.tag !== service.imageTag) {
+      // Different tag name (version upgrade): confirm digests actually differ
+      hasUpdate = currentDigest === null || currentDigest !== latestTag.digest;
+    } else {
+      // Same tag name (rolling tag like "latest"): check if registry was updated after last deploy
+      const lastDeploy = await prisma.containerImageHistory.findFirst({
+        where: { containerImageId: service.containerImage.id, tag: service.imageTag, status: 'success' },
+        orderBy: { deployedAt: 'desc' },
+      });
+      if (lastDeploy) {
+        hasUpdate = new Date(latestTag.updatedAt).getTime() > lastDeploy.deployedAt.getTime();
+      }
+    }
 
     return {
       hasUpdate,

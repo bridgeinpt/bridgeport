@@ -307,12 +307,20 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
         });
 
         // Determine if there's an update available
-        const hasUpdate =
-          latestTag.tag !== image.currentTag
-            // Different tag name (version upgrade): confirm digests actually differ
-            ? currentDigest === null || currentDigest !== latestTag.digest
-            // Same tag name (rolling tag like "latest"): detect digest change since last check
-            : image.latestDigest !== null && latestTag.digest !== image.latestDigest;
+        let hasUpdate = false;
+        if (latestTag.tag !== image.currentTag) {
+          // Different tag name (version upgrade): confirm digests actually differ
+          hasUpdate = currentDigest === null || currentDigest !== latestTag.digest;
+        } else {
+          // Same tag name (rolling tag like "latest"): check if registry was updated after last deploy
+          const lastDeploy = await prisma.containerImageHistory.findFirst({
+            where: { containerImageId: image.id, tag: image.currentTag, status: 'success' },
+            orderBy: { deployedAt: 'desc' },
+          });
+          if (lastDeploy) {
+            hasUpdate = new Date(latestTag.updatedAt).getTime() > lastDeploy.deployedAt.getTime();
+          }
+        }
 
         return {
           hasUpdate,
