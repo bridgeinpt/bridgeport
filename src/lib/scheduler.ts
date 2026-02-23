@@ -290,14 +290,13 @@ async function checkServiceForUpdates(
     });
 
     // Determine if there's an update available
-    // An update is available if:
-    // 1. The latest tag is different from the current tag (e.g., new version)
-    // 2. OR the digest for the current tag has changed (e.g., "latest" was updated)
+    // 1. Different tag name (version upgrade): confirm digests actually differ
+    // 2. Same tag name (rolling tag like "latest"): detect digest change since last check
     const hasUpdate =
-      latestTag.tag !== service.imageTag ||
-      (currentDigest !== null &&
-        latestTag.digest !== service.containerImage.latestDigest &&
-        currentDigest !== latestTag.digest);
+      latestTag.tag !== service.imageTag
+        ? currentDigest === null || currentDigest !== latestTag.digest
+        : service.containerImage.latestDigest !== null &&
+          latestTag.digest !== service.containerImage.latestDigest;
 
     return {
       hasUpdate,

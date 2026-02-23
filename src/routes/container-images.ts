@@ -308,10 +308,11 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
 
         // Determine if there's an update available
         const hasUpdate =
-          latestTag.tag !== image.currentTag ||
-          (currentDigest !== null &&
-            latestTag.digest !== image.latestDigest &&
-            currentDigest !== latestTag.digest);
+          latestTag.tag !== image.currentTag
+            // Different tag name (version upgrade): confirm digests actually differ
+            ? currentDigest === null || currentDigest !== latestTag.digest
+            // Same tag name (rolling tag like "latest"): detect digest change since last check
+            : image.latestDigest !== null && latestTag.digest !== image.latestDigest;
 
         return {
           hasUpdate,
