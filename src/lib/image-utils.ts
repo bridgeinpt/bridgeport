@@ -117,6 +117,40 @@ export function filterTagsByFamily(tags: RegistryTag[], currentTag: string): Reg
 }
 
 /**
+ * Compare two version tag strings numerically.
+ * Strips leading 'v' prefix, splits by '.', and compares each segment as a number.
+ * For non-version tags, falls back to string comparison.
+ * Returns negative if a < b, positive if a > b, 0 if equal.
+ */
+export function compareVersionTags(a: string, b: string): number {
+  // Strip leading 'v' prefix
+  const cleanA = a.replace(/^v/, '');
+  const cleanB = b.replace(/^v/, '');
+
+  // Extract version parts (digits before the first hyphen/suffix)
+  const versionPartA = cleanA.match(/^(\d+(?:\.\d+)*)/);
+  const versionPartB = cleanB.match(/^(\d+(?:\.\d+)*)/);
+
+  if (!versionPartA || !versionPartB) {
+    // Not version tags — fall back to string comparison
+    return a.localeCompare(b);
+  }
+
+  const partsA = versionPartA[1].split('.').map(Number);
+  const partsB = versionPartB[1].split('.').map(Number);
+  const maxLen = Math.max(partsA.length, partsB.length);
+
+  for (let i = 0; i < maxLen; i++) {
+    const segA = partsA[i] ?? 0;
+    const segB = partsB[i] ?? 0;
+    if (segA !== segB) return segA - segB;
+  }
+
+  // Version parts are equal — compare full string for suffix differences
+  return cleanA.localeCompare(cleanB);
+}
+
+/**
  * From a pre-fetched tag list, find the latest tag in the same family as currentTag.
  * Also extracts the current tag's digest. This replaces two separate API calls
  * (getLatestTag + getManifestDigest) with one (listTags).
@@ -135,10 +169,14 @@ export function findLatestInFamily(
     return { latestTag: null, currentDigest };
   }
 
-  // Sort by updatedAt descending to find the most recently updated tag in the family
-  const sorted = [...familyTags].sort(
-    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-  );
+  // Sort by updatedAt descending, then by version (semver-aware) for ties
+  const sorted = [...familyTags].sort((a, b) => {
+    const timeDiff = new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+    // If timestamps differ by more than 1 minute, use timestamp ordering
+    if (Math.abs(timeDiff) > 60_000) return timeDiff;
+    // Otherwise fall back to version comparison (higher version first)
+    return compareVersionTags(b.tag, a.tag);
+  });
 
   return { latestTag: sorted[0], currentDigest };
 }

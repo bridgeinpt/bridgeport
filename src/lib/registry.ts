@@ -316,7 +316,12 @@ export class GenericRegistryClient implements RegistryClient {
   private async fetch<T>(path: string): Promise<T> {
     const response = await fetch(`${this.registryUrl}${path}`, {
       headers: {
-        Accept: 'application/vnd.docker.distribution.manifest.v2+json',
+        Accept: [
+          'application/vnd.docker.distribution.manifest.v2+json',
+          'application/vnd.oci.image.manifest.v1+json',
+          'application/vnd.docker.distribution.manifest.list.v2+json',
+          'application/vnd.oci.image.index.v1+json',
+        ].join(', '),
         ...this.getAuthHeader(),
       },
     });
@@ -404,10 +409,16 @@ export class GenericRegistryClient implements RegistryClient {
   }
 
   async getManifestDigest(repo: string, tag: string): Promise<string> {
+    // Try multiple manifest types — registries vary in what they support
     const response = await fetch(`${this.registryUrl}/v2/${repo}/manifests/${tag}`, {
       method: 'HEAD',
       headers: {
-        Accept: 'application/vnd.docker.distribution.manifest.v2+json',
+        Accept: [
+          'application/vnd.docker.distribution.manifest.v2+json',
+          'application/vnd.oci.image.manifest.v1+json',
+          'application/vnd.docker.distribution.manifest.list.v2+json',
+          'application/vnd.oci.image.index.v1+json',
+        ].join(', '),
         ...this.getAuthHeader(),
       },
     });

@@ -364,9 +364,14 @@ export default function ContainerImages() {
                       <span className="badge bg-slate-700 text-slate-300 text-xs font-mono">
                         {image.currentTag}
                       </span>
-                      {image.updateAvailable && (
+                      {image.updateAvailable && image.latestTag && image.latestTag !== image.currentTag && (
                         <span className="badge bg-yellow-500/20 text-yellow-400 text-xs">
-                          {image.latestTag ? `${image.latestTag} available` : 'update available'}
+                          {image.latestTag} available
+                        </span>
+                      )}
+                      {image.updateAvailable && image.latestTag && image.latestTag === image.currentTag && image.latestDigest && (
+                        <span className="badge bg-yellow-500/20 text-yellow-400 text-xs">
+                          new image available
                         </span>
                       )}
                     </div>
@@ -492,61 +497,100 @@ export default function ContainerImages() {
                     <p className="text-sm text-slate-500">No tags found in registry</p>
                   ) : (
                     <div className="overflow-x-auto">
-                      <table className="w-full">
-                        <thead>
-                          <tr className="text-left text-slate-400 text-xs border-b border-slate-700">
-                            <th className="pb-2 font-medium">Tag</th>
-                            <th className="pb-2 font-medium">Digest</th>
-                            <th className="pb-2 font-medium">Size</th>
-                            <th className="pb-2 font-medium">Updated</th>
-                            <th className="pb-2 font-medium text-right">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-700/50">
-                          {registryTags.map((tag) => (
-                            <tr key={tag.digest + tag.tag} className="text-sm">
-                              <td className="py-2">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-mono text-white">{tag.tag}</span>
-                                  {tag.tag === tagCurrentTag && (
-                                    <span className="badge bg-primary-500/20 text-primary-400 text-xs">current</span>
-                                  )}
-                                  {tagDeployedDigest && tag.digest === tagDeployedDigest && (
-                                    <span className="badge bg-green-500/20 text-green-400 text-xs">deployed</span>
-                                  )}
-                                </div>
-                              </td>
-                              <td className="py-2">
-                                <span className="font-mono text-slate-400 text-xs">
-                                  {tag.digest ? tag.digest.substring(0, 19) : '—'}
-                                </span>
-                              </td>
-                              <td className="py-2 text-slate-400">
-                                {tag.size ? formatBytes(tag.size) : '—'}
-                              </td>
-                              <td className="py-2 text-slate-400">
-                                {tag.updatedAt
-                                  ? formatDistanceToNow(new Date(tag.updatedAt), { addSuffix: true })
-                                  : '—'}
-                              </td>
-                              <td className="py-2 text-right">
-                                {image.services.length > 0 && (
-                                  <button
-                                    onClick={() => {
-                                      setDeployingImage(image);
-                                      setDeployTag(tag.tag);
-                                      setDeployAutoRollback(true);
-                                    }}
-                                    className="btn btn-primary text-xs px-2 py-1"
-                                  >
-                                    Deploy
-                                  </button>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                      {(() => {
+                        // Group tags by digest to show correlation
+                        const digestGroups = new Map<string, string[]>();
+                        const digestColors = ['bg-blue-400', 'bg-emerald-400', 'bg-amber-400', 'bg-purple-400', 'bg-rose-400', 'bg-cyan-400'];
+                        for (const t of registryTags) {
+                          if (t.digest) {
+                            const group = digestGroups.get(t.digest) || [];
+                            group.push(t.tag);
+                            digestGroups.set(t.digest, group);
+                          }
+                        }
+                        // Only color digests shared by multiple tags
+                        const sharedDigests = new Map<string, number>();
+                        let colorIdx = 0;
+                        for (const [digest, tags] of digestGroups) {
+                          if (tags.length > 1) {
+                            sharedDigests.set(digest, colorIdx % digestColors.length);
+                            colorIdx++;
+                          }
+                        }
+
+                        // Detect if timestamps are likely synthetic (all within 5s of each other)
+                        const timestamps = registryTags.map(t => new Date(t.updatedAt).getTime());
+                        const hasRealTimestamps = timestamps.length > 1 &&
+                          Math.max(...timestamps) - Math.min(...timestamps) > 5000;
+
+                        return (
+                          <table className="w-full">
+                            <thead>
+                              <tr className="text-left text-slate-400 text-xs border-b border-slate-700">
+                                <th className="pb-2 font-medium">Tag</th>
+                                <th className="pb-2 font-medium">Digest</th>
+                                <th className="pb-2 font-medium">Size</th>
+                                <th className="pb-2 font-medium">Updated</th>
+                                <th className="pb-2 font-medium text-right">Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-700/50">
+                              {registryTags.map((tag) => {
+                                const digestColorIdx = tag.digest ? sharedDigests.get(tag.digest) : undefined;
+                                return (
+                                  <tr key={tag.digest + tag.tag} className="text-sm">
+                                    <td className="py-2">
+                                      <div className="flex items-center gap-2">
+                                        {digestColorIdx !== undefined && (
+                                          <span className={`w-2 h-2 rounded-full ${digestColors[digestColorIdx]} flex-shrink-0`} title="Tags with same color share the same image digest" />
+                                        )}
+                                        <span className="font-mono text-white">{tag.tag}</span>
+                                        {tag.tag === tagCurrentTag && (
+                                          <span className="badge bg-primary-500/20 text-primary-400 text-xs">current</span>
+                                        )}
+                                        {tagDeployedDigest && tag.digest && tag.digest === tagDeployedDigest && (
+                                          <span className="badge bg-green-500/20 text-green-400 text-xs">deployed</span>
+                                        )}
+                                      </div>
+                                    </td>
+                                    <td className="py-2">
+                                      {tag.digest ? (
+                                        <span className="font-mono text-slate-400 text-xs">
+                                          {tag.digest.substring(0, 19)}
+                                        </span>
+                                      ) : (
+                                        <span className="text-slate-600 text-xs italic">unavailable</span>
+                                      )}
+                                    </td>
+                                    <td className="py-2 text-slate-400">
+                                      {tag.size ? formatBytes(tag.size) : '—'}
+                                    </td>
+                                    <td className="py-2 text-slate-400">
+                                      {hasRealTimestamps && tag.updatedAt
+                                        ? formatDistanceToNow(new Date(tag.updatedAt), { addSuffix: true })
+                                        : '—'}
+                                    </td>
+                                    <td className="py-2 text-right">
+                                      {image.services.length > 0 && (
+                                        <button
+                                          onClick={() => {
+                                            setDeployingImage(image);
+                                            setDeployTag(tag.tag);
+                                            setDeployAutoRollback(true);
+                                          }}
+                                          className="btn btn-primary text-xs px-2 py-1"
+                                        >
+                                          Deploy
+                                        </button>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>

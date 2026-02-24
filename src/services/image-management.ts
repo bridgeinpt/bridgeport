@@ -399,11 +399,20 @@ export async function detectUpdate(
   let resolvedLatestTag = latestTag.tag;
 
   if (latestTag.tag !== currentTag) {
-    // Different tag name (version upgrade): confirm digests actually differ
-    hasUpdate = currentDigest === null || currentDigest !== latestTag.digest;
+    // Different tag name (version upgrade)
+    if (!latestTag.digest || !currentDigest) {
+      // Can't compare digests — if tag name is newer, assume update
+      hasUpdate = true;
+    } else {
+      hasUpdate = currentDigest !== latestTag.digest;
+    }
   } else {
     // Same tag name (rolling tag like "latest"): compare digests
-    if (deployedDigest) {
+    if (!latestTag.digest) {
+      // Registry didn't return a digest — can't determine update status
+      // Don't false-positive (was causing perpetual "latest available" badges)
+      hasUpdate = false;
+    } else if (deployedDigest) {
       hasUpdate = latestTag.digest !== deployedDigest;
     } else {
       // No deployedDigest yet — check history for the last successful deploy's digest
@@ -417,8 +426,8 @@ export async function detectUpdate(
         // History has a digest — compare it to the registry
         hasUpdate = latestTag.digest !== lastSuccessful.digest;
       } else {
-        // No history digest at all — conservative: show as update available
-        hasUpdate = true;
+        // No history digest at all — can't determine, don't false-positive
+        hasUpdate = false;
       }
     }
   }
