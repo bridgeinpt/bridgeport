@@ -354,25 +354,38 @@ export class GenericRegistryClient implements RegistryClient {
     const settings = await getSystemSettings();
     const maxTags = settings.registryMaxTags;
 
-    // Get manifest for each tag to get digest
+    // Fetch manifest digests in parallel (batches of 10)
+    const tagsToFetch = data.tags.slice(0, maxTags);
+    const batchSize = 10;
     const tags: RegistryTag[] = [];
-    for (const tag of data.tags.slice(0, maxTags)) {
-      try {
-        const digest = await this.getManifestDigest(repo, tag);
-        tags.push({
-          tag,
-          digest,
-          size: 0,
-          updatedAt: new Date().toISOString(),
-        });
-      } catch {
-        // Skip tags we can't get manifest for
-        tags.push({
-          tag,
-          digest: '',
-          size: 0,
-          updatedAt: new Date().toISOString(),
-        });
+
+    for (let i = 0; i < tagsToFetch.length; i += batchSize) {
+      const batch = tagsToFetch.slice(i, i + batchSize);
+      const results = await Promise.allSettled(
+        batch.map(async (tag) => {
+          const digest = await this.getManifestDigest(repo, tag);
+          return { tag, digest };
+        })
+      );
+
+      for (const result of results) {
+        if (result.status === 'fulfilled') {
+          tags.push({
+            tag: result.value.tag,
+            digest: result.value.digest,
+            size: 0,
+            updatedAt: new Date().toISOString(),
+          });
+        } else {
+          // Extract tag name from the batch by index
+          const idx = results.indexOf(result);
+          tags.push({
+            tag: batch[idx],
+            digest: '',
+            size: 0,
+            updatedAt: new Date().toISOString(),
+          });
+        }
       }
     }
 

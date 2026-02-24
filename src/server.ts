@@ -44,6 +44,8 @@ import { systemSettingsRoutes } from './routes/system-settings.js';
 import { downloadRoutes } from './routes/downloads.js';
 import { topologyRoutes } from './routes/topology.js';
 import { environmentSettingsRoutes } from './routes/environment-settings.js';
+import { eventRoutes } from './routes/events.js';
+import { sshPool } from './lib/ssh.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -172,6 +174,7 @@ async function buildServer() {
   await fastify.register(downloadRoutes);
   await fastify.register(topologyRoutes);
   await fastify.register(environmentSettingsRoutes);
+  await fastify.register(eventRoutes);
   // Health check
   fastify.get('/health', async () => {
     return {
@@ -241,6 +244,7 @@ async function buildServer() {
   const shutdown = async () => {
     fastify.log.info('Shutting down...');
     stopScheduler();
+    sshPool.shutdown();
     await fastify.close();
     await disconnectDatabase();
     await flushSentry();

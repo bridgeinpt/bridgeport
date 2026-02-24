@@ -591,6 +591,7 @@ model Notification {
 
   @@index([userId, createdAt(sort: Desc)])
   @@index([userId, inAppReadAt])
+  @@index([environmentId])
 }
 
 // User preferences for notification types
@@ -716,6 +717,8 @@ model ServiceDependency {
   dependsOn   Service @relation("ServiceDependents", fields: [dependsOnId], references: [id], onDelete: Cascade)
 
   @@unique([dependentId, dependsOnId])
+  @@index([dependentId])
+  @@index([dependsOnId])
 }
 
 // Orchestrated deployment tracking

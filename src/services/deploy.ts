@@ -10,6 +10,7 @@ import { getEnvironmentSshKey } from '../routes/environments.js';
 import { checkServiceUpdate } from '../lib/scheduler.js';
 import { sendSystemNotification, NOTIFICATION_TYPES } from './notifications.js';
 import { recordTagDeployment } from './image-management.js';
+import { eventBus } from '../lib/event-bus.js';
 import type { Deployment, Service } from '@prisma/client';
 
 export interface DeployOptions {
@@ -68,6 +69,8 @@ export async function deployService(
       where: { id: deployment.id },
       data: { status: 'deploying' },
     });
+
+    eventBus.emitEvent({ type: 'deployment_progress', data: { deploymentId: deployment.id, serviceId, status: 'deploying', environmentId: service.server.environmentId } });
 
     log(`Starting deployment of ${service.name} with tag ${imageTag}`);
 
@@ -237,6 +240,8 @@ export async function deployService(
       },
     });
 
+    eventBus.emitEvent({ type: 'deployment_progress', data: { deploymentId: deployment.id, serviceId, status: 'success', environmentId: service.server.environmentId } });
+
     // Send success notification
     await sendSystemNotification(
       NOTIFICATION_TYPES.SYSTEM_DEPLOYMENT_SUCCESS,
@@ -273,6 +278,8 @@ export async function deployService(
         containerImageHistoryId: historyEntry.id,
       },
     });
+
+    eventBus.emitEvent({ type: 'deployment_progress', data: { deploymentId: deployment.id, serviceId, status: 'failed', environmentId: service.server.environmentId } });
 
     // Send failure notification
     await sendSystemNotification(

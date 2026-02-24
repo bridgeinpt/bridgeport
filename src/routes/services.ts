@@ -82,9 +82,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           where,
           include: {
             containerImage: true,
-            serviceType: {
-              include: { commands: true },
-            },
+            serviceType: true,
             server: { select: { id: true, name: true } },
           },
           orderBy: { name: 'asc' },

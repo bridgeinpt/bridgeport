@@ -15,12 +15,15 @@ import {
 } from '../services/metrics.js';
 import { checkDueBackups } from '../services/database-backup.js';
 import { sendSystemNotification, NOTIFICATION_TYPES, cleanupOldNotifications } from '../services/notifications.js';
+import pLimit from 'p-limit';
 import { recordFailure, recordSuccess } from '../services/bounce-tracker.js';
 import { buildDeploymentPlan, executePlan } from '../services/orchestration.js';
 import { logHealthCheck, cleanupHealthCheckLogs } from '../services/health-checks.js';
 import { getSystemSettings } from '../services/system-settings.js';
+import { cleanupOldAuditLogs } from '../services/audit.js';
 import { logAgentEvent } from '../services/agent-events.js';
 import { runDatabaseMetricsCollection, cleanupOldDatabaseMetrics } from '../services/database-monitoring-collector.js';
+import { eventBus } from './event-bus.js';
 
 interface GlobalSchedulerConfig {
   serverHealthIntervalMs: number;
@@ -51,6 +54,22 @@ const DEFAULT_CONFIG: GlobalSchedulerConfig = {
 const timers = new Map<string, NodeJS.Timeout>();
 let isRunning = false;
 
+// Concurrency limit for parallel operations (SSH connections, health checks)
+const concurrencyLimit = pLimit(5);
+
+/**
+ * Fire-and-forget notification delivery — logs errors but doesn't block the caller.
+ */
+function notifyAsync(
+  typeCode: Parameters<typeof sendSystemNotification>[0],
+  environmentId: Parameters<typeof sendSystemNotification>[1],
+  data: Parameters<typeof sendSystemNotification>[2]
+): void {
+  sendSystemNotification(typeCode, environmentId, data).catch((err) => {
+    console.error('[Scheduler] Async notification delivery failed:', err);
+  });
+}
+
 /**
  * Run health checks on all servers (skips agent-mode servers since agents report health directly)
  */
@@ -63,7 +82,7 @@ async function runServerHealthChecks(): Promise<void> {
 
     console.log(`[Scheduler] Running health checks on ${servers.length} servers (excluding agent-mode)`);
 
-    for (const server of servers) {
+    await Promise.allSettled(servers.map((server) => concurrencyLimit(async () => {
       const start = Date.now();
       try {
         const prevStatus = server.status;
@@ -88,11 +107,15 @@ async function runServerHealthChecks(): Promise<void> {
         });
 
         if (updated) {
+          if (updated.status !== prevStatus) {
+            eventBus.emitEvent({ type: 'health_status', data: { resourceType: 'server', resourceId: server.id, status: updated.status, environmentId: server.environmentId } });
+          }
+
           if (updated.status === 'unhealthy' && prevStatus !== 'unhealthy') {
             // Server became unhealthy - use bounce tracking
             const bounce = await recordFailure('server', server.id, 'offline', NOTIFICATION_TYPES.SYSTEM_SERVER_OFFLINE);
             if (bounce.shouldAlert) {
-              await sendSystemNotification(
+              notifyAsync(
                 NOTIFICATION_TYPES.SYSTEM_SERVER_OFFLINE,
                 server.environmentId,
                 { serverName: server.name }
@@ -102,7 +125,7 @@ async function runServerHealthChecks(): Promise<void> {
             // Server recovered
             const bounce = await recordSuccess('server', server.id, 'offline');
             if (bounce.wasRecovered) {
-              await sendSystemNotification(
+              notifyAsync(
                 NOTIFICATION_TYPES.SYSTEM_SERVER_ONLINE,
                 server.environmentId,
                 { serverName: server.name }
@@ -128,7 +151,7 @@ async function runServerHealthChecks(): Promise<void> {
 
         console.error(`[Scheduler] Health check failed for server ${server.name}:`, error);
       }
-    }
+    })));
   } catch (error) {
     captureException(error, { scheduler: 'serverHealthChecks' });
     console.error('[Scheduler] Server health check run failed:', error);
@@ -159,7 +182,7 @@ async function runServiceHealthChecks(): Promise<void> {
 
     console.log(`[Scheduler] Running health checks on ${services.length} services`);
 
-    for (const service of services) {
+    await Promise.allSettled(services.map((service) => concurrencyLimit(async () => {
       const start = Date.now();
       try {
         const result = await checkServiceHealth(service.id);
@@ -208,7 +231,7 @@ async function runServiceHealthChecks(): Promise<void> {
 
         console.error(`[Scheduler] Health check failed for service ${service.name}:`, error);
       }
-    }
+    })));
   } catch (error) {
     captureException(error, { scheduler: 'serviceHealthChecks' });
     console.error('[Scheduler] Service health check run failed:', error);
@@ -222,18 +245,19 @@ async function runDiscovery(): Promise<void> {
   try {
     const servers = await prisma.server.findMany({
       where: { status: 'healthy' }, // Only discover on healthy servers
-      select: { id: true, name: true },
+      select: { id: true, name: true, environmentId: true },
     });
 
     console.log(`[Scheduler] Running discovery on ${servers.length} healthy servers`);
 
-    for (const server of servers) {
+    await Promise.allSettled(servers.map((server) => concurrencyLimit(async () => {
       try {
         await discoverContainers(server.id);
+        eventBus.emitEvent({ type: 'container_discovery', data: { serverId: server.id, environmentId: server.environmentId } });
       } catch (error) {
         console.error(`[Scheduler] Discovery failed for server ${server.name}:`, error);
       }
-    }
+    })));
   } catch (error) {
     captureException(error, { scheduler: 'discovery' });
     console.error('[Scheduler] Discovery run failed:', error);
@@ -343,22 +367,20 @@ async function runUpdateChecks(): Promise<void> {
               `[Scheduler] Update available for ${image.name}: ${image.currentTag} -> ${result.latestTag}`
             );
 
-            // Auto-deploy if enabled at the ContainerImage level
+            // Auto-deploy if enabled — fire-and-forget to avoid blocking remaining image checks
             if (image.autoUpdate && result.latestTag) {
               console.log(`[Scheduler] Auto-deploying container image "${image.name}" to ${result.latestTag}`);
-              try {
-                const plan = await buildDeploymentPlan({
-                  environmentId: image.environmentId,
-                  containerImageId: image.id,
-                  imageTag: result.latestTag,
-                  triggeredBy: 'scheduler',
-                  triggerType: 'auto_update',
-                });
-                await executePlan(plan.id);
-                console.log(`[Scheduler] Auto-deploy successful for container image "${image.name}"`);
-              } catch (deployError) {
-                console.error(`[Scheduler] Auto-deploy failed for container image "${image.name}":`, deployError);
-              }
+              const tag = result.latestTag;
+              buildDeploymentPlan({
+                environmentId: image.environmentId,
+                containerImageId: image.id,
+                imageTag: tag,
+                triggeredBy: 'scheduler',
+                triggerType: 'auto_update',
+              })
+                .then((plan) => executePlan(plan.id))
+                .then(() => console.log(`[Scheduler] Auto-deploy successful for container image "${image.name}"`))
+                .catch((deployError) => console.error(`[Scheduler] Auto-deploy failed for container image "${image.name}":`, deployError));
             }
           }
         } catch (error) {
@@ -443,7 +465,7 @@ async function runMetricsCollection(): Promise<void> {
 
     console.log(`[Scheduler] Collecting metrics and health from ${servers.length} servers (SSH mode, combined)`);
 
-    for (const server of servers) {
+    await Promise.allSettled(servers.map((server) => concurrencyLimit(async () => {
       try {
         // Collect all data in a single SSH session
         const data = await collectServerDataSSH(server.id);
@@ -454,7 +476,7 @@ async function runMetricsCollection(): Promise<void> {
             where: { id: server.id },
             data: { status: 'unhealthy', lastCheckedAt: new Date() },
           });
-          continue;
+          return;
         }
 
         // Get previous status for comparison
@@ -469,11 +491,16 @@ async function runMetricsCollection(): Promise<void> {
           },
         });
 
+        // Emit health_status event on server status change
+        if (data.serverHealth.status !== prevServerStatus) {
+          eventBus.emitEvent({ type: 'health_status', data: { resourceType: 'server', resourceId: server.id, status: data.serverHealth.status, environmentId: server.environmentId } });
+        }
+
         // Handle server status changes
         if (data.serverHealth.status === 'unhealthy' && prevServerStatus !== 'unhealthy') {
           const bounce = await recordFailure('server', server.id, 'offline', NOTIFICATION_TYPES.SYSTEM_SERVER_OFFLINE);
           if (bounce.shouldAlert) {
-            await sendSystemNotification(
+            notifyAsync(
               NOTIFICATION_TYPES.SYSTEM_SERVER_OFFLINE,
               server.environmentId,
               { serverName: server.name }
@@ -482,7 +509,7 @@ async function runMetricsCollection(): Promise<void> {
         } else if (data.serverHealth.status === 'healthy' && prevServerStatus === 'unhealthy') {
           const bounce = await recordSuccess('server', server.id, 'offline');
           if (bounce.wasRecovered) {
-            await sendSystemNotification(
+            notifyAsync(
               NOTIFICATION_TYPES.SYSTEM_SERVER_ONLINE,
               server.environmentId,
               { serverName: server.name }
@@ -493,6 +520,7 @@ async function runMetricsCollection(): Promise<void> {
         // Save server metrics
         if (data.serverMetrics) {
           await saveServerMetrics(server.id, data.serverMetrics, 'ssh');
+          eventBus.emitEvent({ type: 'metrics_updated', data: { serverId: server.id, environmentId: server.environmentId } });
         }
 
         // Update service health status (service metrics are agent-only now)
@@ -516,6 +544,11 @@ async function runMetricsCollection(): Promise<void> {
               lastCheckedAt: new Date(),
             },
           });
+
+          // Emit health_status event for service status changes
+          if (serviceData.overallStatus !== prevService?.containerStatus) {
+            eventBus.emitEvent({ type: 'health_status', data: { resourceType: 'service', resourceId: service.id, status: serviceData.overallStatus, environmentId: server.environmentId } });
+          }
 
           // Log container health check result
           const containerHealthy = serviceData.containerStatus === 'running' &&
@@ -542,7 +575,7 @@ async function runMetricsCollection(): Promise<void> {
             // Container crashed
             const bounce = await recordFailure('service', service.id, 'crash', NOTIFICATION_TYPES.SYSTEM_CONTAINER_CRASH);
             if (bounce.shouldAlert) {
-              await sendSystemNotification(
+              notifyAsync(
                 NOTIFICATION_TYPES.SYSTEM_CONTAINER_CRASH,
                 server.environmentId,
                 { containerName: service.containerName, serverName: server.name }
@@ -552,7 +585,7 @@ async function runMetricsCollection(): Promise<void> {
             // Container recovered
             const bounce = await recordSuccess('service', service.id, 'crash');
             if (bounce.wasRecovered) {
-              await sendSystemNotification(
+              notifyAsync(
                 NOTIFICATION_TYPES.SYSTEM_CONTAINER_RECOVERED,
                 server.environmentId,
                 { containerName: service.containerName, serverName: server.name }
@@ -564,7 +597,7 @@ async function runMetricsCollection(): Promise<void> {
           if (serviceData.healthStatus === 'unhealthy' && prevService?.healthStatus !== 'unhealthy') {
             const bounce = await recordFailure('service', service.id, 'health_check', NOTIFICATION_TYPES.SYSTEM_HEALTH_CHECK_FAILED);
             if (bounce.shouldAlert) {
-              await sendSystemNotification(
+              notifyAsync(
                 NOTIFICATION_TYPES.SYSTEM_HEALTH_CHECK_FAILED,
                 server.environmentId,
                 {
@@ -577,7 +610,7 @@ async function runMetricsCollection(): Promise<void> {
           } else if (serviceData.healthStatus === 'healthy' && prevService?.healthStatus === 'unhealthy') {
             const bounce = await recordSuccess('service', service.id, 'health_check');
             if (bounce.wasRecovered) {
-              await sendSystemNotification(
+              notifyAsync(
                 NOTIFICATION_TYPES.SYSTEM_HEALTH_CHECK_RECOVERED,
                 server.environmentId,
                 { resourceType: 'Service', resourceName: service.containerName }
@@ -588,7 +621,7 @@ async function runMetricsCollection(): Promise<void> {
       } catch (error) {
         console.error(`[Scheduler] Combined metrics/health collection failed for server ${server.name}:`, error);
       }
-    }
+    })));
   } catch (error) {
     captureException(error, { scheduler: 'metricsCollection' });
     console.error('[Scheduler] Combined metrics/health collection run failed:', error);
@@ -658,7 +691,7 @@ async function runAgentStalenessCheck(): Promise<void> {
           // Send notification for agent going offline
           const bounce = await recordFailure('server', server.id, 'offline', NOTIFICATION_TYPES.SYSTEM_SERVER_OFFLINE);
           if (bounce.shouldAlert) {
-            await sendSystemNotification(
+            notifyAsync(
               NOTIFICATION_TYPES.SYSTEM_SERVER_OFFLINE,
               server.environmentId,
               { serverName: server.name, reason: 'Agent stopped reporting' }
@@ -733,7 +766,7 @@ async function runAgentStalenessCheck(): Promise<void> {
         // Send notification
         const bounce = await recordFailure('server', server.id, 'offline', NOTIFICATION_TYPES.SYSTEM_SERVER_OFFLINE);
         if (bounce.shouldAlert) {
-          await sendSystemNotification(
+          notifyAsync(
             NOTIFICATION_TYPES.SYSTEM_SERVER_OFFLINE,
             server.environmentId,
             { serverName: server.name, reason: 'Agent never connected after deployment' }
@@ -815,6 +848,22 @@ async function runHealthLogCleanup(retentionDays: number): Promise<void> {
 }
 
 /**
+ * Clean up old audit logs based on system settings retention
+ */
+async function runAuditLogCleanup(): Promise<void> {
+  try {
+    const settings = await getSystemSettings();
+    const deleted = await cleanupOldAuditLogs(settings.auditLogRetentionDays);
+    if (deleted > 0) {
+      console.log(`[Scheduler] Cleaned up ${deleted} old audit log records`);
+    }
+  } catch (error) {
+    captureException(error, { scheduler: 'auditLogCleanup' });
+    console.error('[Scheduler] Audit log cleanup failed:', error);
+  }
+}
+
+/**
  * Start the scheduler with periodic health checks and discovery
  */
 export function startScheduler(config: Partial<GlobalSchedulerConfig> = {}): void {
@@ -854,6 +903,7 @@ export function startScheduler(config: Partial<GlobalSchedulerConfig> = {}): voi
   timers.set('cleanup', setInterval(() => runMetricsCleanup(cfg.metricsRetentionDays), 60 * 60 * 1000));
   timers.set('notificationCleanup', setInterval(() => runNotificationCleanup(cfg.notificationRetentionDays), 24 * 60 * 60 * 1000)); // Daily
   timers.set('healthLogCleanup', setInterval(() => runHealthLogCleanup(cfg.healthLogRetentionDays), 24 * 60 * 60 * 1000)); // Daily
+  timers.set('auditLogCleanup', setInterval(runAuditLogCleanup, 24 * 60 * 60 * 1000)); // Daily
 }
 
 /**

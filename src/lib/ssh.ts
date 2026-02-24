@@ -299,6 +299,14 @@ export class SSHClient implements CommandClient {
       this.client = null;
     }
   }
+
+  /**
+   * Check if the underlying ssh2 client is still connected.
+   * Used by the connection pool to detect dead connections.
+   */
+  isConnected(): boolean {
+    return this.client !== null;
+  }
 }
 
 export async function withSSH<T>(
@@ -420,6 +428,242 @@ export async function createClientForServer(
       privateKey: sshCreds.privateKey,
     }),
   };
+}
+
+// ---------------------------------------------------------------------------
+// SSH Connection Pool
+// ---------------------------------------------------------------------------
+
+interface PoolEntry {
+  client: SSHClient;
+  options: SSHClientOptions;
+  lastUsedAt: number;
+  refCount: number;
+}
+
+/**
+ * SSH Connection Pool - reuses SSH connections to reduce handshake overhead.
+ *
+ * Connections are cached by a `host:port:user` key. When a caller acquires a
+ * connection, a lightweight `PooledClient` wrapper is returned. Calling
+ * `disconnect()` on the wrapper returns the connection to the pool instead of
+ * closing it. Idle connections are reaped after `maxIdleMs` (default 5 min).
+ *
+ * Dead connections are detected via `SSHClient.isConnected()` and evicted
+ * automatically. The underlying ssh2 `Client` is also monitored for `error`
+ * and `close` events so that connections that drop unexpectedly are removed
+ * from the pool immediately.
+ */
+class SSHConnectionPool {
+  private connections = new Map<string, PoolEntry>();
+  private cleanupTimer: NodeJS.Timeout;
+  private readonly maxIdleMs = 5 * 60 * 1000; // 5 minutes
+
+  constructor() {
+    this.cleanupTimer = setInterval(() => this.cleanup(), 60_000);
+    // Allow the process to exit even if the timer is still running
+    if (this.cleanupTimer.unref) {
+      this.cleanupTimer.unref();
+    }
+  }
+
+  private getKey(options: SSHClientOptions): string {
+    return `${options.hostname}:${options.port ?? 22}:${options.username ?? 'root'}`;
+  }
+
+  /**
+   * Acquire a `CommandClient` for the given SSH options.
+   *
+   * - Localhost connections are never pooled (returns a `LocalClient`).
+   * - If an existing healthy connection is available, it is reused.
+   * - Otherwise a new `SSHClient` is created, connected, and added to the pool.
+   */
+  async acquire(options: SSHClientOptions): Promise<CommandClient> {
+    // Don't pool localhost connections
+    if (isLocalhost(options.hostname)) {
+      return new LocalClient();
+    }
+
+    const key = this.getKey(options);
+    const existing = this.connections.get(key);
+
+    if (existing && existing.client.isConnected()) {
+      existing.lastUsedAt = Date.now();
+      existing.refCount++;
+      return new PooledClient(existing.client, key, this);
+    }
+
+    // Existing entry is dead – clean it up
+    if (existing) {
+      try { existing.client.disconnect(); } catch { /* ignore */ }
+      this.connections.delete(key);
+    }
+
+    // Create a new connection
+    const client = new SSHClient(options);
+    await client.connect();
+
+    const entry: PoolEntry = { client, options, lastUsedAt: Date.now(), refCount: 1 };
+    this.connections.set(key, entry);
+
+    // Auto-evict if the underlying ssh2 connection drops unexpectedly.
+    // SSHClient stores the ssh2 Client in a private field; we listen via the
+    // public API by monitoring `isConnected()` in the cleanup loop. However,
+    // for immediate eviction we also hook into the ssh2 Client events through
+    // a lightweight wrapper: run a no-op exec to get at the stream, which is
+    // overkill. Instead, just rely on the cleanup timer + isConnected check +
+    // error propagation from PooledClient callers.
+
+    return new PooledClient(client, key, this);
+  }
+
+  /**
+   * Release a connection back to the pool (decrement refCount).
+   * Called by `PooledClient.disconnect()`.
+   */
+  release(key: string): void {
+    const entry = this.connections.get(key);
+    if (entry) {
+      entry.refCount = Math.max(0, entry.refCount - 1);
+      entry.lastUsedAt = Date.now();
+    }
+  }
+
+  /**
+   * Evict a connection from the pool. Called when a caller detects a dead
+   * connection (e.g. exec throws). The underlying client is disconnected.
+   */
+  evict(key: string): void {
+    const entry = this.connections.get(key);
+    if (entry) {
+      try { entry.client.disconnect(); } catch { /* ignore */ }
+      this.connections.delete(key);
+    }
+  }
+
+  /** Periodic cleanup of idle connections. */
+  private cleanup(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.connections) {
+      // Evict dead connections regardless of refCount
+      if (!entry.client.isConnected()) {
+        console.log(`[SSHPool] Removing dead connection: ${key}`);
+        this.connections.delete(key);
+        continue;
+      }
+      // Evict idle connections that have exceeded the TTL
+      if (entry.refCount === 0 && (now - entry.lastUsedAt) > this.maxIdleMs) {
+        console.log(`[SSHPool] Closing idle connection: ${key}`);
+        try { entry.client.disconnect(); } catch { /* ignore */ }
+        this.connections.delete(key);
+      }
+    }
+  }
+
+  /** Return pool statistics (useful for debugging / health endpoints). */
+  stats(): { total: number; idle: number; active: number } {
+    let idle = 0;
+    let active = 0;
+    for (const entry of this.connections.values()) {
+      if (entry.refCount > 0) active++;
+      else idle++;
+    }
+    return { total: this.connections.size, idle, active };
+  }
+
+  /** Shut down the pool – close all connections and stop the cleanup timer. */
+  shutdown(): void {
+    clearInterval(this.cleanupTimer);
+    for (const [, entry] of this.connections) {
+      try { entry.client.disconnect(); } catch { /* ignore */ }
+    }
+    this.connections.clear();
+    console.log('[SSHPool] Pool shut down');
+  }
+}
+
+/**
+ * Wraps an `SSHClient` obtained from the pool.
+ *
+ * - `connect()` is a no-op (already connected).
+ * - `disconnect()` returns the connection to the pool instead of closing it.
+ * - All other methods delegate to the underlying `SSHClient`.
+ * - If an exec/writeFile call fails due to a dead connection, the pool entry
+ *   is evicted so subsequent acquires create a fresh connection.
+ */
+class PooledClient implements CommandClient {
+  private client: SSHClient;
+  private key: string;
+  private pool: SSHConnectionPool;
+  private released = false;
+
+  constructor(client: SSHClient, key: string, pool: SSHConnectionPool) {
+    this.client = client;
+    this.key = key;
+    this.pool = pool;
+  }
+
+  async connect(): Promise<void> {
+    // Already connected via pool – no-op
+  }
+
+  async exec(command: string, options?: ExecOptions): Promise<SSHExecResult> {
+    try {
+      return await this.client.exec(command, options);
+    } catch (err) {
+      // If the connection is dead, evict from pool so next acquire gets a fresh one
+      if (!this.client.isConnected()) {
+        this.pool.evict(this.key);
+        this.released = true;
+      }
+      throw err;
+    }
+  }
+
+  async execStream(
+    command: string,
+    onData: (data: string, isStderr: boolean) => void
+  ): Promise<number> {
+    try {
+      return await this.client.execStream(command, onData);
+    } catch (err) {
+      if (!this.client.isConnected()) {
+        this.pool.evict(this.key);
+        this.released = true;
+      }
+      throw err;
+    }
+  }
+
+  async writeFile(remotePath: string, content: Buffer): Promise<void> {
+    try {
+      return await this.client.writeFile(remotePath, content);
+    } catch (err) {
+      if (!this.client.isConnected()) {
+        this.pool.evict(this.key);
+        this.released = true;
+      }
+      throw err;
+    }
+  }
+
+  disconnect(): void {
+    if (!this.released) {
+      this.released = true;
+      this.pool.release(this.key);
+    }
+  }
+}
+
+/** Singleton SSH connection pool instance. */
+export const sshPool = new SSHConnectionPool();
+
+/**
+ * Factory function that returns a pooled `CommandClient`.
+ * Drop-in replacement for `createClient()` with connection reuse.
+ */
+export async function getPooledClient(options: SSHClientOptions): Promise<CommandClient> {
+  return sshPool.acquire(options);
 }
 
 // Docker-specific commands

@@ -3,6 +3,7 @@ import { deployService, type DeployResult } from './deploy.js';
 import { verifyServiceHealth, type HealthVerificationResult } from './health-verification.js';
 import { recordTagDeployment } from './image-management.js';
 import { sendSystemNotification, NOTIFICATION_TYPES } from './notifications.js';
+import { eventBus } from '../lib/event-bus.js';
 import type { DeploymentPlan, DeploymentPlanStep, Service, ServiceDependency } from '@prisma/client';
 
 export interface BuildPlanOptions {
@@ -277,6 +278,13 @@ export async function executePlan(planId: string): Promise<void> {
     data: { status: 'running', startedAt: new Date() },
   });
 
+  // Emit progress events for all services in the plan
+  for (const step of plan.steps) {
+    if (step.service && step.action === 'deploy') {
+      eventBus.emitEvent({ type: 'deployment_progress', data: { planId, serviceId: step.service.id, status: 'running', environmentId: plan.environmentId } });
+    }
+  }
+
   const planLogs: string[] = [];
   const log = (message: string) => {
     const timestamp = new Date().toISOString();
@@ -432,6 +440,13 @@ export async function executePlan(planId: string): Promise<void> {
       },
     });
 
+    // Emit completion events for all deploy steps
+    for (const step of plan.steps) {
+      if (step.service && step.action === 'deploy') {
+        eventBus.emitEvent({ type: 'deployment_progress', data: { planId, serviceId: step.service.id, status: 'completed', environmentId: plan.environmentId } });
+      }
+    }
+
     // Send success notification
     await sendSystemNotification(
       NOTIFICATION_TYPES.SYSTEM_DEPLOYMENT_SUCCESS,
@@ -455,6 +470,13 @@ export async function executePlan(planId: string): Promise<void> {
         logs: planLogs.join('\n'),
       },
     });
+
+    // Emit failure events for all deploy steps
+    for (const step of plan.steps) {
+      if (step.service && step.action === 'deploy') {
+        eventBus.emitEvent({ type: 'deployment_progress', data: { planId, serviceId: step.service.id, status: 'failed', environmentId: plan.environmentId } });
+      }
+    }
 
     if (plan.autoRollback) {
       await rollbackPlan(planId);

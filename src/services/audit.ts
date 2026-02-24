@@ -89,3 +89,16 @@ export async function getAuditLogs(filters: AuditLogFilters) {
 
   return { logs, total };
 }
+
+/**
+ * Delete audit logs older than retentionDays.
+ * Returns the number of deleted records.
+ */
+export async function cleanupOldAuditLogs(retentionDays: number): Promise<number> {
+  if (retentionDays <= 0) return 0; // 0 = keep forever
+  const cutoffDate = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+  const result = await prisma.auditLog.deleteMany({
+    where: { createdAt: { lt: cutoffDate } },
+  });
+  return result.count;
+}

@@ -3,6 +3,7 @@ import type { Notification, NotificationType, NotificationPreference } from '@pr
 import { sendEmail, generateNotificationEmail } from './email.js';
 import { dispatchWebhook } from './outgoing-webhooks.js';
 import { dispatchSlackNotification } from './slack-notifications.js';
+import { eventBus } from '../lib/event-bus.js';
 
 // Predefined notification types
 export const NOTIFICATION_TYPES = {
@@ -360,6 +361,9 @@ export async function send(
       environmentId,
     },
   });
+
+  // Emit SSE event for real-time notification
+  eventBus.emitEvent({ type: 'notification', data: { userId, count: 1 } });
 
   // Send email if enabled
   const emailEnabled = preference?.emailEnabled ?? JSON.parse(notificationType.defaultChannels || '[]').includes('email');
