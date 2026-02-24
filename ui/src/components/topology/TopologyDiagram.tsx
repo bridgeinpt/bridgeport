@@ -56,6 +56,11 @@ const nodeTypes: NodeTypes = {
   databaseNode: DatabaseNode,
 };
 
+// Prevent React Flow from intercepting events on interactive edge label elements
+const stopAllPropagation = (e: React.MouseEvent | React.PointerEvent) => {
+  e.stopPropagation();
+};
+
 // Custom edge component with colored rendering
 function TopologyEdgeComponent({
   id,
@@ -88,11 +93,13 @@ function TopologyEdgeComponent({
       {(edgeData?.label || edgeData?.manualId) && (
         <EdgeLabelRenderer>
           <div
-            className="absolute flex items-center gap-1 text-[10px] bg-slate-800 border border-slate-600 px-1.5 py-0.5 rounded text-slate-300 pointer-events-auto"
+            className="absolute flex items-center gap-1 text-[10px] bg-slate-800 border border-slate-600 px-1.5 py-0.5 rounded text-slate-300 pointer-events-auto nopan nodrag"
             style={{
               transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
             }}
             title={[edgeData?.port && `Port: ${edgeData.port}`, edgeData?.protocol && `Protocol: ${edgeData.protocol}`, edgeData?.label].filter(Boolean).join(' | ')}
+            onPointerDown={stopAllPropagation}
+            onMouseDown={stopAllPropagation}
           >
             {edgeData?.label && <span>{edgeData.label}</span>}
             {edgeData?.manualId && edgeData?.onDelete && (
@@ -101,10 +108,12 @@ function TopologyEdgeComponent({
                   e.stopPropagation();
                   edgeData.onDelete!(edgeData.manualId!);
                 }}
-                className="text-slate-500 hover:text-red-400 ml-0.5"
+                onPointerDown={stopAllPropagation}
+                onMouseDown={stopAllPropagation}
+                className="p-0.5 text-slate-500 hover:text-red-400 hover:bg-slate-700 rounded ml-0.5"
                 title="Delete connection"
               >
-                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
