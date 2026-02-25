@@ -1,9 +1,16 @@
 /**
  * Test database helpers for BridgePort.
  *
- * Uses a file-based SQLite database per test run (not in-memory, because
- * Prisma's `db push` needs a file URL). The database is created fresh for
- * each test suite via `setupTestDb()` and torn down after.
+ * Uses a file-based SQLite database (not in-memory, because Prisma's
+ * `db push` needs a file URL). The database is created at the same path
+ * as DATABASE_URL so that the singleton PrismaClient from src/lib/db.ts
+ * (used by the authenticate plugin and other services) shares the same
+ * database as the test PrismaClient.
+ *
+ * With vitest `isolate: false` + `pool: 'forks'`, all test files run in
+ * one child process sequentially. We must NOT delete the DB file between
+ * suites because the singleton PrismaClient keeps an open file descriptor.
+ * Instead, we create the schema once and clean data between suites.
  *
  * Usage in tests:
  *   import { setupTestDb, teardownTestDb, getTestPrisma } from '../../test/helpers/db.js';
@@ -19,41 +26,64 @@
  */
 import { PrismaClient } from '@prisma/client';
 import { execSync } from 'child_process';
-import { mkdtempSync, rmSync, existsSync } from 'fs';
-import { join } from 'path';
-import { tmpdir } from 'os';
+import { existsSync, rmSync } from 'fs';
+import { resolve } from 'path';
+import { invalidateSettingsCache } from '../../src/services/system-settings.js';
 
 let testPrisma: PrismaClient | null = null;
-let testDbDir: string | null = null;
 let testDbPath: string | null = null;
+let schemaCreated = false;
 
 /**
- * Creates a temporary SQLite database, applies the schema via `prisma db push`,
- * and returns a connected PrismaClient instance.
+ * Resolve the SQLite file path from a DATABASE_URL like "file:./test.db".
+ */
+function resolveDbPath(dbUrl: string): string {
+  const filePath = dbUrl.replace(/^file:/, '');
+  return resolve(filePath);
+}
+
+/**
+ * Creates or reuses the SQLite test database at the DATABASE_URL path,
+ * cleans all data, and returns a connected PrismaClient instance.
+ *
+ * Uses the same path as process.env.DATABASE_URL so that the singleton
+ * PrismaClient from src/lib/db.ts also connects to this database.
  */
 export async function setupTestDb(): Promise<PrismaClient> {
-  // Create a temp directory for the test database
-  testDbDir = mkdtempSync(join(tmpdir(), 'bp-test-'));
-  testDbPath = join(testDbDir, 'test.db');
+  const dbUrl = process.env.DATABASE_URL || 'file:./test.db';
+  testDbPath = resolveDbPath(dbUrl);
 
-  const dbUrl = `file:${testDbPath}`;
+  if (!schemaCreated || !existsSync(testDbPath)) {
+    // First call (or DB was removed): create schema from scratch
+    for (const suffix of ['', '-wal', '-shm', '-journal']) {
+      const p = testDbPath + suffix;
+      if (existsSync(p)) {
+        rmSync(p, { force: true });
+      }
+    }
 
-  // Apply schema without generating client (we already have it)
-  execSync('npx prisma db push --skip-generate --accept-data-loss', {
-    env: { ...process.env, DATABASE_URL: dbUrl },
-    stdio: 'pipe',
-    timeout: 30_000,
-  });
+    execSync('npx prisma db push --skip-generate --accept-data-loss', {
+      env: { ...process.env, DATABASE_URL: dbUrl },
+      stdio: 'pipe',
+      timeout: 30_000,
+    });
 
-  // Create a new PrismaClient connected to the test database
-  testPrisma = new PrismaClient({
-    datasources: {
-      db: { url: dbUrl },
-    },
-    log: [], // Quiet in tests
-  });
+    schemaCreated = true;
+  }
 
-  await testPrisma.$connect();
+  // Create or reuse PrismaClient connected to the test database
+  if (testPrisma) {
+    // Clean all data for the next test suite while keeping the file alive
+    await cleanAllTables(testPrisma);
+  } else {
+    testPrisma = new PrismaClient({
+      datasources: {
+        db: { url: dbUrl },
+      },
+      log: [], // Quiet in tests
+    });
+    await testPrisma.$connect();
+  }
 
   return testPrisma;
 }
@@ -69,29 +99,18 @@ export function getTestPrisma(): PrismaClient {
 }
 
 /**
- * Disconnects the PrismaClient and cleans up the temporary database files.
+ * Cleans data between test suites. Does NOT delete the DB file
+ * (the singleton PrismaClient has an open connection to it).
  */
 export async function teardownTestDb(): Promise<void> {
-  if (testPrisma) {
-    await testPrisma.$disconnect();
-    testPrisma = null;
-  }
-
-  if (testDbDir && existsSync(testDbDir)) {
-    rmSync(testDbDir, { recursive: true, force: true });
-    testDbDir = null;
-    testDbPath = null;
-  }
+  // Don't disconnect or delete — the singleton prisma needs the file alive.
+  // Data cleanup happens at the start of the next setupTestDb() call.
 }
 
 /**
  * Deletes all data from the database while preserving the schema.
- * Useful for cleaning between tests in the same suite.
  */
-export async function cleanTestDb(): Promise<void> {
-  const prisma = getTestPrisma();
-
-  // Get all table names except Prisma internals
+async function cleanAllTables(prisma: PrismaClient): Promise<void> {
   const tables = await prisma.$queryRaw<{ name: string }[]>`
     SELECT name FROM sqlite_master
     WHERE type='table'
@@ -99,7 +118,6 @@ export async function cleanTestDb(): Promise<void> {
     AND name NOT LIKE 'sqlite_%'
   `;
 
-  // Disable FK checks, delete all rows, then re-enable
   await prisma.$executeRaw`PRAGMA foreign_keys = OFF`;
 
   for (const { name } of tables) {
@@ -107,6 +125,17 @@ export async function cleanTestDb(): Promise<void> {
   }
 
   await prisma.$executeRaw`PRAGMA foreign_keys = ON`;
+
+  // Invalidate in-memory caches that depend on DB data
+  invalidateSettingsCache();
+}
+
+/**
+ * Deletes all data from the database while preserving the schema.
+ * Useful for cleaning between tests in the same suite.
+ */
+export async function cleanTestDb(): Promise<void> {
+  await cleanAllTables(getTestPrisma());
 }
 
 export { testPrisma };
