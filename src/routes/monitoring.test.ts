@@ -32,11 +32,11 @@ describe('monitoring routes', () => {
     await app.close();
   });
 
-  describe('GET /api/monitoring/overview', () => {
+  describe('GET /api/environments/:envId/monitoring/overview', () => {
     it('should return monitoring overview', async () => {
       const res = await app.inject({
         method: 'GET',
-        url: `/api/monitoring/overview?environmentId=${envId}`,
+        url: `/api/environments/${envId}/monitoring/overview`,
         headers: { authorization: `Bearer ${viewerToken}` },
       });
 
@@ -46,30 +46,31 @@ describe('monitoring routes', () => {
     it('should require authentication', async () => {
       const res = await app.inject({
         method: 'GET',
-        url: `/api/monitoring/overview?environmentId=${envId}`,
+        url: `/api/environments/${envId}/monitoring/overview`,
       });
 
       expect(res.statusCode).toBe(401);
     });
   });
 
-  describe('GET /api/monitoring/health-logs', () => {
+  describe('GET /api/environments/:envId/health-logs', () => {
     it('should return health check logs', async () => {
       // Seed a health check log
       await app.prisma.healthCheckLog.create({
         data: {
-          serverId,
-          serviceId,
           environmentId: envId,
-          status: 'healthy',
+          resourceType: 'server',
+          resourceId: serverId,
+          resourceName: 'mon-server',
+          checkType: 'ssh',
+          status: 'success',
           durationMs: 150,
-          source: 'manual',
         },
       });
 
       const res = await app.inject({
         method: 'GET',
-        url: `/api/monitoring/health-logs?environmentId=${envId}`,
+        url: `/api/environments/${envId}/health-logs`,
         headers: { authorization: `Bearer ${viewerToken}` },
       });
 
@@ -80,7 +81,7 @@ describe('monitoring routes', () => {
     it('should support pagination', async () => {
       const res = await app.inject({
         method: 'GET',
-        url: `/api/monitoring/health-logs?environmentId=${envId}&limit=1&offset=0`,
+        url: `/api/environments/${envId}/health-logs?limit=1&offset=0`,
         headers: { authorization: `Bearer ${viewerToken}` },
       });
 
@@ -88,16 +89,16 @@ describe('monitoring routes', () => {
     });
   });
 
-  describe('GET /api/monitoring/agents', () => {
+  describe('GET /api/environments/:envId/agents', () => {
     it('should return agent status for environment servers', async () => {
       const res = await app.inject({
         method: 'GET',
-        url: `/api/monitoring/agents?environmentId=${envId}`,
+        url: `/api/environments/${envId}/agents`,
         headers: { authorization: `Bearer ${viewerToken}` },
       });
 
       expect(res.statusCode).toBe(200);
-      expect(res.json()).toHaveProperty('servers');
+      expect(res.json()).toHaveProperty('agents');
     });
   });
 });

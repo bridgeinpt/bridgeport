@@ -14,7 +14,7 @@ import { logAudit } from '../services/audit.js';
 import { deployAgent, removeAgent, checkAgentStatus } from '../services/agent-deploy.js';
 import { getHostInfo, registerHostServer } from '../services/host-detection.js';
 import { prisma } from '../lib/db.js';
-import { bundledAgentVersion } from '../server.js';
+import { bundledAgentVersion } from '../lib/version.js';
 import { requireAdmin } from '../plugins/authorize.js';
 
 const createServerSchema = z.object({

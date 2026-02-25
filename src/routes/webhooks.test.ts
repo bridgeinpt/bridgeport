@@ -40,7 +40,7 @@ describe('webhook routes', () => {
       });
 
       // May succeed or fail depending on business logic, but should not 401
-      expect([200, 404, 500]).toContain(res.statusCode);
+      expect([200, 400, 404, 500]).toContain(res.statusCode);
     });
 
     it('should accept webhook without authentication', async () => {

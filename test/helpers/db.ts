@@ -72,10 +72,7 @@ export async function setupTestDb(): Promise<PrismaClient> {
   }
 
   // Create or reuse PrismaClient connected to the test database
-  if (testPrisma) {
-    // Clean all data for the next test suite while keeping the file alive
-    await cleanAllTables(testPrisma);
-  } else {
+  if (!testPrisma) {
     testPrisma = new PrismaClient({
       datasources: {
         db: { url: dbUrl },
@@ -84,6 +81,10 @@ export async function setupTestDb(): Promise<PrismaClient> {
     });
     await testPrisma.$connect();
   }
+
+  // Always clean all data — with isolate: false, multiple test files'
+  // beforeAll blocks may have already inserted data before this suite runs.
+  await cleanAllTables(testPrisma);
 
   return testPrisma;
 }

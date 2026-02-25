@@ -57,8 +57,10 @@ describe('deployment-plans routes', () => {
     it('should return plan details', async () => {
       const plan = await app.prisma.deploymentPlan.create({
         data: {
+          name: 'Test Plan',
           status: 'pending',
-          tag: 'v1.0.0',
+          imageTag: 'v1.0.0',
+          triggerType: 'manual',
           environmentId: envId,
           containerImageId: imageId,
           userId,

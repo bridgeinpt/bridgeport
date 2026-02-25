@@ -38,7 +38,9 @@ export default defineConfig({
     testTimeout: 30_000,
     hookTimeout: 30_000,
     // Pool settings for test isolation
+    // All test files must run sequentially in one process to share the SQLite DB
     pool: 'forks',
-    isolate: false, // Equivalent to singleFork: true - required for SQLite file DB sharing
+    isolate: false,
+    maxWorkers: 1,
   },
 });

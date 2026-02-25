@@ -80,8 +80,8 @@ describe('config-files routes', () => {
       });
     });
 
-    it('should create history entry on creation', async () => {
-      const res = await app.inject({
+    it('should create history entry on content update', async () => {
+      const createRes = await app.inject({
         method: 'POST',
         url: `/api/environments/${envId}/config-files`,
         headers: { authorization: `Bearer ${adminToken}` },
@@ -92,12 +92,22 @@ describe('config-files routes', () => {
         },
       });
 
-      const fileId = res.json().configFile.id;
+      const fileId = createRes.json().configFile.id;
+
+      // Update the content to trigger history creation
+      await app.inject({
+        method: 'PATCH',
+        url: `/api/config-files/${fileId}`,
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { content: 'UPDATED=value' },
+      });
+
       const history = await app.prisma.fileHistory.findMany({
         where: { configFileId: fileId },
       });
 
       expect(history.length).toBeGreaterThan(0);
+      expect(history[0].content).toBe('INITIAL=value');
     });
   });
 

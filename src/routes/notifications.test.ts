@@ -22,14 +22,23 @@ describe('notification routes', () => {
     const env = await createTestEnvironment(app.prisma, { name: 'notif-env' });
     envId = env.id;
 
-    // Seed a notification
+    // Create a notification type first, then seed a notification
+    const notifType = await app.prisma.notificationType.create({
+      data: {
+        category: 'system',
+        code: 'test_notification',
+        name: 'Test Notification Type',
+        template: 'Test message',
+        severity: 'info',
+      },
+    });
+
     await app.prisma.notification.create({
       data: {
         userId: viewerId,
-        type: 'test_notification',
+        typeId: notifType.id,
         title: 'Test Notification',
         message: 'This is a test',
-        severity: 'info',
         environmentId: envId,
       },
     });
@@ -83,13 +92,21 @@ describe('notification routes', () => {
 
   describe('POST /api/notifications/:id/read', () => {
     it('should mark notification as read', async () => {
+      const markReadType = await app.prisma.notificationType.create({
+        data: {
+          category: 'system',
+          code: 'mark_read_test',
+          name: 'Mark Read Test',
+          template: 'Test',
+          severity: 'info',
+        },
+      });
       const notif = await app.prisma.notification.create({
         data: {
           userId: viewerId,
-          type: 'mark_read_test',
+          typeId: markReadType.id,
           title: 'Mark Read',
           message: 'Test',
-          severity: 'info',
         },
       });
 

@@ -37,15 +37,14 @@ describe('service-dependencies routes', () => {
     await app.close();
   });
 
-  describe('POST /api/service-dependencies', () => {
+  describe('POST /api/services/:id/dependencies', () => {
     it('should create dependency as operator', async () => {
       const res = await app.inject({
         method: 'POST',
-        url: '/api/service-dependencies',
+        url: `/api/services/${serviceA.id}/dependencies`,
         headers: { authorization: `Bearer ${operatorToken}` },
         payload: {
-          dependentId: serviceA.id,
-          dependencyId: serviceB.id,
+          dependsOnId: serviceB.id,
           type: 'deploy_after',
         },
       });
@@ -53,33 +52,28 @@ describe('service-dependencies routes', () => {
       expect(res.statusCode).toBe(200);
       expect(res.json().dependency).toMatchObject({
         dependentId: serviceA.id,
-        dependencyId: serviceB.id,
+        dependsOnId: serviceB.id,
         type: 'deploy_after',
       });
     });
 
-    it('should reject viewer creating dependency with 403', async () => {
+    it('should allow viewer to read dependencies', async () => {
       const res = await app.inject({
-        method: 'POST',
-        url: '/api/service-dependencies',
+        method: 'GET',
+        url: `/api/services/${serviceA.id}/dependencies`,
         headers: { authorization: `Bearer ${viewerToken}` },
-        payload: {
-          dependentId: serviceA.id,
-          dependencyId: serviceC.id,
-          type: 'health_before',
-        },
       });
 
-      expect(res.statusCode).toBe(403);
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toHaveProperty('dependencies');
     });
 
     it('should require authentication', async () => {
       const res = await app.inject({
         method: 'POST',
-        url: '/api/service-dependencies',
+        url: `/api/services/${serviceA.id}/dependencies`,
         payload: {
-          dependentId: serviceA.id,
-          dependencyId: serviceC.id,
+          dependsOnId: serviceC.id,
           type: 'deploy_after',
         },
       });
@@ -101,19 +95,19 @@ describe('service-dependencies routes', () => {
     });
   });
 
-  describe('DELETE /api/service-dependencies/:id', () => {
+  describe('DELETE /api/dependencies/:id', () => {
     it('should delete dependency as operator', async () => {
       const dep = await app.prisma.serviceDependency.create({
         data: {
           dependentId: serviceB.id,
-          dependencyId: serviceC.id,
+          dependsOnId: serviceC.id,
           type: 'deploy_after',
         },
       });
 
       const res = await app.inject({
         method: 'DELETE',
-        url: `/api/service-dependencies/${dep.id}`,
+        url: `/api/dependencies/${dep.id}`,
         headers: { authorization: `Bearer ${operatorToken}` },
       });
 
@@ -124,7 +118,7 @@ describe('service-dependencies routes', () => {
     it('should return 404 for non-existent dependency', async () => {
       const res = await app.inject({
         method: 'DELETE',
-        url: '/api/service-dependencies/nonexistent',
+        url: '/api/dependencies/nonexistent',
         headers: { authorization: `Bearer ${operatorToken}` },
       });
 

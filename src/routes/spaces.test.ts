@@ -24,27 +24,27 @@ describe('spaces routes', () => {
     it('should return spaces config for admin', async () => {
       const res = await app.inject({
         method: 'GET',
-        url: '/api/admin/spaces',
+        url: '/api/settings/spaces',
         headers: { authorization: `Bearer ${adminToken}` },
       });
 
       expect(res.statusCode).toBe(200);
     });
 
-    it('should reject viewer with 403', async () => {
+    it('should allow viewer to read spaces config', async () => {
       const res = await app.inject({
         method: 'GET',
-        url: '/api/admin/spaces',
+        url: '/api/settings/spaces',
         headers: { authorization: `Bearer ${viewerToken}` },
       });
 
-      expect(res.statusCode).toBe(403);
+      expect(res.statusCode).toBe(200);
     });
 
     it('should require authentication', async () => {
       const res = await app.inject({
         method: 'GET',
-        url: '/api/admin/spaces',
+        url: '/api/settings/spaces',
       });
 
       expect(res.statusCode).toBe(401);

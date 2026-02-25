@@ -56,7 +56,7 @@ describe('registry routes', () => {
         payload: {
           name: 'Docker Hub',
           type: 'dockerhub',
-          url: 'https://registry-1.docker.io',
+          registryUrl: 'https://registry-1.docker.io',
         },
       });
 
@@ -74,7 +74,7 @@ describe('registry routes', () => {
         data: {
           name: 'Deletable Registry',
           type: 'dockerhub',
-          url: 'https://registry.example.com',
+          registryUrl: 'https://registry.example.com',
           environmentId: envId,
         },
       });

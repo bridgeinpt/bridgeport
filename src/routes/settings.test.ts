@@ -24,7 +24,7 @@ describe('settings (service types) routes', () => {
     it('should list service types', async () => {
       const res = await app.inject({
         method: 'GET',
-        url: '/api/service-types',
+        url: '/api/settings/service-types',
         headers: { authorization: `Bearer ${viewerToken}` },
       });
 
@@ -35,7 +35,7 @@ describe('settings (service types) routes', () => {
     it('should require authentication', async () => {
       const res = await app.inject({
         method: 'GET',
-        url: '/api/service-types',
+        url: '/api/settings/service-types',
       });
 
       expect(res.statusCode).toBe(401);
@@ -46,24 +46,25 @@ describe('settings (service types) routes', () => {
     it('should create service type as admin', async () => {
       const res = await app.inject({
         method: 'POST',
-        url: '/api/service-types',
+        url: '/api/settings/service-types',
         headers: { authorization: `Bearer ${adminToken}` },
         payload: {
-          name: 'Custom Type',
-          description: 'A custom service type',
+          name: 'custom-type',
+          displayName: 'Custom Type',
         },
       });
 
       expect(res.statusCode).toBe(200);
       expect(res.json().serviceType).toMatchObject({
-        name: 'Custom Type',
+        name: 'custom-type',
+        displayName: 'Custom Type',
       });
     });
 
     it('should reject viewer creating service type with 403', async () => {
       const res = await app.inject({
         method: 'POST',
-        url: '/api/service-types',
+        url: '/api/settings/service-types',
         headers: { authorization: `Bearer ${viewerToken}` },
         payload: {
           name: 'Viewer Type',

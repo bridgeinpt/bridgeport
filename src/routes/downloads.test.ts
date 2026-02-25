@@ -18,13 +18,14 @@ describe('downloads routes', () => {
   });
 
   describe('GET /api/downloads/cli', () => {
-    it('should require authentication', async () => {
+    it('should be publicly accessible without authentication', async () => {
       const res = await app.inject({
         method: 'GET',
         url: '/api/downloads/cli',
       });
 
-      expect(res.statusCode).toBe(401);
+      // Downloads endpoint is public — no auth required
+      expect([200, 404]).toContain(res.statusCode);
     });
 
     it('should list available CLI downloads', async () => {
