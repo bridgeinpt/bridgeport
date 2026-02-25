@@ -227,7 +227,7 @@ Audit log retention is configurable via **Admin > System Settings** (`auditLogRe
 
 ## Vulnerability Reporting
 
-If you discover a security vulnerability in BridgePort, please report it responsibly. See [SECURITY.md](../../SECURITY.md) for reporting instructions, response timeline expectations, and the scope of what constitutes a security issue.
+If you discover a security vulnerability in BridgePort, please report it responsibly. See [SECURITY.md](../SECURITY.md) for reporting instructions, response timeline expectations, and the scope of what constitutes a security issue.
 
 ---
 

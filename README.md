@@ -166,14 +166,14 @@ flowchart TD
 | Use the CLI | [CLI Reference](docs/reference/cli.md) |
 | Orchestrate multi-service deploys | [Deployment Plans](docs/guides/deployment-plans.md) |
 | Contribute to BridgePort | [Contributing Guide](CONTRIBUTING.md) |
-| Report a security issue | [Security Policy](SECURITY.md) |
+| Report a security issue | [Security Policy](docs/SECURITY.md) |
 
 ## Community and Support
 
 - **Bug reports and feature requests**: [GitHub Issues](https://github.com/bridgeinpt/bridgeport/issues)
 - **Questions and discussions**: [GitHub Discussions](https://github.com/bridgeinpt/bridgeport/discussions)
 - **Contributing**: See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines
-- **Security issues**: See [SECURITY.md](SECURITY.md) for responsible disclosure
+- **Security issues**: See [SECURITY.md](docs/SECURITY.md) for responsible disclosure
 
 ## License
 

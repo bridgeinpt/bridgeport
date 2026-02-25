@@ -131,4 +131,4 @@ Help build BridgePort.
 | Upgrade BridgePort | [Upgrade Guide](operations/upgrades.md) |
 | Fix a problem | [Troubleshooting](operations/troubleshooting.md) |
 | Contribute code | [Contributing Guide](../CONTRIBUTING.md) |
-| Report a vulnerability | [Security Policy](../SECURITY.md) |
+| Report a vulnerability | [Security Policy](./SECURITY.md) |

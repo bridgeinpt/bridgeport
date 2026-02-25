@@ -322,6 +322,6 @@ npx vitest run --config vitest.unit.config.ts   # Unit
 
 - **Questions about the codebase**: Open a [GitHub Discussion](https://github.com/bridgeinpt/bridgeport/discussions)
 - **Bug reports**: Open a [GitHub Issue](https://github.com/bridgeinpt/bridgeport/issues) with reproduction steps
-- **Security issues**: See [SECURITY.md](SECURITY.md) -- please do not open public issues for vulnerabilities
+- **Security issues**: See [SECURITY.md](docs/SECURITY.md) -- please do not open public issues for vulnerabilities
 
 We aim to respond to issues and PRs within a few business days. Thank you for contributing!
