@@ -1,3 +1,3 @@
 #!/bin/sh
-npx vitest run --project backend 'src/lib/' --reporter=dot
+npx vitest run --config vitest.config.ts 'src/lib/' --reporter=dot
 cd ui && npx vitest run 'src/lib/' --reporter=dot
