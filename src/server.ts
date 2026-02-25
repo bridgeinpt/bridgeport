@@ -50,25 +50,15 @@ import { sshPool } from './lib/ssh.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-async function readVersionFile(path: string): Promise<string> {
-  try {
-    return (await readFile(path, 'utf-8')).trim();
-  } catch {
-    return 'unknown';
-  }
-}
-
-// Read versions at startup
+// Read app version at startup
 let appVersion = 'unknown';
 try {
   const packageJson = JSON.parse(await readFile(join(__dirname, '../package.json'), 'utf-8'));
   appVersion = packageJson.version;
 } catch { /* dev mode fallback */ }
 
-const bundledAgentVersion = await readVersionFile(join(__dirname, '../agent/agent-version.txt'));
-const cliVersion = await readVersionFile(join(__dirname, '../cli/cli-version.txt'));
-
-// Export for use in routes
+// Re-export from lib/version for backwards compat (routes import from lib/version directly)
+import { bundledAgentVersion, cliVersion } from './lib/version.js';
 export { bundledAgentVersion, cliVersion };
 
 // Initialize Sentry error monitoring (no-op if SENTRY_DSN is not set)

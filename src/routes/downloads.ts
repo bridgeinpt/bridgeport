@@ -4,7 +4,7 @@ import { stat } from 'fs/promises';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import { cliVersion } from '../server.js';
+import { cliVersion } from '../lib/version.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

@@ -12,7 +12,16 @@
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run --testPathPattern='src/lib/.*\\.test\\.ts$'",
+    "test:integration": "vitest run --project backend",
+    "test:coverage": "vitest run --coverage",
+    "test:migrations": "vitest run test/migrations/",
+    "test:ui": "cd ui && vitest run",
+    "test:ui:watch": "cd ui && vitest",
+    "test:all": "vitest run && cd ui && vitest run"
   },
   "keywords": [
     "deployment",
@@ -50,9 +59,11 @@
     "@types/nodemailer": "^7.0.9",
     "@types/pg": "^8.16.0",
     "@types/ssh2": "^1.15.0",
+    "@vitest/coverage-v8": "^4.0.18",
     "pino-pretty": "^11.0.0",
     "prisma": "^6.0.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "vitest": "^4.0.18"
   }
 }
