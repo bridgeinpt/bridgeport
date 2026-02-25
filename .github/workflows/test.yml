@@ -13,11 +13,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── Change Detection ───────────────────────────────────
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      go: ${{ steps.filter.outputs.go }}
+      migrations: ${{ steps.filter.outputs.migrations }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'src/**'
+              - 'prisma/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'vitest.config.ts'
+              - 'vitest.workspace.ts'
+              - 'tsconfig.json'
+              - 'test/**'
+              - '.github/workflows/test.yml'
+            frontend:
+              - 'ui/**'
+              - '.github/workflows/test.yml'
+            go:
+              - 'bridgeport-agent/**'
+              - 'cli/**'
+              - '.github/workflows/test.yml'
+            migrations:
+              - 'prisma/**'
+              - '.github/workflows/test.yml'
+
   # ── Tier 1: Unit Tests (fast, every commit) ──────────────
   unit-backend:
     name: Backend Unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    needs: changes
+    if: always() && (needs.changes.outputs.backend == 'true' || github.event_name == 'schedule')
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -32,6 +71,8 @@ jobs:
     name: Frontend Unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    needs: changes
+    if: always() && (needs.changes.outputs.frontend == 'true' || github.event_name == 'schedule')
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -45,6 +86,8 @@ jobs:
     name: Go Unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    needs: changes
+    if: always() && (needs.changes.outputs.go == 'true' || github.event_name == 'schedule')
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -58,7 +101,8 @@ jobs:
     name: Backend Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: unit-backend
+    needs: [changes, unit-backend]
+    if: always() && (needs.changes.outputs.backend == 'true' || github.event_name == 'schedule') && needs.unit-backend.result == 'success'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -80,7 +124,8 @@ jobs:
     name: Frontend Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: unit-frontend
+    needs: [changes, unit-frontend]
+    if: always() && (needs.changes.outputs.frontend == 'true' || github.event_name == 'schedule') && needs.unit-frontend.result == 'success'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -99,6 +144,8 @@ jobs:
     name: Migration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    needs: changes
+    if: always() && (needs.changes.outputs.migrations == 'true' || github.event_name == 'schedule')
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -137,7 +184,8 @@ jobs:
     name: Build Check
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [unit-backend, unit-frontend]
+    needs: [changes, unit-backend, unit-frontend]
+    if: always() && (needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true' || github.event_name == 'schedule') && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -154,6 +202,8 @@ jobs:
     name: TypeScript Check
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    needs: changes
+    if: always() && (needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true' || github.event_name == 'schedule')
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
