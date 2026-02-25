@@ -1,138 +1,204 @@
 # Getting Started
 
-This guide walks you through deploying BridgePort with Docker and completing initial setup.
+Get BridgePort running and manage your first server in under 5 minutes.
+
+---
+
+## What You'll Accomplish
+
+By the end of this guide, you will have:
+
+1. A running BridgePort instance
+2. Your first environment created
+3. A server added and connected
+4. Your running Docker containers discovered as services
 
 ## Prerequisites
 
-- A Linux server (or any machine) with Docker and Docker Compose installed
-- A domain name (optional, but recommended for production)
+- **Docker** installed on your machine ([install Docker](https://docs.docker.com/get-docker/))
+- **A server to manage** -- either the same machine (via Docker socket) or a remote server with SSH access
 
-## Installation
+> [!TIP]
+> No remote server? You can manage containers on the same machine BridgePort runs on by mounting the Docker socket. This guide covers both options.
 
-### 1. Create a directory
+---
 
-```bash
-mkdir -p /opt/bridgeport && cd /opt/bridgeport
-```
+## Step 1: Start BridgePort
 
-### 2. Create your `.env` file
-
-```bash
-cat > .env << 'EOF'
-DATABASE_URL=file:/data/bridgeport.db
-MASTER_KEY=<run: openssl rand -base64 32>
-JWT_SECRET=<run: openssl rand -base64 32>
-HOST=0.0.0.0
-PORT=3000
-NODE_ENV=production
-
-# Initial admin user (created on first boot)
-ADMIN_EMAIL=admin@example.com
-ADMIN_PASSWORD=your-secure-password
-EOF
-```
-
-Generate the required secrets:
+Run this single command to start BridgePort:
 
 ```bash
-# Generate and replace MASTER_KEY
-sed -i "s|<run: openssl rand -base64 32>|$(openssl rand -base64 32)|" .env
-# Generate and replace JWT_SECRET (run again for a different value)
-sed -i "0,/<run: openssl rand -base64 32>/s|<run: openssl rand -base64 32>|$(openssl rand -base64 32)|" .env
+docker run -d \
+  --name bridgeport \
+  -p 3000:3000 \
+  -v bridgeport-data:/data \
+  -e MASTER_KEY=$(openssl rand -base64 32) \
+  -e JWT_SECRET=$(openssl rand -base64 32) \
+  -e ADMIN_EMAIL=admin@example.com \
+  -e ADMIN_PASSWORD=changeme123 \
+  ghcr.io/bridgeinpt/bridgeport:latest
 ```
 
-> **Important**: Back up your `MASTER_KEY` separately (e.g., in a password manager). It is required to decrypt secrets and SSH keys stored in the database. Without it, encrypted data cannot be recovered.
+You should see output like:
 
-### 3. Create `docker-compose.yml`
-
-```yaml
-version: '3.8'
-services:
-  bridgeport:
-    image: your-registry/bridgeport:latest
-    container_name: bridgeport
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
-    env_file:
-      - .env
-    volumes:
-      - ./data:/data
-      # Optional: Mount Docker socket for host container management
-      # - /var/run/docker.sock:/var/run/docker.sock
-    # Required if mounting Docker socket
-    # group_add:
-    #   - "999"  # Find your docker group ID: stat -c '%g' /var/run/docker.sock
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
+```
+Unable to find image 'ghcr.io/bridgeinpt/bridgeport:latest' locally
+latest: Pulling from bridgeinpt/bridgeport
+...
+Status: Downloaded newer image for ghcr.io/bridgeinpt/bridgeport:latest
+a1b2c3d4e5f6...
 ```
 
-### 4. Start BridgePort
+Verify it's running:
 
 ```bash
-docker compose up -d
+docker logs bridgeport
 ```
 
-BridgePort will:
-1. Create the database automatically
-2. Run any pending migrations
-3. Create the initial admin user (from `ADMIN_EMAIL` / `ADMIN_PASSWORD`)
-4. Start the web server on port 3000
+Expected output:
 
-### 5. Log in
-
-Open `http://your-server:3000` in your browser and log in with the admin credentials you configured.
-
-## Managing the Docker Host
-
-If BridgePort runs on the same machine as your Docker containers, you have two options for managing them:
-
-### Option A: Docker Socket (Recommended)
-
-Mount the Docker socket to give BridgePort direct access to the Docker daemon:
-
-```yaml
-services:
-  bridgeport:
-    volumes:
-      - ./data:/data
-      - /var/run/docker.sock:/var/run/docker.sock
-    group_add:
-      - "999"  # Docker group ID
+```
+=== BridgePort Startup ===
+Database path: /data/bridgeport.db
+No database found, will create fresh
+Applying migrations...
+...
+=== Starting BridgePort ===
+Server listening on 0.0.0.0:3000
 ```
 
-Find your Docker group ID:
+Open **http://localhost:3000** in your browser.
+
+> [!WARNING]
+> This quick-start command is for trying BridgePort out. The `MASTER_KEY` and `JWT_SECRET` are generated inline and not saved anywhere. For production, see the [Installation Guide](installation.md).
+
+---
+
+## Step 2: Log In
+
+You'll see the BridgePort login page. Enter the credentials you set in the `docker run` command:
+
+- **Email**: `admin@example.com`
+- **Password**: `changeme123`
+
+After logging in, you'll land on an empty dashboard. Time to set things up.
+
+---
+
+## Step 3: Create an Environment
+
+Environments are how BridgePort organizes your infrastructure. Think of them as logical groups -- "production", "staging", "dev", etc. Each environment has its own servers, services, secrets, and settings.
+
+1. Look at the **sidebar** on the left
+2. Click the **environment selector** dropdown at the top
+3. Click **Create Environment**
+4. Enter a name (e.g., `production`) and click **Create**
+
+Your new environment is now active.
+
+---
+
+## Step 4: Add Your First Server
+
+This is where it gets interesting. How you add a server depends on where your containers are running.
+
+```mermaid
+flowchart TD
+    Q["Where are your Docker containers?"]
+    Q -->|Same machine as BridgePort| A["Docker Socket mode"]
+    Q -->|A different server| B["SSH mode"]
+    A --> A1["Mount the Docker socket<br/>(see below)"]
+    B --> B1["Paste your SSH key<br/>in environment settings"]
+```
+
+### Option A: Same Machine (Docker Socket)
+
+If your containers run on the same machine as BridgePort, mount the Docker socket. First, stop and re-create the container:
 
 ```bash
-stat -c '%g' /var/run/docker.sock
+docker stop bridgeport && docker rm bridgeport
 ```
 
-When the socket is mounted and accessible, BridgePort automatically creates a "localhost" server on startup. This server uses socket mode for all Docker operations — no SSH required.
+Then re-run with the socket mounted:
 
-> **Security note**: Mounting the Docker socket gives BridgePort full access to the Docker daemon, equivalent to root access on the host.
+```bash
+docker run -d \
+  --name bridgeport \
+  -p 3000:3000 \
+  -v bridgeport-data:/data \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e MASTER_KEY=$(openssl rand -base64 32) \
+  -e JWT_SECRET=$(openssl rand -base64 32) \
+  -e ADMIN_EMAIL=admin@example.com \
+  -e ADMIN_PASSWORD=changeme123 \
+  ghcr.io/bridgeinpt/bridgeport:latest
+```
 
-### Option B: SSH
+> [!NOTE]
+> When the Docker socket is mounted and accessible, BridgePort automatically detects the host and creates a "localhost" server. Navigate to **Servers** in the sidebar -- you should see it already listed.
 
-If you can't mount the socket, BridgePort can manage the host via SSH through the Docker gateway IP. Requirements:
+### Option B: Remote Server (SSH)
 
-1. SSH server running on the host
-2. SSH connections allowed from Docker network (`172.17.0.0/16`)
-3. SSH key configured in the environment settings
+For remote servers, you'll connect via SSH.
 
-BridgePort will detect the host and show a banner on the Servers page to register it.
+1. **Upload your SSH key**: Go to **Configuration > Environment Settings** in the sidebar, then upload the SSH private key that has access to your server
+2. **Add the server**: Go to **Servers** in the sidebar and click **Add Server**
+3. **Enter the details**:
+   - **Name**: A friendly name (e.g., `web-1`)
+   - **Hostname**: The server's IP or domain (e.g., `10.0.1.50`)
+4. **Test the connection**: BridgePort will verify SSH connectivity
 
-## Next Steps
+Once connected, the server should appear with a **healthy** status.
 
-After initial setup:
+> [!TIP]
+> SSH keys are encrypted at rest and stored per-environment. Each environment can have its own SSH key for security isolation.
 
-1. **Create an environment** — Go to the sidebar and create your first environment (e.g., "production")
-2. **Upload an SSH key** — In environment settings, upload the SSH private key used to connect to your servers
-3. **Add a server** — Register your first server with its hostname/IP
-4. **Discover containers** — Click "Discover" on the server to find running Docker containers
-5. **Connect a registry** — Add a container registry to enable update checking and deployments
+---
 
-For detailed configuration options, see [Configuration Reference](configuration.md).
+## Step 5: Discover Your Containers
+
+Now for the fun part -- seeing your running containers.
+
+1. Go to **Servers** in the sidebar
+2. Find your server and click **Discover**
+3. BridgePort scans the server for running Docker containers
+4. Each container appears as a **Service** with its image, status, and ports
+
+Navigate to **Services** in the sidebar to see everything that was discovered. Each service is linked to a **Container Image**, which BridgePort uses to track tags, check for updates, and manage deployments.
+
+---
+
+## Step 6: Deploy an Update (Optional)
+
+Ready to see BridgePort in action? Try deploying a new tag to one of your services.
+
+1. Go to **Services** and click on a service
+2. In the **Deploy** card, enter a new image tag (e.g., `v1.2.0`)
+3. Click **Deploy**
+4. Watch the deployment log stream in real-time:
+   - Image pulled
+   - Container stopped
+   - New container started
+   - Health check passed
+
+The deployment is recorded in the service's **Deployment History** with full logs and timestamps.
+
+---
+
+## What's Next?
+
+You've got BridgePort running and managing your first server. Here's where to go from here:
+
+| I want to... | Read this |
+|---|---|
+| Set up server and service monitoring | [Monitoring Guide](guides/monitoring.md) |
+| Get notified about failures and deployments | [Notifications Guide](guides/notifications.md) |
+| Connect a container registry for update checks | [Registries Guide](guides/registries.md) |
+| Schedule database backups | [Databases Guide](guides/databases.md) |
+| Manage secrets and config files | [Secrets Guide](guides/secrets.md) / [Config Files Guide](guides/config-files.md) |
+| Use the CLI for terminal workflows | [CLI Reference](reference/cli.md) |
+| Deploy BridgePort for production | [Installation Guide](installation.md) |
+| Understand how BridgePort is structured | [Core Concepts](concepts.md) |
+
+> [!NOTE]
+> For production deployments, make sure to follow the [Installation Guide](installation.md) for proper key management, HTTPS setup, and persistent configuration.
