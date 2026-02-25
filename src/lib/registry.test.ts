@@ -245,28 +245,39 @@ describe('registry', () => {
 
     describe('getManifestDigest', () => {
       it('should return digest for a specific tag', async () => {
-        mockFetch.mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve({
-            tags: [
-              { tag: 'v1.0', manifestDigest: 'sha256:abc', sizeBytes: 100, updatedAt: '2025-01-01T00:00:00Z', registryName: 'test', repository: 'app', compressedSizeBytes: 50 },
-            ],
-          }),
-        });
+        // getManifestDigest first tries V2 API: getDockerCredentials() + HEAD manifest
+        mockFetch
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({
+              auths: { 'registry.digitalocean.com': { auth: Buffer.from('user:pass').toString('base64') } },
+            }),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            headers: { get: (h: string) => h === 'Docker-Content-Digest' ? 'sha256:abc' : null },
+          });
 
         const digest = await client.getManifestDigest('app', 'v1.0');
         expect(digest).toBe('sha256:abc');
       });
 
       it('should throw when tag is not found', async () => {
-        mockFetch.mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve({
-            tags: [
-              { tag: 'v1.0', manifestDigest: 'sha256:abc', sizeBytes: 100, updatedAt: '2025-01-01T00:00:00Z', registryName: 'test', repository: 'app', compressedSizeBytes: 50 },
-            ],
-          }),
-        });
+        // V2 API fails (docker-credentials returns error), falls back to listTags
+        mockFetch
+          .mockResolvedValueOnce({
+            ok: false,
+            status: 401,
+            text: () => Promise.resolve('Unauthorized'),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({
+              tags: [
+                { tag: 'v1.0', manifestDigest: 'sha256:abc', sizeBytes: 100, updatedAt: '2025-01-01T00:00:00Z', registryName: 'test', repository: 'app', compressedSizeBytes: 50 },
+              ],
+            }),
+          });
 
         await expect(client.getManifestDigest('app', 'nonexistent'))
           .rejects.toThrow('Tag nonexistent not found');
