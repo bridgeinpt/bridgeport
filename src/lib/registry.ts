@@ -53,6 +53,7 @@ interface DORegistryRepository {
 export class DORegistryClient implements RegistryClient {
   private token: string;
   private registryName: string;
+  private dockerCreds?: { username: string; password: string };
 
   constructor(token: string, registryName: string = 'bios-registry') {
     this.token = token;
@@ -101,11 +102,13 @@ export class DORegistryClient implements RegistryClient {
       );
 
       for (const t of data.tags) {
+        // Handle both camelCase and snake_case responses from DO API
+        const raw = t as DORegistryTag & Record<string, unknown>;
         allTags.push({
           tag: t.tag,
-          digest: t.manifestDigest,
-          size: t.sizeBytes,
-          updatedAt: t.updatedAt,
+          digest: t.manifestDigest || (raw.manifest_digest as string) || '',
+          size: t.sizeBytes || (raw.size_bytes as number) || 0,
+          updatedAt: t.updatedAt || (raw.updated_at as string) || '',
         });
       }
 
@@ -114,7 +117,67 @@ export class DORegistryClient implements RegistryClient {
       page++;
     }
 
+    // Fill in missing digests from Docker Registry V2 API
+    const tagsNeedingDigest = allTags.filter((t) => !t.digest);
+    if (tagsNeedingDigest.length > 0) {
+      try {
+        const creds = await this.getDockerCredentials();
+        this.dockerCreds = creds;
+        const batchSize = 10;
+
+        for (let i = 0; i < tagsNeedingDigest.length; i += batchSize) {
+          const batch = tagsNeedingDigest.slice(i, i + batchSize);
+          const results = await Promise.allSettled(
+            batch.map((t) => this.fetchV2ManifestDigest(repositoryName, t.tag))
+          );
+
+          for (let j = 0; j < results.length; j++) {
+            if (results[j].status === 'fulfilled') {
+              batch[j].digest = (results[j] as PromiseFulfilledResult<string>).value;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[DORegistry] Failed to fetch Docker credentials for V2 digest fallback:', err);
+      }
+    }
+
     return allTags;
+  }
+
+  /**
+   * Fetch manifest digest from the Docker Registry V2 API (registry.digitalocean.com)
+   * Used as fallback when the DO management API doesn't return digests.
+   */
+  private async fetchV2ManifestDigest(repo: string, tag: string): Promise<string> {
+    if (!this.dockerCreds) {
+      this.dockerCreds = await this.getDockerCredentials();
+    }
+
+    const auth = Buffer.from(`${this.dockerCreds.username}:${this.dockerCreds.password}`).toString('base64');
+    const fullRepo = `${this.registryName}/${repo}`;
+
+    const response = await fetch(
+      `https://registry.digitalocean.com/v2/${fullRepo}/manifests/${tag}`,
+      {
+        method: 'HEAD',
+        headers: {
+          Authorization: `Basic ${auth}`,
+          Accept: [
+            'application/vnd.docker.distribution.manifest.v2+json',
+            'application/vnd.oci.image.manifest.v1+json',
+            'application/vnd.docker.distribution.manifest.list.v2+json',
+            'application/vnd.oci.image.index.v1+json',
+          ].join(', '),
+        },
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`V2 manifest fetch failed: ${response.status}`);
+    }
+
+    return response.headers.get('Docker-Content-Digest') || '';
   }
 
   async getLatestTag(repositoryName: string): Promise<RegistryTag | null> {
@@ -131,12 +194,18 @@ export class DORegistryClient implements RegistryClient {
   }
 
   async getManifestDigest(repositoryName: string, tag: string): Promise<string> {
-    const tags = await this.listTags(repositoryName);
-    const found = tags.find((t) => t.tag === tag);
-    if (!found) {
-      throw new Error(`Tag ${tag} not found in repository ${repositoryName}`);
+    // First try V2 API directly for the most accurate digest
+    try {
+      return await this.fetchV2ManifestDigest(repositoryName, tag);
+    } catch {
+      // Fall back to DO management API
+      const tags = await this.listTags(repositoryName);
+      const found = tags.find((t) => t.tag === tag);
+      if (!found) {
+        throw new Error(`Tag ${tag} not found in repository ${repositoryName}`);
+      }
+      return found.digest;
     }
-    return found.digest;
   }
 
   async getDockerCredentials(): Promise<{ username: string; password: string }> {
@@ -316,7 +385,12 @@ export class GenericRegistryClient implements RegistryClient {
   private async fetch<T>(path: string): Promise<T> {
     const response = await fetch(`${this.registryUrl}${path}`, {
       headers: {
-        Accept: 'application/vnd.docker.distribution.manifest.v2+json',
+        Accept: [
+          'application/vnd.docker.distribution.manifest.v2+json',
+          'application/vnd.oci.image.manifest.v1+json',
+          'application/vnd.docker.distribution.manifest.list.v2+json',
+          'application/vnd.oci.image.index.v1+json',
+        ].join(', '),
         ...this.getAuthHeader(),
       },
     });
@@ -404,10 +478,16 @@ export class GenericRegistryClient implements RegistryClient {
   }
 
   async getManifestDigest(repo: string, tag: string): Promise<string> {
+    // Try multiple manifest types — registries vary in what they support
     const response = await fetch(`${this.registryUrl}/v2/${repo}/manifests/${tag}`, {
       method: 'HEAD',
       headers: {
-        Accept: 'application/vnd.docker.distribution.manifest.v2+json',
+        Accept: [
+          'application/vnd.docker.distribution.manifest.v2+json',
+          'application/vnd.oci.image.manifest.v1+json',
+          'application/vnd.docker.distribution.manifest.list.v2+json',
+          'application/vnd.oci.image.index.v1+json',
+        ].join(', '),
         ...this.getAuthHeader(),
       },
     });
