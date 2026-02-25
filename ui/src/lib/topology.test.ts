@@ -384,14 +384,16 @@ describe('aggregateCollapsedEdges', () => {
     expect(result[0]).toEqual(edges[0]);
   });
 
-  it('should set label to null for single aggregated edges', () => {
+  it('should preserve original edge data for single aggregated edges', () => {
     const edges: TopologyEdge[] = [
       {
-        id: 'auto:1',
+        id: 'manual:conn1',
         source: 'service:svc1',
         target: 'database:db1',
-        type: 'auto',
+        type: 'manual',
         directed: true,
+        label: 'API',
+        port: 5432,
       },
     ];
 
@@ -405,6 +407,12 @@ describe('aggregateCollapsedEdges', () => {
     );
 
     expect(result).toHaveLength(1);
-    expect(result[0].label).toBeNull();
+    // Single aggregated edges preserve original data (including manual: ID for delete)
+    expect(result[0].id).toBe('manual:conn1');
+    expect(result[0].type).toBe('manual');
+    expect(result[0].label).toBe('API');
+    expect(result[0].port).toBe(5432);
+    expect(result[0].source).toBe('server:server-1');
+    expect(result[0].target).toBe('database:db1');
   });
 });
