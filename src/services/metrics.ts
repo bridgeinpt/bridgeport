@@ -327,27 +327,39 @@ export async function collectServerDataSSH(serverId: string): Promise<CombinedSe
 
     if (dockerClient) {
       for (const service of server.services) {
-        // Get container health and stats using Docker client
-        const containerHealth = await dockerClient.getContainerHealth(service.containerName);
-        const metrics = await dockerClient.getContainerStats(service.containerName);
+        try {
+          // Get container health and stats using Docker client
+          const containerHealth = await dockerClient.getContainerHealth(service.containerName);
+          const metrics = await dockerClient.getContainerStats(service.containerName);
 
-        // Check URL health if configured (requires SSH/local for curl)
-        let urlHealth: UrlHealthResult | null = null;
-        if (service.healthCheckUrl && dockerSSH) {
-          urlHealth = await dockerSSH.checkUrl(service.healthCheckUrl);
+          // Check URL health if configured (requires SSH/local for curl)
+          let urlHealth: UrlHealthResult | null = null;
+          if (service.healthCheckUrl && dockerSSH) {
+            urlHealth = await dockerSSH.checkUrl(service.healthCheckUrl);
+          }
+
+          // Determine health and overall status
+          const healthStatus = determineHealthStatus(containerHealth.health, containerHealth.running, urlHealth);
+          const overallStatus = determineOverallStatus(containerHealth.state, containerHealth.running, healthStatus);
+
+          serviceData.push({
+            containerName: service.containerName,
+            metrics: Object.keys(metrics).length > 0 ? metrics : null,
+            containerStatus: containerHealth.state,
+            healthStatus,
+            overallStatus,
+          });
+        } catch (err) {
+          // Don't let individual container errors cascade to mark the server as unhealthy
+          console.error(`[Metrics] Failed to collect data for container ${service.containerName}:`, err);
+          serviceData.push({
+            containerName: service.containerName,
+            metrics: null,
+            containerStatus: 'unknown',
+            healthStatus: 'unknown',
+            overallStatus: 'unknown',
+          });
         }
-
-        // Determine health and overall status
-        const healthStatus = determineHealthStatus(containerHealth.health, containerHealth.running, urlHealth);
-        const overallStatus = determineOverallStatus(containerHealth.state, containerHealth.running, healthStatus);
-
-        serviceData.push({
-          containerName: service.containerName,
-          metrics: Object.keys(metrics).length > 0 ? metrics : null,
-          containerStatus: containerHealth.state,
-          healthStatus,
-          overallStatus,
-        });
       }
     }
 

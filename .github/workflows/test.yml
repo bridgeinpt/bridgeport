@@ -1,0 +1,163 @@
+name: Test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    - cron: '0 3 * * *'  # Nightly at 3 AM UTC
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Tier 1: Unit Tests (fast, every commit) ──────────────
+  unit-backend:
+    name: Backend Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx vitest run --config vitest.unit.config.ts
+
+  unit-frontend:
+    name: Frontend Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: cd ui && npm ci
+      - run: cd ui && npx vitest run 'src/lib/'
+
+  unit-go:
+    name: Go Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - run: cd bridgeport-agent && go test ./... -short -count=1
+      - run: cd cli && go test ./... -short -count=1
+
+  # ── Tier 2: Integration Tests (every PR) ──────────────
+  integration-backend:
+    name: Backend Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: unit-backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx vitest run --config vitest.config.ts --reporter=github-actions
+        env:
+          MASTER_KEY: test-key-for-ci-only-not-real
+          JWT_SECRET: test-jwt-secret-for-ci-only
+
+  integration-frontend:
+    name: Frontend Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: unit-frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: cd ui && npm ci
+      - run: cd ui && npx vitest run --coverage --reporter=github-actions
+      - uses: codecov/codecov-action@v4
+        with:
+          files: ui/coverage/lcov.info
+          flags: frontend
+
+  # ── Migration Tests (every PR with schema changes) ──────
+  migration:
+    name: Migration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx vitest run test/migrations/
+
+  # ── Tier 3: System Tests (nightly) ──────────────────────
+  system:
+    name: System Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx vitest run --config vitest.unit.config.ts
+      - run: npx vitest run --config vitest.config.ts
+        env:
+          MASTER_KEY: test-key-for-ci-only-not-real
+          JWT_SECRET: test-jwt-secret-for-ci-only
+      - run: cd bridgeport-agent && go test ./... -count=1
+      - run: cd cli && go test ./... -count=1
+
+  # ── Build Verification ──────────────────────────────────
+  build:
+    name: Build Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [unit-backend, unit-frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run build
+      - run: cd ui && npm ci && npm run build
+
+  # ── TypeScript Check ────────────────────────────────────
+  typecheck:
+    name: TypeScript Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx tsc --noEmit
+      - run: cd ui && npm ci && npx tsc --noEmit

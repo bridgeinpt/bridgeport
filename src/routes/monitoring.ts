@@ -4,7 +4,7 @@ import { prisma } from '../lib/db.js';
 import { checkServerHealth } from '../services/servers.js';
 import { checkServiceHealth } from '../services/services.js';
 import { logAudit } from '../services/audit.js';
-import { bundledAgentVersion } from '../server.js';
+import { bundledAgentVersion } from '../lib/version.js';
 import { getAgentEvents } from '../services/agent-events.js';
 import { logHealthCheck } from '../services/health-checks.js';
 
