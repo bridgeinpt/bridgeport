@@ -1,0 +1,3 @@
+#!/bin/sh
+npx vitest run --project backend --testPathPattern='src/lib/.*\.test\.ts$' --reporter=dot
+cd ui && npx vitest run --testPathPattern='lib/.*\.test\.tsx?$' --reporter=dot
