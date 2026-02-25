@@ -19,10 +19,10 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    setupFiles: ['../tests/setup.ts'],
+    setupFiles: ['./tests/setup.ts'],
     include: [
-      '../src/routes/**/*.test.ts',
-      '../tests/**/*.test.ts',
+      'src/routes/**/*.test.ts',
+      'tests/**/*.test.ts',
     ],
     exclude: [
       'node_modules',
@@ -31,7 +31,7 @@ export default defineConfig({
     ],
     coverage: {
       provider: 'v8',
-      include: ['../src/**/*.ts'],
+      include: ['src/**/*.ts'],
       exclude: [
         'prisma/**',
         'tests/**',
@@ -41,7 +41,7 @@ export default defineConfig({
         'src/lib/sentry.ts',
       ],
       reporter: ['text', 'lcov', 'html'],
-      reportsDirectory: '../coverage',
+      reportsDirectory: './coverage',
     },
     // Increase test timeout for integration tests
     testTimeout: 30_000,

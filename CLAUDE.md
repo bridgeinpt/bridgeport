@@ -313,8 +313,18 @@ bridgeport/
 │   │   └── output/           # Terminal formatting
 │   ├── go.mod
 │   └── Makefile
+├── config/                   # Build/test configuration
+│   ├── vitest.config.ts      # Integration test config
+│   ├── vitest.unit.config.ts # Unit test config
+│   ├── vitest.workspace.ts   # Vitest workspace
+│   └── codecov.yml           # Code coverage config
 ├── prisma/schema.prisma      # Database schema
-└── docker/                   # Docker configuration
+├── docker/                   # Docker + Caddy configuration
+├── docs/                     # Project documentation
+└── tests/                    # Test infrastructure
+    ├── helpers/              # Test app builder, auth helpers
+    ├── factories/            # Test data factories
+    └── security/             # RBAC matrix tests
 ```
 
 ## Development Commands
@@ -353,8 +363,8 @@ BridgePort uses Vitest with **two separate configs** that must never be mixed:
 
 | Config | Scope | Isolation | Database |
 |--------|-------|-----------|----------|
-| `vitest.config.ts` | Integration tests (`src/routes/`, `test/`) | `isolate: false`, `maxWorkers: 1` | Real SQLite |
-| `vitest.unit.config.ts` | Unit tests (`src/services/`, `src/lib/`) | `isolate: true` | Mocked via `vi.mock` |
+| `config/vitest.config.ts` | Integration tests (`src/routes/`, `tests/`) | `isolate: false`, `maxWorkers: 1` | Real SQLite |
+| `config/vitest.unit.config.ts` | Unit tests (`src/services/`, `src/lib/`) | `isolate: true` | Mocked via `vi.mock` |
 
 **Why two configs?** Integration tests share a real SQLite database and need `isolate: false` so the singleton PrismaClient stays alive across files. Unit tests use `vi.mock('../lib/db.js')` to mock Prisma, and need `isolate: true` so mocks don't leak between files. Mixing them in one process causes data races or mock pollution.
 
@@ -362,10 +372,10 @@ BridgePort uses Vitest with **two separate configs** that must never be mixed:
 
 ```bash
 # Integration tests (routes, security, smoke)
-npx vitest run --config vitest.config.ts
+npx vitest run --config config/vitest.config.ts
 
 # Unit tests (services, lib)
-npx vitest run --config vitest.unit.config.ts
+npx vitest run --config config/vitest.unit.config.ts
 
 # Single test file
 npx vitest run src/routes/auth.test.ts
@@ -379,8 +389,8 @@ npx vitest --watch src/routes/auth.test.ts
 - **Route tests**: `src/routes/<name>.test.ts` (next to the route file)
 - **Service unit tests**: `src/services/<name>.test.ts` (next to the service file)
 - **Lib unit tests**: `src/lib/<name>.test.ts`
-- **Security tests**: `test/security/<name>.test.ts`
-- **Smoke tests**: `test/smoke.test.ts`
+- **Security tests**: `tests/security/<name>.test.ts`
+- **Smoke tests**: `tests/smoke.test.ts`
 
 ### Writing Integration Tests (Routes)
 
@@ -388,10 +398,10 @@ Integration tests use a real Fastify instance with all routes registered, backed
 
 ```typescript
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { buildTestApp, type TestApp } from '../../test/helpers/app.js';
-import { createTestUser } from '../../test/factories/user.js';
-import { createTestEnvironment } from '../../test/factories/environment.js';
-import { generateTestToken } from '../../test/helpers/auth.js';
+import { buildTestApp, type TestApp } from '../../tests/helpers/app.js';
+import { createTestUser } from '../../tests/factories/user.js';
+import { createTestEnvironment } from '../../tests/factories/environment.js';
+import { generateTestToken } from '../../tests/helpers/auth.js';
 
 describe('example routes', () => {
   let app: TestApp;
@@ -516,7 +526,7 @@ describe('my-service', () => {
 
 ### Available Factories
 
-All factories are in `test/factories/` and can be imported from `test/factories/index.js`:
+All factories are in `tests/factories/` and can be imported from `tests/factories/index.js`:
 
 | Factory | Required Fields | Default Role/Type |
 |---------|----------------|-------------------|
@@ -538,7 +548,7 @@ For every new API route, test at minimum:
 4. **Validation** — returns 400 for invalid input (if route validates body/params)
 5. **Not found** — returns 404 for non-existent resources
 6. **Conflicts** — returns 409 for duplicate entries (if applicable)
-7. **Add to security tests** — add the route to `test/security/rbac-matrix.test.ts` in the appropriate role array (`adminRoutes`, `operatorRoutes`, or `viewerRoutes`)
+7. **Add to security tests** — add the route to `tests/security/rbac-matrix.test.ts` in the appropriate role array (`adminRoutes`, `operatorRoutes`, or `viewerRoutes`)
 
 ### What to Test for Bug Fixes
 

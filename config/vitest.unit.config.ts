@@ -16,10 +16,10 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    setupFiles: ['../tests/setup.ts'],
+    setupFiles: ['./tests/setup.ts'],
     include: [
-      '../src/services/**/*.test.ts',
-      '../src/lib/**/*.test.ts',
+      'src/services/**/*.test.ts',
+      'src/lib/**/*.test.ts',
     ],
     exclude: [
       'node_modules',
@@ -28,7 +28,7 @@ export default defineConfig({
     ],
     coverage: {
       provider: 'v8',
-      include: ['../src/**/*.ts'],
+      include: ['src/**/*.ts'],
       exclude: [
         'prisma/**',
         'tests/**',
@@ -38,7 +38,7 @@ export default defineConfig({
         'src/lib/sentry.ts',
       ],
       reporter: ['text', 'lcov', 'html'],
-      reportsDirectory: '../coverage',
+      reportsDirectory: './coverage',
     },
     testTimeout: 30_000,
     hookTimeout: 30_000,

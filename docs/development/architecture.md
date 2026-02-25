@@ -116,7 +116,12 @@ bridgeport/
 │   ├── Dockerfile              # Multi-stage production build
 │   ├── docker-compose.yml      # Production deployment template
 │   └── entrypoint.sh           # Startup script (migrations + boot)
-└── test/                       # Test infrastructure
+├── config/                     # Build/test configuration
+│   ├── vitest.config.ts        # Integration test config
+│   ├── vitest.unit.config.ts   # Unit test config
+│   └── codecov.yml             # Code coverage config
+├── docs/                       # Project documentation
+└── tests/                      # Test infrastructure
     ├── helpers/                 # Test app builder, auth helpers
     ├── factories/               # Test data factories
     └── security/                # RBAC matrix tests
