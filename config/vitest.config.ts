@@ -13,16 +13,16 @@ import path from 'path';
 export default defineConfig({
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': path.resolve(__dirname, '../src'),
     },
   },
   test: {
     globals: true,
     environment: 'node',
-    setupFiles: ['./test/setup.ts'],
+    setupFiles: ['../tests/setup.ts'],
     include: [
-      'src/routes/**/*.test.ts',
-      'test/**/*.test.ts',
+      '../src/routes/**/*.test.ts',
+      '../tests/**/*.test.ts',
     ],
     exclude: [
       'node_modules',
@@ -31,17 +31,17 @@ export default defineConfig({
     ],
     coverage: {
       provider: 'v8',
-      include: ['src/**/*.ts'],
+      include: ['../src/**/*.ts'],
       exclude: [
         'prisma/**',
-        'test/**',
+        'tests/**',
         'src/types/**',
         '**/types.ts',
         '**/index.ts',
         'src/lib/sentry.ts',
       ],
       reporter: ['text', 'lcov', 'html'],
-      reportsDirectory: './coverage',
+      reportsDirectory: '../coverage',
     },
     // Increase test timeout for integration tests
     testTimeout: 30_000,

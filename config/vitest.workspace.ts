@@ -6,11 +6,11 @@ export default defineWorkspace([
     test: {
       name: 'backend',
       include: [
-        'src/**/*.test.ts',
-        'test/**/*.test.ts',
+        '../src/**/*.test.ts',
+        '../tests/**/*.test.ts',
       ],
       exclude: [
-        'test/migrations/**',
+        '../tests/migrations/**',
         'node_modules',
         'dist',
         'ui/**',
@@ -22,15 +22,15 @@ export default defineWorkspace([
     test: {
       name: 'system',
       include: [
-        'test/migrations/**/*.test.ts',
+        '../tests/migrations/**/*.test.ts',
       ],
     },
   },
   {
-    extends: './ui/vitest.config.ts',
+    extends: '../ui/vitest.config.ts',
     test: {
       name: 'frontend',
-      root: './ui',
+      root: '../ui',
     },
   },
 ]);

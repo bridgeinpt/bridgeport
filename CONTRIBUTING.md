@@ -155,10 +155,10 @@ npm run build
 cd ui && npm run build && cd ..
 
 # Run integration tests
-npx vitest run --config vitest.config.ts
+npx vitest run --config config/vitest.config.ts
 
 # Run unit tests
-npx vitest run --config vitest.unit.config.ts
+npx vitest run --config config/vitest.unit.config.ts
 ```
 
 ## Database Migration Guide
@@ -224,17 +224,17 @@ BridgePort has two separate test configurations that must not be mixed:
 
 | Config | Scope | Command |
 |--------|-------|---------|
-| `vitest.config.ts` | Integration tests (routes, API) | `npx vitest run --config vitest.config.ts` |
-| `vitest.unit.config.ts` | Unit tests (services, lib) | `npx vitest run --config vitest.unit.config.ts` |
+| `config/vitest.config.ts` | Integration tests (routes, API) | `npx vitest run --config config/vitest.config.ts` |
+| `config/vitest.unit.config.ts` | Unit tests (services, lib) | `npx vitest run --config config/vitest.unit.config.ts` |
 
 ### Running Tests
 
 ```bash
 # All integration tests
-npx vitest run --config vitest.config.ts
+npx vitest run --config config/vitest.config.ts
 
 # All unit tests
-npx vitest run --config vitest.unit.config.ts
+npx vitest run --config config/vitest.unit.config.ts
 
 # Single test file
 npx vitest run src/routes/auth.test.ts
@@ -267,7 +267,7 @@ For detailed patterns and examples, see the Testing section in [CLAUDE.md](CLAUD
 - [ ] Tests pass (`vitest run --config vitest.config.ts` and `vitest run --config vitest.unit.config.ts`)
 - [ ] Backend builds (`npm run build`)
 - [ ] Frontend builds (`cd ui && npm run build`)
-- [ ] New routes added to RBAC security tests (`test/security/rbac-matrix.test.ts`)
+- [ ] New routes added to RBAC security tests (`tests/security/rbac-matrix.test.ts`)
 - [ ] Migration files committed (if schema changed)
 - [ ] Documentation updated (if behavior changed)
 
@@ -314,8 +314,8 @@ const service = await createTestService(prisma, { serverId, containerImageId: im
 Integration tests and unit tests use different Vitest configs with different isolation modes. Running unit tests with the integration config (or vice versa) causes data races or mock pollution. Always specify the config:
 
 ```bash
-npx vitest run --config vitest.config.ts       # Integration
-npx vitest run --config vitest.unit.config.ts   # Unit
+npx vitest run --config config/vitest.config.ts       # Integration
+npx vitest run --config config/vitest.unit.config.ts   # Unit
 ```
 
 ## Getting Help

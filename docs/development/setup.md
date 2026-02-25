@@ -262,8 +262,8 @@ See [Building](building.md) for full build instructions including the Docker ima
 | Start frontend | `cd ui && npm run dev` |
 | Generate Prisma client | `npm run db:generate` |
 | Create a migration | `npx prisma migrate dev --name descriptive_name` |
-| Run integration tests | `npx vitest run --config vitest.config.ts` |
-| Run unit tests | `npx vitest run --config vitest.unit.config.ts` |
+| Run integration tests | `npx vitest run --config config/vitest.config.ts` |
+| Run unit tests | `npx vitest run --config config/vitest.unit.config.ts` |
 | Build backend | `npm run build` |
 | Build frontend | `cd ui && npm run build` |
 

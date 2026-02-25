@@ -10,16 +10,16 @@ import path from 'path';
 export default defineConfig({
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': path.resolve(__dirname, '../src'),
     },
   },
   test: {
     globals: true,
     environment: 'node',
-    setupFiles: ['./test/setup.ts'],
+    setupFiles: ['../tests/setup.ts'],
     include: [
-      'src/services/**/*.test.ts',
-      'src/lib/**/*.test.ts',
+      '../src/services/**/*.test.ts',
+      '../src/lib/**/*.test.ts',
     ],
     exclude: [
       'node_modules',
@@ -28,17 +28,17 @@ export default defineConfig({
     ],
     coverage: {
       provider: 'v8',
-      include: ['src/**/*.ts'],
+      include: ['../src/**/*.ts'],
       exclude: [
         'prisma/**',
-        'test/**',
+        'tests/**',
         'src/types/**',
         '**/types.ts',
         '**/index.ts',
         'src/lib/sentry.ts',
       ],
       reporter: ['text', 'lcov', 'html'],
-      reportsDirectory: './coverage',
+      reportsDirectory: '../coverage',
     },
     testTimeout: 30_000,
     hookTimeout: 30_000,

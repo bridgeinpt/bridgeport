@@ -18,7 +18,7 @@
     "test:unit": "vitest run --testPathPattern='src/lib/.*\\.test\\.ts$'",
     "test:integration": "vitest run --project backend",
     "test:coverage": "vitest run --coverage",
-    "test:migrations": "vitest run test/migrations/",
+    "test:migrations": "vitest run --config config/vitest.config.ts tests/migrations/",
     "test:ui": "cd ui && vitest run",
     "test:ui:watch": "cd ui && vitest",
     "test:all": "vitest run && cd ui && vitest run"
