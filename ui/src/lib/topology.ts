@@ -188,7 +188,7 @@ export function aggregateCollapsedEdges(
   };
 
   // Group edges by resolved source->target
-  const grouped = new Map<string, { count: number; types: Set<string>; hasDirected: boolean }>();
+  const grouped = new Map<string, { count: number; types: Set<string>; hasDirected: boolean; firstEdge: TopologyEdge }>();
   const result: TopologyEdge[] = [];
 
   for (const edge of edges) {
@@ -211,13 +211,25 @@ export function aggregateCollapsedEdges(
       existing.types.add(edge.type);
       if (edge.directed) existing.hasDirected = true;
     } else {
-      grouped.set(key, { count: 1, types: new Set([edge.type]), hasDirected: edge.directed });
+      grouped.set(key, { count: 1, types: new Set([edge.type]), hasDirected: edge.directed, firstEdge: edge });
     }
   }
 
   // Create aggregated edges
   for (const [key, info] of grouped) {
     const [source, target] = key.split('->');
+
+    // When only one edge is aggregated, preserve the original edge data
+    // (including its manual: ID prefix needed for delete functionality)
+    if (info.count === 1) {
+      result.push({
+        ...info.firstEdge,
+        source,
+        target,
+      });
+      continue;
+    }
+
     const isMultiType = info.types.has('auto') && info.types.has('manual');
     result.push({
       id: `agg:${key}`,
@@ -225,7 +237,7 @@ export function aggregateCollapsedEdges(
       target,
       type: isMultiType ? 'auto' : (info.types.values().next().value as 'auto' | 'manual'),
       directed: info.hasDirected,
-      label: info.count > 1 ? `${info.count} connections` : null,
+      label: `${info.count} connections`,
     });
   }
 

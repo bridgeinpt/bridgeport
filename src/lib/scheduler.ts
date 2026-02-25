@@ -471,51 +471,17 @@ async function runMetricsCollection(): Promise<void> {
         const data = await collectServerDataSSH(server.id);
 
         if (!data) {
-          // Could not connect to server
-          await prisma.server.update({
-            where: { id: server.id },
-            data: { status: 'unhealthy', lastCheckedAt: new Date() },
-          });
+          // Could not connect - skip metrics collection but don't update server health.
+          // Server health is managed by runServerHealthChecks to avoid race conditions
+          // where transient metrics collection failures cause healthy/unhealthy flipping.
+          console.warn(`[Scheduler] Metrics collection failed for server ${server.name} - skipping (health check will determine status)`);
           return;
         }
 
-        // Get previous status for comparison
-        const prevServerStatus = server.status;
-
-        // Update server health status
-        await prisma.server.update({
-          where: { id: server.id },
-          data: {
-            status: data.serverHealth.status,
-            lastCheckedAt: new Date(),
-          },
-        });
-
-        // Emit health_status event on server status change
-        if (data.serverHealth.status !== prevServerStatus) {
-          eventBus.emitEvent({ type: 'health_status', data: { resourceType: 'server', resourceId: server.id, status: data.serverHealth.status, environmentId: server.environmentId } });
-        }
-
-        // Handle server status changes
-        if (data.serverHealth.status === 'unhealthy' && prevServerStatus !== 'unhealthy') {
-          const bounce = await recordFailure('server', server.id, 'offline', NOTIFICATION_TYPES.SYSTEM_SERVER_OFFLINE);
-          if (bounce.shouldAlert) {
-            notifyAsync(
-              NOTIFICATION_TYPES.SYSTEM_SERVER_OFFLINE,
-              server.environmentId,
-              { serverName: server.name }
-            );
-          }
-        } else if (data.serverHealth.status === 'healthy' && prevServerStatus === 'unhealthy') {
-          const bounce = await recordSuccess('server', server.id, 'offline');
-          if (bounce.wasRecovered) {
-            notifyAsync(
-              NOTIFICATION_TYPES.SYSTEM_SERVER_ONLINE,
-              server.environmentId,
-              { serverName: server.name }
-            );
-          }
-        }
+        // Don't update server health status here - that's the job of runServerHealthChecks.
+        // Metrics collection uses Docker/SSH operations that can fail transiently
+        // (e.g., Docker socket busy, command timeout) without the server being truly unhealthy.
+        // Only update lastCheckedAt to track that we attempted collection.
 
         // Save server metrics
         if (data.serverMetrics) {

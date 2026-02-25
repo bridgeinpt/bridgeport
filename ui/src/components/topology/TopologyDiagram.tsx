@@ -61,6 +61,10 @@ const stopAllPropagation = (e: React.MouseEvent | React.PointerEvent) => {
   e.stopPropagation();
 };
 
+// Module-level ref for the delete callback. React Flow's internal edge state management
+// can lose function references in edge data, so we share the callback via a ref instead.
+let edgeDeleteHandlerRef: ((connectionId: string) => void) | null = null;
+
 // Custom edge component with colored rendering
 function TopologyEdgeComponent({
   id,
@@ -73,7 +77,7 @@ function TopologyEdgeComponent({
   data,
   markerEnd,
 }: EdgeProps) {
-  const edgeData = data as { edgeType?: string; label?: string | null; port?: number | null; protocol?: string | null; manualId?: string; onDelete?: (id: string) => void } | undefined;
+  const edgeData = data as { edgeType?: string; label?: string | null; port?: number | null; protocol?: string | null; manualId?: string } | undefined;
   const isAuto = edgeData?.edgeType === 'auto';
   const strokeColor = isAuto ? '#60a5fa' : '#4ade80';
 
@@ -102,11 +106,11 @@ function TopologyEdgeComponent({
             onMouseDown={stopAllPropagation}
           >
             {edgeData?.label && <span>{edgeData.label}</span>}
-            {edgeData?.manualId && edgeData?.onDelete && (
+            {edgeData?.manualId && edgeDeleteHandlerRef && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  edgeData.onDelete!(edgeData.manualId!);
+                  edgeDeleteHandlerRef?.(edgeData.manualId!);
                 }}
                 onPointerDown={stopAllPropagation}
                 onMouseDown={stopAllPropagation}
@@ -294,10 +298,7 @@ function buildNodes(
   return { nodes, serviceToServer, databaseToServer };
 }
 
-function topologyEdgesToReactFlow(
-  topologyEdges: TopologyEdge[],
-  onDeleteManual?: (connectionId: string) => void,
-): Edge[] {
+function topologyEdgesToReactFlow(topologyEdges: TopologyEdge[]): Edge[] {
   return topologyEdges.map((te) => {
     // Extract manual connection ID from edge ID (format: "manual:<connectionId>")
     const manualId = te.type === 'manual' && te.id.startsWith('manual:') ? te.id.replace('manual:', '') : undefined;
@@ -316,7 +317,6 @@ function topologyEdgesToReactFlow(
         port: te.port,
         protocol: te.protocol,
         manualId,
-        onDelete: onDeleteManual,
       },
     };
   });
@@ -347,6 +347,24 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const canInteract = userRole === 'admin' || userRole === 'operator';
+
+  // Set module-level delete handler ref so edge components can access it
+  // (React Flow's internal state management can lose function refs in edge data)
+  useEffect(() => {
+    if (canInteract) {
+      edgeDeleteHandlerRef = async (connectionId: string) => {
+        try {
+          await deleteConnection(connectionId);
+          setManualConnections((prev) => prev.filter((c) => c.id !== connectionId));
+        } catch {
+          // Silently fail - the connection may have already been deleted
+        }
+      };
+    } else {
+      edgeDeleteHandlerRef = null;
+    }
+    return () => { edgeDeleteHandlerRef = null; };
+  }, [canInteract]);
 
   // Fetch manual connections
   useEffect(() => {
@@ -420,15 +438,6 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, []);
-
-  const handleDeleteConnection = useCallback(async (connectionId: string) => {
-    try {
-      await deleteConnection(connectionId);
-      setManualConnections((prev) => prev.filter((c) => c.id !== connectionId));
-    } catch {
-      // Silently fail - the connection may have already been deleted
-    }
   }, []);
 
   // Handle on-diagram edge creation
@@ -528,8 +537,8 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     const inferred = inferConnections(servers, databases);
     const merged = mergeConnections(inferred, manualConnections);
     const aggregated = aggregateCollapsedEdges(merged, collapsedServers, serviceToServer, databaseToServer);
-    return topologyEdgesToReactFlow(aggregated, canInteract ? handleDeleteConnection : undefined);
-  }, [servers, databases, manualConnections, collapsedServers, serviceToServer, databaseToServer, canInteract, handleDeleteConnection]);
+    return topologyEdgesToReactFlow(aggregated);
+  }, [servers, databases, manualConnections, collapsedServers, serviceToServer, databaseToServer]);
 
   const [flowNodes, setFlowNodes, onNodesChange] = useNodesState(nodes);
   const [flowEdges, setFlowEdges, onEdgesChange] = useEdgesState(edges);

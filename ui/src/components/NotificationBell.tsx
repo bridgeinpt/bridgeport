@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { BellIcon, CheckIcon } from './Icons';
 import {
@@ -8,6 +8,7 @@ import {
   markAllNotificationsAsRead,
   type NotificationWithType,
 } from '../lib/api';
+import { useEventSource } from '../lib/useEventSource';
 
 function formatTimeAgo(date: string): string {
   const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
@@ -48,21 +49,21 @@ export default function NotificationBell() {
   const [loading, setLoading] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Fetch unread count on mount and periodically
+  // Fetch unread count on mount
   useEffect(() => {
-    const fetchUnreadCount = async () => {
-      try {
-        const { count } = await getNotificationsUnreadCount();
-        setUnreadCount(count);
-      } catch (error) {
-        console.error('Failed to fetch unread count:', error);
-      }
-    };
-
-    fetchUnreadCount();
-    const interval = setInterval(fetchUnreadCount, 30000); // Refresh every 30 seconds
-    return () => clearInterval(interval);
+    getNotificationsUnreadCount()
+      .then(({ count }) => setUnreadCount(count))
+      .catch((error) => console.error('Failed to fetch unread count:', error));
   }, []);
+
+  // Update unread count via SSE when new notifications arrive
+  const handleNotificationEvent = useCallback(() => {
+    getNotificationsUnreadCount()
+      .then(({ count }) => setUnreadCount(count))
+      .catch(() => {});
+  }, []);
+
+  useEventSource('notification', handleNotificationEvent);
 
   // Fetch notifications when dropdown opens
   useEffect(() => {
