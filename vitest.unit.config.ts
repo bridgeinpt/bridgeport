@@ -2,13 +2,10 @@ import { defineConfig } from 'vitest/config';
 import path from 'path';
 
 /**
- * Vitest config for integration tests (routes, security).
+ * Vitest config for unit tests (services, lib).
  *
- * These tests use a real SQLite database and must run sequentially in
- * one process (isolate: false, maxWorkers: 1) to avoid data races.
- *
- * Unit tests (src/services/, src/lib/) use vi.mock() and need their own
- * config with isolate: true — see vitest.unit.config.ts.
+ * These tests use vi.mock() and need full module isolation so mocks
+ * don't leak between files.  They do NOT touch the real database.
  */
 export default defineConfig({
   resolve: {
@@ -21,8 +18,8 @@ export default defineConfig({
     environment: 'node',
     setupFiles: ['./test/setup.ts'],
     include: [
-      'src/routes/**/*.test.ts',
-      'test/**/*.test.ts',
+      'src/services/**/*.test.ts',
+      'src/lib/**/*.test.ts',
     ],
     exclude: [
       'node_modules',
@@ -43,13 +40,10 @@ export default defineConfig({
       reporter: ['text', 'lcov', 'html'],
       reportsDirectory: './coverage',
     },
-    // Increase test timeout for integration tests
     testTimeout: 30_000,
     hookTimeout: 30_000,
-    // Pool settings for test isolation
-    // All test files must run sequentially in one process to share the SQLite DB
+    // Unit tests need full isolation so vi.mock() doesn't leak between files
     pool: 'forks',
-    isolate: false,
-    maxWorkers: 1,
+    isolate: true,
   },
 });

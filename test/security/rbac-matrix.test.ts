@@ -9,11 +9,10 @@
  * - operator: Requires admin or operator role
  * - admin: Requires admin role only
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { buildTestApp, type TestApp } from '../helpers/app.js';
 import { generateTestToken } from '../helpers/auth.js';
 import { createTestUser, createTestEnvironment } from '../factories/index.js';
-import { cleanTestDb } from '../helpers/db.js';
 
 let app: TestApp;
 
@@ -93,18 +92,18 @@ const adminRoutes: RouteSpec[] = [
   { method: 'POST', url: '/api/admin/slack/channels', minRole: 'admin', body: { name: 'test', webhookUrl: 'https://hooks.slack.com/test' }, description: 'create Slack channel' },
 
   // System settings
-  { method: 'PUT', url: '/api/system-settings', minRole: 'admin', body: { sshConnectTimeoutSec: 30 }, description: 'update system settings' },
-  { method: 'POST', url: '/api/system-settings/reset', minRole: 'admin', description: 'reset system settings' },
+  { method: 'PUT', url: '/api/settings/system', minRole: 'admin', body: { sshCommandTimeoutMs: 30000 }, description: 'update system settings' },
+  { method: 'POST', url: '/api/settings/system/reset', minRole: 'admin', description: 'reset system settings' },
 
   // Notification types management
-  { method: 'GET', url: '/api/notification-types', minRole: 'admin', description: 'list notification types' },
+  { method: 'GET', url: '/api/admin/notification-types', minRole: 'admin', description: 'list notification types' },
 
   // Service types (settings)
-  { method: 'POST', url: '/api/service-types', minRole: 'admin', body: { name: 'TestType', icon: 'test' }, description: 'create service type' },
+  { method: 'POST', url: '/api/settings/service-types', minRole: 'admin', body: { name: 'rbac-test-type', displayName: 'RBAC Test Type' }, description: 'create service type' },
 
   // Spaces config
-  { method: 'PUT', url: '/api/spaces/config', minRole: 'admin', body: { accessKey: 'test', secretKey: 'test', region: 'us-east-1', bucket: 'test', endpoint: 'https://test.com' }, description: 'update spaces config' },
-  { method: 'DELETE', url: '/api/spaces/config', minRole: 'admin', description: 'delete spaces config' },
+  { method: 'PUT', url: '/api/settings/spaces', minRole: 'admin', body: { accessKey: 'test', secretKey: 'test', region: 'us-east-1', bucket: 'test', endpoint: 'https://test.com' }, description: 'update spaces config' },
+  { method: 'DELETE', url: '/api/settings/spaces', minRole: 'admin', description: 'delete spaces config' },
 ];
 
 // Operator-only routes (admin + operator allowed, viewer denied)
@@ -116,7 +115,7 @@ const operatorRoutes: RouteSpec[] = [
   { method: 'POST', url: `/api/environments/__ENV__/config-files`, minRole: 'operator', body: { name: 'test.conf', filename: 'test.conf', content: 'test=1' }, description: 'create config file' },
 
   // Topology mutations
-  { method: 'POST', url: `/api/environments/__ENV__/topology/connections`, minRole: 'operator', body: { sourceType: 'service', sourceId: 'test', targetType: 'service', targetId: 'test2' }, description: 'create topology connection' },
+  { method: 'POST', url: `/api/connections`, minRole: 'operator', body: { environmentId: '__ENV__', sourceType: 'service', sourceId: 'test', targetType: 'service', targetId: 'test2' }, description: 'create topology connection' },
 ];
 
 // Viewer routes (any authenticated user can access)
@@ -129,20 +128,20 @@ const viewerRoutes: RouteSpec[] = [
   { method: 'GET', url: '/api/environments', minRole: 'viewer', description: 'list environments' },
 
   // Server listing
-  { method: 'GET', url: '/api/servers', minRole: 'viewer', description: 'list servers' },
+  { method: 'GET', url: '/api/environments/__ENV__/servers', minRole: 'viewer', description: 'list servers' },
 
   // Audit logs
-  { method: 'GET', url: '/api/audit', minRole: 'viewer', description: 'list audit logs' },
+  { method: 'GET', url: '/api/audit-logs', minRole: 'viewer', description: 'list audit logs' },
 
   // System settings (read)
-  { method: 'GET', url: '/api/system-settings', minRole: 'viewer', description: 'get system settings' },
+  { method: 'GET', url: '/api/settings/system', minRole: 'viewer', description: 'get system settings' },
 
   // Notifications
   { method: 'GET', url: '/api/notifications', minRole: 'viewer', description: 'list notifications' },
-  { method: 'GET', url: '/api/notification-preferences', minRole: 'viewer', description: 'get notification preferences' },
+  { method: 'GET', url: '/api/notifications/preferences', minRole: 'viewer', description: 'get notification preferences' },
 
-  // Health endpoint (no auth required, but tested for completeness)
-  { method: 'GET', url: '/api/monitoring/overview', minRole: 'viewer', description: 'monitoring overview' },
+  // Monitoring overview (requires envId)
+  { method: 'GET', url: '/api/environments/__ENV__/monitoring/overview', minRole: 'viewer', description: 'monitoring overview' },
 ];
 
 const roleHierarchy: Record<string, number> = {
@@ -166,6 +165,15 @@ function resolveUrl(url: string): string {
     .replace('__PLACEHOLDER__', 'nonexistent-id');
 }
 
+function resolveBody(body?: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (!body) return body;
+  const resolved: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(body)) {
+    resolved[key] = typeof value === 'string' ? value.replace('__ENV__', envId) : value;
+  }
+  return resolved;
+}
+
 describe('RBAC enforcement', () => {
   describe('admin-only routes should deny operator and viewer', () => {
     for (const route of adminRoutes) {
@@ -176,7 +184,7 @@ describe('RBAC enforcement', () => {
           method: route.method,
           url: resolveUrl(route.url),
           headers: { authorization: `Bearer ${viewerToken}` },
-          ...(route.body ? { payload: route.body } : {}),
+          ...(route.body ? { payload: resolveBody(route.body) } : {}),
         });
 
         expect(res.statusCode).toBe(403);
@@ -187,7 +195,7 @@ describe('RBAC enforcement', () => {
           method: route.method,
           url: resolveUrl(route.url),
           headers: { authorization: `Bearer ${operatorToken}` },
-          ...(route.body ? { payload: route.body } : {}),
+          ...(route.body ? { payload: resolveBody(route.body) } : {}),
         });
 
         expect(res.statusCode).toBe(403);
@@ -198,7 +206,7 @@ describe('RBAC enforcement', () => {
           method: route.method,
           url: resolveUrl(route.url),
           headers: { authorization: `Bearer ${adminToken}` },
-          ...(route.body ? { payload: route.body } : {}),
+          ...(route.body ? { payload: resolveBody(route.body) } : {}),
         });
 
         // Admin should succeed (not 401 or 403). May get 404 for placeholder IDs, or
@@ -218,7 +226,7 @@ describe('RBAC enforcement', () => {
           method: route.method,
           url: resolveUrl(route.url),
           headers: { authorization: `Bearer ${viewerToken}` },
-          ...(route.body ? { payload: route.body } : {}),
+          ...(route.body ? { payload: resolveBody(route.body) } : {}),
         });
 
         expect(res.statusCode).toBe(403);
@@ -229,7 +237,7 @@ describe('RBAC enforcement', () => {
           method: route.method,
           url: resolveUrl(route.url),
           headers: { authorization: `Bearer ${operatorToken}` },
-          ...(route.body ? { payload: route.body } : {}),
+          ...(route.body ? { payload: resolveBody(route.body) } : {}),
         });
 
         expect(res.statusCode).not.toBe(403);
@@ -241,7 +249,7 @@ describe('RBAC enforcement', () => {
           method: route.method,
           url: resolveUrl(route.url),
           headers: { authorization: `Bearer ${adminToken}` },
-          ...(route.body ? { payload: route.body } : {}),
+          ...(route.body ? { payload: resolveBody(route.body) } : {}),
         });
 
         expect(res.statusCode).not.toBe(403);
@@ -263,7 +271,7 @@ describe('RBAC enforcement', () => {
             method: route.method,
             url: resolveUrl(route.url),
             headers: { authorization: `Bearer ${token}` },
-            ...(route.body ? { payload: route.body } : {}),
+            ...(route.body ? { payload: resolveBody(route.body) } : {}),
           });
 
           expect(res.statusCode).not.toBe(401);
@@ -283,7 +291,7 @@ describe('RBAC enforcement', () => {
         const res = await app.inject({
           method: route.method,
           url: resolveUrl(route.url),
-          ...(route.body ? { payload: route.body } : {}),
+          ...(route.body ? { payload: resolveBody(route.body) } : {}),
         });
 
         expect(res.statusCode).toBe(401);

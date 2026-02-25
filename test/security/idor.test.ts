@@ -219,7 +219,7 @@ describe('IDOR protection', () => {
         url: `/api/users/${viewerId}/change-password`,
         headers: { authorization: `Bearer ${viewerToken}` },
         payload: {
-          currentPassword: 'TestPassword123!',
+          currentPassword: 'test-password-123',
           newPassword: 'NewPassword456!',
         },
       });
@@ -234,7 +234,7 @@ describe('IDOR protection', () => {
         headers: { authorization: `Bearer ${viewerToken}` },
         payload: {
           currentPassword: 'NewPassword456!',
-          newPassword: 'TestPassword123!',
+          newPassword: 'test-password-123',
         },
       });
     });

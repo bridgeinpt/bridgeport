@@ -160,9 +160,9 @@ describe('privilege escalation', () => {
     it('viewer cannot update system settings', async () => {
       const res = await app.inject({
         method: 'PUT',
-        url: '/api/system-settings',
+        url: '/api/settings/system',
         headers: { authorization: `Bearer ${viewerToken}` },
-        payload: { sshConnectTimeoutMs: 99999 },
+        payload: { sshCommandTimeoutMs: 99999 },
       });
 
       expect(res.statusCode).toBe(403);
@@ -171,9 +171,9 @@ describe('privilege escalation', () => {
     it('operator cannot update system settings', async () => {
       const res = await app.inject({
         method: 'PUT',
-        url: '/api/system-settings',
+        url: '/api/settings/system',
         headers: { authorization: `Bearer ${operatorToken}` },
-        payload: { sshConnectTimeoutMs: 99999 },
+        payload: { sshCommandTimeoutMs: 99999 },
       });
 
       expect(res.statusCode).toBe(403);

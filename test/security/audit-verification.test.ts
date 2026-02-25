@@ -254,9 +254,9 @@ describe('audit verification', () => {
     it('should audit system settings update', async () => {
       await app.inject({
         method: 'PUT',
-        url: '/api/system-settings',
+        url: '/api/settings/system',
         headers: { authorization: `Bearer ${adminToken}` },
-        payload: { sshConnectTimeoutMs: 15000 },
+        payload: { sshCommandTimeoutMs: 15000 },
       });
 
       const log = await app.prisma.auditLog.findFirst({

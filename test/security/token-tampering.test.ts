@@ -136,10 +136,11 @@ describe('token tampering', () => {
 
     it('should return 401 for token with past expiry (crafted)', async () => {
       // Manually craft a token with an exp claim in the past
+      const pastExp = Math.floor(Date.now() / 1000) - 3600; // 1 hour ago
       const forgedToken = signToken(
-        { id: viewerId, email: viewerEmail },
+        { id: viewerId, email: viewerEmail, exp: pastExp },
         process.env.JWT_SECRET!,
-        { expiresIn: -3600 * 1000 } // expired 1 hour ago
+        { noTimestamp: true }
       );
 
       const res = await authedRequest(forgedToken);

@@ -26,7 +26,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx prisma generate
-      - run: npx vitest run --config vitest.config.ts 'src/lib/'
+      - run: npx vitest run --config vitest.unit.config.ts
 
   unit-frontend:
     name: Frontend Unit Tests
@@ -67,14 +67,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx prisma generate
-      - run: npx vitest run --config vitest.config.ts --coverage --reporter=github-actions
+      - run: npx vitest run --config vitest.config.ts --reporter=github-actions
         env:
           MASTER_KEY: test-key-for-ci-only-not-real
           JWT_SECRET: test-jwt-secret-for-ci-only
-      - uses: codecov/codecov-action@v4
-        with:
-          files: coverage/lcov.info
-          flags: backend
 
   integration-frontend:
     name: Frontend Integration Tests
@@ -125,6 +121,7 @@ jobs:
           go-version: '1.22'
       - run: npm ci
       - run: npx prisma generate
+      - run: npx vitest run --config vitest.unit.config.ts
       - run: npx vitest run --config vitest.config.ts
         env:
           MASTER_KEY: test-key-for-ci-only-not-real
