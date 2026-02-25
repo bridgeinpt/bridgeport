@@ -1,90 +1,125 @@
-# User Management & RBAC
+# Users & Roles
 
-BridgePort uses a three-tier role system to control who can view, operate, and administer the platform — with every user action logged to the audit trail.
+BridgePort uses a three-tier role system (admin, operator, viewer) with JWT sessions and API tokens to control who can view, operate, and administer the platform.
 
 ## Table of Contents
 
-1. [Quick Start: Creating Your First User](#quick-start-creating-your-first-user)
-2. [Roles & Permissions](#roles--permissions)
-3. [Managing Users](#managing-users)
-4. [Self-Service Account](#self-service-account)
-5. [API Tokens](#api-tokens)
-6. [Initial Admin Setup](#initial-admin-setup)
-7. [Active User Tracking](#active-user-tracking)
-8. [Troubleshooting](#troubleshooting)
-9. [Related Docs](#related-docs)
+1. [Quick Start](#quick-start)
+2. [How It Works](#how-it-works)
+3. [Roles & Permissions](#roles--permissions)
+4. [Managing Users (Admin)](#managing-users-admin)
+5. [Self-Service Account](#self-service-account)
+6. [API Tokens](#api-tokens)
+7. [Initial Admin Setup](#initial-admin-setup)
+8. [Active User Tracking](#active-user-tracking)
+9. [Configuration Options](#configuration-options)
+10. [Troubleshooting](#troubleshooting)
+11. [Related](#related)
 
 ---
 
-## Quick Start: Creating Your First User
+## Quick Start
 
-After the initial admin account exists (see [Initial Admin Setup](#initial-admin-setup)), create additional users from the admin panel:
+After your first admin account exists (see [Initial Admin Setup](#initial-admin-setup)), create additional users in under a minute:
 
-1. Navigate to **Admin → Users** (`/admin/users`).
+1. Navigate to **Admin > Users** (`/admin/users`).
 2. Click **Add User**.
-3. Fill in the form:
-   - **Email** — must be unique across all users
-   - **Password** — minimum 8 characters
-   - **Name** — optional display name
-   - **Role** — defaults to `viewer`; see [Roles & Permissions](#roles--permissions)
+3. Enter email, password (8+ characters), optional name, and role.
 4. Click **Create**.
 
-The new user receives a welcome notification (in-app and email, per their notification preferences) and can log in immediately.
+The new user can log in immediately and receives a welcome notification.
 
-> [!NOTE]
-> Email addresses cannot be changed after account creation. If a user needs a different email, delete the old account and create a new one.
+---
+
+## How It Works
+
+BridgePort supports two authentication methods: **JWT sessions** for interactive browser use and **API tokens** for programmatic access. Both carry the user's role and grant the same permissions.
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant BridgePort
+    participant DB
+
+    alt Browser login
+        Client->>BridgePort: POST /api/auth/login {email, password}
+        BridgePort->>DB: Validate credentials (bcrypt)
+        BridgePort-->>Client: JWT token (7-day expiry)
+        Client->>BridgePort: GET /api/... (Authorization: Bearer <JWT>)
+        BridgePort->>DB: Verify JWT, load user role
+        Note over BridgePort,DB: lastActiveAt updated in background
+    else API token
+        Client->>BridgePort: GET /api/... (Authorization: Bearer <api-token>)
+        BridgePort->>DB: Hash token, look up ApiToken record
+        BridgePort->>DB: Check expiry, load user role
+        Note over BridgePort,DB: lastUsedAt updated on token record
+    end
+    BridgePort->>BridgePort: Check role against route requirement
+    BridgePort-->>Client: 200 OK / 403 Forbidden
+```
+
+**Authentication flow details:**
+
+1. The `authenticate` plugin tries the `Authorization: Bearer` value as an **API token first** (hash lookup in the `ApiToken` table).
+2. If no API token matches, it attempts **JWT verification**.
+3. If neither succeeds, the request gets `401 Unauthorized`.
+4. After authentication, route-level middleware (`requireAdmin`, `requireOperator`) checks the user's role.
+
+JWTs expire after **7 days**. API tokens have optional expiry set at creation time.
 
 ---
 
 ## Roles & Permissions
 
-BridgePort has three roles in strict hierarchy: `admin` > `operator` > `viewer`. A user inherits all permissions of lower roles.
-
-### Permission Matrix
-
-| Action | Admin | Operator | Viewer |
-|--------|:-----:|:--------:|:------:|
-| View all resources | Yes | Yes | Yes |
-| Reveal secret values | Yes | Yes* | Yes* |
-| Deploy services | Yes | Yes | No |
-| Restart/stop services | Yes | Yes | No |
-| Manage secrets | Yes | Yes | No |
-| Manage config files & sync | Yes | Yes | No |
-| Manage databases & backups | Yes | Yes | No |
-| Create/delete environments | Yes | No | No |
-| Manage users | Yes | No | No |
-| Edit environment settings | Yes | No | No |
-| Manage service types | Yes | No | No |
-| System settings | Yes | No | No |
-
-\* Secret reveal is subject to per-environment and per-secret controls configured by admins.
+BridgePort has three roles in strict hierarchy: **admin > operator > viewer**. Higher roles inherit all permissions of lower roles.
 
 ### Role Descriptions
 
-**`viewer`**
-Read-only access to all resources in every environment. Suitable for stakeholders, on-call engineers who need visibility, or external auditors. Viewers can browse deployments, health checks, logs, and metrics but cannot change anything.
+| Role | Purpose | Typical User |
+|------|---------|--------------|
+| **viewer** | Read-only access to all resources in every environment | Stakeholders, on-call engineers, auditors |
+| **operator** | Viewer permissions + operational actions (deploy, manage secrets, trigger backups) | Day-to-day platform engineers |
+| **admin** | Full access including user management, environments, and system settings | Platform owners, team leads |
 
-**`operator`**
-Everything a viewer can do, plus the ability to take operational actions: deploying services, managing secrets, syncing config files, triggering backups, and running health checks. Suitable for engineers who operate the platform day-to-day.
+### Full Permissions Matrix
 
-**`admin`**
-Full access. Admins manage users, environments, system settings, and all resources. There is no sudo or separate super-admin concept — admin is the top tier.
+| Action | Admin | Operator | Viewer |
+|--------|:-----:|:--------:|:------:|
+| **View all resources** (servers, services, metrics, logs) | Yes | Yes | Yes |
+| **View audit logs** | Yes | Yes | Yes |
+| **View deployment history** | Yes | Yes | Yes |
+| **Reveal secret values** | Yes | Yes* | Yes* |
+| **Deploy services** | Yes | Yes | No |
+| **Restart / stop / start containers** | Yes | Yes | No |
+| **Run predefined commands** (shell, migrate) | Yes | Yes | No |
+| **Manage secrets** (create, update, delete) | Yes | Yes | No |
+| **Manage config files & sync** | Yes | Yes | No |
+| **Manage databases & backups** | Yes | Yes | No |
+| **Trigger health checks** | Yes | Yes | No |
+| **Create / delete environments** | Yes | No | No |
+| **Edit environment settings** | Yes | No | No |
+| **Manage users** (create, edit roles, delete) | Yes | No | No |
+| **Manage service types / database types** | Yes | No | No |
+| **System settings** (SSH timeouts, webhook config) | Yes | No | No |
+| **SMTP / Slack / webhook channel config** | Yes | No | No |
+| **Delete servers** | Yes | No | No |
+
+\* Secret reveal is subject to the per-environment `allowSecretReveal` setting and the per-secret `neverReveal` flag, both configured by admins.
 
 > [!WARNING]
-> An admin cannot change their own role. This prevents accidental self-demotion. Another admin must make the change. The same constraint is enforced in the UI: the role dropdown is disabled when editing your own account.
+> An admin cannot change their own role. This prevents accidental self-demotion. Another admin must make the change.
 
 ---
 
-## Managing Users
+## Managing Users (Admin)
 
-All user management is under **Admin → Users** (`/admin/users`). These actions require the `admin` role.
+All user management is under **Admin > Users** (`/admin/users`). These actions require the `admin` role.
 
 ### Creating a User
 
-**API:**
 ```http
 POST /api/users
-Authorization: Bearer <token>
+Authorization: Bearer <admin-token>
 Content-Type: application/json
 
 {
@@ -95,7 +130,7 @@ Content-Type: application/json
 }
 ```
 
-**Response (201):**
+**Response (200):**
 ```json
 {
   "user": {
@@ -109,47 +144,46 @@ Content-Type: application/json
 }
 ```
 
-Password validation: minimum 8 characters. If the email is already in use, the server returns `409 Conflict`.
+Validation: password must be 8+ characters, email must be unique (returns `409 Conflict` if taken). The new user receives a welcome notification.
+
+> [!NOTE]
+> Email addresses cannot be changed after creation. To change a user's email, delete the account and create a new one.
 
 ### Listing Users
 
-**API:**
 ```http
 GET /api/users
-Authorization: Bearer <token>
+Authorization: Bearer <admin-token>
 ```
 
 Returns all users ordered by creation date (newest first). Each record includes `id`, `email`, `name`, `role`, `lastActiveAt`, `createdAt`, and `updatedAt`. Password hashes are never returned.
 
 ### Editing a User
 
-Admins can update a user's `name` and `role`. Email is immutable.
+Admins can update `name` and `role`. Email is immutable.
 
-**API:**
 ```http
 PATCH /api/users/:id
-Authorization: Bearer <token>
+Authorization: Bearer <admin-token>
 Content-Type: application/json
 
 {
-  "name": "Alice Smith",
   "role": "admin"
 }
 ```
 
-When a role change is saved, the affected user receives an in-app and email notification: _"Your role has been changed from operator to admin."_
+When a role changes, the affected user receives a notification: _"Your role has been changed from operator to admin."_
 
 > [!NOTE]
-> Non-admin users can call `PATCH /api/users/:id` for their own account to update their `name`. Any attempt to include a `role` field is rejected with `403 Forbidden`.
+> Non-admin users can call `PATCH /api/users/:id` on their own account to update their `name`. Including a `role` field is rejected with `403 Forbidden`.
 
-### Resetting a User's Password (Admin)
+### Resetting a User's Password
 
 Admins can reset any user's password without knowing the current one:
 
-**API:**
 ```http
 POST /api/users/:id/change-password
-Authorization: Bearer <token>
+Authorization: Bearer <admin-token>
 Content-Type: application/json
 
 {
@@ -161,16 +195,15 @@ The affected user receives a notification: _"Your password was changed by an adm
 
 ### Deleting a User
 
-**API:**
 ```http
 DELETE /api/users/:id
-Authorization: Bearer <token>
+Authorization: Bearer <admin-token>
 ```
 
-Returns `400 Bad Request` if you attempt to delete your own account. All related records (deployments, audit logs, API tokens) are cascade-deleted with the user.
+Returns `400 Bad Request` if you attempt to delete your own account. All related records (deployments, audit logs, API tokens, notifications) are cascade-deleted.
 
 > [!WARNING]
-> Deletion is permanent. There is no deactivation or suspension mechanism — if you need to revoke access without losing audit history, consider rotating the user's password instead and revoking all their API tokens.
+> Deletion is permanent. There is no deactivation mechanism. If you need to revoke access without losing audit history, consider rotating the user's password and revoking all their API tokens instead.
 
 ---
 
@@ -180,26 +213,17 @@ Every user, regardless of role, can manage their own profile without admin invol
 
 ### Accessing My Account
 
-Click the **user icon** at the bottom of the left sidebar. The **My Account** modal opens with two tabs:
+Click the **user icon** at the bottom of the left sidebar. The **My Account** modal opens with two sections:
 
-- **Profile** — update your display name; email and role are read-only here
-- **Change Password** — update your own password
-
-### Updating Your Name
-
-In the Profile tab, edit the Name field and click **Save Changes**. The change takes effect immediately and is reflected in the sidebar.
+- **Profile** -- update your display name (email and role are read-only)
+- **Change Password** -- update your own password
 
 ### Changing Your Password
 
-In the Change Password tab:
-
 1. Enter your **Current Password**.
-2. Enter and confirm your **New Password** (minimum 8 characters).
+2. Enter your **New Password** (8+ characters).
 3. Click **Change Password**.
 
-You receive a notification confirming the change. If the current password is incorrect, the server returns `401 Unauthorized`.
-
-**API equivalent:**
 ```http
 POST /api/users/:id/change-password
 Authorization: Bearer <token>
@@ -212,19 +236,16 @@ Content-Type: application/json
 ```
 
 > [!NOTE]
-> When a non-admin user changes their own password, `currentPassword` is required. Admins resetting another user's password do not need to provide `currentPassword`.
+> Non-admin users must provide `currentPassword`. Admins resetting another user's password can omit it.
 
 ---
 
 ## API Tokens
 
-API tokens let scripts, CI/CD pipelines, and external tools authenticate as a specific user without exposing that user's login password. Tokens carry the same role permissions as their owner.
+API tokens let scripts, CI/CD pipelines, and external tools authenticate as a specific user without exposing login credentials. Tokens carry the same role permissions as their owner.
 
 ### Creating a Token
 
-**UI:** Click the user icon in the sidebar → My Account → (token management is accessible via the API only at this time).
-
-**API:**
 ```http
 POST /api/auth/tokens
 Authorization: Bearer <jwt-or-existing-token>
@@ -250,7 +271,7 @@ Content-Type: application/json
 ```
 
 > [!WARNING]
-> The full token value is returned **only once** at creation time. BridgePort stores only a hash of the token. Copy it immediately and store it in your secrets manager — it cannot be recovered later. If lost, delete the token and create a new one.
+> The full token value is returned **only once** at creation time. BridgePort stores only a SHA-256 hash. Copy it immediately and store it in your secrets manager. If lost, delete the token and create a new one.
 
 `expiresInDays` is optional. Omitting it creates a non-expiring token.
 
@@ -261,7 +282,7 @@ GET /api/auth/tokens
 Authorization: Bearer <token>
 ```
 
-Returns all tokens belonging to the authenticated user. `tokenHash` is never returned. Each record includes `id`, `name`, `lastUsedAt`, `expiresAt`, and `createdAt`.
+Returns all tokens belonging to the authenticated user. Each record includes `id`, `name`, `lastUsedAt`, `expiresAt`, and `createdAt`. The token hash is never returned.
 
 ### Revoking a Token
 
@@ -270,7 +291,7 @@ DELETE /api/auth/tokens/:tokenId
 Authorization: Bearer <token>
 ```
 
-You can only delete your own tokens. Returns `404 Not Found` if the token does not exist or belongs to another user.
+You can only delete your own tokens. Returns `404` if the token does not exist or belongs to another user.
 
 ### Using a Token
 
@@ -281,37 +302,38 @@ Authorization: Bearer bp_abc123...
 
 **Query parameter (SSE connections):**
 ```
-GET /api/sse/events?token=bp_abc123...
+GET /api/events?token=bp_abc123...
 ```
 
-The authentication layer tries an API token lookup first, then falls back to JWT verification. `lastUsedAt` is updated on each successful use.
+The SSE query parameter approach exists because `EventSource` clients cannot set custom headers.
 
 ### Token Use Cases
 
-| Use Case | Notes |
-|----------|-------|
-| CI/CD pipeline | Create a dedicated token per pipeline with `operator` role |
-| Monitoring scripts | Use a `viewer`-role token for read-only metric polling |
-| SSE event streams | Pass via query param `token=` since SSE clients often cannot set headers |
-| Infrastructure-as-code | Store in a secrets manager; rotate on a schedule using `expiresInDays` |
+| Use Case | Recommended Setup |
+|----------|-------------------|
+| CI/CD pipeline deploys | `operator`-role token with `expiresInDays: 90` |
+| Read-only monitoring | `viewer`-role token, non-expiring |
+| SSE event streams | Any role, pass via `?token=` query param |
+| Infrastructure-as-code | Store in secrets manager, rotate on schedule |
+| Webhook integrations | Dedicated `operator` token per integration |
 
 > [!TIP]
-> Name tokens descriptively (e.g., `"github-actions-staging"`, `"grafana-readonly"`) so they are easy to identify and revoke when no longer needed. The `lastUsedAt` field helps identify stale tokens that can be cleaned up.
+> Name tokens descriptively (e.g., `"github-actions-staging"`, `"grafana-readonly"`) so they are easy to identify and revoke. The `lastUsedAt` field helps find stale tokens that can be cleaned up.
 
 ---
 
 ## Initial Admin Setup
 
-On first boot, if no users exist in the database, BridgePort creates an admin account using two environment variables:
+On first boot, if no users exist, BridgePort creates an admin account from environment variables:
 
 ```bash
 ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=your-secure-password
 ```
 
-The bootstrap logic in `src/services/auth.ts` runs `bootstrapAdminUser()` at startup. It checks `prisma.user.count()` and only proceeds if the count is zero — making it safe to leave these variables set in production without risk of duplicate account creation.
+The `bootstrapAdminUser()` function in `src/services/auth.ts` checks `prisma.user.count()` and only proceeds if zero users exist, making it safe to leave these variables set permanently.
 
-If neither variable is set, the bootstrap step is skipped silently. In that case, use the first-user registration endpoint:
+If neither variable is set, use the one-time registration endpoint instead:
 
 ```http
 POST /api/auth/register
@@ -324,35 +346,34 @@ Content-Type: application/json
 }
 ```
 
-This endpoint creates the user with the `admin` role and returns a JWT. It returns `403 Forbidden` if any user already exists, effectively disabling open registration once the instance is bootstrapped.
+This creates the user with the `admin` role and returns a JWT. It returns `403 Forbidden` if any user already exists, effectively disabling open registration after bootstrap.
 
 > [!NOTE]
-> `ADMIN_PASSWORD` must be at least 8 characters. The `ADMIN_EMAIL` must be a valid email address. If either value fails validation, the server exits at startup with a configuration error.
+> `ADMIN_PASSWORD` must be at least 8 characters. `ADMIN_EMAIL` must be a valid email. Invalid values cause a startup failure.
 
 ---
 
 ## Active User Tracking
 
-BridgePort tracks when users are actively using the application. On every authenticated HTTP request (JWT-based, not API token), the `lastActiveAt` field on the `User` record is updated in the background (fire-and-forget, does not add latency).
+BridgePort tracks when users are actively using the application. On every **JWT-authenticated** request, the `lastActiveAt` field is updated in the background (fire-and-forget, no added latency).
 
 ### Viewing Active Users
 
-In **Admin → Users**, the page header shows an "Active Users" summary panel listing everyone active within the configured window. Individual user cards show a pulsing green "Online" badge for currently active users.
+In **Admin > Users**, the page header shows an active users summary. Individual user cards show a green "Online" badge for currently active users.
 
-**API:**
 ```http
 GET /api/users/active
-Authorization: Bearer <token>
+Authorization: Bearer <admin-token>
 ```
 
-Returns users whose `lastActiveAt` is within the active window.
+Returns users whose `lastActiveAt` is within the configured active window.
 
 ### Configuring the Active Window
 
-The window duration is controlled by `activeUserWindowMin` in System Settings, defaulting to **15 minutes**. Change it at **Admin → System** or via:
+The window is controlled by `activeUserWindowMin` in System Settings (default: **15 minutes**):
 
 ```http
-PATCH /api/system-settings
+PATCH /api/settings/system
 Authorization: Bearer <admin-token>
 Content-Type: application/json
 
@@ -362,38 +383,50 @@ Content-Type: application/json
 ```
 
 > [!NOTE]
-> API token requests do not update `lastActiveAt`. Active user tracking reflects interactive browser sessions only.
+> API token requests do **not** update `lastActiveAt`. Active user tracking reflects interactive browser sessions only.
+
+---
+
+## Configuration Options
+
+| Setting | Location | Default | Description |
+|---------|----------|---------|-------------|
+| `ADMIN_EMAIL` | Environment variable | -- | Email for auto-created admin on first boot |
+| `ADMIN_PASSWORD` | Environment variable | -- | Password for auto-created admin on first boot |
+| `activeUserWindowMin` | System Settings | `15` | Minutes of inactivity before a user is no longer "active" |
+| `allowSecretReveal` | Environment Settings > Configuration | `true` | Whether non-admin users can reveal secret values |
+| JWT expiry | Hardcoded | `7 days` | JWT token lifetime |
 
 ---
 
 ## Troubleshooting
 
 **"Email already in use" when creating a user**
-The email must be unique. Check existing users with `GET /api/users`. If the email belongs to a deleted user that was not fully purged, check the database directly.
+Email must be unique. Check existing users with `GET /api/users`.
 
 **"Cannot delete your own account"**
-This is an intentional safeguard. Log in as a different admin to delete the account, or demote the account to `viewer` if you only want to restrict access.
+Intentional safeguard. Log in as a different admin to delete the account.
 
 **"Current password is incorrect" when changing password**
-The current password submitted does not match. Admins can bypass this check by calling `POST /api/users/:id/change-password` without providing `currentPassword`.
+The submitted current password does not match. Admins can bypass this by calling `POST /api/users/:id/change-password` for another user without providing `currentPassword`.
 
 **"Registration disabled" on `POST /api/auth/register`**
-At least one user exists. Use `POST /api/users` with an existing admin token to create additional accounts.
+At least one user exists. Use `POST /api/users` with an admin token to create additional accounts.
 
 **API token returns 401 after rotation**
-After deleting a token, any system still using the old value will receive `401 Unauthorized`. Update the token value in all dependent systems before revoking the old one.
+Any system using the old token value will fail. Update the token in all dependent systems before revoking the old one. Consider creating the replacement token first, updating integrations, then deleting the old token.
 
-**User is not showing as "Online" in the admin panel**
-The active window check is based on `lastActiveAt`, which is only updated on JWT-authenticated requests — not API token requests. If the user authenticates exclusively via API token (e.g., a service account), they will not appear as online.
+**User not showing as "Online" in admin panel**
+`lastActiveAt` is only updated on JWT requests, not API token requests. Users authenticating exclusively via API tokens (e.g., service accounts) will not appear online.
 
 **Admin cannot change their own role in the UI**
 The role dropdown is intentionally disabled when editing your own account. Ask another admin to make the change.
 
 ---
 
-## Related Docs
+## Related
 
-- [Audit Logs](../audit.md) — every user management action is recorded
-- [Notification Settings](../notifications.md) — configure which channels receive user event notifications
-- [Environment Settings](../environments.md) — per-environment secret reveal permissions
-- [System Settings](../system-settings.md) — `activeUserWindowMin` and other operational defaults
+- [Environments](environments.md) -- per-environment `allowSecretReveal` permission
+- [API Reference](../reference/api.md) -- full endpoint documentation
+- [Real-Time Events](../reference/events.md) -- SSE authentication with API tokens
+- [System Settings](../reference/system-settings.md) -- `activeUserWindowMin` and other defaults

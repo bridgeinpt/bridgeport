@@ -1,40 +1,134 @@
 # BridgePort Documentation
 
-**Dock. Run. Ship. Repeat.**
+Everything you need to deploy, manage, and monitor your Docker infrastructure with BridgePort.
 
-BridgePort is a lightweight, self-hosted deployment management tool for Docker-based infrastructure. It provides a web UI, CLI, and API for managing servers, services, databases, secrets, and more across multiple environments.
+---
 
-## Table of Contents
+## Start Here
 
-### Getting Started
-- [Getting Started](getting-started.md) — Install and run BridgePort with Docker
+New to BridgePort? Start from the top and work down.
 
-### Core Concepts
-- [Environments](environments.md) — Organize infrastructure into logical groups
-- [Servers](servers.md) — Register and manage servers
-- [Services](services.md) — Deploy and manage Docker containers
-- [Container Images](container-images.md) — Track images, tags, and auto-updates
-- [Registries](registries.md) — Connect to container registries
+| Doc | Description |
+|-----|-------------|
+| [Getting Started](getting-started.md) | Deploy BridgePort and manage your first server in 5 minutes |
+| [Core Concepts](concepts.md) | How BridgePort thinks: environments, servers, services, images |
+| [Installation Guide](installation.md) | Docker run, Docker Compose, reverse proxy, and development setup |
+| [Configuration Reference](configuration.md) | Every environment variable, with recipes for common setups |
 
-### Configuration & Secrets
-- [Configuration Reference](configuration.md) — All environment variables and settings
-- [Secrets](secrets.md) — Encrypted secret management
-- [Config Files](config-files.md) — Manage and sync configuration files to servers
+---
 
-### Data Management
-- [Databases](databases.md) — Register databases for backup and monitoring
-- [Backup & Restore](backup-restore.md) — Backup strategies and restore procedures
+## Feature Guides
+
+Learn how to use each feature. Every guide includes a quick start, step-by-step walkthrough, configuration options, and troubleshooting.
+
+### Users and Access
+
+| Doc | Description |
+|-----|-------------|
+| [Users and Roles](guides/users.md) | RBAC model, user management, API tokens, self-service account |
+
+### Infrastructure
+
+| Doc | Description |
+|-----|-------------|
+| [Environments](guides/environments.md) | Create and configure environments with SSH keys and per-module settings |
+| [Servers](guides/servers.md) | Add servers, configure SSH or Docker socket, enable metrics |
+| [Services](guides/services.md) | Deploy containers, configure health checks, attach config files |
+| [Container Images](guides/container-images.md) | Central image management, tag history, auto-update |
+| [Registries](guides/registries.md) | Connect Docker Hub, GHCR, and private registries |
+
+### Configuration and Secrets
+
+| Doc | Description |
+|-----|-------------|
+| [Secrets](guides/secrets.md) | Encrypted secret storage, env templates, reveal controls |
+| [Config Files](guides/config-files.md) | Manage and sync configuration files with edit history |
+
+### Data
+
+| Doc | Description |
+|-----|-------------|
+| [Databases](guides/databases.md) | Register databases, schedule backups, enable monitoring |
+| [S3/Spaces Storage](guides/storage.md) | Configure S3-compatible storage for backup destinations |
 
 ### Monitoring
-- [Monitoring](monitoring.md) — Server metrics, service metrics, database monitoring, health checks, and agents
 
-### Access & Security
-- [Users & Roles](users-and-roles.md) — User management and role-based access control
+| Doc | Description |
+|-----|-------------|
+| [Monitoring Quick Start](guides/monitoring.md) | Pick your monitoring mode and see your first metrics |
+| [Server Monitoring](guides/monitoring-servers.md) | CPU, memory, disk, load -- SSH polling and agent deep dive |
+| [Service Monitoring](guides/monitoring-services.md) | Container CPU, memory, network, and block I/O metrics |
+| [Database Monitoring](guides/monitoring-databases.md) | Plugin-driven database metrics for PostgreSQL, MySQL, SQLite, and more |
+| [Health Checks](guides/health-checks.md) | Container, URL, TCP, and TLS certificate checks with bounce protection |
 
-### Automation
-- [Webhooks](webhooks.md) — CI/CD webhook integration
-- [CLI](cli.md) — Command-line interface for terminal workflows
+### Automation and Visualization
 
-### Reference
-- [API Reference](api-reference.md) — Complete REST API documentation
-- [Troubleshooting](troubleshooting.md) — Common issues and solutions
+| Doc | Description |
+|-----|-------------|
+| [Notifications](guides/notifications.md) | In-app, email, Slack, and webhook notifications with preferences |
+| [Service Topology](guides/topology.md) | Interactive architecture diagram on the dashboard |
+| [Deployment Plans](guides/deployment-plans.md) | Orchestrate multi-service deploys with dependency ordering and auto-rollback |
+| [Webhooks](guides/webhooks.md) | CI/CD webhook integration for automated deployments |
+
+---
+
+## Reference
+
+Detailed technical reference for APIs, CLI, agent, plugins, and settings.
+
+| Doc | Description |
+|-----|-------------|
+| [API Reference](reference/api.md) | REST API authentication, endpoints, and error handling |
+| [CLI Reference](reference/cli.md) | Full command reference with examples and expected output |
+| [Agent Reference](reference/agent.md) | Monitoring agent installation, configuration, and troubleshooting |
+| [Real-Time Events (SSE)](reference/events.md) | Server-Sent Events endpoint, event types, and client integration |
+| [Plugin Authoring](reference/plugins.md) | Create custom service types and database types with monitoring queries |
+| [Environment Settings](reference/environment-settings.md) | All per-environment settings (General, Monitoring, Operations, Data, Configuration) |
+| [System Settings](reference/system-settings.md) | Admin-only system-wide operational settings |
+
+---
+
+## Operations
+
+Run BridgePort reliably in production.
+
+| Doc | Description |
+|-----|-------------|
+| [Upgrades](operations/upgrades.md) | How upgrades work, upgrade procedure, rollback, and agent updates |
+| [Security and Hardening](operations/security.md) | Security architecture, RBAC model, hardening checklist, audit logging |
+| [Backup and Restore](operations/backup-restore.md) | Back up BridgePort's own database and manage database backups |
+| [Troubleshooting](operations/troubleshooting.md) | Common issues, debug steps, and quick fix table |
+| [Architecture Patterns](operations/patterns.md) | Single-server, multi-server, staging+production, and real-world stack examples |
+
+---
+
+## Contributing
+
+Help build BridgePort.
+
+| Doc | Description |
+|-----|-------------|
+| [Contributing Guide](../CONTRIBUTING.md) | Development setup, workflow, code style, and PR process |
+| [Development Setup](development/setup.md) | Full dev environment with hot reload |
+| [Architecture Guide](development/architecture.md) | Codebase deep dive: backend, frontend, scheduler, auth flow |
+| [Database Migrations](development/database-migrations.md) | How to make schema changes safely with Prisma |
+| [Building](development/building.md) | Build the Docker image, Go agent, and CLI |
+
+---
+
+## Quick Links
+
+| I want to... | Go here |
+|---|---|
+| Get BridgePort running in 5 minutes | [Getting Started](getting-started.md) |
+| Deploy to production | [Installation Guide](installation.md) |
+| Add my first server | [Servers](guides/servers.md) |
+| Deploy a service | [Services](guides/services.md) |
+| Set up monitoring | [Monitoring Quick Start](guides/monitoring.md) |
+| Back up my databases | [Databases](guides/databases.md) |
+| Use the CLI | [CLI Reference](reference/cli.md) |
+| Write a plugin | [Plugin Authoring](reference/plugins.md) |
+| Upgrade BridgePort | [Upgrade Guide](operations/upgrades.md) |
+| Fix a problem | [Troubleshooting](operations/troubleshooting.md) |
+| Contribute code | [Contributing Guide](../CONTRIBUTING.md) |
+| Report a vulnerability | [Security Policy](../SECURITY.md) |
