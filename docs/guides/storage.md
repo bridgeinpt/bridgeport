@@ -78,7 +78,7 @@ flowchart LR
 - One storage configuration per BridgePort installation (global credentials)
 - Each environment can independently opt in or out
 - Each database can use a different bucket with a custom key prefix
-- Credentials are encrypted at rest using XChaCha20-Poly1305
+- Credentials are encrypted at rest using AES-256-GCM
 - The secret key is never returned to the client after saving
 
 ---

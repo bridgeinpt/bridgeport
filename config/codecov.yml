@@ -15,6 +15,6 @@ coverage:
 
 ignore:
   - prisma/
-  - test/
+  - tests/
   - "**/*.d.ts"
   - "**/types.ts"

@@ -313,7 +313,7 @@ model Deployment {
 model Secret {
   id             String   @id @default(cuid())
   key            String // e.g., DATABASE_URL, DJANGO_SECRET_KEY
-  encryptedValue String // XChaCha20-Poly1305 encrypted
+  encryptedValue String // AES-256-GCM encrypted
   nonce          String // Encryption nonce (base64)
   description    String?
   neverReveal    Boolean  @default(false) // Write-only secret, cannot be revealed
@@ -418,7 +418,7 @@ model RegistryConnection {
   name                   String // "DigitalOcean", "Docker Hub", etc.
   type                   String // "digitalocean", "dockerhub", "gcr", "ecr", "generic"
   registryUrl            String // API URL or registry domain
-  repositoryPrefix       String? // e.g., "bios-registry" for DO
+  repositoryPrefix       String? // e.g., "my-registry" for DO
   encryptedToken         String? // Encrypted API token
   tokenNonce             String?
   username               String? // For basic auth registries
@@ -665,7 +665,7 @@ model BounceTracker {
 model ContainerImage {
   id            String    @id @default(cuid())
   name          String // Display name: "BIOS Backend"
-  imageName     String // Full path: registry.digitalocean.com/bios-registry/bios-backend
+  imageName     String // Full path: registry.digitalocean.com/my-registry/my-app
   currentTag    String // Last deployed tag (to any service)
   latestTag     String? // Latest from registry (for update detection)
   latestDigest    String?

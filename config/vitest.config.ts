@@ -13,16 +13,16 @@ import path from 'path';
 export default defineConfig({
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': path.resolve(__dirname, '../src'),
     },
   },
   test: {
     globals: true,
     environment: 'node',
-    setupFiles: ['./test/setup.ts'],
+    setupFiles: ['./tests/setup.ts'],
     include: [
       'src/routes/**/*.test.ts',
-      'test/**/*.test.ts',
+      'tests/**/*.test.ts',
     ],
     exclude: [
       'node_modules',
@@ -34,7 +34,7 @@ export default defineConfig({
       include: ['src/**/*.ts'],
       exclude: [
         'prisma/**',
-        'test/**',
+        'tests/**',
         'src/types/**',
         '**/types.ts',
         '**/index.ts',

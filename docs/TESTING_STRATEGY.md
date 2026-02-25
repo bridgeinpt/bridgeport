@@ -108,9 +108,12 @@ Colocated test files (standard modern Node.js convention with Vitest):
 
 ```
 bridgeport/
-├── vitest.config.ts              # Backend Vitest config
-├── vitest.workspace.ts           # Vitest workspace (backend + frontend)
-├── test/                         # Shared test infrastructure
+├── config/                       # Build/test configuration
+│   ├── vitest.config.ts          # Backend integration test config
+│   ├── vitest.unit.config.ts     # Backend unit test config
+│   ├── vitest.workspace.ts       # Vitest workspace
+│   └── codecov.yml               # Code coverage config
+├── tests/                        # Shared test infrastructure
 │   ├── setup.ts                  # Global test setup (env vars, mocks)
 │   ├── teardown.ts               # Global teardown
 │   ├── factories/                # Test data factories
@@ -278,8 +281,8 @@ describe('crypto', () => {
 // src/services/orchestration.test.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { buildDeploymentPlan, executePlan } from './orchestration.js';
-import { createMockDocker } from '../../test/mocks/docker.js';
-import { createTestScenario } from '../../test/scenarios/healthy-deployment.js';
+import { createMockDocker } from '../../tests/mocks/docker.js';
+import { createTestScenario } from '../../tests/scenarios/healthy-deployment.js';
 
 describe('orchestration', () => {
   describe('buildDeploymentPlan', () => {
@@ -394,8 +397,8 @@ All API routes tested via `fastify.inject()` — in-process, no port binding, fa
 ```typescript
 // src/routes/auth.test.ts
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { buildTestApp } from '../../test/helpers/app.js';
-import { createTestUser } from '../../test/factories/user.js';
+import { buildTestApp } from '../../tests/helpers/app.js';
+import { createTestUser } from '../../tests/factories/user.js';
 
 describe('POST /api/auth/login', () => {
   let app: Awaited<ReturnType<typeof buildTestApp>>;
@@ -960,7 +963,7 @@ for (const op of sensitiveOperations) {
 Verify all migrations apply cleanly in sequence on a fresh database:
 
 ```typescript
-// test/migrations/migration.test.ts
+// tests/migrations/migration.test.ts
 import { describe, it, expect } from 'vitest';
 import { execSync } from 'child_process';
 import { mkdtempSync, rmSync } from 'fs';
@@ -1039,7 +1042,7 @@ describe('database migrations', () => {
 Each factory creates a minimal valid entity with sensible defaults. All required relations are handled automatically.
 
 ```typescript
-// test/factories/server.ts
+// tests/factories/server.ts
 import { prisma } from '../helpers/db.js';
 import { createTestEnvironment } from './environment.js';
 
@@ -1074,7 +1077,7 @@ export async function createTestServer(overrides: ServerOverrides = {}) {
 For integration tests requiring complex state:
 
 ```typescript
-// test/scenarios/healthy-deployment.ts
+// tests/scenarios/healthy-deployment.ts
 export async function createHealthyDeploymentScenario() {
   const env = await createTestEnvironment({ name: 'production' });
   const server = await createTestServer({ environmentId: env.id });
@@ -1092,7 +1095,7 @@ export async function createHealthyDeploymentScenario() {
   return { env, server, image, service, deployment };
 }
 
-// test/scenarios/failed-rollback.ts
+// tests/scenarios/failed-rollback.ts
 export async function createFailedRollbackScenario() {
   const base = await createHealthyDeploymentScenario();
 
@@ -1117,7 +1120,7 @@ export async function createFailedRollbackScenario() {
 ### 10.3 Database Helpers
 
 ```typescript
-// test/helpers/db.ts
+// tests/helpers/db.ts
 import { PrismaClient } from '@prisma/client';
 import { execSync } from 'child_process';
 
@@ -1164,10 +1167,10 @@ export { prisma };
 ### 11.1 File Naming
 
 - Test files: `{source-file}.test.ts` (backend) or `{source-file}.test.tsx` (frontend)
-- Test factories: `test/factories/{entity}.ts`
-- Test scenarios: `test/scenarios/{scenario-name}.ts`
-- Test mocks: `test/mocks/{dependency}.ts`
-- Test helpers: `test/helpers/{purpose}.ts`
+- Test factories: `tests/factories/{entity}.ts`
+- Test scenarios: `tests/scenarios/{scenario-name}.ts`
+- Test mocks: `tests/mocks/{dependency}.ts`
+- Test helpers: `tests/helpers/{purpose}.ts`
 
 ### 11.2 Describe Block Structure
 
@@ -1271,7 +1274,7 @@ Every PR must achieve **90%+ line coverage on all changed or new files**. This i
 
 Files excluded from coverage requirements:
 ```
-// vitest.config.ts coverage.exclude
+// config/vitest.config.ts coverage.exclude
 [
   'prisma/**',
   'test/**',
@@ -1401,7 +1404,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npx vitest run test/migrations/
+      - run: npx vitest run tests/migrations/
 
   # ── Tier 3: System Tests (nightly) ──────────────────────
   system:
@@ -1482,7 +1485,7 @@ coverage:
 
 ignore:
   - prisma/
-  - test/
+  - tests/
   - "**/*.d.ts"
   - "**/types.ts"
 ```
@@ -1543,7 +1546,7 @@ Recommended extension: **Vitest** (`vitest.explorer`) — inline test status, cl
     "test:unit": "vitest run --testPathPattern='src/lib/.*\\.test\\.ts$'",
     "test:integration": "vitest run --project backend",
     "test:coverage": "vitest run --coverage",
-    "test:migrations": "vitest run test/migrations/",
+    "test:migrations": "vitest run tests/migrations/",
     "test:ui": "cd ui && vitest run",
     "test:ui:watch": "cd ui && vitest",
     "test:all": "vitest run && cd ui && vitest run"
@@ -1560,22 +1563,22 @@ This is a one-shot implementation. Build everything in order — each phase buil
 ### Phase 1: Infrastructure (test tooling + helpers)
 
 1. Install dependencies: `vitest`, `@vitest/coverage-v8`, `@testing-library/react`, `@testing-library/user-event`, `msw`, `@testing-library/jest-dom`
-2. Create `vitest.config.ts` (backend) and `ui/vitest.config.ts` (frontend)
-3. Create `vitest.workspace.ts` for workspace mode
-4. Create `test/setup.ts` — global setup (env vars, mock MASTER_KEY/JWT_SECRET)
-5. Create `test/helpers/db.ts` — in-memory Prisma client
-6. Create `test/helpers/app.ts` — Fastify test app builder
-7. Create `test/helpers/auth.ts` — JWT token generation for tests
-8. Create `test/helpers/sse.ts` — SSE response parser
-9. Create `test/mocks/` — Docker, SSH, registry, SMTP, Slack, Spaces mocks
+2. Create `config/vitest.config.ts` (backend) and `ui/vitest.config.ts` (frontend)
+3. Create `config/vitest.workspace.ts` for workspace mode
+4. Create `tests/setup.ts` — global setup (env vars, mock MASTER_KEY/JWT_SECRET)
+5. Create `tests/helpers/db.ts` — in-memory Prisma client
+6. Create `tests/helpers/app.ts` — Fastify test app builder
+7. Create `tests/helpers/auth.ts` — JWT token generation for tests
+8. Create `tests/helpers/sse.ts` — SSE response parser
+9. Create `tests/mocks/` — Docker, SSH, registry, SMTP, Slack, Spaces mocks
 10. Create `ui/test/setup.ts` — frontend test setup (jsdom, MSW)
 11. Create `ui/test/render.tsx` — custom render with providers
 12. Create `ui/test/msw-handlers.ts` — default API mock handlers
 
 ### Phase 2: Test Data (factories + scenarios)
 
-13. Create all factory functions in `test/factories/`
-14. Create named scenarios in `test/scenarios/`
+13. Create all factory functions in `tests/factories/`
+14. Create named scenarios in `tests/scenarios/`
 15. Verify factories work by writing a smoke test
 
 ### Phase 3: Backend Unit Tests (`src/lib/`)
@@ -1655,7 +1658,7 @@ This is a one-shot implementation. Build everything in order — each phase buil
 
 ### Phase 7: Migration Tests
 
-79. `test/migrations/migration.test.ts` — up/down cycle, idempotency, schema match
+79. `tests/migrations/migration.test.ts` — up/down cycle, idempotency, schema match
 
 ### Phase 8: Frontend Tests
 

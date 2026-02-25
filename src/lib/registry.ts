@@ -55,7 +55,7 @@ export class DORegistryClient implements RegistryClient {
   private registryName: string;
   private dockerCreds?: { username: string; password: string };
 
-  constructor(token: string, registryName: string = 'bios-registry') {
+  constructor(token: string, registryName: string) {
     this.token = token;
     this.registryName = registryName;
   }
@@ -508,7 +508,10 @@ export class RegistryFactory {
         if (!creds.token) {
           throw new Error('Token required for DigitalOcean registry');
         }
-        return new DORegistryClient(creds.token, creds.repositoryPrefix || 'bios-registry');
+        if (!creds.repositoryPrefix) {
+          throw new Error('Repository prefix (registry name) is required for DigitalOcean registry');
+        }
+        return new DORegistryClient(creds.token, creds.repositoryPrefix);
 
       case 'dockerhub':
         return new DockerHubClient({

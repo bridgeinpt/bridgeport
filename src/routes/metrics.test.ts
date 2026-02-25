@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { buildTestApp, type TestApp } from '../../test/helpers/app.js';
-import { createTestUser } from '../../test/factories/user.js';
-import { createTestEnvironment } from '../../test/factories/environment.js';
-import { createTestServer } from '../../test/factories/server.js';
-import { generateTestToken } from '../../test/helpers/auth.js';
+import { buildTestApp, type TestApp } from '../../tests/helpers/app.js';
+import { createTestUser } from '../../tests/factories/user.js';
+import { createTestEnvironment } from '../../tests/factories/environment.js';
+import { createTestServer } from '../../tests/factories/server.js';
+import { generateTestToken } from '../../tests/helpers/auth.js';
 
 describe('metrics routes', () => {
   let app: TestApp;

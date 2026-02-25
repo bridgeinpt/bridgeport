@@ -41,13 +41,8 @@ jobs:
           echo "CLI_VERSION=${CLI_VER}" >> $GITHUB_ENV
           echo "CLI version (from git): ${CLI_VER}"
 
-      - name: Install doctl
-        uses: digitalocean/action-doctl@v2
-        with:
-          token: ${{ secrets.DO_REGISTRY_TOKEN }}
-
-      - name: Log in to DigitalOcean Container Registry
-        run: doctl registry login --expiry-seconds 1200
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
       - name: Build BridgePort Docker image
         run: |
@@ -56,11 +51,11 @@ jobs:
             --build-arg AGENT_VERSION=${{ env.AGENT_VERSION }} \
             --build-arg CLI_VERSION=${{ env.CLI_VERSION }} \
             -f docker/Dockerfile \
-            -t registry.digitalocean.com/bios-registry/bridgeport:${{ env.VERSION_TAG }} \
-            -t registry.digitalocean.com/bios-registry/bridgeport:latest \
+            -t ghcr.io/bridgeinpt/bridgeport:${{ env.VERSION_TAG }} \
+            -t ghcr.io/bridgeinpt/bridgeport:latest \
             .
 
       - name: Push BridgePort Docker image
         run: |
-          docker push registry.digitalocean.com/bios-registry/bridgeport:${{ env.VERSION_TAG }}
-          docker push registry.digitalocean.com/bios-registry/bridgeport:latest
+          docker push ghcr.io/bridgeinpt/bridgeport:${{ env.VERSION_TAG }}
+          docker push ghcr.io/bridgeinpt/bridgeport:latest

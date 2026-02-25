@@ -34,7 +34,7 @@ describe('image-utils', () => {
     });
 
     it('should detect DigitalOcean registry', () => {
-      const result = parseRegistryFromImage('registry.digitalocean.com/bios-registry/app-api');
+      const result = parseRegistryFromImage('registry.digitalocean.com/my-registry/my-app');
       expect(result).toEqual({ registryUrl: 'registry.digitalocean.com', isDockerHub: false });
     });
 
@@ -75,7 +75,7 @@ describe('image-utils', () => {
     });
 
     it('should extract name from registry image', () => {
-      expect(extractImageName('registry.digitalocean.com/bios-registry/app-api')).toBe('app-api');
+      expect(extractImageName('registry.digitalocean.com/my-registry/my-app')).toBe('my-app');
     });
 
     it('should strip tag before extracting', () => {
@@ -93,13 +93,13 @@ describe('image-utils', () => {
 
   describe('extractRepoName', () => {
     it('should extract last segment without prefix', () => {
-      expect(extractRepoName('registry.digitalocean.com/bios-registry/app-api', null))
-        .toBe('app-api');
+      expect(extractRepoName('registry.digitalocean.com/my-registry/my-app', null))
+        .toBe('my-app');
     });
 
     it('should extract name after prefix', () => {
-      expect(extractRepoName('registry.digitalocean.com/bios-registry/app-api', 'bios-registry'))
-        .toBe('app-api');
+      expect(extractRepoName('registry.digitalocean.com/my-registry/my-app', 'my-registry'))
+        .toBe('my-app');
     });
 
     it('should handle multi-segment repo after prefix', () => {
@@ -268,8 +268,8 @@ describe('image-utils', () => {
 
   describe('stripRegistryPrefix', () => {
     it('should strip DigitalOcean registry prefix', () => {
-      expect(stripRegistryPrefix('registry.digitalocean.com/bios-registry/app-api'))
-        .toBe('bios-registry/app-api');
+      expect(stripRegistryPrefix('registry.digitalocean.com/my-registry/my-app'))
+        .toBe('my-registry/my-app');
     });
 
     it('should strip GHCR prefix', () => {

@@ -65,7 +65,7 @@ graph TB
 ```yaml
 services:
   bridgeport:
-    image: registry.digitalocean.com/bios-registry/bridgeport:latest
+    image: ghcr.io/bridgeinpt/bridgeport:latest
     ports:
       - "3000:3000"
     env_file: .env

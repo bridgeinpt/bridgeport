@@ -18,7 +18,7 @@
 
 services:
   bridgeport:
-    image: registry.digitalocean.com/bios-registry/bridgeport:latest
+    image: ghcr.io/bridgeinpt/bridgeport:latest
     container_name: bridgeport
     restart: unless-stopped
     ports:

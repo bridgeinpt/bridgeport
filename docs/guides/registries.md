@@ -98,7 +98,7 @@ sequenceDiagram
 | **Name** | Yes | Display name (e.g., "Production DO Registry"). Must be unique per environment. |
 | **Type** | Yes | `digitalocean`, `dockerhub`, or `generic` |
 | **Registry URL** | Yes | The registry endpoint (see [Authentication](#authentication) for examples) |
-| **Repository Prefix** | No | Narrows repository listing (e.g., `bios-registry` for DO) |
+| **Repository Prefix** | No | Narrows repository listing (e.g., `my-registry` for DO) |
 | **Credentials** | Depends | Token, or username/password -- varies by type |
 | **Default** | No | Mark as default registry for this environment |
 | **Refresh Interval** | No | Minutes between update checks (default: 30, range: 5-1440) |
@@ -118,11 +118,11 @@ Content-Type: application/json
   "name": "Production DO Registry",
   "type": "digitalocean",
   "registryUrl": "https://api.digitalocean.com/v2/registry",
-  "repositoryPrefix": "bios-registry",
+  "repositoryPrefix": "my-registry",
   "token": "dop_v1_abc123...",
   "isDefault": true,
   "refreshIntervalMinutes": 30,
-  "autoLinkPattern": "bios-*"
+  "autoLinkPattern": "myapp-*"
 }
 ```
 
@@ -134,18 +134,18 @@ Content-Type: application/json
     "name": "Production DO Registry",
     "type": "digitalocean",
     "registryUrl": "https://api.digitalocean.com/v2/registry",
-    "repositoryPrefix": "bios-registry",
+    "repositoryPrefix": "my-registry",
     "hasToken": true,
     "hasPassword": false,
     "isDefault": true,
     "refreshIntervalMinutes": 30,
-    "autoLinkPattern": "bios-*"
+    "autoLinkPattern": "myapp-*"
   }
 }
 ```
 
 > [!NOTE]
-> All credentials (tokens and passwords) are encrypted at rest using XChaCha20-Poly1305. They are never returned in API responses -- only `hasToken` and `hasPassword` booleans indicate whether credentials are stored.
+> All credentials (tokens and passwords) are encrypted at rest using AES-256-GCM. They are never returned in API responses -- only `hasToken` and `hasPassword` booleans indicate whether credentials are stored.
 
 ---
 
@@ -158,7 +158,7 @@ Each registry type accepts different credential formats:
 ```
 Registry URL: https://api.digitalocean.com/v2/registry
 Token:        dop_v1_abc123...  (DO personal access token with registry read scope)
-Prefix:       bios-registry     (your registry name)
+Prefix:       my-registry     (your registry name)
 ```
 
 The DO client uses two APIs: the DigitalOcean management API for tag listing, and the Docker Registry V2 API (`registry.digitalocean.com`) as a fallback for manifest digests.
@@ -246,7 +246,7 @@ An auto-link pattern is a string that BridgePort matches against image names dur
 
 | Pattern | Matches |
 |---------|---------|
-| `bios-*` | `bios-backend`, `bios-frontend`, `bios-worker` |
+| `myapp-*` | `myapp-backend`, `myapp-frontend`, `myapp-worker` |
 | `registry.example.com/*` | Any image from `registry.example.com` |
 | (empty) | No auto-linking (manual linking only) |
 
@@ -258,7 +258,7 @@ Authorization: Bearer <token>
 Content-Type: application/json
 
 {
-  "autoLinkPattern": "bios-*"
+  "autoLinkPattern": "myapp-*"
 }
 ```
 

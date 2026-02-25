@@ -87,7 +87,7 @@ Related: [Registries Guide](guides/registries.md)
 
 ### Secret
 
-An encrypted key-value pair stored in BridgePort's database. Secrets are encrypted at rest with XChaCha20-Poly1305 and can be injected into services as environment variables. Some secrets can be marked as `neverReveal` to prevent viewing in the UI.
+An encrypted key-value pair stored in BridgePort's database. Secrets are encrypted at rest with AES-256-GCM and can be injected into services as environment variables. Some secrets can be marked as `neverReveal` to prevent viewing in the UI.
 
 Related: [Secrets Guide](guides/secrets.md)
 
@@ -164,7 +164,7 @@ erDiagram
 | **Health Check** | A verification of a service's health status. Types include container health, HTTP URL checks, TCP connectivity, and TLS certificate expiry. | [Health Checks](guides/health-checks.md) |
 | **Notification Type** | A defined category of notification (e.g., deployment success, health failure) with templates, severity, and per-user channel preferences. | [Notifications](guides/notifications.md) |
 | **Registry** | A container registry connection that BridgePort polls for new image tags. | [Registries](guides/registries.md) |
-| **Secret** | An encrypted key-value pair, stored with XChaCha20-Poly1305 encryption. Injected into services as environment variables. | [Secrets](guides/secrets.md) |
+| **Secret** | An encrypted key-value pair, stored with AES-256-GCM encryption. Injected into services as environment variables. | [Secrets](guides/secrets.md) |
 | **Server** | A machine managed by BridgePort, connected via SSH or Docker socket. | [Servers](guides/servers.md) |
 | **Service** | A Docker container on a server, linked to a Container Image. The core deployable unit. | [Services](guides/services.md) |
 | **Service Dependency** | A relationship between two services that controls deployment ordering: `health_before` (check health first) or `deploy_after` (deploy in sequence). | [Deployment Plans](guides/deployment-plans.md) |

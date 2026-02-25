@@ -72,7 +72,7 @@ flowchart TB
 
 - **Plugin-driven types.** Database types (PostgreSQL, MySQL, SQLite) are defined as plugins in JSON files. Each plugin specifies connection fields, backup/restore commands, and monitoring queries. Admins can customize types at Admin > Database Types.
 - **SSH-based operations.** Backups and SSH-mode monitoring execute commands on the server that hosts the database, using the environment's SSH key.
-- **Encrypted credentials.** Database usernames and passwords are encrypted at rest using XChaCha20-Poly1305.
+- **Encrypted credentials.** Database usernames and passwords are encrypted at rest using AES-256-GCM.
 - **Environment-scoped.** Databases belong to an environment. Each database name must be unique within its environment.
 
 ---

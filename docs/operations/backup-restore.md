@@ -302,7 +302,7 @@ For detailed setup, see the [Storage guide](../guides/storage.md).
    ```yaml
    services:
      bridgeport:
-       image: registry.digitalocean.com/bios-registry/bridgeport:previous-tag
+       image: ghcr.io/bridgeinpt/bridgeport:previous-tag
    ```
 
 5. Report the migration issue to the BridgePort maintainers.

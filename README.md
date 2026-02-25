@@ -25,7 +25,7 @@ BridgePort gives you a single web UI to manage all your Docker infrastructure. C
 | **Deploy** | One-Click Deployments | Deploy new image tags with auto-rollback on failure |
 | **Monitor** | Real-Time Monitoring | Server, service, and database metrics via SSH polling or Go agent |
 | **Health** | Health Checks | Container, URL, TCP, and TLS certificate checks with bounce protection |
-| **Secrets** | Encrypted Secrets | XChaCha20-Poly1305 encryption at rest with per-environment isolation |
+| **Secrets** | Encrypted Secrets | AES-256-GCM encryption at rest with per-environment isolation |
 | **Backup** | Database Backups | Scheduled PostgreSQL, MySQL, and SQLite backups to S3-compatible storage |
 | **Notify** | Notifications | In-app, email (SMTP), Slack, and outgoing webhooks |
 | **Registry** | Registry Integration | Docker Hub, GHCR, and private registries with auto-update |
@@ -166,14 +166,14 @@ flowchart TD
 | Use the CLI | [CLI Reference](docs/reference/cli.md) |
 | Orchestrate multi-service deploys | [Deployment Plans](docs/guides/deployment-plans.md) |
 | Contribute to BridgePort | [Contributing Guide](CONTRIBUTING.md) |
-| Report a security issue | [Security Policy](SECURITY.md) |
+| Report a security issue | [Security Policy](docs/SECURITY.md) |
 
 ## Community and Support
 
 - **Bug reports and feature requests**: [GitHub Issues](https://github.com/bridgeinpt/bridgeport/issues)
 - **Questions and discussions**: [GitHub Discussions](https://github.com/bridgeinpt/bridgeport/discussions)
 - **Contributing**: See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines
-- **Security issues**: See [SECURITY.md](SECURITY.md) for responsible disclosure
+- **Security issues**: See [SECURITY.md](docs/SECURITY.md) for responsible disclosure
 
 ## License
 

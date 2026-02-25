@@ -29,6 +29,12 @@ data/
 # Claude local settings (machine-specific permissions)
 .claude/settings.local.json
 
+# Test artifacts
+test-uploads/
+
+# Specs (local design docs)
+specs/
+
 # OS
 .DS_Store
 Thumbs.db

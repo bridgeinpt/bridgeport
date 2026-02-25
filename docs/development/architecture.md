@@ -116,7 +116,12 @@ bridgeport/
 │   ├── Dockerfile              # Multi-stage production build
 │   ├── docker-compose.yml      # Production deployment template
 │   └── entrypoint.sh           # Startup script (migrations + boot)
-└── test/                       # Test infrastructure
+├── config/                     # Build/test configuration
+│   ├── vitest.config.ts        # Integration test config
+│   ├── vitest.unit.config.ts   # Unit test config
+│   └── codecov.yml             # Code coverage config
+├── docs/                       # Project documentation
+└── tests/                      # Test infrastructure
     ├── helpers/                 # Test app builder, auth helpers
     ├── factories/               # Test data factories
     └── security/                # RBAC matrix tests
@@ -413,9 +418,9 @@ BridgePort manages Docker infrastructure -- it does not handle high-throughput a
 - No connection management complexity
 - Sufficient performance for the operational data BridgePort stores
 
-### Why AES-256-GCM instead of XChaCha20-Poly1305?
+### Why AES-256-GCM?
 
-While the documentation and codebase comments reference XChaCha20-Poly1305, the actual implementation uses AES-256-GCM. AES-256-GCM is an AEAD cipher supported natively by Node.js `crypto` module without additional dependencies. It provides both confidentiality and integrity verification, with a 12-byte IV and 16-byte authentication tag per encryption operation.
+AES-256-GCM is an AEAD cipher supported natively by Node.js `crypto` module without additional dependencies. It provides both confidentiality and integrity verification, with a 12-byte IV and 16-byte authentication tag per encryption operation.
 
 ---
 
