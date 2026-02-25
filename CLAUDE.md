@@ -129,7 +129,7 @@ For legacy databases without migration history, the entrypoint auto-baselines th
 - **Backend**: Node.js, Fastify, TypeScript
 - **Frontend**: React, Vite, Tailwind CSS, Recharts (charts)
 - **Database**: SQLite with Prisma ORM
-- **Encryption**: XChaCha20-Poly1305 for secrets
+- **Encryption**: AES-256-GCM for secrets
 - **Error Monitoring**: Sentry (optional, backend + frontend)
 - **Monitoring Agent**: Go
 - **CLI**: Go (Cobra framework)
@@ -607,7 +607,7 @@ const servers = await prisma.server.findMany();
 ```
 
 ### Secret Encryption
-Secrets are encrypted with XChaCha20-Poly1305. Use `src/lib/crypto.ts`:
+Secrets are encrypted with AES-256-GCM. Use `src/lib/crypto.ts`:
 
 ```typescript
 import { encrypt, decrypt } from '../lib/crypto';
@@ -851,7 +851,7 @@ ConfigurationSettings - Secret reveal permissions
 
 ## Important Notes
 
-- BridgePort is designed to be a **generic tool** - avoid BridgeIn-specific code
+- BridgePort is a **generic, vendor-neutral tool** - do not add code tied to any specific company or hosting provider
 - All secrets must be encrypted at rest
 - SSH keys are stored encrypted per-environment
 - Audit logging is required for sensitive operations
