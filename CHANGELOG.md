@@ -72,7 +72,7 @@ Initial public release of BridgePort.
 - Post-deployment health verification with configurable retries
 
 **Secrets and Configuration**
-- Encrypted secret storage with XChaCha20-Poly1305 encryption
+- Encrypted secret storage with AES-256-GCM encryption
 - Per-environment secret isolation
 - `neverReveal` flag for write-only secrets
 - Per-environment reveal control (disable secret viewing for production)

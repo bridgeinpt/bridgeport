@@ -36,7 +36,7 @@ A `ContainerImage` is a shared entity that sits between your registry and your s
 
 ```mermaid
 flowchart LR
-    R[Container Registry] -->|check for updates| CI[ContainerImage<br/>'bios-backend'<br/>tag: v2.3.1]
+    R[Container Registry] -->|check for updates| CI[ContainerImage<br/>'my-app'<br/>tag: v2.3.1]
     CI --> S1[Service: app-api<br/>server-1]
     CI --> S2[Service: app-api<br/>server-2]
     CI --> S3[Service: app-worker<br/>server-3]
@@ -49,7 +49,7 @@ flowchart LR
 
 **Key concepts:**
 
-- **One image, many services.** A `ContainerImage` named "BIOS Backend" pointing to `registry.digitalocean.com/bios-registry/bios-backend` can be linked to `app-api` on server-1, `app-api` on server-2, and `app-worker` on server-3.
+- **One image, many services.** A `ContainerImage` named "My App Backend" pointing to `registry.digitalocean.com/my-registry/my-app` can be linked to `app-api` on server-1, `app-api` on server-2, and `app-worker` on server-3.
 - **Tag tracking.** The `currentTag` field records what was last deployed. The `latestTag` field records what the registry reports as newest.
 - **Deployment orchestration.** Deploying a tag creates a `DeploymentPlan` that respects service dependencies, performs health checks, and supports auto-rollback.
 - **Automatic discovery.** When BridgePort discovers new containers on a server, it automatically creates or links `ContainerImage` records for them.
@@ -66,8 +66,8 @@ flowchart LR
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| **Name** | Yes | Display name (e.g., "BIOS Backend") |
-| **Image Name** | Yes | Full Docker image path without the tag (e.g., `registry.digitalocean.com/bios-registry/bios-backend`) |
+| **Name** | Yes | Display name (e.g., "My App Backend") |
+| **Image Name** | Yes | Full Docker image path without the tag (e.g., `registry.digitalocean.com/my-registry/my-app`) |
 | **Current Tag** | Yes | The tag currently running (e.g., `v2.3.1` or `latest`) |
 | **Registry Connection** | No | Link to a [registry](registries.md) for update checking and tag browsing |
 
@@ -81,8 +81,8 @@ Authorization: Bearer <token>
 Content-Type: application/json
 
 {
-  "name": "BIOS Backend",
-  "imageName": "registry.digitalocean.com/bios-registry/bios-backend",
+  "name": "My App Backend",
+  "imageName": "registry.digitalocean.com/my-registry/my-app",
   "currentTag": "v2.3.1",
   "registryConnectionId": "clxyz..."
 }
@@ -93,8 +93,8 @@ Content-Type: application/json
 {
   "image": {
     "id": "clxyz...",
-    "name": "BIOS Backend",
-    "imageName": "registry.digitalocean.com/bios-registry/bios-backend",
+    "name": "My App Backend",
+    "imageName": "registry.digitalocean.com/my-registry/my-app",
     "currentTag": "v2.3.1",
     "autoUpdate": false,
     "updateAvailable": false
@@ -323,7 +323,7 @@ Content-Type: application/json
 {
   "plan": {
     "id": "clxyz...",
-    "name": "Deploy bios-backend v2.4.0",
+    "name": "Deploy my-app v2.4.0",
     "status": "pending",
     "imageTag": "v2.4.0"
   }

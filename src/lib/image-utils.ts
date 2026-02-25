@@ -12,7 +12,7 @@ export interface ParsedRegistry {
 /**
  * Parse registry URL from an image name.
  * Examples:
- *   registry.digitalocean.com/bios-registry/app-api -> registry.digitalocean.com
+ *   registry.digitalocean.com/my-registry/my-app -> registry.digitalocean.com
  *   ghcr.io/owner/repo -> ghcr.io
  *   nginx -> docker.io (Docker Hub)
  *   caddy:2-alpine -> docker.io
@@ -34,7 +34,7 @@ export function parseRegistryFromImage(imageName: string): ParsedRegistry {
 /**
  * Extract just the image name (last path segment) from a full image path.
  * Examples:
- *   registry.digitalocean.com/bios-registry/app-api -> app-api
+ *   registry.digitalocean.com/my-registry/my-app -> app-api
  *   ghcr.io/owner/repo -> repo
  *   nginx -> nginx
  *   caddy:2-alpine -> caddy
@@ -49,10 +49,10 @@ export function extractImageName(fullImagePath: string): string {
 /**
  * Extract repository name from full image name, optionally using a prefix pattern.
  * Examples (no prefix):
- *   registry.digitalocean.com/bios-registry/app-api -> app-api
+ *   registry.digitalocean.com/my-registry/my-app -> app-api
  *   ghcr.io/owner/repo -> repo
- * Examples (with prefix "bios-registry"):
- *   registry.digitalocean.com/bios-registry/app-api -> app-api
+ * Examples (with prefix "my-registry"):
+ *   registry.digitalocean.com/my-registry/my-app -> app-api
  */
 export function extractRepoName(imageName: string, repositoryPrefix: string | null): string {
   // Remove registry domain and any prefix
@@ -220,7 +220,7 @@ export function findCompanionTag(
 /**
  * Strip registry prefix from an image name to get the repository path.
  * Examples:
- *   registry.digitalocean.com/bios-registry/app-api -> bios-registry/app-api
+ *   registry.digitalocean.com/my-registry/my-app -> my-registry/my-app
  *   ghcr.io/owner/repo -> owner/repo
  *   nginx -> nginx
  */

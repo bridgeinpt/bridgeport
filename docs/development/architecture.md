@@ -418,9 +418,9 @@ BridgePort manages Docker infrastructure -- it does not handle high-throughput a
 - No connection management complexity
 - Sufficient performance for the operational data BridgePort stores
 
-### Why AES-256-GCM instead of XChaCha20-Poly1305?
+### Why AES-256-GCM?
 
-While the documentation and codebase comments reference XChaCha20-Poly1305, the actual implementation uses AES-256-GCM. AES-256-GCM is an AEAD cipher supported natively by Node.js `crypto` module without additional dependencies. It provides both confidentiality and integrity verification, with a 12-byte IV and 16-byte authentication tag per encryption operation.
+AES-256-GCM is an AEAD cipher supported natively by Node.js `crypto` module without additional dependencies. It provides both confidentiality and integrity verification, with a 12-byte IV and 16-byte authentication tag per encryption operation.
 
 ---
 

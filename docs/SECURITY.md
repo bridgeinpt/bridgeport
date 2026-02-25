@@ -63,7 +63,7 @@ We recommend always running the latest version. Upgrades are designed to be seam
 
 BridgePort includes several security features by default:
 
-- **Encryption at rest**: Secrets, SSH keys, and registry credentials are encrypted with XChaCha20-Poly1305 using the `MASTER_KEY`
+- **Encryption at rest**: Secrets, SSH keys, and registry credentials are encrypted with AES-256-GCM using the `MASTER_KEY`
 - **Authentication**: JWT tokens with bcrypt password hashing, plus API tokens for programmatic access
 - **Authorization**: Role-based access control with three tiers (admin, operator, viewer)
 - **Audit logging**: All sensitive operations are logged with user, action, and timestamp

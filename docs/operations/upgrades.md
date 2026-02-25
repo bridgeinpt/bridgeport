@@ -57,7 +57,7 @@ docker compose up -d
 ### Docker Run
 
 ```bash
-docker pull registry.digitalocean.com/bios-registry/bridgeport:latest
+docker pull ghcr.io/bridgeinpt/bridgeport:latest
 docker stop bridgeport && docker rm bridgeport
 docker run -d \
   --name bridgeport \
@@ -67,7 +67,7 @@ docker run -d \
   -e DATABASE_URL=file:/data/bridgeport.db \
   -e UPLOAD_DIR=/data/uploads \
   -v ./data:/data \
-  registry.digitalocean.com/bios-registry/bridgeport:latest
+  ghcr.io/bridgeinpt/bridgeport:latest
 ```
 
 ### Expected Log Output
@@ -170,7 +170,7 @@ Look for `BridgePort running at http://0.0.0.0:3000` as confirmation that startu
    ```yaml
    services:
      bridgeport:
-       image: registry.digitalocean.com/bios-registry/bridgeport:previous-tag
+       image: ghcr.io/bridgeinpt/bridgeport:previous-tag
    ```
 
 4. Start the container:

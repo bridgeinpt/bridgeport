@@ -127,7 +127,7 @@ Authorization: Bearer <admin-token>
 
 ### SSH Key Management
 
-Each environment has one SSH private key shared by all servers in that environment. The key is encrypted at rest using XChaCha20-Poly1305 and stored as `nonce:ciphertext` in the database.
+Each environment has one SSH private key shared by all servers in that environment. The key is encrypted at rest using AES-256-GCM and stored as `nonce:ciphertext` in the database.
 
 #### Uploading an SSH Key
 

@@ -25,7 +25,7 @@ BridgePort gives you a single web UI to manage all your Docker infrastructure. C
 | **Deploy** | One-Click Deployments | Deploy new image tags with auto-rollback on failure |
 | **Monitor** | Real-Time Monitoring | Server, service, and database metrics via SSH polling or Go agent |
 | **Health** | Health Checks | Container, URL, TCP, and TLS certificate checks with bounce protection |
-| **Secrets** | Encrypted Secrets | XChaCha20-Poly1305 encryption at rest with per-environment isolation |
+| **Secrets** | Encrypted Secrets | AES-256-GCM encryption at rest with per-environment isolation |
 | **Backup** | Database Backups | Scheduled PostgreSQL, MySQL, and SQLite backups to S3-compatible storage |
 | **Notify** | Notifications | In-app, email (SMTP), Slack, and outgoing webhooks |
 | **Registry** | Registry Integration | Docker Hub, GHCR, and private registries with auto-update |

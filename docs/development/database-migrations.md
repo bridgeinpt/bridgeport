@@ -307,7 +307,7 @@ Before merging any schema change, verify:
    ```yaml
    services:
      bridgeport:
-       image: registry.digitalocean.com/bios-registry/bridgeport:previous-tag
+       image: ghcr.io/bridgeinpt/bridgeport:previous-tag
    ```
 
 5. Report the issue so the migration can be fixed in the codebase.

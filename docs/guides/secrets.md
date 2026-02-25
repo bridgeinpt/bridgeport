@@ -37,7 +37,7 @@ Secrets in BridgePort follow a simple flow: store encrypted, reference by name, 
 
 ```mermaid
 flowchart LR
-    U[User creates secret<br/>key: DATABASE_URL<br/>value: postgres://...] --> E[Encrypted with<br/>XChaCha20-Poly1305]
+    U[User creates secret<br/>key: DATABASE_URL<br/>value: postgres://...] --> E[Encrypted with<br/>AES-256-GCM]
     E --> DB[(Database<br/>encrypted value + nonce)]
 
     CF[Config file template<br/>with secret placeholders] --> Sync[Sync to server]
@@ -48,7 +48,7 @@ flowchart LR
 **Key concepts:**
 
 - **Environment-scoped.** Secrets belong to an environment. A secret named `DATABASE_URL` in staging is completely independent from `DATABASE_URL` in production.
-- **Encrypted at rest.** Every secret value is encrypted using XChaCha20-Poly1305 with the `MASTER_KEY` before being stored. The encryption nonce is stored alongside the ciphertext. The plaintext value never touches the database.
+- **Encrypted at rest.** Every secret value is encrypted using AES-256-GCM with the `MASTER_KEY` before being stored. The encryption nonce is stored alongside the ciphertext. The plaintext value never touches the database.
 - **Audit-logged.** Every access to a secret value (reveal, sync, update) is recorded in the [audit log](../audit.md) with the user who performed the action.
 - **Template-based usage.** Secrets are not injected at runtime. They are substituted into config file templates at sync time and written as static files to the server.
 
@@ -331,7 +331,7 @@ Use consistent, descriptive key names:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `key` | string | -- | Uppercase key name (unique per environment) |
-| `encryptedValue` | string | -- | XChaCha20-Poly1305 encrypted value |
+| `encryptedValue` | string | -- | AES-256-GCM encrypted value |
 | `nonce` | string | -- | Encryption nonce (base64) |
 | `description` | string | null | Optional documentation |
 | `neverReveal` | boolean | false | Write-only flag |

@@ -356,7 +356,7 @@ export async function findOrCreateContainerImage(
   }
 
   // Extract display name from image path
-  // e.g., "registry.digitalocean.com/bios-registry/bios-backend" -> "bios-backend"
+  // e.g., "registry.digitalocean.com/my-registry/my-app" -> "my-app"
   const parts = imageName.split('/');
   const displayName = parts[parts.length - 1] || imageName;
 

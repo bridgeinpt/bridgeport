@@ -111,7 +111,7 @@ Server names must be unique within an environment. If a name is already taken, t
 
 ### SSH Key Configuration
 
-Every environment has one SSH private key that all servers in that environment share. The key is encrypted at rest using XChaCha20-Poly1305.
+Every environment has one SSH private key that all servers in that environment share. The key is encrypted at rest using AES-256-GCM.
 
 **Step 1: Generate or locate your SSH key pair.**
 

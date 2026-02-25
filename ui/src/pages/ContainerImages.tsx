@@ -698,7 +698,7 @@ export default function ContainerImages() {
                   type="text"
                   value={formData.imageName}
                   onChange={(e) => setFormData({ ...formData, imageName: e.target.value })}
-                  placeholder="registry.digitalocean.com/bios-registry/bios-backend"
+                  placeholder="ghcr.io/my-org/my-app"
                   className="input font-mono text-sm"
                   required
                 />

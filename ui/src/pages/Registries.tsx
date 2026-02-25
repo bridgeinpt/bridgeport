@@ -531,11 +531,11 @@ export default function Registries() {
                     type="text"
                     value={formData.repositoryPrefix}
                     onChange={(e) => setFormData({ ...formData, repositoryPrefix: e.target.value })}
-                    placeholder="bios-registry"
+                    placeholder="my-registry"
                     className="input font-mono text-sm"
                   />
                   <p className="text-xs text-slate-500 mt-1">
-                    The registry name from DigitalOcean (e.g., bios-registry)
+                    The registry name from DigitalOcean (e.g., my-registry)
                   </p>
                 </div>
               )}
