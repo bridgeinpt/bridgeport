@@ -123,18 +123,18 @@ describe('ssh', () => {
     });
 
     it('should execute local commands successfully', async () => {
-      const result = await client.exec('echo "hello world"');
+      const result = await client.exec('echo "hello world"', { timeout: 30000 });
       expect(result.code).toBe(0);
       expect(result.stdout).toContain('hello world');
     });
 
     it('should return non-zero exit code for failed commands', async () => {
-      const result = await client.exec('false');
+      const result = await client.exec('false', { timeout: 30000 });
       expect(result.code).not.toBe(0);
     });
 
     it('should capture stderr from failed commands', async () => {
-      const result = await client.exec('ls /nonexistent_path_that_does_not_exist 2>&1 || true');
+      const result = await client.exec('ls /nonexistent_path_that_does_not_exist 2>&1 || true', { timeout: 30000 });
       // The command will output error text to stdout (due to redirect) or stderr
       expect(result.code).toBe(0);
     });

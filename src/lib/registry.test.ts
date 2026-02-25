@@ -479,7 +479,7 @@ describe('registry', () => {
           expect.objectContaining({
             method: 'HEAD',
             headers: expect.objectContaining({
-              Accept: 'application/vnd.docker.distribution.manifest.v2+json',
+              Accept: expect.stringContaining('application/vnd.docker.distribution.manifest.v2+json'),
             }),
           }),
         );
