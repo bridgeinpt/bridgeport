@@ -26,7 +26,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx prisma generate
-      - run: npx vitest run --project backend --testPathPattern='src/lib/.*\.test\.ts$' --reporter=github-actions
+      - run: npx vitest run --project backend 'src/lib/'
 
   unit-frontend:
     name: Frontend Unit Tests
@@ -39,7 +39,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: cd ui && npm ci
-      - run: cd ui && npx vitest run --testPathPattern='lib/.*\.test\.tsx?$' --reporter=github-actions
+      - run: cd ui && npx vitest run 'src/lib/'
 
   unit-go:
     name: Go Unit Tests

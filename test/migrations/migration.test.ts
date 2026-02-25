@@ -37,8 +37,9 @@ describe('database migrations', () => {
         { encoding: 'utf8' }
       );
 
-      // No diff means migrations match schema
-      expect(result.trim()).toBe('');
+      // No diff means migrations match schema — Prisma outputs "No difference detected." when clean
+      expect(result.trim()).toMatch(/No difference detected|^$/);
+
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -59,7 +60,7 @@ describe('database migrations', () => {
         { encoding: 'utf8' }
       );
 
-      expect(result).toContain('already been applied');
+      expect(result).toMatch(/already been applied|No pending migrations to apply/);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
