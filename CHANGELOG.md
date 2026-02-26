@@ -2,7 +2,7 @@
 
 All notable changes to BridgePort are documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). BridgePort uses git-based versioning in the format `YYYYMMDD-{7-char SHA}`.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). BridgePort uses git-based versioning in the format `YYYYMMDDHH-{7-char SHA}`.
 
 ## [Unreleased]
 

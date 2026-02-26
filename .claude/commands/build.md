@@ -14,7 +14,7 @@ Build the BridgePort Docker image for deployment.
 
 ```bash
 # Get version info
-VERSION=$(date +%Y%m%d)-$(git rev-parse --short HEAD)
+VERSION=$(date +%Y%m%d%H)-$(git rev-parse --short HEAD)
 AGENT_VERSION=$(git log -1 --format='%cd-%h' --date=format:'%Y%m%d' -- bridgeport-agent/)
 CLI_VERSION=$(git log -1 --format='%cd-%h' --date=format:'%Y%m%d' -- cli/)
 

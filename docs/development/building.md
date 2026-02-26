@@ -21,7 +21,7 @@ BridgePort uses **git-based versioning** derived at build time. There are no ver
 
 | Component | Version Format | Derived From |
 |-----------|---------------|--------------|
-| **App** | `YYYYMMDD-<7-char SHA>` | Current commit at build time |
+| **App** | `YYYYMMDDHH-<7-char SHA>` | Current commit at build time |
 | **Agent** | `YYYYMMDD-<7-char SHA>` | Last commit touching `bridgeport-agent/` |
 | **CLI** | `YYYYMMDD-<7-char SHA>` | Last commit touching `cli/` |
 
@@ -36,7 +36,7 @@ This means:
 
 ```bash
 # App version (current commit)
-APP_VERSION=$(git log -1 --format='%cd-%h' --date=format:'%Y%m%d')
+APP_VERSION=$(git log -1 --format='%cd-%h' --date=format:'%Y%m%d%H')
 
 # Agent version (last commit touching bridgeport-agent/)
 AGENT_VERSION=$(git log -1 --format='%cd-%h' --date=format:'%Y%m%d' -- bridgeport-agent/)
@@ -45,7 +45,7 @@ AGENT_VERSION=$(git log -1 --format='%cd-%h' --date=format:'%Y%m%d' -- bridgepor
 CLI_VERSION=$(git log -1 --format='%cd-%h' --date=format:'%Y%m%d' -- cli/)
 ```
 
-Example output: `20260225-a1b2c3d`
+Example output: `2026022514-a1b2c3d`
 
 ---
 
@@ -79,7 +79,7 @@ graph TD
 
 ```bash
 # Generate version strings
-APP_VERSION=$(git log -1 --format='%cd-%h' --date=format:'%Y%m%d')
+APP_VERSION=$(git log -1 --format='%cd-%h' --date=format:'%Y%m%d%H')
 AGENT_VERSION=$(git log -1 --format='%cd-%h' --date=format:'%Y%m%d' -- bridgeport-agent/)
 CLI_VERSION=$(git log -1 --format='%cd-%h' --date=format:'%Y%m%d' -- cli/)
 

@@ -560,7 +560,7 @@ For every new API route, test at minimum:
 
 BridgePort uses git-based versioning derived at build time:
 
-- **App version**: `YYYYMMDD-{7-char SHA}` from current commit (passed as `APP_VERSION` build arg)
+- **App version**: `YYYYMMDDHH-{7-char SHA}` from current commit (passed as `APP_VERSION` build arg)
 - **Agent version**: Derived from last commit touching `bridgeport-agent/` directory
 - **CLI version**: Derived from last commit touching `cli/` directory
 
