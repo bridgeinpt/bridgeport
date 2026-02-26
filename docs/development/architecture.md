@@ -424,6 +424,209 @@ AES-256-GCM is an AEAD cipher supported natively by Node.js `crypto` module with
 
 ---
 
+## Environment Variables
+
+Required for development:
+
+```bash
+DATABASE_URL=file:./dev.db
+MASTER_KEY=<openssl rand -base64 32>
+JWT_SECRET=<openssl rand -base64 32>
+```
+
+Optional settings:
+
+```bash
+HOST=0.0.0.0
+PORT=3000
+UPLOAD_DIR=./uploads
+CORS_ORIGIN=https://deploy.example.com  # Comma-separated origins
+PLUGINS_DIR=./plugins                    # Plugin JSON directory
+
+# Initial admin (created on first boot if no users exist)
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=your-secure-password
+
+# Scheduler intervals (all in seconds)
+SCHEDULER_ENABLED=true
+SCHEDULER_SERVER_HEALTH_INTERVAL=60     # Server health checks
+SCHEDULER_SERVICE_HEALTH_INTERVAL=60    # Service health checks
+SCHEDULER_DISCOVERY_INTERVAL=300        # Container discovery
+SCHEDULER_UPDATE_CHECK_INTERVAL=1800    # Registry update checks
+SCHEDULER_METRICS_INTERVAL=300          # SSH metrics collection
+SCHEDULER_BACKUP_CHECK_INTERVAL=60      # Backup schedule check
+
+# Sentry error monitoring (opt-in)
+SENTRY_BACKEND_DSN=https://key@sentry.io/12345
+SENTRY_FRONTEND_DSN=https://key@sentry.io/67890
+SENTRY_ENVIRONMENT=production
+SENTRY_TRACES_SAMPLE_RATE=0            # 0.0-1.0
+SENTRY_ENABLED=true                     # Kill switch
+```
+
+---
+
+## Key Models
+
+```
+# Core Resources
+User               - Authentication with role (admin/operator/viewer), lastActiveAt, apiTokens
+ApiToken           - Per-user API tokens with hash, expiry, last used tracking
+Environment        - Logical grouping with SSH key, per-module settings (General/Monitoring/Operations/Data/Configuration)
+Server             - Physical/virtual machine with metricsMode, dockerMode (ssh/socket), agent status tracking
+Service            - Docker container linked to ContainerImage, with dependencies, health config, TCP/cert checks
+Secret             - Encrypted key-value with neverReveal flag
+ConfigFile         - Synced configuration files (text + binary support with isBinary, mimeType)
+FileHistory        - Edit history for config files
+Deployment         - Deployment record with logs, duration, linked to ContainerImageHistory
+DeploymentArtifact - Generated compose/env/config files per deployment
+
+# Orchestration
+ContainerImage        - Central image entity linked to services, with currentTag/latestTag/autoUpdate
+ContainerImageHistory - Tag deployment history per image (success/failed/rolled_back)
+ServiceDependency     - Deployment order dependencies (health_before, deploy_after)
+DeploymentPlan        - Orchestrated multi-service deployment with auto-rollback
+DeploymentPlanStep    - Individual steps in a deployment plan (deploy/health_check/rollback)
+
+# Data Management
+Database           - Registered database for backups + monitoring (editable after creation)
+DatabaseBackup     - Backup record with status, progress, duration
+DatabaseMetrics    - Time-series database monitoring metrics (JSON blob per collection)
+BackupSchedule     - Cron-based backup scheduling
+ServiceDatabase    - Links services to databases with connection env var
+
+# Monitoring & Metrics
+ServerMetrics      - Time-series server metrics (CPU, memory, disk, load, TCP, FDs)
+ServiceMetrics     - Time-series container metrics (CPU, memory, network, block I/O)
+HealthCheckLog     - Health check results with duration, status, response details
+AgentContainerSnapshot - Agent-reported container discovery data (latest per server)
+AgentProcessSnapshot   - Agent-reported top processes (latest per server)
+AgentEvent         - Agent lifecycle events (deploy, status change, token regen)
+
+# Registry & Images
+RegistryConnection - Container registry with refreshIntervalMinutes, autoLinkPattern
+
+# Notifications
+NotificationType       - Notification type definitions with templates, severity, bounce settings
+Notification           - Individual notifications sent to users (in-app, email, webhook)
+NotificationPreference - Per-user, per-type notification channel preferences
+BounceTracker          - Consecutive failure tracking for bounce logic
+
+# Integrations
+SmtpConfig         - SMTP email configuration (singleton-like)
+WebhookConfig      - Outgoing webhook endpoints with filtering
+SlackChannel       - Slack incoming webhook channels
+SlackTypeRouting   - Routes notification types to Slack channels
+
+# Service Topology
+ServiceConnection  - User-defined connections between services/databases (port, protocol, direction)
+DiagramLayout      - Persisted node positions per environment for topology diagram
+
+# Global Settings
+ServiceType        - Predefined service types (Django, Node.js, etc.) with commands
+ServiceTypeCommand - Commands for a service type (shell, migrate, etc.)
+DatabaseType       - Database engine types (PostgreSQL, MySQL, SQLite) with monitoring queries
+DatabaseTypeCommand - Commands for a database type (shell, vacuum, etc.)
+SpacesConfig       - Global DO Spaces credentials
+SpacesEnvironment  - Per-environment Spaces enable/disable
+SystemSettings     - System-wide operational settings (timeouts, limits, retries, URLs)
+
+# Per-Environment Settings (one row each per environment)
+GeneralSettings       - sshUser
+MonitoringSettings    - Intervals, retention, metric toggles, bounce thresholds
+OperationsSettings    - Default docker/metrics modes
+DataSettings          - Backup download, default monitoring settings
+ConfigurationSettings - Secret reveal permissions
+```
+
+---
+
+## UI Features
+
+### Navigation (Sidebar Groups)
+- **Operations**: Dashboard, Servers, Services, Databases
+- **Monitoring**: Overview, Servers, Services, Databases, Health Checks, Agents & SSH
+- **Orchestration**: Container Images, Deployment Plans, Registries
+- **Configuration**: Environment Settings (admin), Secrets, Config Files
+- **Clickable Logo**: Click sidebar logo to navigate to dashboard
+- **My Account Modal**: Click user icon in sidebar to access profile and password change (all users)
+- **Notification Bell**: In-app notification dropdown with unread count
+- **Collapsible Groups**: Sidebar groups collapse/expand, state persisted to localStorage
+
+### Server Management
+- **Monitoring Card**: Configure metrics mode (disabled/SSH/agent), view real-time metrics
+- **Create Service**: Manually create services before containers exist
+- **Discover Containers**: Auto-discover running Docker containers
+
+### Service Management
+- **Deploy**: Deploy new image tags with pull, linked to ContainerImage
+- **Health Checks**: Manual health checks with detailed results (container + URL)
+- **Health Check Config**: Per-service health wait, retries, interval for deployment orchestration
+- **TCP/Cert Checks**: Agent-performed TCP port connectivity and TLS certificate expiry checks
+- **Dependencies**: Define deployment order dependencies between services
+- **Health Check History**: View past health check results from audit log
+- **Deployment History**: View past deployments with expandable logs
+- **Config Files**: Attach and sync config files to servers
+- **Compose Templates**: Docker compose template management with placeholder substitution
+
+### Container Image Management (`/container-images`)
+- **Central Image Entity**: One image can be linked to multiple services
+- **Tag History**: Track all deployed tags with success/failure/rollback status
+- **Registry Integration**: Check for updates from linked registries
+- **Auto-Update**: Per-image toggle for automatic deployment on new tags
+- **Deploy All**: Deploy a tag to all linked services via orchestration
+
+### Deployment Orchestration (`/deployment-plans`)
+- **Multi-Service Deployment**: Deploy to multiple services with dependency-aware ordering
+- **Auto-Rollback**: Automatically roll back all services on failure
+- **Step Tracking**: Real-time progress of deploy/health_check/rollback steps
+- **Parallel Execution**: Option to run same-level services in parallel
+
+### Database Management
+- **Edit Databases**: Edit existing database configurations (name, connection, backup settings)
+- **Backup Management**: View, create, and delete backups with schedule configuration
+- **Database Monitoring**: Enable/disable monitoring, configure collection intervals, test connections
+- **Monitoring Queries**: Plugin-driven (defined in database type JSON files), supports PostgreSQL, MySQL, SQLite
+
+### Notifications (`/notifications`)
+- **In-App Inbox**: Notification list with read/unread, filtering by category
+- **Preferences**: Per-user, per-type channel preferences (in-app, email, webhook)
+- **Bounce Logic**: Consecutive failure tracking to avoid alert storms
+
+### Monitoring Hub (`/monitoring/*`)
+- **Overview** (`/monitoring`): Summary hub with quick stats and links to sub-pages
+- **Servers** (`/monitoring/servers`): Server metrics with time-series charts (CPU, Memory, Disk, Load, Swap, TCP)
+- **Services** (`/monitoring/services`): Service metrics with charts (CPU, Memory, Network RX/TX)
+- **Databases** (`/monitoring/databases`): Database monitoring grid with status, key metrics, sparklines
+- **Database Detail** (`/monitoring/databases/:id`): Dynamic charts driven by plugin monitoring queries
+- **Health Checks** (`/monitoring/health`): Filterable health check logs with pagination
+- **Agents** (`/monitoring/agents`): Agent management, SSH connectivity testing, upgrade indicators
+- Shared components in `ui/src/components/monitoring/` (ChartCard, StatCard, MetricGauge, etc.)
+- Auto-refresh every 30 seconds
+
+### Service Topology (Dashboard)
+- **Interactive Diagram**: Visual service/database topology on the dashboard
+- **Connections**: User-defined connections with port, protocol, direction
+- **Draggable Nodes**: Positions persisted per environment
+- **Server Groups**: Services grouped by server visually
+
+### Agent Upgrade Indicators
+- Server detail page shows "Update available" badge when deployed agent differs from bundled version
+- Monitoring Agents page shows upgrade status column for all agents
+- Bundled agent version exposed via `/health` and agent status API
+
+### Admin Area (`/admin/*`) - Separate Layout
+- **About** (`/admin/about`): App version + CLI tool downloads
+- **System** (`/admin/system`): SSH timeouts, webhook retries, backup timeouts, limits, URLs
+- **Service Types** (`/admin/service-types`): Manage predefined service types and commands
+- **Database Types** (`/admin/database-types`): Manage database type definitions and monitoring queries
+- **Storage** (`/admin/storage`): Global DO Spaces config with per-environment toggles
+- **Users** (`/admin/users`): User management with active status tracking
+- **Audit** (`/admin/audit`): Audit log viewer
+- **Notifications** (`/admin/notifications`): Notification type config, SMTP, Slack channels, webhooks
+
+---
+
 ## Related Documentation
 
 - [Development Setup](setup.md) -- getting the dev environment running
