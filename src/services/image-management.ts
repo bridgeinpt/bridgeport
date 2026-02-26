@@ -112,6 +112,11 @@ export async function listContainerImages(
           },
         },
         registryConnection: true,
+        tagHistory: {
+          orderBy: { deployedAt: 'desc' },
+          take: 1,
+          select: { deployedAt: true },
+        },
       },
       orderBy: { name: 'asc' },
       take: limit,

@@ -23,7 +23,7 @@ import {
   type RegistryConnection,
 } from '../lib/api';
 import { formatDistanceToNow, format } from 'date-fns';
-import { PencilIcon, TrashIcon } from '../components/Icons';
+import { PencilIcon, TrashIcon, ActivityIcon, RefreshIcon } from '../components/Icons';
 import Pagination from '../components/Pagination';
 
 export default function ContainerImages() {
@@ -391,6 +391,13 @@ export default function ContainerImages() {
                           Auto-update enabled
                         </span>
                       )}
+                      {image.lastDeployedAt ? (
+                        <span>
+                          Deployed {formatDistanceToNow(new Date(image.lastDeployedAt), { addSuffix: true })}
+                        </span>
+                      ) : (
+                        <span className="text-slate-600">Never deployed</span>
+                      )}
                       {image.lastCheckedAt && (
                         <span>
                           Checked {formatDistanceToNow(new Date(image.lastCheckedAt), { addSuffix: true })}
@@ -419,7 +426,6 @@ export default function ContainerImages() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {/* Registry buttons */}
                   {image.registryConnectionId && (
                     <>
                       <button
@@ -431,19 +437,10 @@ export default function ContainerImages() {
                       <button
                         onClick={() => handleCheckUpdates(image.id)}
                         disabled={checkingUpdatesId === image.id}
-                        className="btn btn-ghost text-sm"
-                        title="Check for updates from registry"
+                        className="p-1.5 text-slate-400 hover:text-white rounded"
+                        title="Check for updates"
                       >
-                        {checkingUpdatesId === image.id ? (
-                          <span className="flex items-center gap-1">
-                            <span className="animate-spin">
-                              <RefreshIcon className="w-4 h-4" />
-                            </span>
-                            Checking...
-                          </span>
-                        ) : (
-                          'Check Updates'
-                        )}
+                        <RefreshIcon className={`w-4 h-4 ${checkingUpdatesId === image.id ? 'animate-spin' : ''}`} />
                       </button>
                     </>
                   )}
@@ -457,9 +454,10 @@ export default function ContainerImages() {
                   )}
                   <button
                     onClick={() => handleViewHistory(image.id)}
-                    className="btn btn-ghost text-sm"
+                    className={`p-1.5 rounded ${viewingHistory === image.id ? 'text-white' : 'text-slate-400 hover:text-white'}`}
+                    title={viewingHistory === image.id ? 'Hide history' : 'History'}
                   >
-                    {viewingHistory === image.id ? 'Hide History' : 'History'}
+                    <ActivityIcon className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => openLinkModal(image)}
@@ -498,26 +496,6 @@ export default function ContainerImages() {
                   ) : (
                     <div className="overflow-x-auto">
                       {(() => {
-                        // Group tags by digest to show correlation
-                        const digestGroups = new Map<string, string[]>();
-                        const digestColors = ['bg-blue-400', 'bg-emerald-400', 'bg-amber-400', 'bg-purple-400', 'bg-rose-400', 'bg-cyan-400'];
-                        for (const t of registryTags) {
-                          if (t.digest) {
-                            const group = digestGroups.get(t.digest) || [];
-                            group.push(t.tag);
-                            digestGroups.set(t.digest, group);
-                          }
-                        }
-                        // Only color digests shared by multiple tags
-                        const sharedDigests = new Map<string, number>();
-                        let colorIdx = 0;
-                        for (const [digest, tags] of digestGroups) {
-                          if (tags.length > 1) {
-                            sharedDigests.set(digest, colorIdx % digestColors.length);
-                            colorIdx++;
-                          }
-                        }
-
                         // Detect if timestamps are likely synthetic (all within 5s of each other)
                         const timestamps = registryTags.map(t => new Date(t.updatedAt).getTime());
                         const hasRealTimestamps = timestamps.length > 1 &&
@@ -535,58 +513,52 @@ export default function ContainerImages() {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-700/50">
-                              {registryTags.map((tag) => {
-                                const digestColorIdx = tag.digest ? sharedDigests.get(tag.digest) : undefined;
-                                return (
-                                  <tr key={tag.digest + tag.tag} className="text-sm">
-                                    <td className="py-2">
-                                      <div className="flex items-center gap-2">
-                                        {digestColorIdx !== undefined && (
-                                          <span className={`w-2 h-2 rounded-full ${digestColors[digestColorIdx]} flex-shrink-0`} title="Tags with same color share the same image digest" />
-                                        )}
-                                        <span className="font-mono text-white">{tag.tag}</span>
-                                        {tag.tag === tagCurrentTag && (
-                                          <span className="badge bg-primary-500/20 text-primary-400 text-xs">current</span>
-                                        )}
-                                        {tagDeployedDigest && tag.digest && tag.digest === tagDeployedDigest && (
-                                          <span className="badge bg-green-500/20 text-green-400 text-xs">deployed</span>
-                                        )}
-                                      </div>
-                                    </td>
-                                    <td className="py-2">
-                                      {tag.digest ? (
-                                        <span className="font-mono text-slate-400 text-xs">
-                                          {tag.digest.substring(0, 19)}
-                                        </span>
-                                      ) : (
-                                        <span className="text-slate-600 text-xs italic">unavailable</span>
+                              {registryTags.map((tag) => (
+                                <tr key={tag.digest + tag.tag} className="text-sm">
+                                  <td className="py-2">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-mono text-white">{tag.tag}</span>
+                                      {tag.tag === tagCurrentTag && (
+                                        <span className="badge bg-primary-500/20 text-primary-400 text-xs">current</span>
                                       )}
-                                    </td>
-                                    <td className="py-2 text-slate-400">
-                                      {tag.size ? formatBytes(tag.size) : '—'}
-                                    </td>
-                                    <td className="py-2 text-slate-400">
-                                      {hasRealTimestamps && tag.updatedAt
-                                        ? formatDistanceToNow(new Date(tag.updatedAt), { addSuffix: true })
-                                        : '—'}
-                                    </td>
-                                    <td className="py-2 text-right">
-                                      {image.services.length > 0 && (
-                                        <button
-                                          onClick={() => {
-                                            setDeployingImage(image);
-                                            setDeployTag(tag.tag);
-                                            setDeployAutoRollback(true);
-                                          }}
-                                          className="btn btn-primary text-xs px-2 py-1"
-                                        >
-                                          Deploy
-                                        </button>
+                                      {tagDeployedDigest && tag.digest && tag.digest === tagDeployedDigest && (
+                                        <span className="badge bg-green-500/20 text-green-400 text-xs">deployed</span>
                                       )}
-                                    </td>
-                                  </tr>
-                                );
-                              })}
+                                    </div>
+                                  </td>
+                                  <td className="py-2">
+                                    {tag.digest ? (
+                                      <span className="font-mono text-slate-400 text-xs">
+                                        {tag.digest.substring(0, 19)}
+                                      </span>
+                                    ) : (
+                                      <span className="text-slate-600 text-xs italic">unavailable</span>
+                                    )}
+                                  </td>
+                                  <td className="py-2 text-slate-400">
+                                    {tag.size ? formatBytes(tag.size) : '—'}
+                                  </td>
+                                  <td className="py-2 text-slate-400">
+                                    {hasRealTimestamps && tag.updatedAt
+                                      ? formatDistanceToNow(new Date(tag.updatedAt), { addSuffix: true })
+                                      : '—'}
+                                  </td>
+                                  <td className="py-2 text-right">
+                                    {image.services.length > 0 && (
+                                      <button
+                                        onClick={() => {
+                                          setDeployingImage(image);
+                                          setDeployTag(tag.tag);
+                                          setDeployAutoRollback(true);
+                                        }}
+                                        className="btn btn-primary text-xs px-2 py-1"
+                                      >
+                                        Deploy
+                                      </button>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
                             </tbody>
                           </table>
                         );
@@ -926,15 +898,3 @@ function ImageIcon({ className }: { className?: string }) {
   );
 }
 
-function RefreshIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-      />
-    </svg>
-  );
-}

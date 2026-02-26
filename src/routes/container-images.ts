@@ -45,10 +45,20 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
     async (request) => {
       const { envId } = request.params as { envId: string };
       const { limit, offset } = request.query as { limit?: string; offset?: string };
-      return listContainerImages(envId, {
+      const result = await listContainerImages(envId, {
         limit: limit ? parseInt(limit) : 25,
         offset: offset ? parseInt(offset) : 0,
       });
+
+      const images = result.images.map((image) => {
+        const { tagHistory, ...rest } = image as typeof image & { tagHistory?: { deployedAt: Date }[] };
+        return {
+          ...rest,
+          lastDeployedAt: tagHistory?.[0]?.deployedAt ?? null,
+        };
+      });
+
+      return { images, total: result.total };
     }
   );
 

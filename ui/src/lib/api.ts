@@ -1533,6 +1533,7 @@ export interface ContainerImage {
   registryConnectionId: string | null;
   registryConnection?: RegistryConnection | null;
   services: Service[];
+  lastDeployedAt: string | null;
 }
 
 export interface ContainerImageInput {
