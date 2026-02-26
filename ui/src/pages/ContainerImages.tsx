@@ -23,7 +23,7 @@ import {
   type RegistryConnection,
 } from '../lib/api';
 import { formatDistanceToNow, format } from 'date-fns';
-import { PencilIcon, TrashIcon, ActivityIcon, RefreshIcon } from '../components/Icons';
+import { PencilIcon, TrashIcon, ActivityIcon, RefreshIcon, TagIcon, LinkIcon } from '../components/Icons';
 import Pagination from '../components/Pagination';
 
 export default function ContainerImages() {
@@ -426,13 +426,22 @@ export default function ContainerImages() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  {image.services.length > 0 && (
+                    <button
+                      onClick={() => openDeployModal(image)}
+                      className="btn btn-primary text-sm"
+                    >
+                      Deploy
+                    </button>
+                  )}
                   {image.registryConnectionId && (
                     <>
                       <button
                         onClick={() => handleViewTags(image.id)}
-                        className="btn btn-ghost text-sm"
+                        className={`p-1.5 rounded ${viewingTags === image.id ? 'text-primary-400' : 'text-slate-400 hover:text-white'}`}
+                        title={viewingTags === image.id ? 'Hide registry tags' : 'Registry tags'}
                       >
-                        {viewingTags === image.id ? 'Hide Tags' : 'Registry Tags'}
+                        <TagIcon className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => handleCheckUpdates(image.id)}
@@ -444,14 +453,6 @@ export default function ContainerImages() {
                       </button>
                     </>
                   )}
-                  {image.services.length > 0 && (
-                    <button
-                      onClick={() => openDeployModal(image)}
-                      className="btn btn-primary text-sm"
-                    >
-                      Deploy
-                    </button>
-                  )}
                   <button
                     onClick={() => handleViewHistory(image.id)}
                     className={`p-1.5 rounded ${viewingHistory === image.id ? 'text-white' : 'text-slate-400 hover:text-white'}`}
@@ -461,9 +462,10 @@ export default function ContainerImages() {
                   </button>
                   <button
                     onClick={() => openLinkModal(image)}
-                    className="btn btn-ghost text-sm"
+                    className="p-1.5 text-slate-400 hover:text-white rounded"
+                    title="Link services"
                   >
-                    Link Services
+                    <LinkIcon className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => openEdit(image)}
