@@ -467,8 +467,9 @@ describe('executePlan', () => {
       })
     );
 
-    // Success notification sent
-    expect(mockSendNotification).toHaveBeenCalled();
+    // Per-service notifications are sent by deploy.ts, not orchestration
+    // Orchestration should NOT send a duplicate plan-level success notification
+    expect(mockSendNotification).not.toHaveBeenCalled();
   });
 
   it('triggers rollback on failure when autoRollback is enabled', async () => {

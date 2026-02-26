@@ -447,16 +447,7 @@ export async function executePlan(planId: string): Promise<void> {
       }
     }
 
-    // Send success notification
-    await sendSystemNotification(
-      NOTIFICATION_TYPES.SYSTEM_DEPLOYMENT_SUCCESS,
-      plan.environmentId,
-      {
-        planName: plan.name,
-        imageTag: plan.imageTag,
-        serviceCount: plan.steps.filter((s) => s.action === 'deploy').length,
-      }
-    );
+    // Note: per-service success notifications are already sent by deploy.ts
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     log(`ERROR: ${errorMessage}`);
