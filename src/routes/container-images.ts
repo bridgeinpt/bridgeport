@@ -136,13 +136,14 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
         return reply.code(404).send({ error: 'Container image not found' });
       }
 
-      // Convert BigInt size to Number for JSON serialization
-      const { digests, ...rest } = image as typeof image & { digests?: Array<{ size: bigint | null; [key: string]: unknown }> };
+      // Serialize digests: BigInt size → Number, JSON tags → array
+      const { digests, ...rest } = image as typeof image & { digests?: Array<{ size: bigint | null; tags: string; [key: string]: unknown }> };
       return {
         image: {
           ...rest,
           digests: digests?.map((d) => ({
             ...d,
+            tags: JSON.parse(d.tags as string) as string[],
             size: d.size !== null ? Number(d.size) : null,
           })),
         },
