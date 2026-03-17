@@ -6,7 +6,7 @@ import { checkServiceHealth } from '../services/services.js';
 import { RegistryFactory, type RegistryCredentials } from './registry.js';
 import { getRegistryCredentials } from '../services/registries.js';
 import { deployService } from '../services/deploy.js';
-import { extractRepoName, getDefaultTag, parseTagFilter, getBestTag } from './image-utils.js';
+import { extractRepoName, stripRegistryPrefix, getDefaultTag, parseTagFilter, getBestTag } from './image-utils.js';
 import { safeJsonParse } from './helpers.js';
 import { syncDigestsFromRegistry, cleanupOldImageDigests, getImageDigest } from '../services/image-management.js';
 import {
@@ -277,7 +277,12 @@ async function checkImageForUpdates(
 ): Promise<{ hasUpdate: boolean; bestTag?: string; newestDigestId?: string }> {
   try {
     const client = RegistryFactory.create(creds);
-    const repoName = extractRepoName(imageName, creds.repositoryPrefix);
+    // DO API expects repo name without registry prefix (e.g., "my-app")
+    // DockerHub and generic V2 registries need the full path after the domain
+    // (e.g., "keycloak/keycloak", "bitnami/postgresql")
+    const repoName = creds.type === 'digitalocean'
+      ? extractRepoName(imageName, creds.repositoryPrefix)
+      : stripRegistryPrefix(imageName);
 
     const allTags = await client.listTags(repoName);
     const result = await syncDigestsFromRegistry(imageId, allTags);

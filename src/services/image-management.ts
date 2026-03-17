@@ -1,7 +1,7 @@
 import { prisma } from '../lib/db.js';
 import type { ContainerImage, ContainerImageHistory, Service } from '@prisma/client';
 import { RegistryFactory, type RegistryTag } from '../lib/registry.js';
-import { extractRepoName, parseTagFilter, getBestTag, getDefaultTag, matchesTagFilter } from '../lib/image-utils.js';
+import { extractRepoName, stripRegistryPrefix, parseTagFilter, getBestTag, getDefaultTag, matchesTagFilter } from '../lib/image-utils.js';
 import { getRegistryCredentials } from './registries.js';
 import { HISTORY_STATUS } from '../lib/constants.js';
 import { safeJsonParse } from '../lib/helpers.js';
@@ -621,7 +621,9 @@ export async function listImageTags(
   }
 
   const client = RegistryFactory.create(creds);
-  const repoName = extractRepoName(image.imageName, creds.repositoryPrefix);
+  const repoName = creds.type === 'digitalocean'
+    ? extractRepoName(image.imageName, creds.repositoryPrefix)
+    : stripRegistryPrefix(image.imageName);
   const tags = await client.listTags(repoName);
 
   return {

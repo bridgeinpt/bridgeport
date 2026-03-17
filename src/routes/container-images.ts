@@ -18,7 +18,7 @@ import { buildDeploymentPlan, executePlan } from '../services/orchestration.js';
 import { logAudit } from '../services/audit.js';
 import { RegistryFactory } from '../lib/registry.js';
 import { getRegistryCredentials } from '../services/registries.js';
-import { extractRepoName, parseTagFilter, getBestTag, getDefaultTag } from '../lib/image-utils.js';
+import { extractRepoName, stripRegistryPrefix, parseTagFilter, getBestTag, getDefaultTag } from '../lib/image-utils.js';
 import { safeJsonParse, validateBody, findOrNotFound, getErrorMessage, handleUniqueConstraint, parsePaginationQuery } from '../lib/helpers.js';
 
 const createContainerImageSchema = z.object({
@@ -376,7 +376,9 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
 
       try {
         const client = RegistryFactory.create(creds);
-        const repoName = extractRepoName(image.imageName, creds.repositoryPrefix);
+        const repoName = creds.type === 'digitalocean'
+          ? extractRepoName(image.imageName, creds.repositoryPrefix)
+          : stripRegistryPrefix(image.imageName);
         const allTags = await client.listTags(repoName);
 
         const result = await syncDigestsFromRegistry(image.id, allTags);

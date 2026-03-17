@@ -4,7 +4,7 @@ import { DockerSSH, createClientForServer, type CommandClient } from '../lib/ssh
 import { createDockerClientForServer, type DockerClient } from '../lib/docker.js';
 import { RegistryFactory } from '../lib/registry.js';
 import { getRegistryCredentials } from './registries.js';
-import { extractRepoName } from '../lib/image-utils.js';
+import { extractRepoName, stripRegistryPrefix } from '../lib/image-utils.js';
 import { generateDeploymentArtifacts, saveDeploymentArtifacts } from './compose.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 import { checkServiceUpdate } from '../lib/scheduler.js';
@@ -374,7 +374,9 @@ export async function getLatestImageTags(
   }
 
   const client = RegistryFactory.create(creds);
-  const repoName = extractRepoName(service.containerImage.imageName, creds.repositoryPrefix);
+  const repoName = creds.type === 'digitalocean'
+    ? extractRepoName(service.containerImage.imageName, creds.repositoryPrefix)
+    : stripRegistryPrefix(service.containerImage.imageName);
   const tags = await client.listTags(repoName);
 
   return tags
