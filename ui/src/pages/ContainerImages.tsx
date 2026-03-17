@@ -9,21 +9,17 @@ import {
   updateContainerImageSettings,
   deleteContainerImage,
   deployContainerImage,
-  getContainerImageHistory,
-  getContainerImageTags,
   linkServiceToContainerImage,
   getLinkableServices,
   listRegistryConnections,
   checkContainerImageUpdates,
   type ContainerImage,
   type ContainerImageInput,
-  type ContainerImageHistory,
-  type RegistryTag,
   type Service,
   type RegistryConnection,
 } from '../lib/api';
-import { formatDistanceToNow, format } from 'date-fns';
-import { PencilIcon, TrashIcon, ActivityIcon, RefreshIcon, TagIcon, LinkIcon } from '../components/Icons';
+import { formatDistanceToNow } from 'date-fns';
+import { PencilIcon, TrashIcon, RefreshIcon, LinkIcon } from '../components/Icons';
 import Pagination from '../components/Pagination';
 
 export default function ContainerImages() {
@@ -42,11 +38,6 @@ export default function ContainerImages() {
   const [deployAutoRollback, setDeployAutoRollback] = useState(true);
   const [deploying, setDeploying] = useState(false);
 
-  // History modal
-  const [viewingHistory, setViewingHistory] = useState<string | null>(null);
-  const [history, setHistory] = useState<ContainerImageHistory[]>([]);
-  const [loadingHistory, setLoadingHistory] = useState(false);
-
   // Link services
   const [linkingImage, setLinkingImage] = useState<ContainerImage | null>(null);
   const [linkableServices, setLinkableServices] = useState<Service[]>([]);
@@ -59,11 +50,6 @@ export default function ContainerImages() {
 
   // Check updates state
   const [checkingUpdatesId, setCheckingUpdatesId] = useState<string | null>(null);
-
-  // Registry tags browser
-  const [viewingTags, setViewingTags] = useState<string | null>(null);
-  const [registryTags, setRegistryTags] = useState<RegistryTag[]>([]);
-  const [loadingTags, setLoadingTags] = useState(false);
 
   // Edit form auto-update state
   const [editAutoUpdate, setEditAutoUpdate] = useState(false);
@@ -192,29 +178,6 @@ export default function ContainerImages() {
     }
   };
 
-  const handleViewHistory = async (imageId: string) => {
-    if (viewingHistory === imageId) {
-      setViewingHistory(null);
-      setHistory([]);
-      return;
-    }
-    // Close tags if open
-    if (viewingTags) {
-      setViewingTags(null);
-      setRegistryTags([]);
-    }
-    setViewingHistory(imageId);
-    setLoadingHistory(true);
-    try {
-      const { history } = await getContainerImageHistory(imageId);
-      setHistory(history);
-    } catch (error) {
-      toast.error('Failed to load history');
-    } finally {
-      setLoadingHistory(false);
-    }
-  };
-
   const openLinkModal = async (image: ContainerImage) => {
     setLinkingImage(image);
     setLoadingLinkable(true);
@@ -255,53 +218,6 @@ export default function ContainerImages() {
       toast.error(error instanceof Error ? error.message : 'Failed to check updates');
     } finally {
       setCheckingUpdatesId(null);
-    }
-  };
-
-  const handleViewTags = async (imageId: string) => {
-    if (viewingTags === imageId) {
-      setViewingTags(null);
-      setRegistryTags([]);
-      return;
-    }
-    // Close history if open
-    if (viewingHistory) {
-      setViewingHistory(null);
-      setHistory([]);
-    }
-    setViewingTags(imageId);
-    setLoadingTags(true);
-    try {
-      const result = await getContainerImageTags(imageId);
-      setRegistryTags(result.tags);
-      // tagFilter available in result.tagFilter if needed
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to load tags');
-      setViewingTags(null);
-    } finally {
-      setLoadingTags(false);
-    }
-  };
-
-  const formatBytes = (bytes: number): string => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
-  };
-
-  // Helper function to get status badge color
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'success':
-        return 'bg-green-500/20 text-green-400';
-      case 'failed':
-        return 'bg-red-500/20 text-red-400';
-      case 'rolled_back':
-        return 'bg-yellow-500/20 text-yellow-400';
-      default:
-        return 'bg-slate-700 text-slate-300';
     }
   };
 
@@ -429,31 +345,15 @@ export default function ContainerImages() {
                     </button>
                   )}
                   {image.registryConnectionId && (
-                    <>
-                      <button
-                        onClick={() => handleViewTags(image.id)}
-                        className={`p-1.5 rounded ${viewingTags === image.id ? 'text-primary-400' : 'text-slate-400 hover:text-white'}`}
-                        title={viewingTags === image.id ? 'Hide registry tags' : 'Registry tags'}
-                      >
-                        <TagIcon className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => handleCheckUpdates(image.id)}
-                        disabled={checkingUpdatesId === image.id}
-                        className="p-1.5 text-slate-400 hover:text-white rounded"
-                        title="Check for updates"
-                      >
-                        <RefreshIcon className={`w-4 h-4 ${checkingUpdatesId === image.id ? 'animate-spin' : ''}`} />
-                      </button>
-                    </>
+                    <button
+                      onClick={() => handleCheckUpdates(image.id)}
+                      disabled={checkingUpdatesId === image.id}
+                      className="p-1.5 text-slate-400 hover:text-white rounded"
+                      title="Check for updates"
+                    >
+                      <RefreshIcon className={`w-4 h-4 ${checkingUpdatesId === image.id ? 'animate-spin' : ''}`} />
+                    </button>
                   )}
-                  <button
-                    onClick={() => handleViewHistory(image.id)}
-                    className={`p-1.5 rounded ${viewingHistory === image.id ? 'text-white' : 'text-slate-400 hover:text-white'}`}
-                    title={viewingHistory === image.id ? 'Hide history' : 'History'}
-                  >
-                    <ActivityIcon className="w-4 h-4" />
-                  </button>
                   <button
                     onClick={() => openLinkModal(image)}
                     className="p-1.5 text-slate-400 hover:text-white rounded"
@@ -478,145 +378,6 @@ export default function ContainerImages() {
                 </div>
               </div>
 
-              {/* Registry Tags */}
-              {viewingTags === image.id && (
-                <div className="mt-4 pt-4 border-t border-slate-700">
-                  <h4 className="text-sm font-medium text-slate-400 mb-3">Registry Tags</h4>
-                  {loadingTags ? (
-                    <div className="animate-pulse space-y-2">
-                      <div className="h-8 bg-slate-700 rounded"></div>
-                      <div className="h-8 bg-slate-700 rounded"></div>
-                    </div>
-                  ) : registryTags.length === 0 ? (
-                    <p className="text-sm text-slate-500">No tags found in registry</p>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      {(() => {
-                        // Detect if timestamps are likely synthetic (all within 5s of each other)
-                        const timestamps = registryTags.map(t => new Date(t.updatedAt).getTime());
-                        const hasRealTimestamps = timestamps.length > 1 &&
-                          Math.max(...timestamps) - Math.min(...timestamps) > 5000;
-
-                        return (
-                          <table className="w-full">
-                            <thead>
-                              <tr className="text-left text-slate-400 text-xs border-b border-slate-700">
-                                <th className="pb-2 font-medium">Tag</th>
-                                <th className="pb-2 font-medium">Digest</th>
-                                <th className="pb-2 font-medium">Size</th>
-                                <th className="pb-2 font-medium">Updated</th>
-                                <th className="pb-2 font-medium text-right">Actions</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-700/50">
-                              {registryTags.map((tag) => (
-                                <tr key={tag.digest + tag.tag} className="text-sm">
-                                  <td className="py-2">
-                                    <span className="font-mono text-white">{tag.tag}</span>
-                                  </td>
-                                  <td className="py-2">
-                                    {tag.digest ? (
-                                      <span className="font-mono text-slate-400 text-xs">
-                                        {tag.digest.substring(0, 19)}
-                                      </span>
-                                    ) : (
-                                      <span className="text-slate-600 text-xs italic">unavailable</span>
-                                    )}
-                                  </td>
-                                  <td className="py-2 text-slate-400">
-                                    {tag.size ? formatBytes(tag.size) : '—'}
-                                  </td>
-                                  <td className="py-2 text-slate-400">
-                                    {hasRealTimestamps && tag.updatedAt
-                                      ? formatDistanceToNow(new Date(tag.updatedAt), { addSuffix: true })
-                                      : '—'}
-                                  </td>
-                                  <td className="py-2 text-right">
-                                    {image.services.length > 0 && (
-                                      <button
-                                        onClick={() => {
-                                          setDeployingImage(image);
-                                          setDeployTag(tag.tag);
-                                          setDeployAutoRollback(true);
-                                        }}
-                                        className="btn btn-primary text-xs px-2 py-1"
-                                      >
-                                        Deploy
-                                      </button>
-                                    )}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        );
-                      })()}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* History */}
-              {viewingHistory === image.id && (
-                <div className="mt-4 pt-4 border-t border-slate-700">
-                  <h4 className="text-sm font-medium text-slate-400 mb-3">Deployment History</h4>
-                  {loadingHistory ? (
-                    <div className="animate-pulse space-y-2">
-                      <div className="h-8 bg-slate-700 rounded"></div>
-                    </div>
-                  ) : history.length === 0 ? (
-                    <p className="text-sm text-slate-500">No deployment history</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {history.slice(0, 10).map((entry) => (
-                        <div
-                          key={entry.id}
-                          className="p-3 bg-slate-800/50 rounded text-sm"
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-4">
-                              <span className="font-mono text-white">{entry.tag}</span>
-                              <span className={`badge text-xs ${getStatusBadge(entry.status)}`}>
-                                {entry.status}
-                              </span>
-                              {entry.deploymentCount && entry.deploymentCount > 0 && (
-                                <span className="text-slate-500">
-                                  {entry.deploymentCount} deployment{entry.deploymentCount !== 1 ? 's' : ''}
-                                </span>
-                              )}
-                              {entry.totalDurationMs && entry.totalDurationMs > 0 && (
-                                <span className="text-slate-500">
-                                  {Math.round(entry.totalDurationMs / 1000)}s
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-3 text-slate-400">
-                              <span>{entry.deployedBy}</span>
-                              <span className="text-slate-500">
-                                {format(new Date(entry.deployedAt), 'MMM d, HH:mm')}
-                              </span>
-                            </div>
-                          </div>
-                          {/* Services deployed */}
-                          {entry.services && entry.services.length > 0 && (
-                            <div className="mt-2 pt-2 border-t border-slate-700 flex flex-wrap gap-2">
-                              {entry.services.map((svc) => (
-                                <div
-                                  key={svc.id}
-                                  className="flex items-center gap-1 px-2 py-0.5 bg-slate-700/50 rounded text-xs"
-                                >
-                                  <span className="text-slate-300">{svc.name}</span>
-                                  <span className="text-slate-500">on {svc.serverName}</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           ))}
         </div>

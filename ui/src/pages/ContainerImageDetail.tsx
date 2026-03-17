@@ -361,6 +361,7 @@ export default function ContainerImageDetail() {
                     <th className="pb-2 font-medium">Best Tag</th>
                     <th className="pb-2 font-medium">Tags</th>
                     <th className="pb-2 font-medium">Size</th>
+                    <th className="pb-2 font-medium">Updated</th>
                     <th className="pb-2 font-medium">Discovered</th>
                     <th className="pb-2 font-medium text-right">Actions</th>
                   </tr>
@@ -414,6 +415,11 @@ export default function ContainerImageDetail() {
                         </td>
                         <td className="py-2.5 text-slate-400">
                           {digest.size ? formatBytes(digest.size) : '-'}
+                        </td>
+                        <td className="py-2.5 text-slate-400">
+                          {digest.pushedAt
+                            ? formatDistanceToNow(new Date(digest.pushedAt), { addSuffix: true })
+                            : '-'}
                         </td>
                         <td className="py-2.5 text-slate-400">
                           {formatDistanceToNow(new Date(digest.discoveredAt), { addSuffix: true })}
