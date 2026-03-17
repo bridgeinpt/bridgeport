@@ -159,7 +159,7 @@ describe('image-management', () => {
       expect(entry.status).toBe('success');
       expect(mockPrisma.containerImage.update).toHaveBeenCalledWith({
         where: { id: 'img-1' },
-        data: { updateAvailable: false },
+        data: { updateAvailable: false, deployedDigestId: 'digest-1' },
       });
       expect(mockPrisma.service.updateMany).toHaveBeenCalledWith({
         where: { containerImageId: 'img-1' },
@@ -233,9 +233,8 @@ describe('image-management', () => {
   describe('syncDigestsFromRegistry', () => {
     it('creates new digests and sets updateAvailable', async () => {
       mockPrisma.containerImage.findUniqueOrThrow.mockResolvedValue({
-        id: 'img-1',
         tagFilter: 'latest',
-        services: [{ imageDigestId: null }],
+        deployedDigestId: null,
       });
 
       vi.mocked(matchesTagFilter).mockReturnValue(true);
@@ -256,9 +255,8 @@ describe('image-management', () => {
 
     it('updates tags on existing digest', async () => {
       mockPrisma.containerImage.findUniqueOrThrow.mockResolvedValue({
-        id: 'img-1',
         tagFilter: 'latest',
-        services: [{ imageDigestId: 'existing-digest' }],
+        deployedDigestId: 'existing-digest',
       });
 
       vi.mocked(matchesTagFilter).mockReturnValue(true);
@@ -285,9 +283,8 @@ describe('image-management', () => {
 
     it('skips tags not matching filter', async () => {
       mockPrisma.containerImage.findUniqueOrThrow.mockResolvedValue({
-        id: 'img-1',
         tagFilter: 'v*',
-        services: [],
+        deployedDigestId: null,
       });
 
       vi.mocked(matchesTagFilter).mockReturnValue(false);

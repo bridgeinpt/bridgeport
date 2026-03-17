@@ -1534,6 +1534,7 @@ export interface ContainerImage {
   // Computed from latest digest
   bestTag?: string | null;
   latestDigest?: ImageDigest | null;
+  deployedDigest?: ImageDigest | null;
 }
 
 export interface ImageDigest {
@@ -1568,6 +1569,7 @@ export interface ContainerImageHistory {
   services?: Array<{ id: string; name: string; serverName: string }>;
   totalDurationMs?: number;
   deploymentCount?: number;
+  imageDigest?: { id: string; manifestDigest: string; tags: string[] } | null;
 }
 
 export const listContainerImages = (envId: string, options?: { limit?: number; offset?: number }) => {

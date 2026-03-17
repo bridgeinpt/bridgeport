@@ -83,9 +83,11 @@ export async function getContainerImage(id: string): Promise<ContainerImage & { 
       services: {
         include: {
           server: { select: { id: true, name: true, hostname: true, environmentId: true } },
+          imageDigest: { select: { id: true, manifestDigest: true, tags: true } },
         },
       },
       registryConnection: true,
+      deployedDigest: true,
       digests: {
         orderBy: { discoveredAt: 'desc' },
         take: 20,
@@ -171,7 +173,9 @@ export async function linkServiceToContainerImage(
 }
 
 /**
- * Record a tag deployment in history
+ * Record a tag deployment in history.
+ * Auto-resolves the imageDigestId from the tag if not provided.
+ * On success, sets ContainerImage.deployedDigestId and clears updateAvailable.
  */
 export async function recordTagDeployment(
   containerImageId: string,
@@ -181,11 +185,31 @@ export async function recordTagDeployment(
   status: 'success' | 'failed' | 'rolled_back' = HISTORY_STATUS.SUCCESS,
   imageDigestId?: string
 ): Promise<ContainerImageHistory> {
+  // Auto-resolve imageDigestId from tag if not provided
+  if (!imageDigestId && status === HISTORY_STATUS.SUCCESS) {
+    const recentDigests = await prisma.imageDigest.findMany({
+      where: { containerImageId },
+      orderBy: { discoveredAt: 'desc' },
+      take: 50,
+    });
+    for (const d of recentDigests) {
+      const tags = safeJsonParse(d.tags, [] as string[]);
+      if (tags.includes(tag)) {
+        imageDigestId = d.id;
+        digest = digest || d.manifestDigest;
+        break;
+      }
+    }
+  }
+
   if (status === HISTORY_STATUS.SUCCESS) {
-    // Update container image - just clear updateAvailable
+    // Update container image - clear updateAvailable and set deployedDigestId
     await prisma.containerImage.update({
       where: { id: containerImageId },
-      data: { updateAvailable: false },
+      data: {
+        updateAvailable: false,
+        ...(imageDigestId ? { deployedDigestId: imageDigestId } : {}),
+      },
     });
 
     // Update all linked services' imageDigestId
@@ -249,6 +273,9 @@ export async function getTagHistory(
     orderBy: { deployedAt: 'desc' },
     take: limit,
     include: {
+      imageDigest: {
+        select: { id: true, manifestDigest: true, tags: true },
+      },
       deployments: {
         select: {
           id: true,
@@ -406,9 +433,7 @@ export async function syncDigestsFromRegistry(
 ): Promise<SyncDigestsResult> {
   const image = await prisma.containerImage.findUniqueOrThrow({
     where: { id: imageId },
-    include: {
-      services: { select: { imageDigestId: true } },
-    },
+    select: { tagFilter: true, deployedDigestId: true },
   });
 
   const patterns = parseTagFilter(image.tagFilter);
@@ -485,15 +510,8 @@ export async function syncDigestsFromRegistry(
     orderBy: { discoveredAt: 'desc' },
   });
 
-  // Get the deployed digest IDs from linked services
-  const deployedDigestIds = new Set(
-    image.services
-      .map((s) => s.imageDigestId)
-      .filter((id): id is string => id !== null)
-  );
-
-  // There's an update if there are new digests AND the newest isn't deployed
-  const hasUpdate = newestDigest !== null && !deployedDigestIds.has(newestDigest.id);
+  // There's an update if the newest digest differs from the deployed one
+  const hasUpdate = newestDigest !== null && newestDigest.id !== image.deployedDigestId;
 
   await prisma.containerImage.update({
     where: { id: imageId },

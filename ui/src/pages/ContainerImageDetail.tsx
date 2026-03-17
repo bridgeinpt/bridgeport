@@ -208,7 +208,8 @@ export default function ContainerImageDetail() {
       ?.map((s: any) => s.imageDigestId)
       .filter(Boolean) ?? []
   );
-  const currentDigest = image?.latestDigest;
+  // Use deployedDigest (actual deployed SHA) for status bar, fall back to latestDigest
+  const currentDigest = image?.deployedDigest || image?.latestDigest;
 
   const digestTotalPages = Math.ceil(digestsTotal / digestPageSize);
 
@@ -303,15 +304,26 @@ export default function ContainerImageDetail() {
       <div className="panel">
         <div className="flex items-center gap-6 text-sm">
           {/* Current SHA */}
-          <div>
+          <div className="flex items-center gap-2">
             <span className="text-slate-500">Deployed SHA: </span>
             {currentDigest ? (
-              <span className="font-mono text-white">
-                {formatDigestShort(currentDigest.manifestDigest)}
-                {currentDigest.bestTag && (
-                  <span className="text-slate-400 ml-2">({currentDigest.bestTag})</span>
+              <>
+                <span className="font-mono text-white">
+                  {formatDigestShort(currentDigest.manifestDigest)}
+                </span>
+                {currentDigest.tags && currentDigest.tags.length > 0 && (
+                  <div className="flex items-center gap-1">
+                    {currentDigest.tags.slice(0, 3).map((tag) => (
+                      <span key={tag} className="badge bg-slate-700 text-slate-300 text-xs">
+                        {tag}
+                      </span>
+                    ))}
+                    {currentDigest.tags.length > 3 && (
+                      <span className="text-slate-500 text-xs">+{currentDigest.tags.length - 3}</span>
+                    )}
+                  </div>
                 )}
-              </span>
+              </>
             ) : (
               <span className="text-slate-500">None</span>
             )}
@@ -540,47 +552,66 @@ export default function ContainerImageDetail() {
               <p className="text-slate-500 text-sm">No deployment history.</p>
             ) : (
               <div className="space-y-2">
-                {history.map((entry) => (
-                  <div key={entry.id} className="p-3 bg-slate-800/50 rounded text-sm">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-4">
-                        <span className="font-mono text-white">{entry.tag}</span>
-                        <span className={`badge text-xs ${getStatusBadge(entry.status)}`}>
-                          {entry.status}
-                        </span>
-                        {entry.digest && (
-                          <span className="font-mono text-slate-500 text-xs">
-                            {formatDigestShort(entry.digest)}
+                {history.map((entry) => {
+                  const sha = entry.imageDigest?.manifestDigest || entry.digest;
+                  const historyTags = entry.imageDigest?.tags || [];
+                  return (
+                    <div key={entry.id} className="p-3 bg-slate-800/50 rounded text-sm">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          {sha ? (
+                            <span className="font-mono text-white">
+                              {formatDigestShort(sha)}
+                            </span>
+                          ) : (
+                            <span className="font-mono text-white">{entry.tag}</span>
+                          )}
+                          <span className={`badge text-xs ${getStatusBadge(entry.status)}`}>
+                            {entry.status}
                           </span>
-                        )}
-                        {entry.deploymentCount && entry.deploymentCount > 0 && (
+                          {historyTags.length > 0 ? (
+                            <div className="flex items-center gap-1">
+                              {historyTags.slice(0, 3).map((tag) => (
+                                <span key={tag} className="badge bg-slate-700 text-slate-300 text-xs">
+                                  {tag}
+                                </span>
+                              ))}
+                              {historyTags.length > 3 && (
+                                <span className="text-slate-500 text-xs">+{historyTags.length - 3}</span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-slate-500 text-xs">{entry.tag}</span>
+                          )}
+                          {entry.deploymentCount && entry.deploymentCount > 0 && (
+                            <span className="text-slate-500">
+                              {entry.deploymentCount} deployment{entry.deploymentCount !== 1 ? 's' : ''}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 text-slate-400">
+                          {entry.deployedBy && <span>{entry.deployedBy}</span>}
                           <span className="text-slate-500">
-                            {entry.deploymentCount} deployment{entry.deploymentCount !== 1 ? 's' : ''}
+                            {format(new Date(entry.deployedAt), 'MMM d, HH:mm')}
                           </span>
-                        )}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3 text-slate-400">
-                        {entry.deployedBy && <span>{entry.deployedBy}</span>}
-                        <span className="text-slate-500">
-                          {format(new Date(entry.deployedAt), 'MMM d, HH:mm')}
-                        </span>
-                      </div>
+                      {entry.services && entry.services.length > 0 && (
+                        <div className="mt-2 pt-2 border-t border-slate-700 flex flex-wrap gap-2">
+                          {entry.services.map((svc) => (
+                            <div
+                              key={svc.id}
+                              className="flex items-center gap-1 px-2 py-0.5 bg-slate-700/50 rounded text-xs"
+                            >
+                              <span className="text-slate-300">{svc.name}</span>
+                              <span className="text-slate-500">on {svc.serverName}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    {entry.services && entry.services.length > 0 && (
-                      <div className="mt-2 pt-2 border-t border-slate-700 flex flex-wrap gap-2">
-                        {entry.services.map((svc) => (
-                          <div
-                            key={svc.id}
-                            className="flex items-center gap-1 px-2 py-0.5 bg-slate-700/50 rounded text-xs"
-                          >
-                            <span className="text-slate-300">{svc.name}</span>
-                            <span className="text-slate-500">on {svc.serverName}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

@@ -682,6 +682,10 @@ model ContainerImage {
   registryConnectionId String?
   registryConnection   RegistryConnection? @relation(fields: [registryConnectionId], references: [id], onDelete: SetNull)
 
+  // Currently deployed digest (set on successful deploy, cleared never)
+  deployedDigestId String?
+  deployedDigest   ImageDigest? @relation("DeployedDigest", fields: [deployedDigestId], references: [id], onDelete: SetNull)
+
   tagHistory      ContainerImageHistory[]
   services        Service[]
   deploymentPlans DeploymentPlan[]
@@ -703,8 +707,9 @@ model ImageDigest {
   discoveredAt     DateTime  @default(now()) // When BridgePort first ingested this digest
   updatedAt        DateTime  @updatedAt
 
-  services       Service[]
-  historyEntries ContainerImageHistory[]
+  services         Service[]
+  historyEntries   ContainerImageHistory[]
+  deployedByImages ContainerImage[] @relation("DeployedDigest")
 
   @@unique([containerImageId, manifestDigest])
   @@index([containerImageId, discoveredAt(sort: Desc)])

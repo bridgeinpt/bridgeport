@@ -276,9 +276,22 @@ export default function ContainerImages() {
                       <Link to={`/container-images/${image.id}`} className="text-lg font-semibold text-white hover:text-primary-400">
                         {image.name}
                       </Link>
-                      <span className="badge bg-slate-700 text-slate-300 text-xs font-mono">
-                        {image.bestTag || image.tagFilter}
-                      </span>
+                      {image.latestDigest?.tags && image.latestDigest.tags.length > 0 ? (
+                        <>
+                          {image.latestDigest.tags.slice(0, 3).map((tag) => (
+                            <span key={tag} className="badge bg-slate-700 text-slate-300 text-xs font-mono">
+                              {tag}
+                            </span>
+                          ))}
+                          {image.latestDigest.tags.length > 3 && (
+                            <span className="text-slate-500 text-xs">+{image.latestDigest.tags.length - 3}</span>
+                          )}
+                        </>
+                      ) : (
+                        <span className="badge bg-slate-700 text-slate-300 text-xs font-mono">
+                          {image.bestTag || image.tagFilter}
+                        </span>
+                      )}
                       {image.updateAvailable && (
                         <span className="badge bg-yellow-500/20 text-yellow-400 text-xs">
                           update available

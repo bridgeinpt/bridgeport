@@ -127,10 +127,25 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
       if (!image) return;
 
       // Serialize digests: BigInt size → Number, JSON tags → array
-      const { digests, ...rest } = image as typeof image & { digests?: Array<{ size: bigint | null; tags: string; [key: string]: unknown }> };
+      const { digests, deployedDigest, services, ...rest } = image as typeof image & {
+        digests?: Array<{ size: bigint | null; tags: string; [key: string]: unknown }>;
+        deployedDigest?: { tags: string; size: bigint | null; [key: string]: unknown } | null;
+      };
       return {
         image: {
           ...rest,
+          services: (services as any[]).map((s) => ({
+            ...s,
+            imageDigest: s.imageDigest ? {
+              ...s.imageDigest,
+              tags: safeJsonParse(s.imageDigest.tags, [] as string[]),
+            } : null,
+          })),
+          deployedDigest: deployedDigest ? {
+            ...deployedDigest,
+            tags: safeJsonParse(deployedDigest.tags as string, [] as string[]),
+            size: deployedDigest.size !== null ? Number(deployedDigest.size) : null,
+          } : null,
           digests: digests?.map((d) => ({
             ...d,
             tags: safeJsonParse(d.tags as string, [] as string[]),
@@ -293,7 +308,20 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
       if (!image) return;
 
       const history = await getTagHistory(id, limit ? parseInt(limit) : 20);
-      return { history };
+      // Parse imageDigest.tags from JSON string to array
+      const parsed = history.map((entry) => {
+        const { imageDigest, ...rest } = entry as typeof entry & {
+          imageDigest?: { tags: string; [key: string]: unknown } | null;
+        };
+        return {
+          ...rest,
+          imageDigest: imageDigest ? {
+            ...imageDigest,
+            tags: safeJsonParse(imageDigest.tags as string, [] as string[]),
+          } : null,
+        };
+      });
+      return { history: parsed };
     }
   );
 
