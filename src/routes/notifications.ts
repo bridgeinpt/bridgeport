@@ -11,6 +11,7 @@ import {
   updateNotificationType,
 } from '../services/notifications.js';
 import { requireAdmin } from '../plugins/authorize.js';
+import { validateBody, findOrNotFound } from '../lib/helpers.js';
 
 const listQuerySchema = z.object({
   limit: z.coerce.number().min(1).max(100).default(50),
@@ -66,11 +67,8 @@ export async function notificationRoutes(fastify: FastifyInstance): Promise<void
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const notification = await markAsRead(id, request.authUser!.id);
-
-      if (!notification) {
-        return reply.code(404).send({ error: 'Notification not found' });
-      }
+      const notification = await findOrNotFound(markAsRead(id, request.authUser!.id), 'Notification', reply);
+      if (!notification) return;
 
       return { notification };
     }
@@ -102,13 +100,10 @@ export async function notificationRoutes(fastify: FastifyInstance): Promise<void
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { typeId } = request.params as { typeId: string };
-      const body = updatePreferenceSchema.safeParse(request.body);
+      const body = validateBody(updatePreferenceSchema, request, reply);
+      if (!body) return;
 
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
-
-      const preference = await updatePreference(request.authUser!.id, typeId, body.data);
+      const preference = await updatePreference(request.authUser!.id, typeId, body);
       return { preference };
     }
   );
@@ -131,14 +126,11 @@ export async function notificationRoutes(fastify: FastifyInstance): Promise<void
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = updateTypeSchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(updateTypeSchema, request, reply);
+      if (!body) return;
 
       try {
-        const notificationType = await updateNotificationType(id, body.data);
+        const notificationType = await updateNotificationType(id, body);
         return { type: notificationType };
       } catch {
         return reply.code(404).send({ error: 'Notification type not found' });

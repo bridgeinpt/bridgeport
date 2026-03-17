@@ -12,6 +12,7 @@ import {
 import { RegistryFactory } from '../lib/registry.js';
 import { logAudit } from '../services/audit.js';
 import { DISCOVERY_STATUS } from '../lib/constants.js';
+import { validateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage } from '../lib/helpers.js';
 
 const registryTypeSchema = z.enum(['digitalocean', 'dockerhub', 'generic']);
 
@@ -59,14 +60,11 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
-      const body = createRegistrySchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(createRegistrySchema, request, reply);
+      if (!body) return;
 
       try {
-        const registry = await createRegistryConnection(envId, body.data);
+        const registry = await createRegistryConnection(envId, body);
 
         await logAudit({
           action: 'create',
@@ -80,9 +78,7 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
 
         return { registry };
       } catch (error) {
-        if (error instanceof Error && error.message.includes('Unique constraint')) {
-          return reply.code(409).send({ error: 'Registry connection with this name already exists' });
-        }
+        if (handleUniqueConstraint(error, 'Registry connection with this name already exists', reply)) return;
         throw error;
       }
     }
@@ -94,11 +90,8 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const registry = await getRegistryConnection(id);
-
-      if (!registry) {
-        return reply.code(404).send({ error: 'Registry connection not found' });
-      }
+      const registry = await findOrNotFound(getRegistryConnection(id), 'Registry connection', reply);
+      if (!registry) return;
 
       return { registry };
     }
@@ -110,22 +103,19 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = updateRegistrySchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(updateRegistrySchema, request, reply);
+      if (!body) return;
 
       try {
         const existing = await getRegistryConnection(id);
-        const registry = await updateRegistryConnection(id, body.data);
+        const registry = await updateRegistryConnection(id, body);
 
         await logAudit({
           action: 'update',
           resourceType: 'registry_connection',
           resourceId: registry.id,
           resourceName: registry.name,
-          details: { changes: Object.keys(body.data) },
+          details: { changes: Object.keys(body) },
           userId: request.authUser!.id,
           environmentId: existing?.environmentId,
         });
@@ -147,10 +137,8 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const existing = await getRegistryConnection(id);
-      if (!existing) {
-        return reply.code(404).send({ error: 'Registry connection not found' });
-      }
+      const existing = await findOrNotFound(getRegistryConnection(id), 'Registry connection', reply);
+      if (!existing) return;
 
       if (existing._count && existing._count.containerImages > 0) {
         return reply.code(400).send({
@@ -180,10 +168,8 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const creds = await getRegistryCredentials(id);
-      if (!creds) {
-        return reply.code(404).send({ error: 'Registry connection not found' });
-      }
+      const creds = await findOrNotFound(getRegistryCredentials(id), 'Registry connection', reply);
+      if (!creds) return;
 
       try {
         const client = RegistryFactory.create(creds);
@@ -191,7 +177,7 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
 
         return { success: true, message: 'Connection successful' };
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Connection test failed';
+        const message = getErrorMessage(error, 'Connection test failed');
         return reply.code(400).send({ success: false, error: message });
       }
     }
@@ -204,17 +190,15 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const creds = await getRegistryCredentials(id);
-      if (!creds) {
-        return reply.code(404).send({ error: 'Registry connection not found' });
-      }
+      const creds = await findOrNotFound(getRegistryCredentials(id), 'Registry connection', reply);
+      if (!creds) return;
 
       try {
         const client = RegistryFactory.create(creds);
         const repositories = await client.listRepositories();
         return { repositories };
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to list repositories';
+        const message = getErrorMessage(error, 'Failed to list repositories');
         return reply.code(500).send({ error: message });
       }
     }
@@ -227,17 +211,15 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id, repo } = request.params as { id: string; repo: string };
 
-      const creds = await getRegistryCredentials(id);
-      if (!creds) {
-        return reply.code(404).send({ error: 'Registry connection not found' });
-      }
+      const creds = await findOrNotFound(getRegistryCredentials(id), 'Registry connection', reply);
+      if (!creds) return;
 
       try {
         const client = RegistryFactory.create(creds);
         const tags = await client.listTags(repo);
         return { tags };
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to list tags';
+        const message = getErrorMessage(error, 'Failed to list tags');
         return reply.code(500).send({ error: message });
       }
     }
@@ -250,10 +232,8 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const registry = await getRegistryConnection(id);
-      if (!registry) {
-        return reply.code(404).send({ error: 'Registry connection not found' });
-      }
+      const registry = await findOrNotFound(getRegistryConnection(id), 'Registry connection', reply);
+      if (!registry) return;
 
       const services = await prisma.service.findMany({
         where: { containerImage: { registryConnectionId: id } },
@@ -290,10 +270,8 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const registry = await getRegistryConnection(id);
-      if (!registry) {
-        return reply.code(404).send({ error: 'Registry connection not found' });
-      }
+      const registry = await findOrNotFound(getRegistryConnection(id), 'Registry connection', reply);
+      if (!registry) return;
 
       const creds = await getRegistryCredentials(id);
       if (!creds) {
@@ -323,7 +301,7 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
             serviceId: service.id,
             name: service.name,
             hasUpdate: false,
-            error: error instanceof Error ? error.message : 'Check failed',
+            error: getErrorMessage(error, 'Check failed'),
           });
         }
       }

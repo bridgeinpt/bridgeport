@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireAdmin } from '../../plugins/authorize.js';
+import { validateBody, findOrNotFound } from '../../lib/helpers.js';
 import {
   listWebhooks,
   getWebhook,
@@ -48,11 +49,8 @@ export async function webhookAdminRoutes(fastify: FastifyInstance): Promise<void
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const webhook = await getWebhook(id);
-
-      if (!webhook) {
-        return reply.code(404).send({ error: 'Webhook not found' });
-      }
+      const webhook = await findOrNotFound(getWebhook(id), 'Webhook', reply);
+      if (!webhook) return;
 
       return { webhook };
     }
@@ -63,12 +61,10 @@ export async function webhookAdminRoutes(fastify: FastifyInstance): Promise<void
     '/api/admin/webhooks',
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
-      const body = createWebhookSchema.safeParse(request.body);
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(createWebhookSchema, request, reply);
+      if (!body) return;
 
-      const webhook = await createWebhook(body.data);
+      const webhook = await createWebhook(body);
 
       await logAudit({
         action: 'create',
@@ -89,21 +85,18 @@ export async function webhookAdminRoutes(fastify: FastifyInstance): Promise<void
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = updateWebhookSchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(updateWebhookSchema, request, reply);
+      if (!body) return;
 
       try {
-        const webhook = await updateWebhook(id, body.data);
+        const webhook = await updateWebhook(id, body);
 
         await logAudit({
           action: 'update',
           resourceType: 'webhook_config',
           resourceId: webhook.id,
           resourceName: webhook.name,
-          details: body.data,
+          details: body,
           userId: request.authUser!.id,
         });
 
@@ -121,10 +114,8 @@ export async function webhookAdminRoutes(fastify: FastifyInstance): Promise<void
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const webhook = await getWebhook(id);
-      if (!webhook) {
-        return reply.code(404).send({ error: 'Webhook not found' });
-      }
+      const webhook = await findOrNotFound(getWebhook(id), 'Webhook', reply);
+      if (!webhook) return;
 
       await deleteWebhook(id);
 

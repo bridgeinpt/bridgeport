@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireAdmin } from '../../plugins/authorize.js';
+import { validateBody, findOrNotFound } from '../../lib/helpers.js';
 import {
   listSlackChannels,
   getSlackChannel,
@@ -63,11 +64,8 @@ export async function slackAdminRoutes(fastify: FastifyInstance): Promise<void> 
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const channel = await getSlackChannel(id);
-
-      if (!channel) {
-        return reply.code(404).send({ error: 'Slack channel not found' });
-      }
+      const channel = await findOrNotFound(getSlackChannel(id), 'Slack channel', reply);
+      if (!channel) return;
 
       return { channel };
     }
@@ -78,12 +76,10 @@ export async function slackAdminRoutes(fastify: FastifyInstance): Promise<void> 
     '/api/admin/slack/channels',
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
-      const body = createChannelSchema.safeParse(request.body);
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(createChannelSchema, request, reply);
+      if (!body) return;
 
-      const channel = await createSlackChannel(body.data);
+      const channel = await createSlackChannel(body);
 
       await logAudit({
         action: 'create',
@@ -104,21 +100,18 @@ export async function slackAdminRoutes(fastify: FastifyInstance): Promise<void> 
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = updateChannelSchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(updateChannelSchema, request, reply);
+      if (!body) return;
 
       try {
-        const channel = await updateSlackChannel(id, body.data);
+        const channel = await updateSlackChannel(id, body);
 
         await logAudit({
           action: 'update',
           resourceType: 'slack_channel',
           resourceId: channel.id,
           resourceName: channel.name,
-          details: body.data,
+          details: body,
           userId: request.authUser!.id,
         });
 
@@ -136,10 +129,8 @@ export async function slackAdminRoutes(fastify: FastifyInstance): Promise<void> 
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const channel = await getSlackChannel(id);
-      if (!channel) {
-        return reply.code(404).send({ error: 'Slack channel not found' });
-      }
+      const channel = await findOrNotFound(getSlackChannel(id), 'Slack channel', reply);
+      if (!channel) return;
 
       await deleteSlackChannel(id);
 
@@ -192,18 +183,15 @@ export async function slackAdminRoutes(fastify: FastifyInstance): Promise<void> 
     '/api/admin/slack/routing',
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
-      const body = updateRoutingsSchema.safeParse(request.body);
+      const body = validateBody(updateRoutingsSchema, request, reply);
+      if (!body) return;
 
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
-
-      const routings = await updateRoutingsForType(body.data.typeId, body.data.routings);
+      const routings = await updateRoutingsForType(body.typeId, body.routings);
 
       await logAudit({
         action: 'update',
         resourceType: 'slack_routing',
-        resourceId: body.data.typeId,
+        resourceId: body.typeId,
         details: { routingCount: routings.length },
         userId: request.authUser!.id,
       });

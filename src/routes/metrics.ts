@@ -15,6 +15,7 @@ import { deployAgent } from '../services/agent-deploy.js';
 import { logAgentEvent } from '../services/agent-events.js';
 import crypto from 'crypto';
 import { SERVER_STATUS, HEALTH_STATUS, CONTAINER_STATUS, METRICS_MODE, AGENT_STATUS, DISCOVERY_STATUS } from '../lib/constants.js';
+import { findOrNotFound, validateBody } from '../lib/helpers.js';
 
 const metricsQuerySchema = z.object({
   from: z.string().datetime().optional(),
@@ -159,10 +160,8 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: 'Invalid query', details: query.error.issues });
       }
 
-      const server = await prisma.server.findUnique({ where: { id } });
-      if (!server) {
-        return reply.code(404).send({ error: 'Server not found' });
-      }
+      const server = await findOrNotFound(prisma.server.findUnique({ where: { id } }), 'Server', reply);
+      if (!server) return;
 
       const metrics = await getServerMetrics(
         id,
@@ -187,10 +186,8 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: 'Invalid query', details: query.error.issues });
       }
 
-      const service = await prisma.service.findUnique({ where: { id } });
-      if (!service) {
-        return reply.code(404).send({ error: 'Service not found' });
-      }
+      const service = await findOrNotFound(prisma.service.findUnique({ where: { id } }), 'Service', reply);
+      if (!service) return;
 
       const metrics = await getServiceMetrics(
         id,
@@ -210,10 +207,8 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
 
-      const env = await prisma.environment.findUnique({ where: { id: envId } });
-      if (!env) {
-        return reply.code(404).send({ error: 'Environment not found' });
-      }
+      const env = await findOrNotFound(prisma.environment.findUnique({ where: { id: envId } }), 'Environment', reply);
+      if (!env) return;
 
       const summary = await getEnvironmentMetricsSummary(envId);
       return { servers: summary };
@@ -227,14 +222,15 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const server = await prisma.server.findUnique({
-        where: { id },
-        include: { services: true },
-      });
-
-      if (!server) {
-        return reply.code(404).send({ error: 'Server not found' });
-      }
+      const server = await findOrNotFound(
+        prisma.server.findUnique({
+          where: { id },
+          include: { services: true },
+        }),
+        'Server',
+        reply
+      );
+      if (!server) return;
 
       if (server.metricsMode === METRICS_MODE.DISABLED) {
         return reply.code(400).send({ error: 'Metrics collection is disabled for this server' });
@@ -276,13 +272,11 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
       return reply.code(401).send({ error: 'Invalid agent token' });
     }
 
-    const body = serverMetricsIngestSchema.safeParse(request.body);
-    if (!body.success) {
-      return reply.code(400).send({ error: 'Invalid metrics data', details: body.error.issues });
-    }
+    const body = validateBody(serverMetricsIngestSchema, request, reply);
+    if (!body) return;
 
     // Save server metrics (exclude non-metrics fields)
-    const { services: serviceMetrics, serverHealthy, agentVersion, serviceHealthChecks, tcpCheckResults, certCheckResults, containers, topProcesses, ...serverMetricsData } = body.data;
+    const { services: serviceMetrics, serverHealthy, agentVersion, serviceHealthChecks, tcpCheckResults, certCheckResults, containers, topProcesses, ...serverMetricsData } = body;
     await saveServerMetrics(server.id, serverMetricsData, 'agent');
 
     // Save container snapshot for discovery (upsert)
@@ -560,10 +554,8 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const server = await prisma.server.findUnique({ where: { id } });
-      if (!server) {
-        return reply.code(404).send({ error: 'Server not found' });
-      }
+      const server = await findOrNotFound(prisma.server.findUnique({ where: { id } }), 'Server', reply);
+      if (!server) return;
 
       // Only allow regeneration if agent mode is enabled
       if (server.metricsMode !== METRICS_MODE.AGENT) {

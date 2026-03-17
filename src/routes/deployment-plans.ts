@@ -11,6 +11,7 @@ import {
 } from '../services/orchestration.js';
 import { logAudit } from '../services/audit.js';
 import { PLAN_STATUS, STEP_STATUS } from '../lib/constants.js';
+import { validateBody, findOrNotFound, getErrorMessage } from '../lib/helpers.js';
 
 const createPlanSchema = z.object({
   serviceIds: z.array(z.string()).min(1),
@@ -39,21 +40,18 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       const { execute } = request.query as { execute?: string };
-      const body = createPlanSchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(createPlanSchema, request, reply);
+      if (!body) return;
 
       try {
         const plan = await buildDeploymentPlan({
           environmentId: envId,
-          serviceIds: body.data.serviceIds,
-          imageTag: body.data.imageTag,
+          serviceIds: body.serviceIds,
+          imageTag: body.imageTag,
           triggerType: 'manual',
           triggeredBy: request.authUser!.email,
           userId: request.authUser!.id,
-          autoRollback: body.data.autoRollback,
+          autoRollback: body.autoRollback,
         });
 
         await logAudit({
@@ -62,9 +60,9 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
           resourceId: plan.id,
           resourceName: plan.name,
           details: {
-            imageTag: body.data.imageTag,
-            serviceCount: body.data.serviceIds.length,
-            autoRollback: body.data.autoRollback,
+            imageTag: body.imageTag,
+            serviceCount: body.serviceIds.length,
+            autoRollback: body.autoRollback,
           },
           userId: request.authUser!.id,
           environmentId: envId,
@@ -80,7 +78,7 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
         const fullPlan = await getDeploymentPlan(plan.id);
         return { plan: fullPlan };
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to create deployment plan';
+        const message = getErrorMessage(error, 'Failed to create deployment plan');
         return reply.code(400).send({ error: message });
       }
     }
@@ -92,11 +90,8 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const plan = await getDeploymentPlan(id);
-
-      if (!plan) {
-        return reply.code(404).send({ error: 'Deployment plan not found' });
-      }
+      const plan = await findOrNotFound(getDeploymentPlan(id), 'Deployment plan', reply);
+      if (!plan) return;
 
       return { plan };
     }
@@ -109,10 +104,8 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const plan = await prisma.deploymentPlan.findUnique({ where: { id } });
-      if (!plan) {
-        return reply.code(404).send({ error: 'Deployment plan not found' });
-      }
+      const plan = await findOrNotFound(prisma.deploymentPlan.findUnique({ where: { id } }), 'Deployment plan', reply);
+      if (!plan) return;
 
       if (plan.status !== PLAN_STATUS.PENDING) {
         return reply.code(400).send({ error: `Cannot execute plan with status: ${plan.status}` });
@@ -144,10 +137,8 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const plan = await prisma.deploymentPlan.findUnique({ where: { id } });
-      if (!plan) {
-        return reply.code(404).send({ error: 'Deployment plan not found' });
-      }
+      const plan = await findOrNotFound(prisma.deploymentPlan.findUnique({ where: { id } }), 'Deployment plan', reply);
+      if (!plan) return;
 
       try {
         await cancelPlan(id);
@@ -164,7 +155,7 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
 
         return { success: true };
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to cancel plan';
+        const message = getErrorMessage(error, 'Failed to cancel plan');
         return reply.code(400).send({ error: message });
       }
     }
@@ -177,14 +168,15 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const plan = await prisma.deploymentPlan.findUnique({
-        where: { id },
-        include: { steps: true },
-      });
-
-      if (!plan) {
-        return reply.code(404).send({ error: 'Deployment plan not found' });
-      }
+      const plan = await findOrNotFound(
+        prisma.deploymentPlan.findUnique({
+          where: { id },
+          include: { steps: true },
+        }),
+        'Deployment plan',
+        reply
+      );
+      if (!plan) return;
 
       // Can only rollback completed or failed plans
       if (!([PLAN_STATUS.COMPLETED, PLAN_STATUS.FAILED] as string[]).includes(plan.status)) {
@@ -228,10 +220,8 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { id } = request.params as { id: string };
 
-      const plan = await prisma.deploymentPlan.findUnique({ where: { id } });
-      if (!plan) {
-        return reply.code(404).send({ error: 'Deployment plan not found' });
-      }
+      const plan = await findOrNotFound(prisma.deploymentPlan.findUnique({ where: { id } }), 'Deployment plan', reply);
+      if (!plan) return;
 
       reply.raw.writeHead(200, {
         'Content-Type': 'text/event-stream',

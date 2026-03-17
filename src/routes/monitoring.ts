@@ -8,6 +8,7 @@ import { bundledAgentVersion } from '../lib/version.js';
 import { getAgentEvents } from '../services/agent-events.js';
 import { logHealthCheck } from '../services/health-checks.js';
 import { SERVER_STATUS, HEALTH_STATUS, CONTAINER_STATUS, HEALTH_CHECK_STATUS, DISCOVERY_STATUS, type ServerStatus } from '../lib/constants.js';
+import { validateBody, findOrNotFound, getErrorMessage } from '../lib/helpers.js';
 
 const healthLogQuerySchema = z.object({
   type: z.enum(['server', 'service', 'container']).optional(),
@@ -42,10 +43,8 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         return reply.code(400).send({ error: 'Invalid query', details: query.error.issues });
       }
 
-      const env = await prisma.environment.findUnique({ where: { id: envId } });
-      if (!env) {
-        return reply.code(404).send({ error: 'Environment not found' });
-      }
+      const env = await findOrNotFound(prisma.environment.findUnique({ where: { id: envId } }), 'Environment', reply);
+      if (!env) return;
 
       const { type, checkType, status, resourceId, hours, page, limit } = query.data;
       const since = new Date();
@@ -121,23 +120,18 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
-      const body = runHealthChecksSchema.safeParse(request.body);
+      const body = validateBody(runHealthChecksSchema, request, reply);
+      if (!body) return;
 
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
-
-      const env = await prisma.environment.findUnique({ where: { id: envId } });
-      if (!env) {
-        return reply.code(404).send({ error: 'Environment not found' });
-      }
+      const env = await findOrNotFound(prisma.environment.findUnique({ where: { id: envId } }), 'Environment', reply);
+      if (!env) return;
 
       const results: {
         servers: Array<{ id: string; name: string; status: string; durationMs: number; error?: string }>;
         services: Array<{ id: string; name: string; status: string; durationMs: number; error?: string }>;
       } = { servers: [], services: [] };
 
-      const { type } = body.data;
+      const { type } = body;
 
       // Run server health checks
       if (type === 'all' || type === 'servers') {
@@ -172,7 +166,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
             });
           } catch (error) {
             const durationMs = Date.now() - start;
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            const errorMessage = getErrorMessage(error, 'Unknown error');
 
             await logHealthCheck({
               environmentId: envId,
@@ -236,7 +230,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
             });
           } catch (error) {
             const durationMs = Date.now() - start;
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            const errorMessage = getErrorMessage(error, 'Unknown error');
 
             await logHealthCheck({
               environmentId: envId,
@@ -290,10 +284,8 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         return reply.code(400).send({ error: 'Invalid query', details: query.error.issues });
       }
 
-      const env = await prisma.environment.findUnique({ where: { id: envId } });
-      if (!env) {
-        return reply.code(404).send({ error: 'Environment not found' });
-      }
+      const env = await findOrNotFound(prisma.environment.findUnique({ where: { id: envId } }), 'Environment', reply);
+      if (!env) return;
 
       const { hours, metric } = query.data;
       const since = new Date();
@@ -419,10 +411,8 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         return reply.code(400).send({ error: 'Invalid query', details: query.error.issues });
       }
 
-      const env = await prisma.environment.findUnique({ where: { id: envId } });
-      if (!env) {
-        return reply.code(404).send({ error: 'Environment not found' });
-      }
+      const env = await findOrNotFound(prisma.environment.findUnique({ where: { id: envId } }), 'Environment', reply);
+      if (!env) return;
 
       const { hours } = query.data;
       const since = new Date();
@@ -488,14 +478,15 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const server = await prisma.server.findUnique({
-        where: { id },
-        include: { environment: true },
-      });
-
-      if (!server) {
-        return reply.code(404).send({ error: 'Server not found' });
-      }
+      const server = await findOrNotFound(
+        prisma.server.findUnique({
+          where: { id },
+          include: { environment: true },
+        }),
+        'Server',
+        reply
+      );
+      if (!server) return;
 
       const start = Date.now();
       try {
@@ -520,7 +511,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         };
       } catch (error) {
         const durationMs = Date.now() - start;
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        const errorMessage = getErrorMessage(error, 'Unknown error');
 
         await logHealthCheck({
           environmentId: server.environmentId,
@@ -549,10 +540,8 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
 
-      const env = await prisma.environment.findUnique({ where: { id: envId } });
-      if (!env) {
-        return reply.code(404).send({ error: 'Environment not found' });
-      }
+      const env = await findOrNotFound(prisma.environment.findUnique({ where: { id: envId } }), 'Environment', reply);
+      if (!env) return;
 
       const servers = await prisma.server.findMany({
         where: { environmentId: envId },
@@ -588,7 +577,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
             };
           } catch (error) {
             const durationMs = Date.now() - start;
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            const errorMessage = getErrorMessage(error, 'Unknown error');
 
             await logHealthCheck({
               environmentId: envId,
@@ -624,10 +613,8 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
 
-      const env = await prisma.environment.findUnique({ where: { id: envId } });
-      if (!env) {
-        return reply.code(404).send({ error: 'Environment not found' });
-      }
+      const env = await findOrNotFound(prisma.environment.findUnique({ where: { id: envId } }), 'Environment', reply);
+      if (!env) return;
 
       // Get server stats
       const servers = await prisma.server.findMany({
@@ -694,10 +681,8 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
 
-      const env = await prisma.environment.findUnique({ where: { id: envId } });
-      if (!env) {
-        return reply.code(404).send({ error: 'Environment not found' });
-      }
+      const env = await findOrNotFound(prisma.environment.findUnique({ where: { id: envId } }), 'Environment', reply);
+      if (!env) return;
 
       // Get all servers in this environment
       const servers = await prisma.server.findMany({
@@ -854,13 +839,15 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
 
-      const env = await prisma.environment.findUnique({
-        where: { id: envId },
-        select: { id: true },
-      });
-      if (!env) {
-        return reply.code(404).send({ error: 'Environment not found' });
-      }
+      const env = await findOrNotFound(
+        prisma.environment.findUnique({
+          where: { id: envId },
+          select: { id: true },
+        }),
+        'Environment',
+        reply
+      );
+      if (!env) return;
 
       const generalSettings = await prisma.generalSettings.findUnique({
         where: { environmentId: envId },
@@ -920,10 +907,8 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
       const { id } = request.params as { id: string };
       const { limit } = request.query as { limit?: string };
 
-      const server = await prisma.server.findUnique({ where: { id } });
-      if (!server) {
-        return reply.code(404).send({ error: 'Server not found' });
-      }
+      const server = await findOrNotFound(prisma.server.findUnique({ where: { id } }), 'Server', reply);
+      if (!server) return;
 
       const events = await getAgentEvents(id, limit ? parseInt(limit, 10) : 20);
 

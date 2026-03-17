@@ -4,7 +4,7 @@ import { prisma } from '../lib/db.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
 import { requireAdmin } from '../plugins/authorize.js';
 import { logAudit } from '../services/audit.js';
-import { safeJsonParse } from '../lib/helpers.js';
+import { safeJsonParse, validateBody, findOrNotFound, getErrorMessage } from '../lib/helpers.js';
 import { S3Client, ListBucketsCommand, HeadBucketCommand } from '@aws-sdk/client-s3';
 
 const spacesConfigSchema = z.object({
@@ -59,34 +59,32 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
     '/api/settings/spaces',
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
-      const body = spacesConfigSchema.safeParse(request.body);
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(spacesConfigSchema, request, reply);
+      if (!body) return;
 
       // Check if config already exists
       const existing = await prisma.spacesConfig.findFirst();
 
       // For new configs, secretKey is required
-      if (!existing && !body.data.secretKey) {
+      if (!existing && !body.secretKey) {
         return reply.code(400).send({ error: 'Secret key is required for new configuration' });
       }
 
-      const endpoint = body.data.endpoint || `${body.data.region}.digitaloceanspaces.com`;
-      const bucketsJson = body.data.buckets ? JSON.stringify(body.data.buckets) : null;
+      const endpoint = body.endpoint || `${body.region}.digitaloceanspaces.com`;
+      const bucketsJson = body.buckets ? JSON.stringify(body.buckets) : null;
 
       let config;
       if (existing) {
         // For updates, only encrypt new secret if provided
         const updateData: Record<string, unknown> = {
-          accessKey: body.data.accessKey,
-          region: body.data.region,
+          accessKey: body.accessKey,
+          region: body.region,
           endpoint,
           buckets: bucketsJson,
         };
 
-        if (body.data.secretKey) {
-          const { ciphertext, nonce } = encrypt(body.data.secretKey);
+        if (body.secretKey) {
+          const { ciphertext, nonce } = encrypt(body.secretKey);
           updateData.encryptedSecretKey = ciphertext;
           updateData.secretKeyNonce = nonce;
         }
@@ -100,18 +98,18 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
           action: 'update',
           resourceType: 'spaces_config',
           resourceId: config.id,
-          details: { region: body.data.region },
+          details: { region: body.region },
           userId: request.authUser!.id,
         });
       } else {
         // For new config, secretKey is guaranteed to be present (validated above)
-        const { ciphertext, nonce } = encrypt(body.data.secretKey!);
+        const { ciphertext, nonce } = encrypt(body.secretKey!);
         config = await prisma.spacesConfig.create({
           data: {
-            accessKey: body.data.accessKey,
+            accessKey: body.accessKey,
             encryptedSecretKey: ciphertext,
             secretKeyNonce: nonce,
-            region: body.data.region,
+            region: body.region,
             endpoint,
             buckets: bucketsJson,
           },
@@ -121,7 +119,7 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
           action: 'create',
           resourceType: 'spaces_config',
           resourceId: config.id,
-          details: { region: body.data.region },
+          details: { region: body.region },
           userId: request.authUser!.id,
         });
       }
@@ -142,10 +140,8 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
     '/api/settings/spaces',
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
-      const existing = await prisma.spacesConfig.findFirst();
-      if (!existing) {
-        return reply.code(404).send({ error: 'Spaces configuration not found' });
-      }
+      const existing = await findOrNotFound(prisma.spacesConfig.findFirst(), 'Spaces configuration', reply);
+      if (!existing) return;
 
       await prisma.spacesConfig.delete({ where: { id: existing.id } });
 
@@ -231,7 +227,7 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
           };
         } catch (listError) {
           // ListBuckets failed - likely a scoped key
-          const errMsg = listError instanceof Error ? listError.message : '';
+          const errMsg = getErrorMessage(listError, '');
           if (errMsg.includes('AccessDenied') || errMsg.includes('403')) {
             return reply.code(400).send({
               success: false,
@@ -242,7 +238,7 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
           throw listError;
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Connection test failed';
+        const message = getErrorMessage(error, 'Connection test failed');
         return reply.code(400).send({ success: false, error: message });
       }
     }
@@ -284,14 +280,14 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
 
         return { buckets, source: 'discovered' };
       } catch (error) {
-        const errMsg = error instanceof Error ? error.message : '';
+        const errMsg = getErrorMessage(error, '');
         if (errMsg.includes('AccessDenied') || errMsg.includes('403')) {
           return reply.code(400).send({
             error: 'Cannot list buckets with this key. Add bucket names manually in Spaces settings.',
             scopedKey: true,
           });
         }
-        const message = error instanceof Error ? error.message : 'Failed to list buckets';
+        const message = getErrorMessage(error, 'Failed to list buckets');
         return reply.code(400).send({ error: message });
       }
     }
@@ -331,24 +327,20 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
       const { environmentId } = request.params as { environmentId: string };
-      const body = updateEnvironmentSpacesSchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(updateEnvironmentSpacesSchema, request, reply);
+      if (!body) return;
 
       const config = await prisma.spacesConfig.findFirst();
       if (!config) {
         return reply.code(400).send({ error: 'Spaces not configured' });
       }
 
-      const environment = await prisma.environment.findUnique({
-        where: { id: environmentId },
-      });
-
-      if (!environment) {
-        return reply.code(404).send({ error: 'Environment not found' });
-      }
+      const environment = await findOrNotFound(
+        prisma.environment.findUnique({ where: { id: environmentId } }),
+        'Environment',
+        reply
+      );
+      if (!environment) return;
 
       // Upsert the SpacesEnvironment record
       await prisma.spacesEnvironment.upsert({
@@ -358,11 +350,11 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
             environmentId,
           },
         },
-        update: { enabled: body.data.enabled },
+        update: { enabled: body.enabled },
         create: {
           spacesConfigId: config.id,
           environmentId,
-          enabled: body.data.enabled,
+          enabled: body.enabled,
         },
       });
 
@@ -371,12 +363,12 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
         resourceType: 'spaces_environment',
         resourceId: environmentId,
         resourceName: environment.name,
-        details: { spacesEnabled: body.data.enabled },
+        details: { spacesEnabled: body.enabled },
         userId: request.authUser!.id,
         environmentId,
       });
 
-      return { success: true, enabled: body.data.enabled };
+      return { success: true, enabled: body.enabled };
     }
   );
 }

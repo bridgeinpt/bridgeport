@@ -20,7 +20,14 @@ import { prisma } from '../lib/db.js';
 import { requireOperator } from '../plugins/authorize.js';
 import { collectDatabaseMetrics } from '../services/database-monitoring-collector.js';
 import { pingDatabase } from '../services/database-query-executor.js';
-import { safeJsonParse } from '../lib/helpers.js';
+import {
+  safeJsonParse,
+  validateBody,
+  findOrNotFound,
+  getErrorMessage,
+  handleUniqueConstraint,
+  parsePaginationQuery,
+} from '../lib/helpers.js';
 
 const storageTypeSchema = z.enum(['local', 'spaces']);
 const backupFormatSchema = z.enum(['plain', 'custom', 'tar']);
@@ -72,11 +79,8 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request) => {
       const { envId } = request.params as { envId: string };
-      const { limit, offset } = request.query as { limit?: string; offset?: string };
-      return listDatabases(envId, {
-        limit: limit ? parseInt(limit) : 25,
-        offset: offset ? parseInt(offset) : 0,
-      });
+      const { limit, offset } = parsePaginationQuery(request.query as Record<string, unknown>);
+      return listDatabases(envId, { limit, offset });
     }
   );
 
@@ -86,26 +90,23 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
-      const body = createDatabaseSchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(createDatabaseSchema, request, reply);
+      if (!body) return;
 
       try {
         // Resolve databaseTypeId if provided
-        let databaseTypeId = body.data.databaseTypeId;
+        let databaseTypeId = body.databaseTypeId;
         if (!databaseTypeId) {
           // Look up DatabaseType by name for backward compat
           const dbType = await prisma.databaseType.findUnique({
-            where: { name: body.data.type },
+            where: { name: body.type },
           });
           if (dbType) {
             databaseTypeId = dbType.id;
           }
         }
 
-        const database = await createDatabase(envId, body.data, databaseTypeId);
+        const database = await createDatabase(envId, body, databaseTypeId);
 
         await logAudit({
           action: 'create',
@@ -119,9 +120,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
 
         return { database };
       } catch (error) {
-        if (error instanceof Error && error.message.includes('Unique constraint')) {
-          return reply.code(409).send({ error: 'Database with this name already exists' });
-        }
+        if (handleUniqueConstraint(error, 'Database with this name already exists', reply)) return;
         throw error;
       }
     }
@@ -133,11 +132,8 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const database = await getDatabase(id);
-
-      if (!database) {
-        return reply.code(404).send({ error: 'Database not found' });
-      }
+      const database = await findOrNotFound(getDatabase(id), 'Database', reply);
+      if (!database) return;
 
       return { database };
     }
@@ -149,22 +145,19 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = updateDatabaseSchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(updateDatabaseSchema, request, reply);
+      if (!body) return;
 
       try {
         const existing = await getDatabase(id);
-        const database = await updateDatabase(id, body.data);
+        const database = await updateDatabase(id, body);
 
         await logAudit({
           action: 'update',
           resourceType: 'database',
           resourceId: database.id,
           resourceName: database.name,
-          details: { changes: Object.keys(body.data) },
+          details: { changes: Object.keys(body) },
           userId: request.authUser!.id,
           environmentId: existing?.environmentId,
         });
@@ -186,10 +179,8 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const existing = await getDatabase(id);
-      if (!existing) {
-        return reply.code(404).send({ error: 'Database not found' });
-      }
+      const existing = await findOrNotFound(getDatabase(id), 'Database', reply);
+      if (!existing) return;
 
       if (existing._count && existing._count.backups > 0) {
         return reply.code(400).send({
@@ -219,10 +210,8 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const database = await getDatabase(id);
-      if (!database) {
-        return reply.code(404).send({ error: 'Database not found' });
-      }
+      const database = await findOrNotFound(getDatabase(id), 'Database', reply);
+      if (!database) return;
 
       try {
         const { backupId } = await createBackup(id, request.authUser!.id);
@@ -239,7 +228,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
 
         return { backupId, message: 'Backup started' };
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Backup failed';
+        const message = getErrorMessage(error, 'Backup failed');
         return reply.code(500).send({ error: message });
       }
     }
@@ -251,17 +240,12 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const { limit, offset } = request.query as { limit?: string; offset?: string };
+      const { limit, offset } = parsePaginationQuery(request.query as Record<string, unknown>, { limit: 50, offset: 0 });
 
-      const database = await getDatabase(id);
-      if (!database) {
-        return reply.code(404).send({ error: 'Database not found' });
-      }
+      const database = await findOrNotFound(getDatabase(id), 'Database', reply);
+      if (!database) return;
 
-      const { backups, total } = await listBackups(id, {
-        limit: limit ? parseInt(limit) : 50,
-        offset: offset ? parseInt(offset) : 0,
-      });
+      const { backups, total } = await listBackups(id, { limit, offset });
 
       // Check if downloads are allowed
       const dataSettings = await prisma.dataSettings.findUnique({
@@ -287,10 +271,8 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const backup = await getBackup(id);
-      if (!backup) {
-        return reply.code(404).send({ error: 'Backup not found' });
-      }
+      const backup = await findOrNotFound(getBackup(id), 'Backup', reply);
+      if (!backup) return;
 
       // Check if downloads are allowed
       const dataSettings = await prisma.dataSettings.findUnique({
@@ -328,7 +310,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
           return reply.send(result.content);
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Download failed';
+        const message = getErrorMessage(error, 'Download failed');
         return reply.code(400).send({ error: message });
       }
     }
@@ -341,10 +323,8 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const backup = await getBackup(id);
-      if (!backup) {
-        return reply.code(404).send({ error: 'Backup not found' });
-      }
+      const backup = await findOrNotFound(getBackup(id), 'Backup', reply);
+      if (!backup) return;
 
       await deleteBackup(id);
 
@@ -368,10 +348,8 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const database = await getDatabase(id);
-      if (!database) {
-        return reply.code(404).send({ error: 'Database not found' });
-      }
+      const database = await findOrNotFound(getDatabase(id), 'Database', reply);
+      if (!database) return;
 
       const schedule = await getBackupSchedule(id);
       return { schedule };
@@ -384,22 +362,17 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = scheduleSchema.safeParse(request.body);
+      const body = validateBody(scheduleSchema, request, reply);
+      if (!body) return;
 
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
-
-      const database = await getDatabase(id);
-      if (!database) {
-        return reply.code(404).send({ error: 'Database not found' });
-      }
+      const database = await findOrNotFound(getDatabase(id), 'Database', reply);
+      if (!database) return;
 
       const schedule = await setBackupSchedule(
         id,
-        body.data.cronExpression,
-        body.data.retentionDays,
-        body.data.enabled
+        body.cronExpression,
+        body.retentionDays,
+        body.enabled
       );
 
       await logAudit({
@@ -407,7 +380,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
         resourceType: 'backup_schedule',
         resourceId: schedule.id,
         resourceName: database.name,
-        details: { ...body.data },
+        details: { ...body },
         userId: request.authUser!.id,
         environmentId: database.environmentId,
       });
@@ -423,10 +396,8 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const database = await getDatabase(id);
-      if (!database) {
-        return reply.code(404).send({ error: 'Database not found' });
-      }
+      const database = await findOrNotFound(getDatabase(id), 'Database', reply);
+      if (!database) return;
 
       await deleteBackupSchedule(id);
 
@@ -591,16 +562,17 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
       const { id } = request.params as { envId: string; id: string };
       const { hours } = request.query as { hours?: string };
 
-      const database = await prisma.database.findUnique({
-        where: { id },
-        include: {
-          databaseType: { select: { monitoringConfig: true } },
-        },
-      });
-
-      if (!database) {
-        return reply.code(404).send({ error: 'Database not found' });
-      }
+      const database = await findOrNotFound(
+        prisma.database.findUnique({
+          where: { id },
+          include: {
+            databaseType: { select: { monitoringConfig: true } },
+          },
+        }),
+        'Database',
+        reply
+      );
+      if (!database) return;
 
       const hoursNum = hours ? parseInt(hours) : 24;
       const since = new Date();
@@ -633,19 +605,21 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { envId, id } = request.params as { envId: string; id: string };
 
-      const database = await prisma.database.findUnique({
-        where: { id },
-        include: { databaseType: true, server: true },
-      });
-      if (!database) {
-        return reply.code(404).send({ error: 'Database not found' });
-      }
+      const database = await findOrNotFound(
+        prisma.database.findUnique({
+          where: { id },
+          include: { databaseType: true, server: true },
+        }),
+        'Database',
+        reply
+      );
+      if (!database) return;
 
       try {
         const result = await pingDatabase(database, envId);
         return result;
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Connection failed';
+        const message = getErrorMessage(error, 'Connection failed');
         return { success: false, latencyMs: null, error: message };
       }
     }
@@ -662,10 +636,12 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
         collectionIntervalSec?: number;
       };
 
-      const database = await prisma.database.findUnique({ where: { id } });
-      if (!database) {
-        return reply.code(404).send({ error: 'Database not found' });
-      }
+      const database = await findOrNotFound(
+        prisma.database.findUnique({ where: { id } }),
+        'Database',
+        reply
+      );
+      if (!database) return;
 
       const updated = await prisma.database.update({
         where: { id },

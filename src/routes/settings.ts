@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/db.js';
 import { requireAdmin } from '../plugins/authorize.js';
 import { logAudit } from '../services/audit.js';
-import { safeJsonParse } from '../lib/helpers.js';
+import { safeJsonParse, validateBody, findOrNotFound } from '../lib/helpers.js';
 import { resetTypeToDefaults, exportTypeAsJson, getLastSyncResult } from '../services/plugin-loader.js';
 
 const createServiceTypeSchema = z.object({
@@ -116,7 +116,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const serviceType = await prisma.serviceType.findUnique({
+      const serviceType = await findOrNotFound(prisma.serviceType.findUnique({
         where: { id },
         include: {
           commands: {
@@ -126,11 +126,8 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
             select: { services: true },
           },
         },
-      });
-
-      if (!serviceType) {
-        return reply.code(404).send({ error: 'Service type not found' });
-      }
+      }), 'Service type', reply);
+      if (!serviceType) return;
 
       return { serviceType };
     }
@@ -141,13 +138,11 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     '/api/settings/service-types',
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
-      const body = createServiceTypeSchema.safeParse(request.body);
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(createServiceTypeSchema, request, reply);
+      if (!body) return;
 
       const existing = await prisma.serviceType.findUnique({
-        where: { name: body.data.name },
+        where: { name: body.name },
       });
 
       if (existing) {
@@ -156,7 +151,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
 
       const serviceType = await prisma.serviceType.create({
         data: {
-          ...body.data,
+          ...body,
           source: 'user',
         },
         include: {
@@ -182,22 +177,17 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = updateServiceTypeSchema.safeParse(request.body);
+      const body = validateBody(updateServiceTypeSchema, request, reply);
+      if (!body) return;
 
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
-
-      const existing = await prisma.serviceType.findUnique({ where: { id } });
-      if (!existing) {
-        return reply.code(404).send({ error: 'Service type not found' });
-      }
+      const existing = await findOrNotFound(prisma.serviceType.findUnique({ where: { id } }), 'Service type', reply);
+      if (!existing) return;
 
       await markServiceTypeCustomized(id);
 
       const serviceType = await prisma.serviceType.update({
         where: { id },
-        data: body.data,
+        data: body,
         include: {
           commands: {
             orderBy: { sortOrder: 'asc' },
@@ -210,7 +200,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         resourceType: 'service_type',
         resourceId: serviceType.id,
         resourceName: serviceType.name,
-        details: body.data,
+        details: body,
         userId: request.authUser!.id,
       });
 
@@ -225,14 +215,11 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const existing = await prisma.serviceType.findUnique({
+      const existing = await findOrNotFound(prisma.serviceType.findUnique({
         where: { id },
         include: { _count: { select: { services: true } } },
-      });
-
-      if (!existing) {
-        return reply.code(404).send({ error: 'Service type not found' });
-      }
+      }), 'Service type', reply);
+      if (!existing) return;
 
       if (existing._count.services > 0) {
         return reply.code(409).send({
@@ -262,10 +249,8 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const existing = await prisma.serviceType.findUnique({ where: { id } });
-      if (!existing) {
-        return reply.code(404).send({ error: 'Service type not found' });
-      }
+      const existing = await findOrNotFound(prisma.serviceType.findUnique({ where: { id } }), 'Service type', reply);
+      if (!existing) return;
 
       const success = await resetTypeToDefaults('service-type', id);
       if (!success) {
@@ -314,21 +299,16 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = createCommandSchema.safeParse(request.body);
+      const body = validateBody(createCommandSchema, request, reply);
+      if (!body) return;
 
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
-
-      const serviceType = await prisma.serviceType.findUnique({ where: { id } });
-      if (!serviceType) {
-        return reply.code(404).send({ error: 'Service type not found' });
-      }
+      const serviceType = await findOrNotFound(prisma.serviceType.findUnique({ where: { id } }), 'Service type', reply);
+      if (!serviceType) return;
 
       // Check for duplicate command name
       const existingCmd = await prisma.serviceTypeCommand.findUnique({
         where: {
-          serviceTypeId_name: { serviceTypeId: id, name: body.data.name },
+          serviceTypeId_name: { serviceTypeId: id, name: body.name },
         },
       });
 
@@ -337,7 +317,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       // Get max sortOrder if not specified
-      let sortOrder = body.data.sortOrder;
+      let sortOrder = body.sortOrder;
       if (sortOrder === undefined) {
         const maxOrder = await prisma.serviceTypeCommand.findFirst({
           where: { serviceTypeId: id },
@@ -349,7 +329,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
 
       const command = await prisma.serviceTypeCommand.create({
         data: {
-          ...body.data,
+          ...body,
           sortOrder,
           serviceTypeId: id,
         },
@@ -362,7 +342,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         resourceType: 'service_type_command',
         resourceId: command.id,
         resourceName: `${serviceType.name}/${command.name}`,
-        details: { serviceTypeId: id, command: body.data.command },
+        details: { serviceTypeId: id, command: body.command },
         userId: request.authUser!.id,
       });
 
@@ -376,24 +356,18 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
       const { id, commandId } = request.params as { id: string; commandId: string };
-      const body = updateCommandSchema.safeParse(request.body);
+      const body = validateBody(updateCommandSchema, request, reply);
+      if (!body) return;
 
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
-
-      const existing = await prisma.serviceTypeCommand.findFirst({
+      const existing = await findOrNotFound(prisma.serviceTypeCommand.findFirst({
         where: { id: commandId, serviceTypeId: id },
         include: { serviceType: true },
-      });
-
-      if (!existing) {
-        return reply.code(404).send({ error: 'Command not found' });
-      }
+      }), 'Command', reply);
+      if (!existing) return;
 
       const command = await prisma.serviceTypeCommand.update({
         where: { id: commandId },
-        data: body.data,
+        data: body,
       });
 
       await markServiceTypeCustomized(id);
@@ -403,7 +377,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         resourceType: 'service_type_command',
         resourceId: command.id,
         resourceName: `${existing.serviceType.name}/${command.name}`,
-        details: body.data,
+        details: body,
         userId: request.authUser!.id,
       });
 
@@ -418,14 +392,11 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id, commandId } = request.params as { id: string; commandId: string };
 
-      const existing = await prisma.serviceTypeCommand.findFirst({
+      const existing = await findOrNotFound(prisma.serviceTypeCommand.findFirst({
         where: { id: commandId, serviceTypeId: id },
         include: { serviceType: true },
-      });
-
-      if (!existing) {
-        return reply.code(404).send({ error: 'Command not found' });
-      }
+      }), 'Command', reply);
+      if (!existing) return;
 
       await prisma.serviceTypeCommand.delete({ where: { id: commandId } });
 
@@ -455,10 +426,8 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: 'Invalid input - expected array of command IDs' });
       }
 
-      const serviceType = await prisma.serviceType.findUnique({ where: { id } });
-      if (!serviceType) {
-        return reply.code(404).send({ error: 'Service type not found' });
-      }
+      const serviceType = await findOrNotFound(prisma.serviceType.findUnique({ where: { id } }), 'Service type', reply);
+      if (!serviceType) return;
 
       // Update sortOrder for each command
       await Promise.all(
@@ -514,7 +483,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const databaseType = await prisma.databaseType.findUnique({
+      const databaseType = await findOrNotFound(prisma.databaseType.findUnique({
         where: { id },
         include: {
           commands: {
@@ -524,11 +493,8 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
             select: { databases: true },
           },
         },
-      });
-
-      if (!databaseType) {
-        return reply.code(404).send({ error: 'Database type not found' });
-      }
+      }), 'Database type', reply);
+      if (!databaseType) return;
 
       return {
         databaseType: {
@@ -544,13 +510,11 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     '/api/settings/database-types',
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
-      const body = createDatabaseTypeSchema.safeParse(request.body);
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(createDatabaseTypeSchema, request, reply);
+      if (!body) return;
 
       const existing = await prisma.databaseType.findUnique({
-        where: { name: body.data.name },
+        where: { name: body.name },
       });
 
       if (existing) {
@@ -559,13 +523,13 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
 
       const databaseType = await prisma.databaseType.create({
         data: {
-          name: body.data.name,
-          displayName: body.data.displayName,
+          name: body.name,
+          displayName: body.displayName,
           source: 'user',
-          connectionFields: JSON.stringify(body.data.connectionFields),
-          backupCommand: body.data.backupCommand || null,
-          restoreCommand: body.data.restoreCommand || null,
-          defaultPort: body.data.defaultPort || null,
+          connectionFields: JSON.stringify(body.connectionFields),
+          backupCommand: body.backupCommand || null,
+          restoreCommand: body.restoreCommand || null,
+          defaultPort: body.defaultPort || null,
         },
         include: {
           commands: true,
@@ -595,25 +559,20 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = updateDatabaseTypeSchema.safeParse(request.body);
+      const body = validateBody(updateDatabaseTypeSchema, request, reply);
+      if (!body) return;
 
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
-
-      const existing = await prisma.databaseType.findUnique({ where: { id } });
-      if (!existing) {
-        return reply.code(404).send({ error: 'Database type not found' });
-      }
+      const existing = await findOrNotFound(prisma.databaseType.findUnique({ where: { id } }), 'Database type', reply);
+      if (!existing) return;
 
       await markDatabaseTypeCustomized(id);
 
       const updateData: Record<string, unknown> = {};
-      if (body.data.displayName !== undefined) updateData.displayName = body.data.displayName;
-      if (body.data.connectionFields !== undefined) updateData.connectionFields = JSON.stringify(body.data.connectionFields);
-      if (body.data.backupCommand !== undefined) updateData.backupCommand = body.data.backupCommand;
-      if (body.data.restoreCommand !== undefined) updateData.restoreCommand = body.data.restoreCommand;
-      if (body.data.defaultPort !== undefined) updateData.defaultPort = body.data.defaultPort;
+      if (body.displayName !== undefined) updateData.displayName = body.displayName;
+      if (body.connectionFields !== undefined) updateData.connectionFields = JSON.stringify(body.connectionFields);
+      if (body.backupCommand !== undefined) updateData.backupCommand = body.backupCommand;
+      if (body.restoreCommand !== undefined) updateData.restoreCommand = body.restoreCommand;
+      if (body.defaultPort !== undefined) updateData.defaultPort = body.defaultPort;
 
       const databaseType = await prisma.databaseType.update({
         where: { id },
@@ -630,7 +589,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         resourceType: 'database_type',
         resourceId: databaseType.id,
         resourceName: databaseType.name,
-        details: body.data,
+        details: body,
         userId: request.authUser!.id,
       });
 
@@ -650,14 +609,11 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const existing = await prisma.databaseType.findUnique({
+      const existing = await findOrNotFound(prisma.databaseType.findUnique({
         where: { id },
         include: { _count: { select: { databases: true } } },
-      });
-
-      if (!existing) {
-        return reply.code(404).send({ error: 'Database type not found' });
-      }
+      }), 'Database type', reply);
+      if (!existing) return;
 
       if (existing._count.databases > 0) {
         return reply.code(409).send({
@@ -687,10 +643,8 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const existing = await prisma.databaseType.findUnique({ where: { id } });
-      if (!existing) {
-        return reply.code(404).send({ error: 'Database type not found' });
-      }
+      const existing = await findOrNotFound(prisma.databaseType.findUnique({ where: { id } }), 'Database type', reply);
+      if (!existing) return;
 
       const success = await resetTypeToDefaults('database-type', id);
       if (!success) {
@@ -744,20 +698,15 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = createCommandSchema.safeParse(request.body);
+      const body = validateBody(createCommandSchema, request, reply);
+      if (!body) return;
 
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
-
-      const databaseType = await prisma.databaseType.findUnique({ where: { id } });
-      if (!databaseType) {
-        return reply.code(404).send({ error: 'Database type not found' });
-      }
+      const databaseType = await findOrNotFound(prisma.databaseType.findUnique({ where: { id } }), 'Database type', reply);
+      if (!databaseType) return;
 
       const existingCmd = await prisma.databaseTypeCommand.findUnique({
         where: {
-          databaseTypeId_name: { databaseTypeId: id, name: body.data.name },
+          databaseTypeId_name: { databaseTypeId: id, name: body.name },
         },
       });
 
@@ -765,7 +714,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.code(409).send({ error: 'Command already exists' });
       }
 
-      let sortOrder = body.data.sortOrder;
+      let sortOrder = body.sortOrder;
       if (sortOrder === undefined) {
         const maxOrder = await prisma.databaseTypeCommand.findFirst({
           where: { databaseTypeId: id },
@@ -777,7 +726,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
 
       const command = await prisma.databaseTypeCommand.create({
         data: {
-          ...body.data,
+          ...body,
           sortOrder,
           databaseTypeId: id,
         },
@@ -790,7 +739,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         resourceType: 'database_type_command',
         resourceId: command.id,
         resourceName: `${databaseType.name}/${command.name}`,
-        details: { databaseTypeId: id, command: body.data.command },
+        details: { databaseTypeId: id, command: body.command },
         userId: request.authUser!.id,
       });
 
@@ -804,24 +753,18 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
       const { id, commandId } = request.params as { id: string; commandId: string };
-      const body = updateCommandSchema.safeParse(request.body);
+      const body = validateBody(updateCommandSchema, request, reply);
+      if (!body) return;
 
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
-
-      const existing = await prisma.databaseTypeCommand.findFirst({
+      const existing = await findOrNotFound(prisma.databaseTypeCommand.findFirst({
         where: { id: commandId, databaseTypeId: id },
         include: { databaseType: true },
-      });
-
-      if (!existing) {
-        return reply.code(404).send({ error: 'Command not found' });
-      }
+      }), 'Command', reply);
+      if (!existing) return;
 
       const command = await prisma.databaseTypeCommand.update({
         where: { id: commandId },
-        data: body.data,
+        data: body,
       });
 
       await markDatabaseTypeCustomized(id);
@@ -831,7 +774,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         resourceType: 'database_type_command',
         resourceId: command.id,
         resourceName: `${existing.databaseType.name}/${command.name}`,
-        details: body.data,
+        details: body,
         userId: request.authUser!.id,
       });
 
@@ -846,14 +789,11 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id, commandId } = request.params as { id: string; commandId: string };
 
-      const existing = await prisma.databaseTypeCommand.findFirst({
+      const existing = await findOrNotFound(prisma.databaseTypeCommand.findFirst({
         where: { id: commandId, databaseTypeId: id },
         include: { databaseType: true },
-      });
-
-      if (!existing) {
-        return reply.code(404).send({ error: 'Command not found' });
-      }
+      }), 'Command', reply);
+      if (!existing) return;
 
       await prisma.databaseTypeCommand.delete({ where: { id: commandId } });
 

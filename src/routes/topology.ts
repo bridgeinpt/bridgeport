@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/db.js';
 import { requireOperator } from '../plugins/authorize.js';
-import { safeJsonParse } from '../lib/helpers.js';
+import { safeJsonParse, validateBody, findOrNotFound, handleUniqueConstraint } from '../lib/helpers.js';
 
 const createConnectionSchema = z.object({
   environmentId: z.string().min(1),
@@ -48,12 +48,8 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
     '/api/connections',
     { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
-      const parsed = createConnectionSchema.safeParse(request.body);
-      if (!parsed.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: parsed.error.issues });
-      }
-
-      const data = parsed.data;
+      const data = validateBody(createConnectionSchema, request, reply);
+      if (!data) return;
 
       // Prevent self-connections
       if (data.sourceType === data.targetType && data.sourceId === data.targetId) {
@@ -61,43 +57,53 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       // Verify environment exists
-      const environment = await prisma.environment.findUnique({ where: { id: data.environmentId } });
-      if (!environment) {
-        return reply.code(404).send({ error: 'Environment not found' });
-      }
+      const environment = await findOrNotFound(
+        prisma.environment.findUnique({ where: { id: data.environmentId } }),
+        'Environment',
+        reply
+      );
+      if (!environment) return;
 
       // Verify source exists
       if (data.sourceType === 'service') {
-        const service = await prisma.service.findFirst({
-          where: { id: data.sourceId, server: { environmentId: data.environmentId } },
-        });
-        if (!service) {
-          return reply.code(404).send({ error: 'Source service not found in this environment' });
-        }
+        const service = await findOrNotFound(
+          prisma.service.findFirst({
+            where: { id: data.sourceId, server: { environmentId: data.environmentId } },
+          }),
+          'Source service in this environment',
+          reply
+        );
+        if (!service) return;
       } else {
-        const database = await prisma.database.findFirst({
-          where: { id: data.sourceId, environmentId: data.environmentId },
-        });
-        if (!database) {
-          return reply.code(404).send({ error: 'Source database not found in this environment' });
-        }
+        const database = await findOrNotFound(
+          prisma.database.findFirst({
+            where: { id: data.sourceId, environmentId: data.environmentId },
+          }),
+          'Source database in this environment',
+          reply
+        );
+        if (!database) return;
       }
 
       // Verify target exists
       if (data.targetType === 'service') {
-        const service = await prisma.service.findFirst({
-          where: { id: data.targetId, server: { environmentId: data.environmentId } },
-        });
-        if (!service) {
-          return reply.code(404).send({ error: 'Target service not found in this environment' });
-        }
+        const service = await findOrNotFound(
+          prisma.service.findFirst({
+            where: { id: data.targetId, server: { environmentId: data.environmentId } },
+          }),
+          'Target service in this environment',
+          reply
+        );
+        if (!service) return;
       } else {
-        const database = await prisma.database.findFirst({
-          where: { id: data.targetId, environmentId: data.environmentId },
-        });
-        if (!database) {
-          return reply.code(404).send({ error: 'Target database not found in this environment' });
-        }
+        const database = await findOrNotFound(
+          prisma.database.findFirst({
+            where: { id: data.targetId, environmentId: data.environmentId },
+          }),
+          'Target database in this environment',
+          reply
+        );
+        if (!database) return;
       }
 
       try {
@@ -117,9 +123,7 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
 
         return reply.code(201).send(connection);
       } catch (error: unknown) {
-        if (error && typeof error === 'object' && 'code' in error && error.code === 'P2002') {
-          return reply.code(409).send({ error: 'A connection with this source, target, and port already exists' });
-        }
+        if (handleUniqueConstraint(error, 'A connection with this source, target, and port already exists', reply)) return;
         throw error;
       }
     }
@@ -132,10 +136,8 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const connection = await prisma.serviceConnection.findUnique({ where: { id } });
-      if (!connection) {
-        return reply.code(404).send({ error: 'Connection not found' });
-      }
+      const connection = await findOrNotFound(prisma.serviceConnection.findUnique({ where: { id } }), 'Connection', reply);
+      if (!connection) return;
 
       await prisma.serviceConnection.delete({ where: { id } });
 
@@ -179,18 +181,18 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
     '/api/diagram-layout',
     { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
-      const parsed = upsertLayoutSchema.safeParse(request.body);
-      if (!parsed.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: parsed.error.issues });
-      }
+      const parsed = validateBody(upsertLayoutSchema, request, reply);
+      if (!parsed) return;
 
-      const { environmentId, positions } = parsed.data;
+      const { environmentId, positions } = parsed;
 
       // Verify environment exists
-      const environment = await prisma.environment.findUnique({ where: { id: environmentId } });
-      if (!environment) {
-        return reply.code(404).send({ error: 'Environment not found' });
-      }
+      const environment = await findOrNotFound(
+        prisma.environment.findUnique({ where: { id: environmentId } }),
+        'Environment',
+        reply
+      );
+      if (!environment) return;
 
       const positionsJson = JSON.stringify(positions);
 

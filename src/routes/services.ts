@@ -16,6 +16,7 @@ import { checkServiceUpdate } from '../lib/scheduler.js';
 import { determineHealthStatus, determineOverallStatus } from '../services/servers.js';
 import { getSystemSettings } from '../services/system-settings.js';
 import { HEALTH_STATUS, CONTAINER_STATUS, DISCOVERY_STATUS, HEALTH_CHECK_STATUS } from '../lib/constants.js';
+import { validateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery } from '../lib/helpers.js';
 
 const createServiceSchema = z.object({
   name: z.string().min(1),
@@ -72,9 +73,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request) => {
       const { envId } = request.params as { envId: string };
-      const { limit: limitStr, offset: offsetStr } = request.query as { limit?: string; offset?: string };
-      const limit = limitStr ? parseInt(limitStr) : 25;
-      const offset = offsetStr ? parseInt(offsetStr) : 0;
+      const { limit, offset } = parsePaginationQuery(request.query as Record<string, unknown>);
 
       const where = { server: { environmentId: envId } };
 
@@ -104,30 +103,31 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const service = await prisma.service.findUnique({
-        where: { id },
-        include: {
-          server: {
-            include: { environment: true },
-          },
-          serviceType: {
-            include: {
-              commands: {
-                orderBy: { sortOrder: 'asc' },
+      const service = await findOrNotFound(
+        prisma.service.findUnique({
+          where: { id },
+          include: {
+            server: {
+              include: { environment: true },
+            },
+            serviceType: {
+              include: {
+                commands: {
+                  orderBy: { sortOrder: 'asc' },
+                },
+              },
+            },
+            containerImage: {
+              include: {
+                registryConnection: true,
               },
             },
           },
-          containerImage: {
-            include: {
-              registryConnection: true,
-            },
-          },
-        },
-      });
-
-      if (!service) {
-        return reply.code(404).send({ error: 'Service not found' });
-      }
+        }),
+        'Service',
+        reply
+      );
+      if (!service) return;
 
       return { service };
     }
@@ -139,18 +139,15 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { serverId } = request.params as { serverId: string };
-      const body = createServiceSchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(createServiceSchema, request, reply);
+      if (!body) return;
 
       try {
         const server = await prisma.server.findUnique({ where: { id: serverId } });
 
         // Verify containerImage exists and is in the same environment
         const containerImage = await prisma.containerImage.findUnique({
-          where: { id: body.data.containerImageId },
+          where: { id: body.containerImageId },
         });
         if (!containerImage) {
           return reply.code(400).send({ error: 'Container image not found' });
@@ -161,7 +158,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
 
         const service = await prisma.service.create({
           data: {
-            ...body.data,
+            ...body,
             serverId,
           },
         });
@@ -178,9 +175,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
 
         return { service };
       } catch (error) {
-        if (error instanceof Error && error.message.includes('Unique constraint')) {
-          return reply.code(409).send({ error: 'Service already exists' });
-        }
+        if (handleUniqueConstraint(error, 'Service already exists', reply)) return;
         throw error;
       }
     }
@@ -192,11 +187,8 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = updateServiceSchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(updateServiceSchema, request, reply);
+      if (!body) return;
 
       try {
         const existing = await prisma.service.findUnique({
@@ -205,7 +197,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         });
         const service = await prisma.service.update({
           where: { id },
-          data: body.data,
+          data: body,
         });
 
         await logAudit({
@@ -213,7 +205,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           resourceType: 'service',
           resourceId: service.id,
           resourceName: service.name,
-          details: { changes: body.data },
+          details: { changes: body },
           userId: request.authUser!.id,
           environmentId: existing?.server.environmentId,
         });
@@ -269,11 +261,8 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = deploySchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(deploySchema, request, reply);
+      if (!body) return;
 
       const service = await prisma.service.findUnique({
         where: { id },
@@ -285,7 +274,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           id,
           request.authUser!.email,
           request.authUser!.id,
-          body.data
+          body
         );
 
         await logAudit({
@@ -293,21 +282,21 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           resourceType: 'service',
           resourceId: id,
           resourceName: service?.name,
-          details: { imageTag: body.data.imageTag || service?.imageTag, deploymentId: result.deployment?.id },
+          details: { imageTag: body.imageTag || service?.imageTag, deploymentId: result.deployment?.id },
           userId: request.authUser!.id,
           environmentId: service?.server.environmentId,
         });
 
         return result;
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Deployment failed';
+        const message = getErrorMessage(error, 'Deployment failed');
 
         await logAudit({
           action: 'deploy',
           resourceType: 'service',
           resourceId: id,
           resourceName: service?.name,
-          details: { imageTag: body.data.imageTag },
+          details: { imageTag: body.imageTag },
           success: false,
           error: message,
           userId: request.authUser!.id,
@@ -338,11 +327,8 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const deployment = await getDeployment(id);
-
-      if (!deployment) {
-        return reply.code(404).send({ error: 'Deployment not found' });
-      }
+      const deployment = await findOrNotFound(getDeployment(id), 'Deployment', reply);
+      if (!deployment) return;
 
       return { deployment };
     }
@@ -360,7 +346,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         const logs = await getContainerLogs(id, tail ? parseInt(tail) : 100);
         return { logs };
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to get logs';
+        const message = getErrorMessage(error, 'Failed to get logs');
         return reply.code(500).send({ error: message });
       }
     }
@@ -373,14 +359,15 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { id } = request.params as { id: string };
 
-      const service = await prisma.service.findUnique({
-        where: { id },
-        include: { server: true },
-      });
-
-      if (!service) {
-        return reply.code(404).send({ error: 'Service not found' });
-      }
+      const service = await findOrNotFound(
+        prisma.service.findUnique({
+          where: { id },
+          include: { server: true },
+        }),
+        'Service',
+        reply
+      );
+      if (!service) return;
 
       // Create appropriate client based on hostname
       const { client, error } = await createClientForServer(
@@ -416,7 +403,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           }
         );
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Stream error';
+        const message = getErrorMessage(error, 'Stream error');
         reply.raw.write(`event: error\n`);
         reply.raw.write(`data: ${JSON.stringify({ error: message })}\n\n`);
       } finally {
@@ -437,7 +424,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         const tags = await getLatestImageTags(id);
         return { tags };
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to get tags';
+        const message = getErrorMessage(error, 'Failed to get tags');
         return reply.code(500).send({ error: message });
       }
     }
@@ -450,14 +437,15 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const service = await prisma.service.findUnique({
-        where: { id },
-        include: { server: true },
-      });
-
-      if (!service) {
-        return reply.code(404).send({ error: 'Service not found' });
-      }
+      const service = await findOrNotFound(
+        prisma.service.findUnique({
+          where: { id },
+          include: { server: true },
+        }),
+        'Service',
+        reply
+      );
+      if (!service) return;
 
       // Create appropriate client based on hostname
       const { client, error } = await createClientForServer(
@@ -488,7 +476,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
 
         return { success: true };
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Restart failed';
+        const message = getErrorMessage(error, 'Restart failed');
 
         await logAudit({
           action: 'restart',
@@ -515,14 +503,15 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const service = await prisma.service.findUnique({
-        where: { id },
-        include: { server: true },
-      });
-
-      if (!service) {
-        return reply.code(404).send({ error: 'Service not found' });
-      }
+      const service = await findOrNotFound(
+        prisma.service.findUnique({
+          where: { id },
+          include: { server: true },
+        }),
+        'Service',
+        reply
+      );
+      if (!service) return;
 
       // Create appropriate client based on hostname
       const { client, error } = await createClientForServer(
@@ -650,7 +639,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         };
       } catch (error) {
         const durationMs = Date.now() - start;
-        const message = error instanceof Error ? error.message : 'Health check failed';
+        const message = getErrorMessage(error, 'Health check failed');
 
         // Update status to unknown on error
         await prisma.service.update({
@@ -700,14 +689,15 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
       const { id } = request.params as { id: string };
       const { limit } = request.query as { limit?: string };
 
-      const service = await prisma.service.findUnique({
-        where: { id },
-        include: { server: true },
-      });
-
-      if (!service) {
-        return reply.code(404).send({ error: 'Service not found' });
-      }
+      const service = await findOrNotFound(
+        prisma.service.findUnique({
+          where: { id },
+          include: { server: true },
+        }),
+        'Service',
+        reply
+      );
+      if (!service) return;
 
       // Get audit logs for this service (deploy, restart, health_check actions)
       const logs = await prisma.auditLog.findMany({
@@ -751,14 +741,15 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const service = await prisma.service.findUnique({
-        where: { id },
-        include: { server: true, containerImage: true },
-      });
-
-      if (!service) {
-        return reply.code(404).send({ error: 'Service not found' });
-      }
+      const service = await findOrNotFound(
+        prisma.service.findUnique({
+          where: { id },
+          include: { server: true, containerImage: true },
+        }),
+        'Service',
+        reply
+      );
+      if (!service) return;
 
       const result = await checkServiceUpdate(id);
 
@@ -791,39 +782,37 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = runCommandSchema.safeParse(request.body);
+      const body = validateBody(runCommandSchema, request, reply);
+      if (!body) return;
 
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
-
-      const service = await prisma.service.findUnique({
-        where: { id },
-        include: {
-          serviceType: {
-            include: {
-              commands: true,
+      const service = await findOrNotFound(
+        prisma.service.findUnique({
+          where: { id },
+          include: {
+            serviceType: {
+              include: {
+                commands: true,
+              },
             },
+            server: true,
           },
-          server: true,
-        },
-      });
-
-      if (!service) {
-        return reply.code(404).send({ error: 'Service not found' });
-      }
+        }),
+        'Service',
+        reply
+      );
+      if (!service) return;
 
       if (!service.serviceType) {
         return reply.code(400).send({ error: 'Service has no service type configured' });
       }
 
       const command = service.serviceType.commands.find(
-        (cmd) => cmd.name === body.data.commandName
+        (cmd) => cmd.name === body.commandName
       );
 
       if (!command) {
         return reply.code(404).send({
-          error: `Command '${body.data.commandName}' not found`,
+          error: `Command '${body.commandName}' not found`,
           availableCommands: service.serviceType.commands.map((c) => c.name),
         });
       }
@@ -833,7 +822,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         resourceType: 'service',
         resourceId: id,
         resourceName: service.name,
-        details: { commandName: body.data.commandName, command: command.command },
+        details: { commandName: body.commandName, command: command.command },
         userId: request.authUser!.id,
         environmentId: service.server.environmentId,
       });

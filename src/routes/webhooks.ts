@@ -6,6 +6,7 @@ import { deployService } from '../services/deploy.js';
 import { buildDeploymentPlan, executePlan } from '../services/orchestration.js';
 import { logAudit } from '../services/audit.js';
 import { DEPLOYMENT_STATUS } from '../lib/constants.js';
+import { validateBody, findOrNotFound, getErrorMessage } from '../lib/helpers.js';
 
 const deployWebhookSchema = z.object({
   service: z.string().min(1), // Service name or ID
@@ -55,36 +56,34 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
       }
     }
 
-    const body = deployWebhookSchema.safeParse(request.body);
-    if (!body.success) {
-      return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-    }
+    const body = validateBody(deployWebhookSchema, request, reply);
+    if (!body) return;
 
     // Find environment
-    const environment = await prisma.environment.findUnique({
-      where: { name: body.data.environment },
-    });
-
-    if (!environment) {
-      return reply.code(404).send({ error: 'Environment not found' });
-    }
+    const environment = await findOrNotFound(
+      prisma.environment.findUnique({ where: { name: body.environment } }),
+      'Environment',
+      reply
+    );
+    if (!environment) return;
 
     // Find service by name in the environment
-    const service = await prisma.service.findFirst({
-      where: {
-        OR: [
-          { id: body.data.service },
-          { name: body.data.service },
-        ],
-        server: {
-          environmentId: environment.id,
+    const service = await findOrNotFound(
+      prisma.service.findFirst({
+        where: {
+          OR: [
+            { id: body.service },
+            { name: body.service },
+          ],
+          server: {
+            environmentId: environment.id,
+          },
         },
-      },
-    });
-
-    if (!service) {
-      return reply.code(404).send({ error: 'Service not found' });
-    }
+      }),
+      'Service',
+      reply
+    );
+    if (!service) return;
 
     try {
       const result = await deployService(
@@ -92,8 +91,8 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
         'webhook',
         null,
         {
-          imageTag: body.data.imageTag,
-          generateArtifacts: body.data.generateArtifacts,
+          imageTag: body.imageTag,
+          generateArtifacts: body.generateArtifacts,
         }
       );
 
@@ -102,7 +101,7 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
         resourceType: 'service',
         resourceId: service.id,
         resourceName: service.name,
-        details: { source: 'custom-webhook', imageTag: body.data.imageTag, deploymentId: result.deployment.id },
+        details: { source: 'custom-webhook', imageTag: body.imageTag, deploymentId: result.deployment.id },
         environmentId: environment.id,
       });
 
@@ -112,14 +111,14 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
         status: result.deployment.status,
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Deployment failed';
+      const message = getErrorMessage(error, 'Deployment failed');
 
       await logAudit({
         action: 'webhook_deploy',
         resourceType: 'service',
         resourceId: service.id,
         resourceName: service.name,
-        details: { source: 'custom-webhook', imageTag: body.data.imageTag },
+        details: { source: 'custom-webhook', imageTag: body.imageTag },
         success: false,
         error: message,
         environmentId: environment.id,
@@ -229,25 +228,22 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
       }
     }
 
-    const body = deployImageWebhookSchema.safeParse(request.body);
-    if (!body.success) {
-      return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-    }
+    const body = validateBody(deployImageWebhookSchema, request, reply);
+    if (!body) return;
 
     // Find environment
-    const environment = await prisma.environment.findUnique({
-      where: { name: body.data.environment },
-    });
-
-    if (!environment) {
-      return reply.code(404).send({ error: 'Environment not found' });
-    }
+    const environment = await findOrNotFound(
+      prisma.environment.findUnique({ where: { name: body.environment } }),
+      'Environment',
+      reply
+    );
+    if (!environment) return;
 
     // Find container image by imageName in the environment
     // autoUpdate is now on ContainerImage, not Service
     const containerImage = await prisma.containerImage.findFirst({
       where: {
-        imageName: body.data.imageName,
+        imageName: body.imageName,
         environmentId: environment.id,
         autoUpdate: true,  // Only deploy if autoUpdate is enabled on the image
       },
@@ -260,7 +256,7 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
       // Check if the image exists but doesn't have autoUpdate enabled
       const imageExists = await prisma.containerImage.findFirst({
         where: {
-          imageName: body.data.imageName,
+          imageName: body.imageName,
           environmentId: environment.id,
         },
       });
@@ -287,7 +283,7 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
       const plan = await buildDeploymentPlan({
         environmentId: environment.id,
         containerImageId: containerImage.id,
-        imageTag: body.data.imageTag,
+        imageTag: body.imageTag,
         triggerType: 'webhook',
         triggeredBy: 'webhook',
       });
@@ -299,7 +295,7 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
         resourceName: containerImage.name,
         details: {
           source: 'deploy-image-webhook',
-          imageTag: body.data.imageTag,
+          imageTag: body.imageTag,
           planId: plan.id,
           serviceCount: containerImage.services.length,
         },
@@ -318,14 +314,14 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
         services: containerImage.services.map((s: { name: string }) => s.name),
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Deployment failed';
+      const message = getErrorMessage(error, 'Deployment failed');
 
       await logAudit({
         action: 'webhook_deploy',
         resourceType: 'container_image',
         resourceId: containerImage.id,
         resourceName: containerImage.name,
-        details: { source: 'deploy-image-webhook', imageTag: body.data.imageTag },
+        details: { source: 'deploy-image-webhook', imageTag: body.imageTag },
         success: false,
         error: message,
         environmentId: environment.id,

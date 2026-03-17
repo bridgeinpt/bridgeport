@@ -8,6 +8,7 @@ import {
   deleteApiToken,
 } from '../services/auth.js';
 import { send, NOTIFICATION_TYPES } from '../services/notifications.js';
+import { validateBody } from '../lib/helpers.js';
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -28,12 +29,10 @@ const createTokenSchema = z.object({
 export async function authRoutes(fastify: FastifyInstance): Promise<void> {
   // Login
   fastify.post('/api/auth/login', async (request, reply) => {
-    const body = loginSchema.safeParse(request.body);
-    if (!body.success) {
-      return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-    }
+    const body = validateBody(loginSchema, request, reply);
+    if (!body) return;
 
-    const user = await validatePassword(body.data.email, body.data.password);
+    const user = await validatePassword(body.email, body.password);
     if (!user) {
       return reply.code(401).send({ error: 'Invalid credentials' });
     }
@@ -48,10 +47,8 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
 
   // Register (only if no users exist)
   fastify.post('/api/auth/register', async (request, reply) => {
-    const body = registerSchema.safeParse(request.body);
-    if (!body.success) {
-      return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-    }
+    const body = validateBody(registerSchema, request, reply);
+    if (!body) return;
 
     // Check if users exist (only allow first user registration)
     const { prisma } = await import('../lib/db.js');
@@ -61,7 +58,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     }
 
     // First user is always admin
-    const user = await createUser(body.data.email, body.data.password, body.data.name, 'admin');
+    const user = await createUser(body.email, body.password, body.name, 'admin');
 
     const token = fastify.jwt.sign(
       { id: user.id, email: user.email },
@@ -95,24 +92,22 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     '/api/auth/tokens',
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
-      const body = createTokenSchema.safeParse(request.body);
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(createTokenSchema, request, reply);
+      if (!body) return;
 
-      const expiresAt = body.data.expiresInDays
-        ? new Date(Date.now() + body.data.expiresInDays * 24 * 60 * 60 * 1000)
+      const expiresAt = body.expiresInDays
+        ? new Date(Date.now() + body.expiresInDays * 24 * 60 * 60 * 1000)
         : undefined;
 
       const { token, tokenRecord } = await createApiToken(
         request.authUser!.id,
-        body.data.name,
+        body.name,
         expiresAt
       );
 
       // Notify user about API token creation
       await send(NOTIFICATION_TYPES.USER_API_TOKEN_CREATED, request.authUser!.id, {
-        tokenName: body.data.name,
+        tokenName: body.name,
       });
 
       // Only return the full token once

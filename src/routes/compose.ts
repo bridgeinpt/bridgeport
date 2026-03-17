@@ -6,6 +6,7 @@ import {
   previewDeploymentArtifacts,
   getDeploymentArtifacts,
 } from '../services/compose.js';
+import { validateBody, findOrNotFound, getErrorMessage } from '../lib/helpers.js';
 
 const composeTemplateSchema = z.object({
   composeTemplate: z.string().min(1),
@@ -23,7 +24,7 @@ export async function composeRoutes(fastify: FastifyInstance): Promise<void> {
         const artifacts = await previewDeploymentArtifacts(id);
         return { artifacts };
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Generation failed';
+        const message = getErrorMessage(error, 'Generation failed');
         return reply.code(400).send({ error: message });
       }
     }
@@ -36,14 +37,15 @@ export async function composeRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const service = await prisma.service.findUnique({
-        where: { id },
-        select: { id: true, name: true, composeTemplate: true },
-      });
-
-      if (!service) {
-        return reply.code(404).send({ error: 'Service not found' });
-      }
+      const service = await findOrNotFound(
+        prisma.service.findUnique({
+          where: { id },
+          select: { id: true, name: true, composeTemplate: true },
+        }),
+        'Service',
+        reply
+      );
+      if (!service) return;
 
       return { template: service.composeTemplate };
     }
@@ -54,16 +56,13 @@ export async function composeRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = composeTemplateSchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(composeTemplateSchema, request, reply);
+      if (!body) return;
 
       try {
         const service = await prisma.service.update({
           where: { id },
-          data: { composeTemplate: body.data.composeTemplate },
+          data: { composeTemplate: body.composeTemplate },
           select: { id: true, name: true, composeTemplate: true },
         });
 
@@ -101,13 +100,12 @@ export async function composeRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const deployment = await prisma.deployment.findUnique({
-        where: { id },
-      });
-
-      if (!deployment) {
-        return reply.code(404).send({ error: 'Deployment not found' });
-      }
+      const deployment = await findOrNotFound(
+        prisma.deployment.findUnique({ where: { id } }),
+        'Deployment',
+        reply
+      );
+      if (!deployment) return;
 
       const artifacts = await getDeploymentArtifacts(id);
       return { artifacts };
@@ -121,13 +119,12 @@ export async function composeRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const artifact = await prisma.deploymentArtifact.findUnique({
-        where: { id },
-      });
-
-      if (!artifact) {
-        return reply.code(404).send({ error: 'Artifact not found' });
-      }
+      const artifact = await findOrNotFound(
+        prisma.deploymentArtifact.findUnique({ where: { id } }),
+        'Artifact',
+        reply
+      );
+      if (!artifact) return;
 
       reply.header('Content-Type', 'text/plain');
       reply.header('Content-Disposition', `attachment; filename="${artifact.name}"`);

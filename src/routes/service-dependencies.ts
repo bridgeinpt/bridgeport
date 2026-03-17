@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma, isPrismaNotFoundError } from '../lib/db.js';
 import { logAudit } from '../services/audit.js';
 import { resolveDependencyOrder } from '../services/orchestration.js';
+import { validateBody, findOrNotFound, handleUniqueConstraint } from '../lib/helpers.js';
 
 const createDependencySchema = z.object({
   dependsOnId: z.string().min(1),
@@ -17,33 +18,34 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const service = await prisma.service.findUnique({
-        where: { id },
-        include: {
-          dependencies: {
-            include: {
-              dependsOn: {
-                include: {
-                  server: { select: { name: true } },
+      const service = await findOrNotFound(
+        prisma.service.findUnique({
+          where: { id },
+          include: {
+            dependencies: {
+              include: {
+                dependsOn: {
+                  include: {
+                    server: { select: { name: true } },
+                  },
+                },
+              },
+            },
+            dependents: {
+              include: {
+                dependent: {
+                  include: {
+                    server: { select: { name: true } },
+                  },
                 },
               },
             },
           },
-          dependents: {
-            include: {
-              dependent: {
-                include: {
-                  server: { select: { name: true } },
-                },
-              },
-            },
-          },
-        },
-      });
-
-      if (!service) {
-        return reply.code(404).send({ error: 'Service not found' });
-      }
+        }),
+        'Service',
+        reply
+      );
+      if (!service) return;
 
       return {
         dependencies: service.dependencies,
@@ -58,11 +60,8 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = createDependencySchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(createDependencySchema, request, reply);
+      if (!body) return;
 
       // Verify both services exist
       const [dependent, dependsOn] = await Promise.all([
@@ -71,7 +70,7 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
           include: { server: true },
         }),
         prisma.service.findUnique({
-          where: { id: body.data.dependsOnId },
+          where: { id: body.dependsOnId },
           include: { server: true },
         }),
       ]);
@@ -84,6 +83,7 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
         return reply.code(404).send({ error: 'Dependency service not found' });
       }
 
+
       // Verify both services are in the same environment
       if (dependent.server.environmentId !== dependsOn.server.environmentId) {
         return reply.code(400).send({
@@ -92,7 +92,7 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
       }
 
       // Check for self-dependency
-      if (id === body.data.dependsOnId) {
+      if (id === body.dependsOnId) {
         return reply.code(400).send({ error: 'A service cannot depend on itself' });
       }
 
@@ -111,13 +111,13 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
         // Add the new dependency to the list for validation
         const tempService = allServices.find((s) => s.id === id);
         if (tempService) {
-          const tempDependsOn = allServices.find((s) => s.id === body.data.dependsOnId);
+          const tempDependsOn = allServices.find((s) => s.id === body.dependsOnId);
           if (tempDependsOn) {
             tempService.dependencies.push({
               id: 'temp',
-              type: body.data.type,
+              type: body.type,
               dependentId: id,
-              dependsOnId: body.data.dependsOnId,
+              dependsOnId: body.dependsOnId,
               dependsOn: tempDependsOn,
             } as never);
           }
@@ -136,8 +136,8 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
         const dependency = await prisma.serviceDependency.create({
           data: {
             dependentId: id,
-            dependsOnId: body.data.dependsOnId,
-            type: body.data.type,
+            dependsOnId: body.dependsOnId,
+            type: body.type,
           },
           include: {
             dependsOn: {
@@ -156,9 +156,9 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
           details: {
             dependentId: id,
             dependentName: dependent.name,
-            dependsOnId: body.data.dependsOnId,
+            dependsOnId: body.dependsOnId,
             dependsOnName: dependsOn.name,
-            type: body.data.type,
+            type: body.type,
           },
           userId: request.authUser!.id,
           environmentId: dependent.server.environmentId,
@@ -166,9 +166,7 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
 
         return { dependency };
       } catch (error) {
-        if (error instanceof Error && error.message.includes('Unique constraint')) {
-          return reply.code(409).send({ error: 'This dependency already exists' });
-        }
+        if (handleUniqueConstraint(error, 'This dependency already exists', reply)) return;
         throw error;
       }
     }
@@ -182,19 +180,20 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
       const { id } = request.params as { id: string };
 
       try {
-        const dependency = await prisma.serviceDependency.findUnique({
-          where: { id },
-          include: {
-            dependent: {
-              include: { server: true },
+        const dependency = await findOrNotFound(
+          prisma.serviceDependency.findUnique({
+            where: { id },
+            include: {
+              dependent: {
+                include: { server: true },
+              },
+              dependsOn: true,
             },
-            dependsOn: true,
-          },
-        });
-
-        if (!dependency) {
-          return reply.code(404).send({ error: 'Dependency not found' });
-        }
+          }),
+          'Dependency',
+          reply
+        );
+        if (!dependency) return;
 
         await prisma.serviceDependency.delete({ where: { id } });
 
@@ -308,17 +307,18 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const service = await prisma.service.findUnique({
-        where: { id },
-        include: {
-          server: true,
-          dependencies: true,
-        },
-      });
-
-      if (!service) {
-        return reply.code(404).send({ error: 'Service not found' });
-      }
+      const service = await findOrNotFound(
+        prisma.service.findUnique({
+          where: { id },
+          include: {
+            server: true,
+            dependencies: true,
+          },
+        }),
+        'Service',
+        reply
+      );
+      if (!service) return;
 
       // Get existing dependency IDs
       const existingDependencyIds = new Set(service.dependencies.map((d) => d.dependsOnId));

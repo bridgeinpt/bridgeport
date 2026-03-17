@@ -6,6 +6,7 @@ import { getEnvironmentSshKey } from './environments.js';
 import { requireOperator } from '../plugins/authorize.js';
 import { logAudit } from '../services/audit.js';
 import { resolveSecretPlaceholders } from '../services/secrets.js';
+import { validateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery } from '../lib/helpers.js';
 
 const createConfigFileSchema = z.object({
   name: z.string().min(1),
@@ -39,9 +40,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
     { preHandler: [fastify.authenticate] },
     async (request) => {
       const { envId } = request.params as { envId: string };
-      const { limit: limitStr, offset: offsetStr } = request.query as { limit?: string; offset?: string };
-      const limit = limitStr ? parseInt(limitStr) : 25;
-      const offset = offsetStr ? parseInt(offsetStr) : 0;
+      const { limit, offset } = parsePaginationQuery(request.query as Record<string, unknown>);
       const where = { environmentId: envId };
 
       const [configFiles, total] = await Promise.all([
@@ -132,22 +131,23 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const configFile = await prisma.configFile.findUnique({
-        where: { id },
-        include: {
-          services: {
-            include: {
-              service: {
-                select: { id: true, name: true, server: { select: { id: true, name: true } } },
+      const configFile = await findOrNotFound(
+        prisma.configFile.findUnique({
+          where: { id },
+          include: {
+            services: {
+              include: {
+                service: {
+                  select: { id: true, name: true, server: { select: { id: true, name: true } } },
+                },
               },
             },
           },
-        },
-      });
-
-      if (!configFile) {
-        return reply.code(404).send({ error: 'Config file not found' });
-      }
+        }),
+        'Config file',
+        reply
+      );
+      if (!configFile) return;
 
       // Add sync status to each service attachment
       const servicesWithSyncStatus = configFile.services.map((sf) => {
@@ -175,16 +175,13 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
     { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
-      const body = createConfigFileSchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(createConfigFileSchema, request, reply);
+      if (!body) return;
 
       try {
         const configFile = await prisma.configFile.create({
           data: {
-            ...body.data,
+            ...body,
             environmentId: envId,
           },
         });
@@ -204,9 +201,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         }
         return { configFile };
       } catch (error) {
-        if (error instanceof Error && error.message.includes('Unique constraint')) {
-          return reply.code(409).send({ error: 'Config file with this name already exists' });
-        }
+        if (handleUniqueConstraint(error, 'Config file with this name already exists', reply)) return;
         throw error;
       }
     }
@@ -218,20 +213,19 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
     { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = updateConfigFileSchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(updateConfigFileSchema, request, reply);
+      if (!body) return;
 
       try {
-        const existing = await prisma.configFile.findUnique({ where: { id } });
-        if (!existing) {
-          return reply.code(404).send({ error: 'Config file not found' });
-        }
+        const existing = await findOrNotFound(
+          prisma.configFile.findUnique({ where: { id } }),
+          'Config file',
+          reply
+        );
+        if (!existing) return;
 
         // Save history if content is being updated
-        if (body.data.content !== undefined && body.data.content !== existing.content) {
+        if (body.content !== undefined && body.content !== existing.content) {
           await prisma.fileHistory.create({
             data: {
               content: existing.content,
@@ -243,7 +237,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
 
         const configFile = await prisma.configFile.update({
           where: { id },
-          data: body.data,
+          data: body,
         });
 
         await logAudit({
@@ -276,10 +270,12 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const configFile = await prisma.configFile.findUnique({ where: { id } });
-      if (!configFile) {
-        return reply.code(404).send({ error: 'Config file not found' });
-      }
+      const configFile = await findOrNotFound(
+        prisma.configFile.findUnique({ where: { id } }),
+        'Config file',
+        reply
+      );
+      if (!configFile) return;
 
       const history = await prisma.fileHistory.findMany({
         where: { configFileId: id },
@@ -304,10 +300,12 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
     async (request, reply) => {
       const { id, historyId } = request.params as { id: string; historyId: string };
 
-      const configFile = await prisma.configFile.findUnique({ where: { id } });
-      if (!configFile) {
-        return reply.code(404).send({ error: 'Config file not found' });
-      }
+      const configFile = await findOrNotFound(
+        prisma.configFile.findUnique({ where: { id } }),
+        'Config file',
+        reply
+      );
+      if (!configFile) return;
 
       const historyEntry = await prisma.fileHistory.findUnique({ where: { id: historyId } });
       if (!historyEntry || historyEntry.configFileId !== id) {
@@ -386,30 +384,31 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const service = await prisma.service.findUnique({
-        where: { id },
-        include: {
-          files: {
-            include: {
-              configFile: {
-                select: {
-                  id: true,
-                  name: true,
-                  filename: true,
-                  description: true,
-                  isBinary: true,
-                  mimeType: true,
-                  fileSize: true,
+      const service = await findOrNotFound(
+        prisma.service.findUnique({
+          where: { id },
+          include: {
+            files: {
+              include: {
+                configFile: {
+                  select: {
+                    id: true,
+                    name: true,
+                    filename: true,
+                    description: true,
+                    isBinary: true,
+                    mimeType: true,
+                    fileSize: true,
+                  },
                 },
               },
             },
           },
-        },
-      });
-
-      if (!service) {
-        return reply.code(404).send({ error: 'Service not found' });
-      }
+        }),
+        'Service',
+        reply
+      );
+      if (!service) return;
 
       return { files: service.files };
     }
@@ -421,18 +420,15 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
     { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = attachFileSchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(attachFileSchema, request, reply);
+      if (!body) return;
 
       try {
         const serviceFile = await prisma.serviceFile.create({
           data: {
             serviceId: id,
-            configFileId: body.data.configFileId,
-            targetPath: body.data.targetPath,
+            configFileId: body.configFileId,
+            targetPath: body.targetPath,
           },
           include: {
             configFile: {
@@ -459,16 +455,14 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           resourceType: 'service_file',
           resourceId: serviceFile.id,
           resourceName: `${serviceFile.configFile.name} -> ${service?.name}`,
-          details: { targetPath: body.data.targetPath },
+          details: { targetPath: body.targetPath },
           userId: request.authUser!.id,
           environmentId: service?.server.environmentId,
         });
 
         return { serviceFile };
       } catch (error) {
-        if (error instanceof Error && error.message.includes('Unique constraint')) {
-          return reply.code(409).send({ error: 'File already attached to this service' });
-        }
+        if (handleUniqueConstraint(error, 'File already attached to this service', reply)) return;
         throw error;
       }
     }
@@ -482,17 +476,18 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
       const { serviceId, fileId } = request.params as { serviceId: string; fileId: string };
 
       try {
-        const serviceFile = await prisma.serviceFile.findFirst({
-          where: { serviceId, configFileId: fileId },
-          include: {
-            configFile: { select: { name: true } },
-            service: { include: { server: true } },
-          },
-        });
-
-        if (!serviceFile) {
-          return reply.code(404).send({ error: 'File not attached to this service' });
-        }
+        const serviceFile = await findOrNotFound(
+          prisma.serviceFile.findFirst({
+            where: { serviceId, configFileId: fileId },
+            include: {
+              configFile: { select: { name: true } },
+              service: { include: { server: true } },
+            },
+          }),
+          'File attachment',
+          reply
+        );
+        if (!serviceFile) return;
 
         await prisma.serviceFile.delete({ where: { id: serviceFile.id } });
 
@@ -521,28 +516,26 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
     { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { serviceId, fileId } = request.params as { serviceId: string; fileId: string };
-      const body = z.object({ targetPath: z.string().min(1) }).safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(z.object({ targetPath: z.string().min(1) }), request, reply);
+      if (!body) return;
 
       try {
-        const serviceFile = await prisma.serviceFile.findFirst({
-          where: { serviceId, configFileId: fileId },
-          include: {
-            configFile: { select: { name: true } },
-            service: { include: { server: true } },
-          },
-        });
-
-        if (!serviceFile) {
-          return reply.code(404).send({ error: 'File not attached to this service' });
-        }
+        const serviceFile = await findOrNotFound(
+          prisma.serviceFile.findFirst({
+            where: { serviceId, configFileId: fileId },
+            include: {
+              configFile: { select: { name: true } },
+              service: { include: { server: true } },
+            },
+          }),
+          'File attachment',
+          reply
+        );
+        if (!serviceFile) return;
 
         const updated = await prisma.serviceFile.update({
           where: { id: serviceFile.id },
-          data: { targetPath: body.data.targetPath },
+          data: { targetPath: body.targetPath },
           include: {
             configFile: {
               select: {
@@ -563,7 +556,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           resourceType: 'service_file',
           resourceId: serviceFile.id,
           resourceName: `${serviceFile.configFile.name} -> ${serviceFile.service.name}`,
-          details: { oldTargetPath: serviceFile.targetPath, newTargetPath: body.data.targetPath },
+          details: { oldTargetPath: serviceFile.targetPath, newTargetPath: body.targetPath },
           userId: request.authUser!.id,
           environmentId: serviceFile.service.server.environmentId,
         });
@@ -585,19 +578,20 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const service = await prisma.service.findUnique({
-        where: { id },
-        include: {
-          server: true,
-          files: {
-            include: { configFile: true },
+      const service = await findOrNotFound(
+        prisma.service.findUnique({
+          where: { id },
+          include: {
+            server: true,
+            files: {
+              include: { configFile: true },
+            },
           },
-        },
-      });
-
-      if (!service) {
-        return reply.code(404).send({ error: 'Service not found' });
-      }
+        }),
+        'Service',
+        reply
+      );
+      if (!service) return;
 
       if (service.files.length === 0) {
         return reply.code(400).send({ error: 'No files attached to this service' });
@@ -685,13 +679,12 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
               file: configFile.name,
               targetPath,
               success: false,
-              error: err instanceof Error ? err.message : 'Unknown error',
+              error: getErrorMessage(err, 'Unknown error'),
             });
           }
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Connection failed';
-        return reply.code(500).send({ error: message });
+        return reply.code(500).send({ error: getErrorMessage(error, 'Connection failed') });
       } finally {
         client.disconnect();
       }
@@ -720,31 +713,32 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
     async (request, reply) => {
       const { serverId } = request.params as { serverId: string };
 
-      const server = await prisma.server.findUnique({
-        where: { id: serverId },
-        include: {
-          services: {
-            include: {
-              files: {
-                include: {
-                  configFile: {
-                    select: {
-                      id: true,
-                      name: true,
-                      filename: true,
-                      updatedAt: true,
+      const server = await findOrNotFound(
+        prisma.server.findUnique({
+          where: { id: serverId },
+          include: {
+            services: {
+              include: {
+                files: {
+                  include: {
+                    configFile: {
+                      select: {
+                        id: true,
+                        name: true,
+                        filename: true,
+                        updatedAt: true,
+                      },
                     },
                   },
                 },
               },
             },
           },
-        },
-      });
-
-      if (!server) {
-        return reply.code(404).send({ error: 'Server not found' });
-      }
+        }),
+        'Server',
+        reply
+      );
+      if (!server) return;
 
       // Build config file status list
       const configFilesMap = new Map<string, {
@@ -828,22 +822,23 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
     async (request, reply) => {
       const { serverId } = request.params as { serverId: string };
 
-      const server = await prisma.server.findUnique({
-        where: { id: serverId },
-        include: {
-          services: {
-            include: {
-              files: {
-                include: { configFile: true },
+      const server = await findOrNotFound(
+        prisma.server.findUnique({
+          where: { id: serverId },
+          include: {
+            services: {
+              include: {
+                files: {
+                  include: { configFile: true },
+                },
               },
             },
           },
-        },
-      });
-
-      if (!server) {
-        return reply.code(404).send({ error: 'Server not found' });
-      }
+        }),
+        'Server',
+        reply
+      );
+      if (!server) return;
 
       // Collect all service files that need syncing
       const serviceFilesToSync: Array<{
@@ -954,13 +949,12 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
               serviceName: service.name,
               targetPath: sf.targetPath,
               success: false,
-              error: err instanceof Error ? err.message : 'Unknown error',
+              error: getErrorMessage(err, 'Unknown error'),
             });
           }
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Connection failed';
-        return reply.code(500).send({ error: message });
+        return reply.code(500).send({ error: getErrorMessage(error, 'Connection failed') });
       } finally {
         client.disconnect();
       }
@@ -989,22 +983,23 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const configFile = await prisma.configFile.findUnique({
-        where: { id },
-        include: {
-          services: {
-            include: {
-              service: {
-                include: { server: true },
+      const configFile = await findOrNotFound(
+        prisma.configFile.findUnique({
+          where: { id },
+          include: {
+            services: {
+              include: {
+                service: {
+                  include: { server: true },
+                },
               },
             },
           },
-        },
-      });
-
-      if (!configFile) {
-        return reply.code(404).send({ error: 'Config file not found' });
-      }
+        }),
+        'Config file',
+        reply
+      );
+      if (!configFile) return;
 
       if (configFile.services.length === 0) {
         return reply.code(400).send({ error: 'Config file is not attached to any services' });
@@ -1128,7 +1123,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
                 serverName: server.name,
                 targetPath: sf.targetPath,
                 success: false,
-                error: err instanceof Error ? err.message : 'Unknown error',
+                error: getErrorMessage(err, 'Unknown error'),
               });
             }
           }
@@ -1140,7 +1135,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
               serverName: server.name,
               targetPath: sf.targetPath,
               success: false,
-              error: error instanceof Error ? error.message : 'Connection failed',
+              error: getErrorMessage(error, 'Connection failed'),
             });
           }
         } finally {
@@ -1173,12 +1168,8 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
       const { envId } = request.params as { envId: string };
 
       // Check environment exists
-      const environment = await prisma.environment.findUnique({
-        where: { id: envId },
-      });
-      if (!environment) {
-        return reply.code(404).send({ error: 'Environment not found' });
-      }
+      const environment = await findOrNotFound(prisma.environment.findUnique({ where: { id: envId } }), 'Environment', reply);
+      if (!environment) return;
 
       const data = await request.file();
       if (!data) {
@@ -1249,9 +1240,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         // Strip binary content from response — no need to echo back the base64 payload
         return { configFile: { ...configFile, content: '' } };
       } catch (error) {
-        if (error instanceof Error && error.message.includes('Unique constraint')) {
-          return reply.code(409).send({ error: 'Config file with this name already exists' });
-        }
+        if (handleUniqueConstraint(error, 'Config file with this name already exists', reply)) return;
         throw error;
       }
     }

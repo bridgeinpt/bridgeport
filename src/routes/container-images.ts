@@ -19,7 +19,7 @@ import { logAudit } from '../services/audit.js';
 import { RegistryFactory } from '../lib/registry.js';
 import { getRegistryCredentials } from '../services/registries.js';
 import { extractRepoName, parseTagFilter, getBestTag, getDefaultTag } from '../lib/image-utils.js';
-import { safeJsonParse } from '../lib/helpers.js';
+import { safeJsonParse, validateBody, findOrNotFound, getErrorMessage, handleUniqueConstraint, parsePaginationQuery } from '../lib/helpers.js';
 
 const createContainerImageSchema = z.object({
   name: z.string().min(1),
@@ -48,11 +48,8 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
     { preHandler: [fastify.authenticate] },
     async (request) => {
       const { envId } = request.params as { envId: string };
-      const { limit, offset } = request.query as { limit?: string; offset?: string };
-      const result = await listContainerImages(envId, {
-        limit: limit ? parseInt(limit) : 25,
-        offset: offset ? parseInt(offset) : 0,
-      });
+      const { limit, offset } = parsePaginationQuery(request.query as Record<string, unknown>);
+      const result = await listContainerImages(envId, { limit, offset });
 
       const images = result.images.map((image) => {
         const { tagHistory, digests, ...rest } = image as typeof image & {
@@ -92,17 +89,14 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
-      const body = createContainerImageSchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(createContainerImageSchema, request, reply);
+      if (!body) return;
 
       try {
         const image = await createContainerImage({
-          ...body.data,
+          ...body,
           environmentId: envId,
-          registryConnectionId: body.data.registryConnectionId ?? undefined,
+          registryConnectionId: body.registryConnectionId ?? undefined,
         });
 
         await logAudit({
@@ -117,9 +111,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
 
         return { image };
       } catch (error) {
-        if (error instanceof Error && error.message.includes('Unique constraint')) {
-          return reply.code(409).send({ error: 'A container image for this image name already exists' });
-        }
+        if (handleUniqueConstraint(error, 'A container image for this image name already exists', reply)) return;
         throw error;
       }
     }
@@ -131,11 +123,8 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const image = await getContainerImage(id);
-
-      if (!image) {
-        return reply.code(404).send({ error: 'Container image not found' });
-      }
+      const image = await findOrNotFound(getContainerImage(id), 'Container image', reply);
+      if (!image) return;
 
       // Serialize digests: BigInt size → Number, JSON tags → array
       const { digests, ...rest } = image as typeof image & { digests?: Array<{ size: bigint | null; tags: string; [key: string]: unknown }> };
@@ -158,22 +147,19 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = updateContainerImageSchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(updateContainerImageSchema, request, reply);
+      if (!body) return;
 
       try {
         const existing = await prisma.containerImage.findUnique({ where: { id } });
-        const image = await updateContainerImage(id, body.data);
+        const image = await updateContainerImage(id, body);
 
         await logAudit({
           action: 'update',
           resourceType: 'container_image',
           resourceId: image.id,
           resourceName: image.name,
-          details: { changes: body.data },
+          details: { changes: body },
           userId: request.authUser!.id,
           environmentId: existing?.environmentId,
         });
@@ -230,33 +216,26 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = deployImageSchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(deployImageSchema, request, reply);
+      if (!body) return;
 
       // Must provide either imageTag or imageDigestId
-      if (!body.data.imageTag && !body.data.imageDigestId) {
+      if (!body.imageTag && !body.imageDigestId) {
         return reply.code(400).send({ error: 'Either imageTag or imageDigestId must be provided' });
       }
 
-      const image = await getContainerImage(id);
-      if (!image) {
-        return reply.code(404).send({ error: 'Container image not found' });
-      }
+      const image = await findOrNotFound(getContainerImage(id), 'Container image', reply);
+      if (!image) return;
 
       if (image.services.length === 0) {
         return reply.code(400).send({ error: 'No services linked to this image' });
       }
 
       // Resolve tag from digest if needed
-      let imageTag = body.data.imageTag;
-      if (!imageTag && body.data.imageDigestId) {
-        const digest = await getImageDigest(body.data.imageDigestId);
-        if (!digest) {
-          return reply.code(404).send({ error: 'Image digest not found' });
-        }
+      let imageTag = body.imageTag;
+      if (!imageTag && body.imageDigestId) {
+        const digest = await findOrNotFound(getImageDigest(body.imageDigestId), 'Image digest', reply);
+        if (!digest) return;
         const digestTags = safeJsonParse(digest.tags, [] as string[]);
         const patterns = parseTagFilter(image.tagFilter);
         imageTag = getBestTag(digestTags, patterns) || digestTags[0] || getDefaultTag(image.tagFilter);
@@ -271,7 +250,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
           triggerType: 'manual',
           triggeredBy: request.authUser!.email,
           userId: request.authUser!.id,
-          autoRollback: body.data.autoRollback,
+          autoRollback: body.autoRollback,
         });
 
         await logAudit({
@@ -281,7 +260,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
           resourceName: image.name,
           details: {
             imageTag,
-            imageDigestId: body.data.imageDigestId,
+            imageDigestId: body.imageDigestId,
             planId: plan.id,
             serviceCount: image.services.length,
           },
@@ -296,7 +275,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
 
         return { plan };
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Deployment failed';
+        const message = getErrorMessage(error, 'Deployment failed');
         return reply.code(500).send({ error: message });
       }
     }
@@ -310,10 +289,8 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
       const { id } = request.params as { id: string };
       const { limit } = request.query as { limit?: string };
 
-      const image = await prisma.containerImage.findUnique({ where: { id } });
-      if (!image) {
-        return reply.code(404).send({ error: 'Container image not found' });
-      }
+      const image = await findOrNotFound(prisma.containerImage.findUnique({ where: { id } }), 'Container image', reply);
+      if (!image) return;
 
       const history = await getTagHistory(id, limit ? parseInt(limit) : 20);
       return { history };
@@ -331,7 +308,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
         const result = await listImageTags(id);
         return result;
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to list tags';
+        const message = getErrorMessage(error, 'Failed to list tags');
         if (message.includes('not found')) {
           return reply.code(404).send({ error: message });
         }
@@ -350,14 +327,15 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const image = await prisma.containerImage.findUnique({
-        where: { id },
-        include: { registryConnection: true },
-      });
-
-      if (!image) {
-        return reply.code(404).send({ error: 'Container image not found' });
-      }
+      const image = await findOrNotFound(
+        prisma.containerImage.findUnique({
+          where: { id },
+          include: { registryConnection: true },
+        }),
+        'Container image',
+        reply
+      );
+      if (!image) return;
 
       if (!image.registryConnectionId) {
         return reply.code(400).send({ error: 'No registry connection configured for this image' });
@@ -394,7 +372,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
           lastCheckedAt: new Date().toISOString(),
         };
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to check for updates';
+        const message = getErrorMessage(error, 'Failed to check for updates');
         return reply.code(500).send({ error: message });
       }
     }
@@ -406,17 +384,12 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const { limit, offset } = request.query as { limit?: string; offset?: string };
+      const { limit, offset } = parsePaginationQuery(request.query as Record<string, unknown>, { limit: 20, offset: 0 });
 
-      const image = await prisma.containerImage.findUnique({ where: { id } });
-      if (!image) {
-        return reply.code(404).send({ error: 'Container image not found' });
-      }
+      const image = await findOrNotFound(prisma.containerImage.findUnique({ where: { id } }), 'Container image', reply);
+      if (!image) return;
 
-      const result = await listImageDigests(id, {
-        limit: limit ? parseInt(limit) : 20,
-        offset: offset ? parseInt(offset) : 0,
-      });
+      const result = await listImageDigests(id, { limit, offset });
 
       return result;
     }
@@ -429,10 +402,8 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
     async (request, reply) => {
       const { digestId } = request.params as { id: string; digestId: string };
 
-      const digest = await getImageDigest(digestId);
-      if (!digest) {
-        return reply.code(404).send({ error: 'Image digest not found' });
-      }
+      const digest = await findOrNotFound(getImageDigest(digestId), 'Image digest', reply);
+      if (!digest) return;
 
       return { digest };
     }
@@ -445,18 +416,18 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
     async (request, reply) => {
       const { id, serviceId } = request.params as { id: string; serviceId: string };
 
-      const image = await prisma.containerImage.findUnique({ where: { id } });
-      if (!image) {
-        return reply.code(404).send({ error: 'Container image not found' });
-      }
+      const image = await findOrNotFound(prisma.containerImage.findUnique({ where: { id } }), 'Container image', reply);
+      if (!image) return;
 
-      const service = await prisma.service.findUnique({
-        where: { id: serviceId },
-        include: { server: true },
-      });
-      if (!service) {
-        return reply.code(404).send({ error: 'Service not found' });
-      }
+      const service = await findOrNotFound(
+        prisma.service.findUnique({
+          where: { id: serviceId },
+          include: { server: true },
+        }),
+        'Service',
+        reply
+      );
+      if (!service) return;
 
       // Verify service is in same environment
       if (service.server.environmentId !== image.environmentId) {
@@ -486,10 +457,8 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const image = await prisma.containerImage.findUnique({ where: { id } });
-      if (!image) {
-        return reply.code(404).send({ error: 'Container image not found' });
-      }
+      const image = await findOrNotFound(prisma.containerImage.findUnique({ where: { id } }), 'Container image', reply);
+      if (!image) return;
 
       // Find services in same environment that are linked to a different container image
       const services = await prisma.service.findMany({

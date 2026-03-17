@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireAdmin } from '../../plugins/authorize.js';
+import { validateBody } from '../../lib/helpers.js';
 import {
   getSmtpConfig,
   saveSmtpConfig,
@@ -40,12 +41,10 @@ export async function smtpRoutes(fastify: FastifyInstance): Promise<void> {
     '/api/admin/smtp',
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
-      const body = smtpConfigSchema.safeParse(request.body);
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(smtpConfigSchema, request, reply);
+      if (!body) return;
 
-      const config = await saveSmtpConfig(body.data);
+      const config = await saveSmtpConfig(body);
 
       await logAudit({
         action: 'update',

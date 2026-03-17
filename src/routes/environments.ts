@@ -5,7 +5,7 @@ import { encrypt, decrypt } from '../lib/crypto.js';
 import { logAudit } from '../services/audit.js';
 import { requireAdmin } from '../plugins/authorize.js';
 import { createDefaultSettings } from '../services/environment-settings.js';
-import { safeJsonParse } from '../lib/helpers.js';
+import { safeJsonParse, validateBody, findOrNotFound, getErrorMessage } from '../lib/helpers.js';
 import { S3Client, ListBucketsCommand } from '@aws-sdk/client-s3';
 
 const createEnvSchema = z.object({
@@ -43,28 +43,29 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const environment = await prisma.environment.findUnique({
-        where: { id },
-        include: {
-          servers: {
-            include: {
-              services: {
-                include: {
-                  serviceType: true,
-                  containerImage: true,
+      const environment = await findOrNotFound(
+        prisma.environment.findUnique({
+          where: { id },
+          include: {
+            servers: {
+              include: {
+                services: {
+                  include: {
+                    serviceType: true,
+                    containerImage: true,
+                  },
                 },
               },
             },
+            _count: {
+              select: { secrets: true },
+            },
           },
-          _count: {
-            select: { secrets: true },
-          },
-        },
-      });
-
-      if (!environment) {
-        return reply.code(404).send({ error: 'Environment not found' });
-      }
+        }),
+        'Environment',
+        reply
+      );
+      if (!environment) return;
 
       return { environment };
     }
@@ -75,13 +76,11 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
     '/api/environments',
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
-      const body = createEnvSchema.safeParse(request.body);
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(createEnvSchema, request, reply);
+      if (!body) return;
 
       const existing = await prisma.environment.findUnique({
-        where: { name: body.data.name },
+        where: { name: body.name },
       });
 
       if (existing) {
@@ -89,7 +88,7 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
       }
 
       const environment = await prisma.environment.create({
-        data: { name: body.data.name },
+        data: { name: body.name },
       });
 
       await createDefaultSettings(environment.id);
@@ -143,22 +142,18 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = updateSshSchema.safeParse(request.body);
+      const body = validateBody(updateSshSchema, request, reply);
+      if (!body) return;
 
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
-
-      const environment = await prisma.environment.findUnique({
-        where: { id },
-      });
-
-      if (!environment) {
-        return reply.code(404).send({ error: 'Environment not found' });
-      }
+      const environment = await findOrNotFound(
+        prisma.environment.findUnique({ where: { id } }),
+        'Environment',
+        reply
+      );
+      if (!environment) return;
 
       // Encrypt the private key before storing
-      const { ciphertext, nonce } = encrypt(body.data.sshPrivateKey);
+      const { ciphertext, nonce } = encrypt(body.sshPrivateKey);
       const encryptedKey = `${nonce}:${ciphertext}`;
 
       await prisma.environment.update({
@@ -170,8 +165,8 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
 
       await prisma.generalSettings.upsert({
         where: { environmentId: id },
-        update: { sshUser: body.data.sshUser },
-        create: { environmentId: id, sshUser: body.data.sshUser },
+        update: { sshUser: body.sshUser },
+        create: { environmentId: id, sshUser: body.sshUser },
       });
 
       await logAudit({
@@ -179,7 +174,7 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
         resourceType: 'environment',
         resourceId: id,
         resourceName: environment.name,
-        details: { sshUser: body.data.sshUser, sshKeyUpdated: true },
+        details: { sshUser: body.sshUser, sshKeyUpdated: true },
         userId: request.authUser!.id,
         environmentId: id,
       });
@@ -195,14 +190,15 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const environment = await prisma.environment.findUnique({
-        where: { id },
-        select: { id: true, name: true, sshPrivateKey: true },
-      });
-
-      if (!environment) {
-        return reply.code(404).send({ error: 'Environment not found' });
-      }
+      const environment = await findOrNotFound(
+        prisma.environment.findUnique({
+          where: { id },
+          select: { id: true, name: true, sshPrivateKey: true },
+        }),
+        'Environment',
+        reply
+      );
+      if (!environment) return;
 
       const generalSettings = await prisma.generalSettings.findUnique({
         where: { environmentId: id },
@@ -222,13 +218,12 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const environment = await prisma.environment.findUnique({
-        where: { id },
-      });
-
-      if (!environment) {
-        return reply.code(404).send({ error: 'Environment not found' });
-      }
+      const environment = await findOrNotFound(
+        prisma.environment.findUnique({ where: { id } }),
+        'Environment',
+        reply
+      );
+      if (!environment) return;
 
       await prisma.environment.update({
         where: { id },
@@ -265,14 +260,15 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const environment = await prisma.environment.findUnique({
-        where: { id },
-        select: { id: true, name: true },
-      });
-
-      if (!environment) {
-        return reply.code(404).send({ error: 'Environment not found' });
-      }
+      const environment = await findOrNotFound(
+        prisma.environment.findUnique({
+          where: { id },
+          select: { id: true, name: true },
+        }),
+        'Environment',
+        reply
+      );
+      if (!environment) return;
 
       const sshCreds = await getEnvironmentSshKey(id);
       if (!sshCreds) {
@@ -332,14 +328,14 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
 
         return { buckets, source: 'discovered' };
       } catch (error) {
-        const errMsg = error instanceof Error ? error.message : '';
+        const errMsg = getErrorMessage(error, '');
         if (errMsg.includes('AccessDenied') || errMsg.includes('403')) {
           return reply.code(400).send({
             error: 'Cannot list buckets with this key. Add bucket names in Global Spaces settings.',
             scopedKey: true,
           });
         }
-        const message = error instanceof Error ? error.message : 'Failed to list buckets';
+        const message = getErrorMessage(error, 'Failed to list buckets');
         return reply.code(400).send({ error: message });
       }
     }
@@ -413,7 +409,7 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
           buckets: bucketNames,
         };
       } catch (error) {
-        const errMsg = error instanceof Error ? error.message : '';
+        const errMsg = getErrorMessage(error, '');
         if (errMsg.includes('AccessDenied') || errMsg.includes('403')) {
           return reply.code(400).send({
             success: false,
@@ -421,7 +417,7 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
             scopedKey: true,
           });
         }
-        const message = error instanceof Error ? error.message : 'Connection test failed';
+        const message = getErrorMessage(error, 'Connection test failed');
         return reply.code(400).send({
           success: false,
           error: message

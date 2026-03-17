@@ -9,6 +9,7 @@ import {
   SETTINGS_REGISTRY,
   type SettingsModule,
 } from '../services/environment-settings.js';
+import { findOrNotFound, getErrorMessage } from '../lib/helpers.js';
 
 const VALID_MODULES = ['general', 'monitoring', 'operations', 'data', 'configuration'] as const;
 
@@ -37,10 +38,8 @@ export async function environmentSettingsRoutes(fastify: FastifyInstance): Promi
         return reply.code(400).send({ error: `Invalid module: ${module}. Must be one of: ${VALID_MODULES.join(', ')}` });
       }
 
-      const env = await prisma.environment.findUnique({ where: { id } });
-      if (!env) {
-        return reply.code(404).send({ error: 'Environment not found' });
-      }
+      const env = await findOrNotFound(prisma.environment.findUnique({ where: { id } }), 'Environment', reply);
+      if (!env) return;
 
       const settings = await getModuleSettings(id, module);
       const definitions = SETTINGS_REGISTRY[module];
@@ -60,10 +59,8 @@ export async function environmentSettingsRoutes(fastify: FastifyInstance): Promi
         return reply.code(400).send({ error: `Invalid module: ${module}. Must be one of: ${VALID_MODULES.join(', ')}` });
       }
 
-      const env = await prisma.environment.findUnique({ where: { id } });
-      if (!env) {
-        return reply.code(404).send({ error: 'Environment not found' });
-      }
+      const env = await findOrNotFound(prisma.environment.findUnique({ where: { id } }), 'Environment', reply);
+      if (!env) return;
 
       try {
         const { updated, changes } = await updateModuleSettings(id, module, request.body as Record<string, unknown>);
@@ -82,7 +79,7 @@ export async function environmentSettingsRoutes(fastify: FastifyInstance): Promi
 
         return { settings: updated };
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Validation failed';
+        const message = getErrorMessage(err, 'Validation failed');
         return reply.code(400).send({ error: message });
       }
     },
@@ -99,10 +96,8 @@ export async function environmentSettingsRoutes(fastify: FastifyInstance): Promi
         return reply.code(400).send({ error: `Invalid module: ${module}. Must be one of: ${VALID_MODULES.join(', ')}` });
       }
 
-      const env = await prisma.environment.findUnique({ where: { id } });
-      if (!env) {
-        return reply.code(404).send({ error: 'Environment not found' });
-      }
+      const env = await findOrNotFound(prisma.environment.findUnique({ where: { id } }), 'Environment', reply);
+      if (!env) return;
 
       const settings = await resetModuleSettings(id, module);
 

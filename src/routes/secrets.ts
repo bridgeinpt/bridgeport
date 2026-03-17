@@ -9,6 +9,7 @@ import {
   deleteSecret,
 } from '../services/secrets.js';
 import { logAudit } from '../services/audit.js';
+import { validateBody, findOrNotFound, handleUniqueConstraint } from '../lib/helpers.js';
 
 const createSecretSchema = z.object({
   key: z.string().min(1).regex(/^[A-Z][A-Z0-9_]*$/, 'Key must be uppercase with underscores'),
@@ -127,14 +128,11 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
-      const body = createSecretSchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(createSecretSchema, request, reply);
+      if (!body) return;
 
       try {
-        const secret = await createSecret(envId, body.data);
+        const secret = await createSecret(envId, body);
 
         await logAudit({
           action: 'create',
@@ -147,9 +145,7 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
 
         return { secret };
       } catch (error) {
-        if (error instanceof Error && error.message.includes('Unique constraint')) {
-          return reply.code(409).send({ error: 'Secret already exists' });
-        }
+        if (handleUniqueConstraint(error, 'Secret already exists', reply)) return;
         throw error;
       }
     }
@@ -163,13 +159,8 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
       const { id } = request.params as { id: string };
 
       try {
-        const secret = await prisma.secret.findUnique({
-          where: { id },
-        });
-
-        if (!secret) {
-          return reply.code(404).send({ error: 'Secret not found' });
-        }
+        const secret = await findOrNotFound(prisma.secret.findUnique({ where: { id } }), 'Secret', reply);
+        if (!secret) return;
 
         // Check environment-level reveal setting
         const configSettings = await prisma.configurationSettings.findUnique({
@@ -230,22 +221,19 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = updateSecretSchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(updateSecretSchema, request, reply);
+      if (!body) return;
 
       try {
         const existing = await prisma.secret.findUnique({ where: { id } });
-        const secret = await updateSecret(id, body.data);
+        const secret = await updateSecret(id, body);
 
         await logAudit({
           action: 'update',
           resourceType: 'secret',
           resourceId: secret.id,
           resourceName: secret.key,
-          details: { valueChanged: !!body.data.value, descriptionChanged: !!body.data.description },
+          details: { valueChanged: !!body.value, descriptionChanged: !!body.description },
           userId: request.authUser!.id,
           environmentId: existing?.environmentId,
         });

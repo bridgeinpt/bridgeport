@@ -7,6 +7,7 @@ import { logAudit } from '../services/audit.js';
 import type { UserRole } from '../services/auth.js';
 import { send, NOTIFICATION_TYPES } from '../services/notifications.js';
 import { getSystemSettings } from '../services/system-settings.js';
+import { validateBody, findOrNotFound } from '../lib/helpers.js';
 
 const SALT_ROUNDS = 12;
 
@@ -83,7 +84,7 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const user = await prisma.user.findUnique({
+      const user = await findOrNotFound(prisma.user.findUnique({
         where: { id },
         select: {
           id: true,
@@ -93,11 +94,8 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
           createdAt: true,
           updatedAt: true,
         },
-      });
-
-      if (!user) {
-        return reply.code(404).send({ error: 'User not found' });
-      }
+      }), 'User', reply);
+      if (!user) return;
 
       return { user };
     }
@@ -108,28 +106,26 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
     '/api/users',
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
-      const body = createUserSchema.safeParse(request.body);
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(createUserSchema, request, reply);
+      if (!body) return;
 
       // Check if email already exists
       const existing = await prisma.user.findUnique({
-        where: { email: body.data.email },
+        where: { email: body.email },
       });
 
       if (existing) {
         return reply.code(409).send({ error: 'Email already in use' });
       }
 
-      const passwordHash = await bcrypt.hash(body.data.password, SALT_ROUNDS);
+      const passwordHash = await bcrypt.hash(body.password, SALT_ROUNDS);
 
       const user = await prisma.user.create({
         data: {
-          email: body.data.email,
+          email: body.email,
           passwordHash,
-          name: body.data.name,
-          role: body.data.role,
+          name: body.name,
+          role: body.role,
         },
         select: {
           id: true,
@@ -163,32 +159,26 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate, requireAdminOrSelf('id')] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = updateUserSchema.safeParse(request.body);
+      const body = validateBody(updateUserSchema, request, reply);
+      if (!body) return;
 
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
-
-      const existingUser = await prisma.user.findUnique({
+      const existingUser = await findOrNotFound(prisma.user.findUnique({
         where: { id },
-      });
-
-      if (!existingUser) {
-        return reply.code(404).send({ error: 'User not found' });
-      }
+      }), 'User', reply);
+      if (!existingUser) return;
 
       // Non-admins cannot change roles
       const isAdmin = request.authUser!.role === 'admin';
-      if (!isAdmin && body.data.role) {
+      if (!isAdmin && body.role) {
         return reply.code(403).send({ error: 'Only admins can change user roles' });
       }
 
       const updateData: { name?: string; role?: UserRole } = {};
-      if (body.data.name !== undefined) {
-        updateData.name = body.data.name;
+      if (body.name !== undefined) {
+        updateData.name = body.name;
       }
-      if (body.data.role !== undefined && isAdmin) {
-        updateData.role = body.data.role;
+      if (body.role !== undefined && isAdmin) {
+        updateData.role = body.role;
       }
 
       const user = await prisma.user.update({
@@ -237,14 +227,11 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: 'Cannot delete your own account' });
       }
 
-      const user = await prisma.user.findUnique({
+      const user = await findOrNotFound(prisma.user.findUnique({
         where: { id },
         select: { email: true },
-      });
-
-      if (!user) {
-        return reply.code(404).send({ error: 'User not found' });
-      }
+      }), 'User', reply);
+      if (!user) return;
 
       await prisma.user.delete({
         where: { id },
@@ -268,36 +255,30 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate, requireAdminOrSelf('id')] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = changePasswordSchema.safeParse(request.body);
+      const body = validateBody(changePasswordSchema, request, reply);
+      if (!body) return;
 
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
-
-      const user = await prisma.user.findUnique({
+      const user = await findOrNotFound(prisma.user.findUnique({
         where: { id },
-      });
-
-      if (!user) {
-        return reply.code(404).send({ error: 'User not found' });
-      }
+      }), 'User', reply);
+      if (!user) return;
 
       const isAdmin = request.authUser!.role === 'admin';
       const isSelf = request.authUser!.id === id;
 
       // Non-admins changing their own password must provide current password
       if (isSelf && !isAdmin) {
-        if (!body.data.currentPassword) {
+        if (!body.currentPassword) {
           return reply.code(400).send({ error: 'Current password is required' });
         }
 
-        const validPassword = await bcrypt.compare(body.data.currentPassword, user.passwordHash);
+        const validPassword = await bcrypt.compare(body.currentPassword, user.passwordHash);
         if (!validPassword) {
           return reply.code(401).send({ error: 'Current password is incorrect' });
         }
       }
 
-      const newPasswordHash = await bcrypt.hash(body.data.newPassword, SALT_ROUNDS);
+      const newPasswordHash = await bcrypt.hash(body.newPassword, SALT_ROUNDS);
 
       await prisma.user.update({
         where: { id },

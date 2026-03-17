@@ -8,6 +8,7 @@ import {
 } from '../services/system-settings.js';
 import { requireAdmin } from '../plugins/authorize.js';
 import { logAudit } from '../services/audit.js';
+import { validateBody } from '../lib/helpers.js';
 
 const updateSettingsSchema = z.object({
   sshCommandTimeoutMs: z.number().int().min(1000).max(600000).optional(),
@@ -64,15 +65,13 @@ export async function systemSettingsRoutes(fastify: FastifyInstance): Promise<vo
     '/api/settings/system',
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
-      const body = updateSettingsSchema.safeParse(request.body);
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(updateSettingsSchema, request, reply);
+      if (!body) return;
 
       // Validate webhookRetryDelaysMs is valid JSON array if provided
-      if (body.data.webhookRetryDelaysMs) {
+      if (body.webhookRetryDelaysMs) {
         try {
-          const delays = JSON.parse(body.data.webhookRetryDelaysMs);
+          const delays = JSON.parse(body.webhookRetryDelaysMs);
           if (!Array.isArray(delays) || !delays.every(d => typeof d === 'number' && d >= 0)) {
             return reply.code(400).send({
               error: 'webhookRetryDelaysMs must be a JSON array of non-negative numbers',
@@ -86,7 +85,7 @@ export async function systemSettingsRoutes(fastify: FastifyInstance): Promise<vo
       }
 
       // Handle empty string as null for URL and token fields
-      const updateData = { ...body.data };
+      const updateData = { ...body };
       if (updateData.publicUrl === '') {
         updateData.publicUrl = null;
       }
@@ -100,7 +99,7 @@ export async function systemSettingsRoutes(fastify: FastifyInstance): Promise<vo
       const settings = await updateSystemSettings(updateData);
 
       // Don't log the actual token value in audit
-      const auditDetails = { ...body.data };
+      const auditDetails = { ...body };
       if (auditDetails.doRegistryToken) {
         auditDetails.doRegistryToken = '(updated)';
       }

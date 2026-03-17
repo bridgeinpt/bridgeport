@@ -17,7 +17,7 @@ import { prisma } from '../lib/db.js';
 import { bundledAgentVersion } from '../lib/version.js';
 import { requireAdmin } from '../plugins/authorize.js';
 import { METRICS_MODE } from '../lib/constants.js';
-import { safeJsonParse } from '../lib/helpers.js';
+import { safeJsonParse, validateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery } from '../lib/helpers.js';
 
 const createServerSchema = z.object({
   name: z.string().min(1),
@@ -66,10 +66,10 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request) => {
       const { envId } = request.params as { envId: string };
-      const { limit, offset } = request.query as { limit?: string; offset?: string };
+      const { limit, offset } = parsePaginationQuery(request.query as Record<string, unknown>);
       const result = await listServers(envId, {
-        limit: limit ? parseInt(limit) : 25,
-        offset: offset ? parseInt(offset) : 0,
+        limit,
+        offset,
       });
       return result;
     }
@@ -81,11 +81,8 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const server = await getServer(id);
-
-      if (!server) {
-        return reply.code(404).send({ error: 'Server not found' });
-      }
+      const server = await findOrNotFound(getServer(id), 'Server', reply);
+      if (!server) return;
 
       return { server };
     }
@@ -97,30 +94,25 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
-      const body = createServerSchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(createServerSchema, request, reply);
+      if (!body) return;
 
       try {
-        const server = await createServer(envId, body.data);
+        const server = await createServer(envId, body);
 
         await logAudit({
           action: 'create',
           resourceType: 'server',
           resourceId: server.id,
           resourceName: server.name,
-          details: { hostname: server.hostname, tags: body.data.tags },
+          details: { hostname: server.hostname, tags: body.tags },
           userId: request.authUser!.id,
           environmentId: envId,
         });
 
         return { server };
       } catch (error) {
-        if (error instanceof Error && error.message.includes('Unique constraint')) {
-          return reply.code(409).send({ error: 'Server already exists' });
-        }
+        if (handleUniqueConstraint(error, 'Server already exists', reply)) return;
         throw error;
       }
     }
@@ -132,22 +124,19 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = updateServerSchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(updateServerSchema, request, reply);
+      if (!body) return;
 
       try {
         const existing = await getServer(id);
-        const server = await updateServer(id, body.data);
+        const server = await updateServer(id, body);
 
         await logAudit({
           action: 'update',
           resourceType: 'server',
           resourceId: server.id,
           resourceName: server.name,
-          details: { changes: body.data },
+          details: { changes: body },
           userId: request.authUser!.id,
           environmentId: existing?.environmentId,
         });
@@ -232,8 +221,7 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
         return { services, missing };
       } catch (error) {
         console.error(`[Discover] Failed for server ${id}:`, error);
-        const message = error instanceof Error ? error.message : 'Discovery failed';
-        return reply.code(500).send({ error: message });
+        return reply.code(500).send({ error: getErrorMessage(error, 'Discovery failed') });
       }
     }
   );
@@ -244,14 +232,11 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
-      const body = importTerraformSchema.safeParse(request.body);
-
-      if (!body.success) {
-        return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
-      }
+      const body = validateBody(importTerraformSchema, request, reply);
+      if (!body) return;
 
       try {
-        const servers = await importFromTerraform(envId, body.data);
+        const servers = await importFromTerraform(envId, body);
 
         await logAudit({
           action: 'import',
@@ -264,8 +249,7 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
 
         return { servers, imported: servers.length };
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Import failed';
-        return reply.code(500).send({ error: message });
+        return reply.code(500).send({ error: getErrorMessage(error, 'Import failed') });
       }
     }
   );
@@ -278,14 +262,11 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
       const { id } = request.params as { id: string };
       const body = request.body as { bridgeportUrl?: string } | undefined;
 
-      const server = await prisma.server.findUnique({
+      const server = await findOrNotFound(prisma.server.findUnique({
         where: { id },
         include: { environment: true },
-      });
-
-      if (!server) {
-        return reply.code(404).send({ error: 'Server not found' });
-      }
+      }), 'Server', reply);
+      if (!server) return;
 
       const result = await deployAgent(id, body?.bridgeportUrl);
 
@@ -315,14 +296,11 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const server = await prisma.server.findUnique({
+      const server = await findOrNotFound(prisma.server.findUnique({
         where: { id },
         include: { environment: true },
-      });
-
-      if (!server) {
-        return reply.code(404).send({ error: 'Server not found' });
-      }
+      }), 'Server', reply);
+      if (!server) return;
 
       const result = await removeAgent(id);
 
@@ -352,10 +330,8 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const server = await prisma.server.findUnique({ where: { id } });
-      if (!server) {
-        return reply.code(404).send({ error: 'Server not found' });
-      }
+      const server = await findOrNotFound(prisma.server.findUnique({ where: { id } }), 'Server', reply);
+      if (!server) return;
 
       const status = await checkAgentStatus(id);
       return {
@@ -382,14 +358,11 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: 'Invalid mode. Must be ssh, agent, or disabled' });
       }
 
-      const server = await prisma.server.findUnique({
+      const server = await findOrNotFound(prisma.server.findUnique({
         where: { id },
         include: { environment: true },
-      });
-
-      if (!server) {
-        return reply.code(404).send({ error: 'Server not found' });
-      }
+      }), 'Server', reply);
+      if (!server) return;
 
       // If switching to agent mode, deploy the agent
       if (body.mode === METRICS_MODE.AGENT && server.metricsMode !== METRICS_MODE.AGENT) {
@@ -485,16 +458,13 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const server = await prisma.server.findUnique({
+      const server = await findOrNotFound(prisma.server.findUnique({
         where: { id },
         include: {
           processSnapshot: true,
         },
-      });
-
-      if (!server) {
-        return reply.code(404).send({ error: 'Server not found' });
-      }
+      }), 'Server', reply);
+      if (!server) return;
 
       if (!server.processSnapshot) {
         return {
