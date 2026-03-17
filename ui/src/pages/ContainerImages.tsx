@@ -44,7 +44,6 @@ export default function ContainerImages() {
 
   // Deploy modal
   const [deployingImage, setDeployingImage] = useState<ContainerImage | null>(null);
-  const [deployTag, setDeployTag] = useState('');
   const [deployAutoRollback, setDeployAutoRollback] = useState(true);
   const [deploying, setDeploying] = useState(false);
 
@@ -144,16 +143,21 @@ export default function ContainerImages() {
 
   const openDeployModal = (image: ContainerImage) => {
     setDeployingImage(image);
-    setDeployTag(image.bestTag || image.tagFilter.split(',')[0]?.trim() || 'latest');
     setDeployAutoRollback(true);
   };
 
   const handleDeploy = async () => {
-    if (!deployingImage || !deployTag) return;
+    if (!deployingImage) return;
+    const digest = deployingImage.latestDigest;
+    if (!digest) return;
 
     setDeploying(true);
     try {
-      const { plan } = await deployContainerImage(deployingImage.id, { imageTag: deployTag, autoRollback: deployAutoRollback });
+      const { plan } = await deployContainerImage(deployingImage.id, {
+        imageTag: digest.bestTag || undefined,
+        imageDigestId: digest.id,
+        autoRollback: deployAutoRollback,
+      });
       toast.success(`Deployment plan created: ${plan.name}`);
       setDeployingImage(null);
       reload();
@@ -333,12 +337,12 @@ export default function ContainerImages() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  {image.services.length > 0 && (
+                  {image.services.length > 0 && image.latestDigest && (
                     <button
                       onClick={() => openDeployModal(image)}
                       className="btn btn-primary text-sm"
                     >
-                      Deploy
+                      {image.updateAvailable ? 'Deploy Update' : 'Deploy Latest'}
                     </button>
                   )}
                   {image.registryConnectionId && (
@@ -503,27 +507,50 @@ export default function ContainerImages() {
       )}
 
       {/* Deploy Modal */}
-      {deployingImage && (
+      {deployingImage && deployingImage.latestDigest && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-lg p-6">
-            <h3 className="text-lg font-semibold text-white mb-4">
+            <h3 className="text-lg font-semibold text-white mb-1">
               Deploy {deployingImage.name}
             </h3>
-            <p className="text-slate-400 text-sm mb-4">
-              This will deploy to {deployingImage.services.length} linked service
+            <p className="text-slate-500 text-sm mb-4">
+              Deploy latest digest to {deployingImage.services.length} linked service
               {deployingImage.services.length !== 1 ? 's' : ''} in dependency order.
             </p>
 
             <div className="space-y-4">
+              <div className="bg-slate-800/50 rounded p-3">
+                <div className="text-sm text-slate-400 mb-1">Digest</div>
+                <div className="font-mono text-white text-sm">
+                  {deployingImage.latestDigest.manifestDigest.startsWith('sha256:')
+                    ? deployingImage.latestDigest.manifestDigest.slice(7, 19)
+                    : deployingImage.latestDigest.manifestDigest.slice(0, 12)}
+                </div>
+                {deployingImage.latestDigest.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-2">
+                    {deployingImage.latestDigest.tags.map((tag) => (
+                      <span key={tag} className="badge bg-slate-700 text-slate-300 text-xs">
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div>
-                <label className="block text-sm text-slate-400 mb-1">Image Tag</label>
-                <input
-                  type="text"
-                  value={deployTag}
-                  onChange={(e) => setDeployTag(e.target.value)}
-                  placeholder="v1.0.0"
-                  className="input font-mono"
-                />
+                <div className="text-sm text-slate-400 mb-2">
+                  Services to update ({deployingImage.services.length}):
+                </div>
+                <div className="space-y-1">
+                  {deployingImage.services.map((s: any) => (
+                    <div key={s.id} className="flex items-center gap-2 p-2 bg-slate-800/50 rounded text-sm">
+                      <span className="text-white">{s.name}</span>
+                      {s.server?.name && (
+                        <span className="text-slate-500">on {s.server.name}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <div className="flex items-center gap-2">
@@ -539,17 +566,6 @@ export default function ContainerImages() {
                 </label>
               </div>
 
-              <div className="bg-slate-800/50 rounded p-3">
-                <h4 className="text-sm font-medium text-slate-400 mb-2">Services to deploy:</h4>
-                <div className="space-y-1">
-                  {deployingImage.services.map((s) => (
-                    <div key={s.id} className="text-sm text-slate-300">
-                      {s.name}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
               <div className="flex gap-2 justify-end pt-4">
                 <button
                   type="button"
@@ -560,7 +576,7 @@ export default function ContainerImages() {
                 </button>
                 <button
                   onClick={handleDeploy}
-                  disabled={deploying || !deployTag}
+                  disabled={deploying}
                   className="btn btn-primary"
                 >
                   {deploying ? 'Starting Deploy...' : 'Deploy'}
