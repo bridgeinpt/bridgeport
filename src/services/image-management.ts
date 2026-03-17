@@ -4,6 +4,7 @@ import { RegistryFactory, type RegistryTag } from '../lib/registry.js';
 import { extractRepoName, parseTagFilter, getBestTag, getDefaultTag, matchesTagFilter } from '../lib/image-utils.js';
 import { getRegistryCredentials } from './registries.js';
 import { HISTORY_STATUS } from '../lib/constants.js';
+import { safeJsonParse } from '../lib/helpers.js';
 
 export interface CreateContainerImageInput {
   name: string;
@@ -155,7 +156,7 @@ export async function linkServiceToContainerImage(
   let bestTag = getDefaultTag(containerImage.tagFilter);
 
   if (latestDigest) {
-    const digestTags = JSON.parse(latestDigest.tags) as string[];
+    const digestTags = safeJsonParse(latestDigest.tags, [] as string[]);
     bestTag = getBestTag(digestTags, tagFilterPatterns) || bestTag;
   }
 
@@ -454,7 +455,7 @@ export async function syncDigestsFromRegistry(
 
     if (existing) {
       // Update tags if changed
-      const existingTags = JSON.parse(existing.tags) as string[];
+      const existingTags = safeJsonParse(existing.tags, [] as string[]);
       const tagsChanged = JSON.stringify(existingTags.sort()) !== JSON.stringify(info.tags.sort());
       if (tagsChanged) {
         await prisma.imageDigest.update({
@@ -533,9 +534,10 @@ export async function listImageDigests(
   const patterns = image ? parseTagFilter(image.tagFilter) : [];
 
   const digestsWithBestTag = digests.map((d) => {
-    const tags = JSON.parse(d.tags) as string[];
+    const tags = safeJsonParse(d.tags, [] as string[]);
     return {
       ...d,
+      tags,
       size: d.size !== null ? Number(d.size) : null,
       bestTag: getBestTag(tags, patterns),
     };
