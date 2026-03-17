@@ -10,6 +10,7 @@ import { EmptyState } from '../components/EmptyState.js';
 import { Alert } from '../components/Alert.js';
 import { useToast } from '../components/Toast.js';
 import { ServerIcon, HeartPulseIcon, TrashIcon } from '../components/Icons.js';
+import { safeJsonParse } from '../lib/helpers.js';
 
 export default function Servers() {
   const { selectedEnvironment } = useAppStore();
@@ -342,7 +343,7 @@ export default function Servers() {
 
       <div className="space-y-4">
         {servers.map((server) => {
-          const tags = server.tags ? JSON.parse(server.tags) : [];
+          const tags = safeJsonParse(server.tags, [] as string[]);
           return (
             <div key={server.id} className="panel">
               <div className="flex items-start justify-between">

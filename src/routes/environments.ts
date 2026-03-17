@@ -5,6 +5,7 @@ import { encrypt, decrypt } from '../lib/crypto.js';
 import { logAudit } from '../services/audit.js';
 import { requireAdmin } from '../plugins/authorize.js';
 import { createDefaultSettings } from '../services/environment-settings.js';
+import { safeJsonParse } from '../lib/helpers.js';
 import { S3Client, ListBucketsCommand } from '@aws-sdk/client-s3';
 
 const createEnvSchema = z.object({
@@ -479,14 +480,9 @@ export async function getEnvironmentSpacesConfig(environmentId: string): Promise
   }
 
   const secretKey = decrypt(globalConfig.encryptedSecretKey, globalConfig.secretKeyNonce);
-  let buckets: string[] | undefined;
-  if (globalConfig.buckets) {
-    try {
-      buckets = JSON.parse(globalConfig.buckets);
-    } catch {
-      buckets = undefined;
-    }
-  }
+  const buckets: string[] | undefined = globalConfig.buckets
+    ? safeJsonParse(globalConfig.buckets, [] as string[])
+    : undefined;
 
   return {
     accessKey: globalConfig.accessKey,

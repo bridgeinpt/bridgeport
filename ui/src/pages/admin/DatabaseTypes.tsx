@@ -14,6 +14,7 @@ import {
   type DatabaseTypeField,
 } from '../../lib/api';
 import { useToast } from '../../components/Toast';
+import { safeJsonParse } from '../../lib/helpers';
 
 export default function DatabaseTypes() {
   const { user } = useAuthStore();
@@ -61,11 +62,7 @@ export default function DatabaseTypes() {
   };
 
   const parseConnectionFields = (jsonStr: string): DatabaseTypeField[] => {
-    try {
-      return JSON.parse(jsonStr) as DatabaseTypeField[];
-    } catch {
-      return [];
-    }
+    return safeJsonParse(jsonStr, [] as DatabaseTypeField[]);
   };
 
   const handleCreateType = async () => {
@@ -76,16 +73,16 @@ export default function DatabaseTypes() {
 
     let connectionFields: DatabaseTypeField[] = [];
     if (newTypeConnectionFields.trim()) {
-      try {
-        connectionFields = JSON.parse(newTypeConnectionFields);
-        if (!Array.isArray(connectionFields)) {
-          toast.error('Connection fields must be a JSON array');
-          return;
-        }
-      } catch {
+      const parsed = safeJsonParse(newTypeConnectionFields, null);
+      if (parsed === null) {
         toast.error('Invalid JSON for connection fields');
         return;
       }
+      if (!Array.isArray(parsed)) {
+        toast.error('Connection fields must be a JSON array');
+        return;
+      }
+      connectionFields = parsed;
     }
 
     setCreating(true);

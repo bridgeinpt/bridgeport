@@ -1,4 +1,5 @@
 import type { ServerWithServices, Database, ServiceConnection, ExposedPort } from './api';
+import { safeJsonParse } from './helpers';
 
 export interface InferredConnection {
   sourceType: 'service' | 'database';
@@ -19,12 +20,7 @@ const WELL_KNOWN_PORTS: Record<number, string> = {
 };
 
 function parseExposedPorts(portsJson: string | null): ExposedPort[] {
-  if (!portsJson) return [];
-  try {
-    return JSON.parse(portsJson);
-  } catch {
-    return [];
-  }
+  return safeJsonParse(portsJson, [] as ExposedPort[]);
 }
 
 /**

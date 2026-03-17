@@ -1,5 +1,6 @@
 import { prisma } from '../lib/db.js';
 import type { SystemSettings } from '@prisma/client';
+import { safeJsonParse } from '../lib/helpers.js';
 
 // Cache for system settings (refreshed on update)
 let cachedSettings: SystemSettings | null = null;
@@ -100,13 +101,9 @@ export function invalidateSettingsCache(): void {
  * Parse webhook retry delays from JSON string
  */
 export function parseWebhookRetryDelays(settings: SystemSettings): number[] {
-  try {
-    const delays = JSON.parse(settings.webhookRetryDelaysMs);
-    if (Array.isArray(delays) && delays.every(d => typeof d === 'number')) {
-      return delays;
-    }
-  } catch {
-    // ignore parse errors
+  const delays = safeJsonParse(settings.webhookRetryDelaysMs, [1000, 5000, 15000]);
+  if (Array.isArray(delays) && delays.every(d => typeof d === 'number')) {
+    return delays;
   }
-  return JSON.parse(SYSTEM_SETTINGS_DEFAULTS.webhookRetryDelaysMs);
+  return safeJsonParse(SYSTEM_SETTINGS_DEFAULTS.webhookRetryDelaysMs, [1000, 5000, 15000]);
 }

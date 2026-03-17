@@ -52,50 +52,26 @@ import {
   getOverallStatusDotColor,
   getContainerHealthTextColor,
 } from '../lib/status';
+import { safeJsonParse } from '../lib/helpers';
 
 function parseExposedPorts(portsJson: string | null): ExposedPort[] {
-  if (!portsJson) return [];
-  try {
-    return JSON.parse(portsJson);
-  } catch {
-    return [];
-  }
+  return safeJsonParse(portsJson, [] as ExposedPort[]);
 }
 
 function parseTCPChecks(jsonStr: string | null): TCPCheckConfig[] {
-  if (!jsonStr) return [];
-  try {
-    return JSON.parse(jsonStr);
-  } catch {
-    return [];
-  }
+  return safeJsonParse(jsonStr, [] as TCPCheckConfig[]);
 }
 
 function parseTCPCheckResults(jsonStr: string | null): TCPCheckResult[] {
-  if (!jsonStr) return [];
-  try {
-    return JSON.parse(jsonStr);
-  } catch {
-    return [];
-  }
+  return safeJsonParse(jsonStr, [] as TCPCheckResult[]);
 }
 
 function parseCertChecks(jsonStr: string | null): CertCheckConfig[] {
-  if (!jsonStr) return [];
-  try {
-    return JSON.parse(jsonStr);
-  } catch {
-    return [];
-  }
+  return safeJsonParse(jsonStr, [] as CertCheckConfig[]);
 }
 
 function parseCertCheckResults(jsonStr: string | null): CertCheckResult[] {
-  if (!jsonStr) return [];
-  try {
-    return JSON.parse(jsonStr);
-  } catch {
-    return [];
-  }
+  return safeJsonParse(jsonStr, [] as CertCheckResult[]);
 }
 
 export default function ServiceDetail() {
@@ -1505,7 +1481,8 @@ export default function ServiceDetail() {
                     </thead>
                     <tbody className="divide-y divide-slate-700">
                       {healthPagination.paginatedData.map((log) => {
-                        const details = log.details ? JSON.parse(log.details) : null;
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                        const details = safeJsonParse<Record<string, any> | null>(log.details, null);
                         return (
                           <tr key={log.id} className="text-slate-300">
                             <td className="py-3 text-sm">
@@ -1600,7 +1577,8 @@ export default function ServiceDetail() {
         {actionHistory.length > 0 ? (
           <div className="space-y-2">
             {(showAllHistory ? actionHistory : actionHistory.slice(0, 5)).map((log) => {
-              const details = log.details ? JSON.parse(log.details) : null;
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const details = safeJsonParse<Record<string, any> | null>(log.details, null);
               return (
                 <div
                   key={log.id}

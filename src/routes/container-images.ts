@@ -19,6 +19,7 @@ import { logAudit } from '../services/audit.js';
 import { RegistryFactory } from '../lib/registry.js';
 import { getRegistryCredentials } from '../services/registries.js';
 import { extractRepoName, parseTagFilter, getBestTag, getDefaultTag } from '../lib/image-utils.js';
+import { safeJsonParse } from '../lib/helpers.js';
 
 const createContainerImageSchema = z.object({
   name: z.string().min(1),
@@ -63,7 +64,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
         const latestDigest = digests?.[0];
         let bestTag: string | null = null;
         if (latestDigest) {
-          const tags = JSON.parse(latestDigest.tags) as string[];
+          const tags = safeJsonParse(latestDigest.tags, [] as string[]);
           const patterns = parseTagFilter(rest.tagFilter);
           bestTag = getBestTag(tags, patterns);
         }
@@ -74,7 +75,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
           latestDigest: latestDigest ? {
             id: latestDigest.id,
             manifestDigest: latestDigest.manifestDigest,
-            tags: JSON.parse(latestDigest.tags),
+            tags: safeJsonParse(latestDigest.tags, [] as string[]),
             discoveredAt: latestDigest.discoveredAt,
           } : null,
           bestTag,
@@ -143,7 +144,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
           ...rest,
           digests: digests?.map((d) => ({
             ...d,
-            tags: JSON.parse(d.tags as string) as string[],
+            tags: safeJsonParse(d.tags as string, [] as string[]),
             size: d.size !== null ? Number(d.size) : null,
           })),
         },
@@ -256,7 +257,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
         if (!digest) {
           return reply.code(404).send({ error: 'Image digest not found' });
         }
-        const digestTags = JSON.parse(digest.tags) as string[];
+        const digestTags = safeJsonParse(digest.tags, [] as string[]);
         const patterns = parseTagFilter(image.tagFilter);
         imageTag = getBestTag(digestTags, patterns) || digestTags[0] || getDefaultTag(image.tagFilter);
       }
@@ -385,7 +386,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
             id: newest.id,
             manifestDigest: newest.manifestDigest,
             bestTag: newest.bestTag,
-            tags: JSON.parse(newest.tags),
+            tags: safeJsonParse(newest.tags, [] as string[]),
             discoveredAt: newest.discoveredAt,
           } : null,
           newDigests: result.newDigests,

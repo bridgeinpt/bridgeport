@@ -2,6 +2,7 @@ import { prisma } from '../lib/db.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
 import type { SlackChannel, NotificationType } from '@prisma/client';
 import { getSystemSettings } from './system-settings.js';
+import { safeJsonParse } from '../lib/helpers.js';
 
 // ==================== Types ====================
 
@@ -466,7 +467,7 @@ export async function dispatchSlackNotification(
 
     // Check environment filter
     if (routing.environmentIds && environmentId) {
-      const allowedEnvs = JSON.parse(routing.environmentIds) as string[];
+      const allowedEnvs = safeJsonParse(routing.environmentIds, [] as string[]);
       if (!allowedEnvs.includes(environmentId)) return false;
     }
 

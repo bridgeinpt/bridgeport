@@ -13,6 +13,7 @@ import {
   type DeploymentStepStatus,
 } from '../lib/api';
 import { formatDistanceToNow, format } from 'date-fns';
+import { safeJsonParse } from '../lib/helpers';
 
 const STATUS_COLORS: Record<DeploymentPlanStatus, { bg: string; text: string; border: string }> = {
   pending: { bg: 'bg-slate-500/20', text: 'text-slate-400', border: 'border-slate-500' },
@@ -370,7 +371,7 @@ function StepCard({
             <div className="mb-4">
               <h4 className="text-sm font-medium text-slate-400 mb-2">Health Check Details</h4>
               <pre className="bg-slate-950 rounded p-3 text-xs text-slate-300 overflow-x-auto">
-                {JSON.stringify(JSON.parse(step.healthDetails), null, 2)}
+                {JSON.stringify(safeJsonParse(step.healthDetails, {}), null, 2)}
               </pre>
             </div>
           )}

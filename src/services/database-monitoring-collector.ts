@@ -2,6 +2,7 @@ import { prisma } from '../lib/db.js';
 import { decrypt } from '../lib/crypto.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 import { executeMonitoringQueries, type MonitoringConfig, type SQLConnectionInfo, type SSHConnectionInfo, type RedisConnectionInfo } from './database-query-executor.js';
+import { safeJsonParse } from '../lib/helpers.js';
 
 /**
  * Collect metrics for a single database
@@ -27,9 +28,9 @@ export async function collectDatabaseMetrics(databaseId: string): Promise<void> 
     return; // No monitoring config defined for this database type
   }
 
-  const monitoringConfig: MonitoringConfig = JSON.parse(database.databaseType.monitoringConfig);
+  const monitoringConfig = safeJsonParse(database.databaseType.monitoringConfig, null) as MonitoringConfig | null;
 
-  if (!monitoringConfig.queries || monitoringConfig.queries.length === 0) {
+  if (!monitoringConfig || !monitoringConfig.queries || monitoringConfig.queries.length === 0) {
     return;
   }
 

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/db.js';
 import { requireAdmin } from '../plugins/authorize.js';
 import { logAudit } from '../services/audit.js';
+import { safeJsonParse } from '../lib/helpers.js';
 import { resetTypeToDefaults, exportTypeAsJson, getLastSyncResult } from '../services/plugin-loader.js';
 
 const createServiceTypeSchema = z.object({
@@ -500,7 +501,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
       return {
         databaseTypes: databaseTypes.map(dt => ({
           ...dt,
-          connectionFields: JSON.parse(dt.connectionFields),
+          connectionFields: safeJsonParse(dt.connectionFields, []),
         })),
       };
     }
@@ -532,7 +533,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
       return {
         databaseType: {
           ...databaseType,
-          connectionFields: JSON.parse(databaseType.connectionFields),
+          connectionFields: safeJsonParse(databaseType.connectionFields, []),
         },
       };
     }
@@ -582,7 +583,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
       return {
         databaseType: {
           ...databaseType,
-          connectionFields: JSON.parse(databaseType.connectionFields),
+          connectionFields: safeJsonParse(databaseType.connectionFields, []),
         },
       };
     }
@@ -636,7 +637,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
       return {
         databaseType: {
           ...databaseType,
-          connectionFields: JSON.parse(databaseType.connectionFields),
+          connectionFields: safeJsonParse(databaseType.connectionFields, []),
         },
       };
     }
@@ -713,7 +714,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
       return {
         databaseType: databaseType ? {
           ...databaseType,
-          connectionFields: JSON.parse(databaseType.connectionFields),
+          connectionFields: safeJsonParse(databaseType.connectionFields, []),
         } : null,
       };
     }

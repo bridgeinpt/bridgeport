@@ -1,12 +1,8 @@
 import type { ExposedPort } from './types';
+import { safeJsonParse } from '../../lib/helpers';
 
 export function parseExposedPorts(portsJson: string | null): ExposedPort[] {
-  if (!portsJson) return [];
-  try {
-    return JSON.parse(portsJson);
-  } catch {
-    return [];
-  }
+  return safeJsonParse(portsJson, [] as ExposedPort[]);
 }
 
 export function getContainerStatusColor(status: string): string {

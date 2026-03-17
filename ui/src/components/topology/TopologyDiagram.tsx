@@ -30,6 +30,7 @@ import { listConnections, createConnection, deleteConnection, getDiagramLayout, 
 import { inferConnections, mergeConnections, aggregateCollapsedEdges, type TopologyEdge } from '../../lib/topology';
 import { EmptyState } from '../EmptyState';
 import { toPng } from 'html-to-image';
+import { safeJsonParse } from '../../lib/helpers';
 
 function downloadFile(filename: string, content: string, mimeType: string) {
   const blob = new Blob([content], { type: mimeType });
@@ -143,12 +144,7 @@ const SERVER_GAP = 40;
 const DATABASE_STANDALONE_X_OFFSET = 50;
 
 function parseExposedPorts(portsJson: string | null): ExposedPort[] {
-  if (!portsJson) return [];
-  try {
-    return JSON.parse(portsJson);
-  } catch {
-    return [];
-  }
+  return safeJsonParse(portsJson, [] as ExposedPort[]);
 }
 
 interface BuildResult {

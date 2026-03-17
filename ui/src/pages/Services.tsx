@@ -11,6 +11,7 @@ import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { OperationResultsModal, type OperationResult } from '../components/OperationResultsModal.js';
 import { Modal } from '../components/Modal.js';
+import { safeJsonParse } from '../lib/helpers.js';
 
 // Lazy load DependencyFlow to avoid loading @xyflow/react (~80KB) until needed
 const DependencyFlow = lazy(() =>
@@ -23,12 +24,7 @@ interface ServiceWithServer extends Service {
 }
 
 function parseExposedPorts(portsJson: string | null): ExposedPort[] {
-  if (!portsJson) return [];
-  try {
-    return JSON.parse(portsJson);
-  } catch {
-    return [];
-  }
+  return safeJsonParse(portsJson, [] as ExposedPort[]);
 }
 
 function formatPorts(ports: ExposedPort[], maxDisplay = 2): string {

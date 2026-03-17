@@ -4,6 +4,7 @@ import { getAuditLogs, listEnvironments, type AuditLog, type Environment } from 
 import { formatDistanceToNow } from 'date-fns';
 import { ChevronDownIcon } from '../../components/Icons';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
+import { safeJsonParse } from '../../lib/helpers';
 
 const RESOURCE_TYPES = [
   { value: '', label: 'All Types' },
@@ -205,7 +206,7 @@ export default function Audit() {
                           )}
                           {log.details && (
                             <pre className="text-xs text-slate-400 overflow-x-auto">
-                              {JSON.stringify(JSON.parse(log.details), null, 2)}
+                              {JSON.stringify(safeJsonParse(log.details, {}), null, 2)}
                             </pre>
                           )}
                         </td>

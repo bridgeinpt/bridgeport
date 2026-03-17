@@ -8,6 +8,7 @@ import { readFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { sendSystemNotification, NOTIFICATION_TYPES } from './notifications.js';
+import { safeJsonParse } from '../lib/helpers.js';
 
 // Default pg_dump timeout (5 minutes)
 const DEFAULT_PG_DUMP_TIMEOUT_MS = 300000;
@@ -329,14 +330,9 @@ function toOutput(db: {
   environmentId: string;
   _count?: { backups: number; services: number };
 }): DatabaseOutput {
-  let parsedPgDumpOptions: PgDumpOptions | null = null;
-  if (db.pgDumpOptions) {
-    try {
-      parsedPgDumpOptions = JSON.parse(db.pgDumpOptions);
-    } catch {
-      // ignore parse errors
-    }
-  }
+  const parsedPgDumpOptions: PgDumpOptions | null = db.pgDumpOptions
+    ? safeJsonParse(db.pgDumpOptions, {} as PgDumpOptions)
+    : null;
   return {
     id: db.id,
     name: db.name,
@@ -440,14 +436,9 @@ async function executeBackup(backupId: string): Promise<void> {
   const useSpaces = db.backupStorageType === 'spaces';
 
   // Parse pg_dump options
-  let pgOpts: PgDumpOptions = {};
-  if (db.pgDumpOptions) {
-    try {
-      pgOpts = JSON.parse(db.pgDumpOptions);
-    } catch {
-      // ignore parse errors
-    }
-  }
+  const pgOpts: PgDumpOptions = db.pgDumpOptions
+    ? safeJsonParse(db.pgDumpOptions, {} as PgDumpOptions)
+    : {};
 
   // Determine file extension for temp file
   let tempExtension = '.sql';

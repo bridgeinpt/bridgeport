@@ -25,6 +25,7 @@ import {
 } from '../lib/api';
 import { formatDistanceToNow, format } from 'date-fns';
 import Pagination from '../components/Pagination';
+import { safeJsonParse } from '../lib/helpers';
 
 
 const BACKUP_FORMATS = [
@@ -55,11 +56,8 @@ interface BackupError {
 
 function parseBackupError(error: string | null): BackupError | string | null {
   if (!error) return null;
-  try {
-    return JSON.parse(error) as BackupError;
-  } catch {
-    return error;
-  }
+  const parsed = safeJsonParse(error, null);
+  return parsed !== null ? (parsed as BackupError) : error;
 }
 
 export default function DatabaseDetail() {

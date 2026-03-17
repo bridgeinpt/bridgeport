@@ -33,6 +33,7 @@ import {
 } from '../../lib/api';
 import { useToast } from '../../components/Toast';
 import { PlusIcon, TrashIcon } from '../../components/Icons';
+import { safeJsonParse } from '../../lib/helpers';
 
 type TabType = 'smtp' | 'webhooks' | 'slack' | 'types';
 
@@ -45,12 +46,9 @@ function secToMs(sec: number): number {
 }
 
 function parseDelaysMs(delaysJson: string): string {
-  try {
-    const delays = JSON.parse(delaysJson) as number[];
-    return delays.map((d) => Math.round(d / 1000)).join(', ');
-  } catch {
-    return '1, 5, 15';
-  }
+  const delays = safeJsonParse(delaysJson, [] as number[]);
+  if (delays.length === 0) return '1, 5, 15';
+  return delays.map((d) => Math.round(d / 1000)).join(', ');
 }
 
 function formatDelaysMs(delaysSec: string): string {
@@ -215,8 +213,8 @@ export default function NotificationSettings() {
         url: webhook.url,
         secret: '',
         enabled: webhook.enabled,
-        typeFilter: webhook.typeFilter ? JSON.parse(webhook.typeFilter) : undefined,
-        environmentIds: webhook.environmentIds ? JSON.parse(webhook.environmentIds) : undefined,
+        typeFilter: safeJsonParse(webhook.typeFilter, undefined),
+        environmentIds: safeJsonParse(webhook.environmentIds, undefined),
       });
     } else {
       setEditingWebhook(null);
@@ -908,7 +906,7 @@ export default function NotificationSettings() {
             </p>
             <div className="space-y-3">
               {notificationTypes.filter((t) => t.category === 'system').map((type) => {
-                const channels = JSON.parse(type.defaultChannels || '[]') as string[];
+                const channels = safeJsonParse(type.defaultChannels, [] as string[]);
                 return (
                   <div key={type.id} className={`p-4 bg-slate-800 rounded-lg ${!type.enabled ? 'opacity-60' : ''}`}>
                     <div className="flex items-start justify-between gap-4">
@@ -1011,7 +1009,7 @@ export default function NotificationSettings() {
             </p>
             <div className="space-y-3">
               {notificationTypes.filter((t) => t.category === 'user').map((type) => {
-                const channels = JSON.parse(type.defaultChannels || '[]') as string[];
+                const channels = safeJsonParse(type.defaultChannels, [] as string[]);
                 return (
                   <div key={type.id} className="p-4 bg-slate-800 rounded-lg">
                     <div className="flex items-start justify-between">

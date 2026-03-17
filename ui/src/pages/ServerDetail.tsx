@@ -38,14 +38,10 @@ import { formatDistanceToNow } from 'date-fns';
 import { getContainerStatusColor, getHealthStatusColor, getSyncStatusColor } from '../lib/status';
 import { Modal } from '../components/Modal';
 import { RefreshIcon, CheckIcon, WarningIcon, FileIcon } from '../components/Icons';
+import { safeJsonParse } from '../lib/helpers';
 
 function parseExposedPorts(portsJson: string | null): ExposedPort[] {
-  if (!portsJson) return [];
-  try {
-    return JSON.parse(portsJson);
-  } catch {
-    return [];
-  }
+  return safeJsonParse(portsJson, [] as ExposedPort[]);
 }
 
 function formatPorts(ports: ExposedPort[], maxDisplay = 3): string {
@@ -395,7 +391,7 @@ export default function ServerDetail() {
       name: server.name,
       hostname: server.hostname,
       publicIp: server.publicIp || '',
-      tags: server.tags ? JSON.parse(server.tags) : [],
+      tags: safeJsonParse(server.tags, [] as string[]),
     });
     setEditTagInput('');
     setEditServerError(null);
@@ -585,8 +581,7 @@ export default function ServerDetail() {
         <div className="panel">
           <h3 className="text-lg font-semibold text-white mb-4">Tags</h3>
           <div className="flex flex-wrap gap-2">
-            {server.tags &&
-              JSON.parse(server.tags).map((tag: string) => (
+            {safeJsonParse(server.tags, [] as string[]).map((tag: string) => (
                 <span
                   key={tag}
                   className="px-3 py-1 bg-slate-700 rounded-full text-sm text-slate-300"
@@ -594,7 +589,7 @@ export default function ServerDetail() {
                   {tag}
                 </span>
               ))}
-            {(!server.tags || JSON.parse(server.tags).length === 0) && (
+            {safeJsonParse(server.tags, [] as string[]).length === 0 && (
               <p className="text-slate-400">No tags</p>
             )}
           </div>

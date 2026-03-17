@@ -3,6 +3,7 @@ import { prisma } from '../lib/db.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
 import type { WebhookConfig } from '@prisma/client';
 import { getSystemSettings, parseWebhookRetryDelays } from './system-settings.js';
+import { safeJsonParse } from '../lib/helpers.js';
 
 interface WebhookConfigInput {
   name: string;
@@ -197,12 +198,8 @@ async function sendWebhookWithRetry(
 
   // Add custom headers if configured
   if (webhook.headers) {
-    try {
-      const customHeaders = JSON.parse(webhook.headers) as Record<string, string>;
-      Object.assign(headers, customHeaders);
-    } catch {
-      // Ignore invalid headers JSON
-    }
+    const customHeaders = safeJsonParse(webhook.headers, {} as Record<string, string>);
+    Object.assign(headers, customHeaders);
   }
 
   // Add signature if secret is configured
@@ -261,7 +258,7 @@ export async function dispatchWebhook(
   for (const webhook of webhooks) {
     // Check type filter
     if (webhook.typeFilter) {
-      const allowedTypes = JSON.parse(webhook.typeFilter) as string[];
+      const allowedTypes = safeJsonParse(webhook.typeFilter, [] as string[]);
       if (!allowedTypes.includes(typeCode)) {
         continue;
       }
@@ -269,7 +266,7 @@ export async function dispatchWebhook(
 
     // Check environment filter
     if (webhook.environmentIds && environmentId) {
-      const allowedEnvs = JSON.parse(webhook.environmentIds) as string[];
+      const allowedEnvs = safeJsonParse(webhook.environmentIds, [] as string[]);
       if (!allowedEnvs.includes(environmentId)) {
         continue;
       }

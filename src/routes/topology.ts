@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/db.js';
 import { requireOperator } from '../plugins/authorize.js';
+import { safeJsonParse } from '../lib/helpers.js';
 
 const createConnectionSchema = z.object({
   environmentId: z.string().min(1),
@@ -166,7 +167,7 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
         layout: {
           id: layout.id,
           environmentId: layout.environmentId,
-          positions: JSON.parse(layout.positions),
+          positions: safeJsonParse(layout.positions, {}),
           updatedAt: layout.updatedAt,
         },
       };
@@ -203,7 +204,7 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
         layout: {
           id: layout.id,
           environmentId: layout.environmentId,
-          positions: JSON.parse(layout.positions),
+          positions: safeJsonParse(layout.positions, {}),
           updatedAt: layout.updatedAt,
         },
       };
@@ -310,13 +311,9 @@ function escapeMermaidLabel(label: string): string {
 
 function getServicePrimaryPort(exposedPortsJson: string | null): string | null {
   if (!exposedPortsJson) return null;
-  try {
-    const ports = JSON.parse(exposedPortsJson) as Array<{ host?: number; container?: number }>;
-    if (ports.length > 0) {
-      return String(ports[0].container || ports[0].host || '');
-    }
-  } catch {
-    // ignore
+  const ports = safeJsonParse(exposedPortsJson, [] as Array<{ host?: number; container?: number }>);
+  if (ports.length > 0) {
+    return String(ports[0].container || ports[0].host || '');
   }
   return null;
 }

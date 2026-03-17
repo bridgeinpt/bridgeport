@@ -1,6 +1,7 @@
 import { format } from 'date-fns';
 import type { ServiceHistoryEntry } from './types';
 import { getHealthStatusColor } from './utils';
+import { safeJsonParse } from '../../lib/helpers';
 
 interface ActionHistoryProps {
   actionHistory: ServiceHistoryEntry[];
@@ -29,7 +30,7 @@ export function ActionHistory({
       {actionHistory.length > 0 ? (
         <div className="space-y-2">
           {(showAllHistory ? actionHistory : actionHistory.slice(0, 5)).map((log) => {
-            const details = log.details ? JSON.parse(log.details) : null;
+            const details = safeJsonParse<Record<string, string> | null>(log.details, null);
             return (
               <div
                 key={log.id}

@@ -24,6 +24,7 @@ import { CheckIcon, WarningIcon, RefreshIcon, ServerIcon, CubeIcon, DatabaseIcon
 import { useToast } from '../components/Toast';
 import { TopologyDiagram } from '../components/topology';
 import { useAuthStore } from '../lib/store';
+import { safeJsonParse } from '../lib/helpers';
 
 interface DeployAllResult {
   serviceId: string;
@@ -943,12 +944,9 @@ function formatAction(action: string): string {
 }
 
 function formatDetails(details: string): string {
-  try {
-    const parsed = JSON.parse(details);
-    if (parsed.imageTag) return parsed.imageTag;
-    if (parsed.status) return parsed.status;
-    return '';
-  } catch {
-    return details.substring(0, 30);
-  }
+  const parsed = safeJsonParse<Record<string, unknown> | null>(details, null);
+  if (parsed === null) return details.substring(0, 30);
+  if (parsed.imageTag) return parsed.imageTag as string;
+  if (parsed.status) return parsed.status as string;
+  return '';
 }

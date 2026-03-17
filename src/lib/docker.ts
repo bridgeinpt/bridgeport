@@ -2,6 +2,7 @@ import Docker from 'dockerode';
 import { access, constants } from 'fs/promises';
 import type { CommandClient } from './ssh.js';
 import { CONTAINER_STATUS, DOCKER_MODE } from './constants.js';
+import { safeJsonParse } from './helpers.js';
 
 // ==================== Types ====================
 
@@ -327,7 +328,7 @@ export class DockerSSHClient implements DockerClient {
 
     const ports: Array<{ host: number | null; container: number; protocol: string }> = [];
     try {
-      const portsData = JSON.parse(portsJson || '{}');
+      const portsData = safeJsonParse(portsJson, {});
       for (const [containerPort, bindings] of Object.entries(portsData)) {
         const [portStr, protocol] = containerPort.split('/');
         const containerPortNum = parseInt(portStr, 10);

@@ -20,6 +20,7 @@ import { prisma } from '../lib/db.js';
 import { requireOperator } from '../plugins/authorize.js';
 import { collectDatabaseMetrics } from '../services/database-monitoring-collector.js';
 import { pingDatabase } from '../services/database-query-executor.js';
+import { safeJsonParse } from '../lib/helpers.js';
 
 const storageTypeSchema = z.enum(['local', 'spaces']);
 const backupFormatSchema = z.enum(['plain', 'custom', 'tar']);
@@ -490,10 +491,10 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
           // Build queryMeta for this type
           const queryMeta: Array<{ name: string; displayName: string; resultType: string; unit?: string; chartGroup?: string; resultMapping?: Record<string, string> }> = [];
           if (db.databaseType?.monitoringConfig) {
-            const config = JSON.parse(db.databaseType.monitoringConfig) as {
+            const config = safeJsonParse(db.databaseType.monitoringConfig, null) as {
               queries: Array<{ name: string; displayName: string; resultType: string; unit?: string; chartGroup?: string; resultMapping?: Record<string, string> }>;
-            };
-            for (const q of config.queries) {
+            } | null;
+            for (const q of config?.queries ?? []) {
               queryMeta.push({
                 name: q.name,
                 displayName: q.displayName,
@@ -509,7 +510,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
 
         // Build time-series data for this database
         const data = metrics.map((m) => {
-          const parsed = JSON.parse(m.metricsJson) as Record<string, unknown>;
+          const parsed = safeJsonParse(m.metricsJson, {} as Record<string, unknown>);
           const point: Record<string, unknown> = { time: m.collectedAt.toISOString() };
 
           for (const [key, value] of Object.entries(parsed)) {
@@ -572,9 +573,9 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
         monitoringStatus: db.monitoringStatus,
         lastCollectedAt: db.lastCollectedAt,
         lastMonitoringError: db.lastMonitoringError,
-        latestMetrics: db.metrics[0] ? JSON.parse(db.metrics[0].metricsJson) : null,
+        latestMetrics: db.metrics[0] ? safeJsonParse(db.metrics[0].metricsJson, {} as Record<string, unknown>) : null,
         monitoringConfig: db.databaseType?.monitoringConfig
-          ? JSON.parse(db.databaseType.monitoringConfig)
+          ? safeJsonParse(db.databaseType.monitoringConfig, null)
           : null,
       }));
 
@@ -616,10 +617,10 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
       return {
         metrics: metrics.map((m) => ({
           collectedAt: m.collectedAt,
-          data: JSON.parse(m.metricsJson),
+          data: safeJsonParse(m.metricsJson, {} as Record<string, unknown>),
         })),
         monitoringConfig: database.databaseType?.monitoringConfig
-          ? JSON.parse(database.databaseType.monitoringConfig)
+          ? safeJsonParse(database.databaseType.monitoringConfig, null)
           : null,
       };
     }

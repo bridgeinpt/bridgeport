@@ -4,6 +4,7 @@ import { sendEmail, generateNotificationEmail } from './email.js';
 import { dispatchWebhook } from './outgoing-webhooks.js';
 import { dispatchSlackNotification } from './slack-notifications.js';
 import { eventBus } from '../lib/event-bus.js';
+import { safeJsonParse } from '../lib/helpers.js';
 
 // Predefined notification types
 export const NOTIFICATION_TYPES = {
@@ -341,7 +342,7 @@ export async function send(
 
   // Check environment filter if preference specifies certain environments
   if (environmentId && preference?.environmentIds) {
-    const allowedEnvs = JSON.parse(preference.environmentIds) as string[];
+    const allowedEnvs = safeJsonParse(preference.environmentIds, [] as string[]);
     if (!allowedEnvs.includes(environmentId)) {
       return null;
     }
@@ -366,7 +367,7 @@ export async function send(
   eventBus.emitEvent({ type: 'notification', data: { userId, count: 1 } });
 
   // Send email if enabled
-  const emailEnabled = preference?.emailEnabled ?? JSON.parse(notificationType.defaultChannels || '[]').includes('email');
+  const emailEnabled = preference?.emailEnabled ?? safeJsonParse(notificationType.defaultChannels, [] as string[]).includes('email');
   if (emailEnabled) {
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { email: true } });
     if (user?.email) {
@@ -425,7 +426,7 @@ export async function sendSystemNotification(
   }
 
   // Send webhooks for system notifications
-  const defaultChannels = JSON.parse(notificationType.defaultChannels || '[]') as string[];
+  const defaultChannels = safeJsonParse(notificationType.defaultChannels, [] as string[]);
   let envName: string | undefined;
   if (environmentId) {
     const env = await prisma.environment.findUnique({ where: { id: environmentId }, select: { name: true } });
@@ -558,7 +559,7 @@ export async function getPreferences(userId: string): Promise<Array<Notification
       results.push(existing);
     } else {
       // Return a virtual preference with defaults
-      const defaultChannels = JSON.parse(notifType.defaultChannels || '["in_app"]') as string[];
+      const defaultChannels = safeJsonParse(notifType.defaultChannels, ['in_app'] as string[]);
       results.push({
         id: `virtual-${notifType.id}`,
         userId,

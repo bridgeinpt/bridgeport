@@ -4,6 +4,7 @@ import { promisify } from 'util';
 import { readFile, stat, writeFile as fsWriteFile } from 'fs/promises';
 import { config } from './config.js';
 import { getSystemSettings } from '../services/system-settings.js';
+import { safeJsonParse } from './helpers.js';
 import { CONTAINER_STATUS, SERVER_TYPE } from './constants.js';
 
 const execAsync = promisify(exec);
@@ -802,7 +803,7 @@ export class DockerSSH {
     // Parse ports from Docker's NetworkSettings.Ports format
     const ports: Array<{ host: number | null; container: number; protocol: string }> = [];
     try {
-      const portsData = JSON.parse(portsJson || '{}');
+      const portsData = safeJsonParse(portsJson, {});
       // portsData looks like: {"80/tcp":[{"HostIp":"0.0.0.0","HostPort":"8080"}], "443/tcp": null}
       for (const [containerPort, bindings] of Object.entries(portsData)) {
         const [portStr, protocol] = containerPort.split('/');

@@ -17,6 +17,7 @@ import { prisma } from '../lib/db.js';
 import { bundledAgentVersion } from '../lib/version.js';
 import { requireAdmin } from '../plugins/authorize.js';
 import { METRICS_MODE } from '../lib/constants.js';
+import { safeJsonParse } from '../lib/helpers.js';
 
 const createServerSchema = z.object({
   name: z.string().min(1),
@@ -503,20 +504,13 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
         };
       }
 
-      try {
-        const processes = JSON.parse(server.processSnapshot.data);
-        return {
-          hasData: true,
-          processes,
-          updatedAt: server.processSnapshot.updatedAt,
-        };
-      } catch {
-        return {
-          hasData: false,
-          processes: null,
-          updatedAt: null,
-        };
-      }
+      const processes = safeJsonParse(server.processSnapshot.data, {});
+      const hasData = Object.keys(processes).length > 0;
+      return {
+        hasData,
+        processes: hasData ? processes : null,
+        updatedAt: hasData ? server.processSnapshot.updatedAt : null,
+      };
     }
   );
 }

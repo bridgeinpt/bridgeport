@@ -4,6 +4,7 @@ import { prisma } from '../lib/db.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
 import { requireAdmin } from '../plugins/authorize.js';
 import { logAudit } from '../services/audit.js';
+import { safeJsonParse } from '../lib/helpers.js';
 import { S3Client, ListBucketsCommand, HeadBucketCommand } from '@aws-sdk/client-s3';
 
 const spacesConfigSchema = z.object({
@@ -35,14 +36,7 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       // Parse buckets from JSON
-      let buckets: string[] = [];
-      if (config.buckets) {
-        try {
-          buckets = JSON.parse(config.buckets);
-        } catch {
-          buckets = [];
-        }
-      }
+      const buckets: string[] = safeJsonParse(config.buckets, [] as string[]);
 
       return {
         configured: true,
@@ -189,14 +183,7 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
         });
 
         // Parse configured buckets
-        let configuredBuckets: string[] = [];
-        if (config.buckets) {
-          try {
-            configuredBuckets = JSON.parse(config.buckets);
-          } catch {
-            configuredBuckets = [];
-          }
-        }
+        const configuredBuckets: string[] = safeJsonParse(config.buckets, [] as string[]);
 
         // If buckets are manually configured, test access to the first one
         if (configuredBuckets.length > 0) {
@@ -272,14 +259,7 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       // Parse configured buckets
-      let configuredBuckets: string[] = [];
-      if (config.buckets) {
-        try {
-          configuredBuckets = JSON.parse(config.buckets);
-        } catch {
-          configuredBuckets = [];
-        }
-      }
+      const configuredBuckets: string[] = safeJsonParse(config.buckets, [] as string[]);
 
       // If buckets are manually configured, return those
       if (configuredBuckets.length > 0) {
