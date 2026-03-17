@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppStore } from '../lib/store.js';
 import { useToast } from '../components/Toast.js';
+import { usePaginatedFetch } from '../hooks/usePaginatedFetch.js';
 import {
   listDatabases,
   createDatabase,
@@ -29,13 +30,18 @@ const STORAGE_TYPES = [
 export default function Databases() {
   const { selectedEnvironment } = useAppStore();
   const toast = useToast();
-  const [databases, setDatabases] = useState<Database[]>([]);
-  const [totalItems, setTotalItems] = useState(0);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const { items: databases, total, loading, currentPage, pageSize, totalPages, setCurrentPage, setPageSize, reload } =
+    usePaginatedFetch<Database>({
+      fetcher: ({ limit, offset }) =>
+        listDatabases(selectedEnvironment!.id, { limit, offset }).then(r => ({
+          items: r.databases,
+          total: r.total,
+        })),
+      deps: [selectedEnvironment?.id],
+      enabled: !!selectedEnvironment?.id,
+    });
   const [servers, setServers] = useState<Server[]>([]);
   const [databaseTypes, setDatabaseTypes] = useState<DatabaseTypeRecord[]>([]);
-  const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
   const [backingUpId, setBackingUpId] = useState<string | null>(null);
@@ -59,28 +65,15 @@ export default function Databases() {
 
   useEffect(() => {
     if (selectedEnvironment?.id) {
-      loadData();
-    }
-  }, [selectedEnvironment?.id, currentPage, pageSize]);
-
-  const loadData = async () => {
-    if (!selectedEnvironment?.id) return;
-    setLoading(true);
-    try {
-      const offset = (currentPage - 1) * pageSize;
-      const [dbRes, serverRes, dbTypeRes] = await Promise.all([
-        listDatabases(selectedEnvironment.id, { limit: pageSize, offset }),
+      Promise.all([
         listServers(selectedEnvironment.id),
         listDatabaseTypes(),
-      ]);
-      setDatabases(dbRes.databases);
-      setTotalItems(dbRes.total);
-      setServers(serverRes.servers);
-      setDatabaseTypes(dbTypeRes.databaseTypes);
-    } finally {
-      setLoading(false);
+      ]).then(([serverRes, dbTypeRes]) => {
+        setServers(serverRes.servers);
+        setDatabaseTypes(dbTypeRes.databaseTypes);
+      });
     }
-  };
+  }, [selectedEnvironment?.id]);
 
   const loadBuckets = async () => {
     if (!selectedEnvironment?.id) return;
@@ -135,8 +128,8 @@ export default function Databases() {
       if (formData.backupSpacesBucket) data.backupSpacesBucket = formData.backupSpacesBucket;
       if (formData.backupSpacesPrefix) data.backupSpacesPrefix = formData.backupSpacesPrefix;
 
-      const { database } = await createDatabase(selectedEnvironment.id, data);
-      setDatabases((prev) => [...prev, database]);
+      await createDatabase(selectedEnvironment.id, data);
+      reload();
       setShowCreate(false);
       resetForm();
     } finally {
@@ -148,7 +141,7 @@ export default function Databases() {
     if (!confirm(`Delete database "${db.name}"? This will not delete actual data.`)) return;
     try {
       await deleteDatabase(db.id);
-      setDatabases((prev) => prev.filter((d) => d.id !== db.id));
+      reload();
       toast.success('Database deleted');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Delete failed');
@@ -161,15 +154,13 @@ export default function Databases() {
       await createDatabaseBackup(db.id);
       toast.success('Backup started');
       // Refresh to show updated lastBackup
-      loadData();
+      reload();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Backup failed');
     } finally {
       setBackingUpId(null);
     }
   };
-
-  const totalPages = Math.ceil(totalItems / pageSize);
 
   if (!selectedEnvironment) {
     return (
@@ -453,7 +444,7 @@ export default function Databases() {
       )}
 
       {/* Databases List */}
-      {totalItems === 0 ? (
+      {total === 0 ? (
         <EmptyState
           icon={DatabaseIcon}
           message="No databases configured"
@@ -576,10 +567,10 @@ export default function Databases() {
           <Pagination
             currentPage={currentPage}
             totalPages={totalPages}
-            totalItems={totalItems}
+            totalItems={total}
             pageSize={pageSize}
             onPageChange={setCurrentPage}
-            onPageSizeChange={(size) => { setPageSize(size); setCurrentPage(1); }}
+            onPageSizeChange={setPageSize}
           />
         </div>
       )}

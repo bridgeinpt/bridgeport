@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppStore, useAuthStore, isAdmin } from '../lib/store.js';
+import { usePaginatedFetch } from '../hooks/usePaginatedFetch.js';
 import { listServers, checkServerHealth, discoverContainers, createServer, deleteServer, getHostInfo, registerHost, getHealthLogs, type Server, type HostInfo, type HealthCheckLog } from '../lib/api.js';
 import { formatDistanceToNow } from 'date-fns';
 import { Modal } from '../components/Modal.js';
@@ -16,11 +17,16 @@ export default function Servers() {
   const { selectedEnvironment } = useAppStore();
   const { user } = useAuthStore();
   const toast = useToast();
-  const [servers, setServers] = useState<Server[]>([]);
-  const [totalItems, setTotalItems] = useState(0);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
-  const [loading, setLoading] = useState(true);
+  const { items: servers, total, loading, currentPage, pageSize, totalPages, setCurrentPage, setPageSize, reload } =
+    usePaginatedFetch({
+      fetcher: ({ limit, offset }) =>
+        listServers(selectedEnvironment!.id, { limit, offset }).then(r => ({
+          items: r.servers,
+          total: r.total,
+        })),
+      deps: [selectedEnvironment?.id],
+      enabled: !!selectedEnvironment?.id,
+    });
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -46,33 +52,17 @@ export default function Servers() {
 
   useEffect(() => {
     if (selectedEnvironment?.id) {
-      setLoading(true);
-      const offset = (currentPage - 1) * pageSize;
-      Promise.all([
-        listServers(selectedEnvironment.id, { limit: pageSize, offset }),
-        getHostInfo(selectedEnvironment.id).catch(() => null),
-      ])
-        .then(([serversRes, hostInfoRes]) => {
-          setServers(serversRes.servers);
-          setTotalItems(serversRes.total);
-          setHostInfo(hostInfoRes);
-        })
-        .finally(() => setLoading(false));
-
+      getHostInfo(selectedEnvironment.id).catch(() => null).then(setHostInfo);
       loadHealthLogs(selectedEnvironment.id);
     }
-  }, [selectedEnvironment?.id, currentPage, pageSize]);
+  }, [selectedEnvironment?.id]);
 
   const handleRegisterHost = async () => {
     if (!selectedEnvironment?.id || !hostInfo?.detected) return;
     setRegisteringHost(true);
     try {
       const { server } = await registerHost(selectedEnvironment.id);
-      // Re-fetch to update paginated list
-      const offset = (currentPage - 1) * pageSize;
-      const res = await listServers(selectedEnvironment.id, { limit: pageSize, offset });
-      setServers(res.servers);
-      setTotalItems(res.total);
+      reload();
       setHostInfo((prev) => prev ? { ...prev, registered: true, serverId: server.id } : null);
       toast.success('Host server registered successfully');
     } catch (error) {
@@ -85,14 +75,8 @@ export default function Servers() {
   const handleHealthCheck = async (serverId: string) => {
     setActionLoading(serverId);
     try {
-      const result = await checkServerHealth(serverId);
-      setServers((prev) =>
-        prev.map((s) =>
-          s.id === serverId
-            ? { ...s, status: result.status, lastCheckedAt: new Date().toISOString() }
-            : s
-        )
-      );
+      await checkServerHealth(serverId);
+      reload();
       // Reload health logs to show new entry
       if (selectedEnvironment?.id) {
         loadHealthLogs(selectedEnvironment.id);
@@ -106,13 +90,7 @@ export default function Servers() {
     setActionLoading(serverId);
     try {
       await discoverContainers(serverId);
-      // Reload to see new services
-      if (selectedEnvironment?.id) {
-        const offset = (currentPage - 1) * pageSize;
-        const res = await listServers(selectedEnvironment.id, { limit: pageSize, offset });
-        setServers(res.servers);
-        setTotalItems(res.total);
-      }
+      reload();
     } finally {
       setActionLoading(null);
     }
@@ -133,11 +111,7 @@ export default function Servers() {
         publicIp: newPublicIp || undefined,
         tags: tags.length > 0 ? tags : undefined,
       });
-      // Re-fetch to update paginated list
-      const offset = (currentPage - 1) * pageSize;
-      const res = await listServers(selectedEnvironment.id, { limit: pageSize, offset });
-      setServers(res.servers);
-      setTotalItems(res.total);
+      reload();
       setShowCreate(false);
       setNewName('');
       setNewHostname('');
@@ -153,11 +127,7 @@ export default function Servers() {
     setDeleting(true);
     try {
       await deleteServer(serverToDelete.id);
-      // Re-fetch to update paginated list
-      const offset = (currentPage - 1) * pageSize;
-      const res = await listServers(selectedEnvironment.id, { limit: pageSize, offset });
-      setServers(res.servers);
-      setTotalItems(res.total);
+      reload();
       toast.success(`Server "${serverToDelete.name}" deleted`);
       setServerToDelete(null);
     } catch (error) {
@@ -166,8 +136,6 @@ export default function Servers() {
       setDeleting(false);
     }
   };
-
-  const totalPages = Math.ceil(totalItems / pageSize);
 
   if (loading) {
     return <LoadingSkeleton rows={3} rowHeight="h-20" />;
@@ -430,7 +398,7 @@ export default function Servers() {
           );
         })}
 
-        {totalItems === 0 && (
+        {total === 0 && (
           <EmptyState
             icon={ServerIcon}
             message="No servers configured"
@@ -438,14 +406,14 @@ export default function Servers() {
             action={{ label: 'Add Your First Server', onClick: () => setShowCreate(true) }}
           />
         )}
-        {totalItems > 0 && (
+        {total > 0 && (
           <Pagination
             currentPage={currentPage}
             totalPages={totalPages}
-            totalItems={totalItems}
+            totalItems={total}
             pageSize={pageSize}
             onPageChange={setCurrentPage}
-            onPageSizeChange={(size) => { setPageSize(size); setCurrentPage(1); }}
+            onPageSizeChange={setPageSize}
           />
         )}
       </div>

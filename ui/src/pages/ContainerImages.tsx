@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppStore } from '../lib/store';
 import { useToast } from '../components/Toast';
+import { usePaginatedFetch } from '../hooks/usePaginatedFetch.js';
 import {
   listContainerImages,
   createContainerImage,
@@ -25,9 +26,18 @@ import Pagination from '../components/Pagination';
 export default function ContainerImages() {
   const { selectedEnvironment } = useAppStore();
   const toast = useToast();
-  const [images, setImages] = useState<ContainerImage[]>([]);
+  const { items: images, total, loading, currentPage, pageSize, totalPages, setCurrentPage, setPageSize, reload } =
+    usePaginatedFetch<ContainerImage>({
+      fetcher: ({ limit, offset }) =>
+        listContainerImages(selectedEnvironment!.id, { limit, offset }).then(r => ({
+          items: r.images,
+          total: r.total,
+        })),
+      deps: [selectedEnvironment?.id],
+      enabled: !!selectedEnvironment?.id,
+    });
+
   const [registries, setRegistries] = useState<RegistryConnection[]>([]);
-  const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -42,11 +52,6 @@ export default function ContainerImages() {
   const [linkingImage, setLinkingImage] = useState<ContainerImage | null>(null);
   const [linkableServices, setLinkableServices] = useState<Service[]>([]);
   const [loadingLinkable, setLoadingLinkable] = useState(false);
-
-  // Pagination
-  const [totalItems, setTotalItems] = useState(0);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
 
   // Check updates state
   const [checkingUpdatesId, setCheckingUpdatesId] = useState<string | null>(null);
@@ -64,28 +69,9 @@ export default function ContainerImages() {
 
   useEffect(() => {
     if (selectedEnvironment?.id) {
-      setLoading(true);
-      const offset = (currentPage - 1) * pageSize;
-      Promise.all([
-        listContainerImages(selectedEnvironment.id, { limit: pageSize, offset }),
-        listRegistryConnections(selectedEnvironment.id),
-      ])
-        .then(([imagesRes, registriesRes]) => {
-          setImages(imagesRes.images);
-          setTotalItems(imagesRes.total);
-          setRegistries(registriesRes.registries);
-        })
-        .finally(() => setLoading(false));
+      listRegistryConnections(selectedEnvironment.id).then(r => setRegistries(r.registries));
     }
-  }, [selectedEnvironment?.id, currentPage, pageSize]);
-
-  const reloadImages = async () => {
-    if (!selectedEnvironment?.id) return;
-    const offset = (currentPage - 1) * pageSize;
-    const res = await listContainerImages(selectedEnvironment.id, { limit: pageSize, offset });
-    setImages(res.images);
-    setTotalItems(res.total);
-  };
+  }, [selectedEnvironment?.id]);
 
   const resetForm = () => {
     setFormData({
@@ -132,7 +118,7 @@ export default function ContainerImages() {
         await createContainerImage(selectedEnvironment.id, formData);
         toast.success('Image created');
       }
-      await reloadImages();
+      reload();
       setShowCreate(false);
       resetForm();
     } catch (error) {
@@ -150,7 +136,7 @@ export default function ContainerImages() {
     try {
       await deleteContainerImage(id);
       toast.success('Image deleted');
-      await reloadImages();
+      reload();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Delete failed');
     }
@@ -170,7 +156,7 @@ export default function ContainerImages() {
       const { plan } = await deployContainerImage(deployingImage.id, { imageTag: deployTag, autoRollback: deployAutoRollback });
       toast.success(`Deployment plan created: ${plan.name}`);
       setDeployingImage(null);
-      await reloadImages();
+      reload();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Deployment failed');
     } finally {
@@ -196,7 +182,7 @@ export default function ContainerImages() {
     try {
       await linkServiceToContainerImage(linkingImage.id, serviceId);
       toast.success('Service linked');
-      await reloadImages();
+      reload();
       const { services } = await getLinkableServices(linkingImage.id);
       setLinkableServices(services);
     } catch (error) {
@@ -208,7 +194,7 @@ export default function ContainerImages() {
     setCheckingUpdatesId(imageId);
     try {
       const result = await checkContainerImageUpdates(imageId);
-      await reloadImages();
+      reload();
       if (result.hasUpdate) {
         toast.success(`Update available: ${result.newestDigest?.bestTag || 'new digest'}`);
       } else {
@@ -220,8 +206,6 @@ export default function ContainerImages() {
       setCheckingUpdatesId(null);
     }
   };
-
-  const totalPages = Math.ceil(totalItems / pageSize);
 
   if (!selectedEnvironment) {
     return (
@@ -251,7 +235,7 @@ export default function ContainerImages() {
             <div className="h-12 bg-slate-700 rounded"></div>
           </div>
         </div>
-      ) : totalItems === 0 ? (
+      ) : total === 0 ? (
         <div className="panel text-center py-12">
           <ImageIcon className="w-12 h-12 text-slate-500 mx-auto mb-4" />
           <p className="text-slate-400 mb-4">No container images configured</p>
@@ -395,14 +379,14 @@ export default function ContainerImages() {
           ))}
         </div>
       )}
-      {totalItems > 0 && (
+      {total > 0 && (
         <Pagination
           currentPage={currentPage}
           totalPages={totalPages}
-          totalItems={totalItems}
+          totalItems={total}
           pageSize={pageSize}
           onPageChange={setCurrentPage}
-          onPageSizeChange={(size) => { setPageSize(size); setCurrentPage(1); }}
+          onPageSizeChange={setPageSize}
         />
       )}
 

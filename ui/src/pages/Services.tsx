@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo, lazy, Suspense } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAppStore, useAuthStore, isAdmin } from '../lib/store.js';
 import { listServices, deployService, checkServiceHealth, deleteService, getDependencyGraph, type Service, type ExposedPort, type DependencyGraphNode, type DependencyGraphEdge } from '../lib/api.js';
+import { usePaginatedFetch } from '../hooks/usePaginatedFetch.js';
 import { formatDistanceToNow } from 'date-fns';
 import { getContainerStatusColor, getHealthStatusColor } from '../lib/status.js';
 import { RefreshIcon, CubeIcon, HeartPulseIcon, TrashIcon } from '../components/Icons.js';
@@ -53,11 +54,16 @@ export default function Services() {
     return hash === 'dependencies' ? 'dependencies' : 'list';
   };
 
-  const [services, setServices] = useState<ServiceWithServer[]>([]);
-  const [totalItems, setTotalItems] = useState(0);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
-  const [loading, setLoading] = useState(true);
+  const { items: services, total, loading, currentPage, pageSize, totalPages, setCurrentPage, setPageSize, reload } =
+    usePaginatedFetch<ServiceWithServer>({
+      fetcher: ({ limit, offset }) =>
+        listServices(selectedEnvironment!.id, { limit, offset }).then(r => ({
+          items: r.services.map((svc) => ({ ...svc, serverName: svc.server?.name || '' })),
+          total: r.total,
+        })),
+      deps: [selectedEnvironment?.id],
+      enabled: !!selectedEnvironment?.id,
+    });
 
   const activeTab = getTabFromHash();
 
@@ -80,23 +86,6 @@ export default function Services() {
   const [graphNodes, setGraphNodes] = useState<DependencyGraphNode[]>([]);
   const [graphEdges, setGraphEdges] = useState<DependencyGraphEdge[]>([]);
   const [deploymentOrder, setDeploymentOrder] = useState<string[][]>([]);
-
-  useEffect(() => {
-    if (selectedEnvironment?.id) {
-      setLoading(true);
-      const offset = (currentPage - 1) * pageSize;
-      listServices(selectedEnvironment.id, { limit: pageSize, offset })
-        .then((servicesRes) => {
-          const allServices: ServiceWithServer[] = servicesRes.services.map((svc) => ({
-            ...svc,
-            serverName: svc.server?.name || '',
-          }));
-          setServices(allServices);
-          setTotalItems(servicesRes.total);
-        })
-        .finally(() => setLoading(false));
-    }
-  }, [selectedEnvironment?.id, currentPage, pageSize]);
 
   // Dependency graph is environment-wide — fetch once per environment, not on pagination change
   useEffect(() => {
@@ -163,12 +152,7 @@ export default function Services() {
     setBulkDeploying(false);
 
     // Reload services
-    if (selectedEnvironment?.id) {
-      const offset = (currentPage - 1) * pageSize;
-      const res = await listServices(selectedEnvironment.id, { limit: pageSize, offset });
-      setServices(res.services.map((svc) => ({ ...svc, serverName: svc.server?.name || '' })));
-      setTotalItems(res.total);
-    }
+    reload();
 
     const successCount = results.filter((r) => r.success).length;
     if (successCount === results.length) {
@@ -178,25 +162,11 @@ export default function Services() {
     }
   };
 
-  const reloadServices = async () => {
-    if (!selectedEnvironment?.id) return;
-    const offset = (currentPage - 1) * pageSize;
-    const res = await listServices(selectedEnvironment.id, { limit: pageSize, offset });
-    setServices(res.services.map((svc) => ({ ...svc, serverName: svc.server?.name || '' })));
-    setTotalItems(res.total);
-  };
-
   const handleHealthCheck = async (serviceId: string) => {
     setActionLoading(serviceId);
     try {
-      const result = await checkServiceHealth(serviceId);
-      setServices((prev) =>
-        prev.map((s) =>
-          s.id === serviceId
-            ? { ...s, healthStatus: result.healthStatus, containerStatus: result.containerStatus, lastCheckedAt: new Date().toISOString() }
-            : s
-        )
-      );
+      await checkServiceHealth(serviceId);
+      reload();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Health check failed');
     } finally {
@@ -209,7 +179,7 @@ export default function Services() {
     setDeleting(true);
     try {
       await deleteService(serviceToDelete.id);
-      await reloadServices();
+      reload();
       toast.success(`Service "${serviceToDelete.name}" deleted`);
       setServiceToDelete(null);
     } catch (error) {
@@ -218,8 +188,6 @@ export default function Services() {
       setDeleting(false);
     }
   };
-
-  const totalPages = Math.ceil(totalItems / pageSize);
 
   if (loading) {
     return <LoadingSkeleton rows={3} rowHeight="h-20" />;
@@ -438,7 +406,7 @@ export default function Services() {
                               pullImage: true,
                             }).then(() => {
                               toast.success(`Deployed ${service.name} to ${service.latestAvailableTag}`);
-                              reloadServices();
+                              reload();
                             }).catch((err) => {
                               toast.error(err instanceof Error ? err.message : 'Deploy failed');
                             });
@@ -473,10 +441,10 @@ export default function Services() {
             <Pagination
               currentPage={currentPage}
               totalPages={totalPages}
-              totalItems={totalItems}
+              totalItems={total}
               pageSize={pageSize}
               onPageChange={setCurrentPage}
-              onPageSizeChange={(size) => { setPageSize(size); setCurrentPage(1); }}
+              onPageSizeChange={setPageSize}
             />
           </>
         ) : (

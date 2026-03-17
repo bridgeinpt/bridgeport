@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../../lib/store';
 import { getAuditLogs, listEnvironments, type AuditLog, type Environment } from '../../lib/api';
+import { usePaginatedFetch } from '../../hooks/usePaginatedFetch.js';
 import { formatDistanceToNow } from 'date-fns';
 import { ChevronDownIcon } from '../../components/Icons';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
@@ -30,16 +31,24 @@ const ACTION_COLORS: Record<string, string> = {
 
 export default function Audit() {
   const { activityResourceTypeFilter, setActivityResourceTypeFilter } = useAppStore();
-  const [logs, setLogs] = useState<AuditLog[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
   const [expandedLog, setExpandedLog] = useState<string | null>(null);
-  const [page, setPage] = useState(0);
-  const limit = 20;
 
   // Filters for admin view
   const [environments, setEnvironments] = useState<Environment[]>([]);
   const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<string>('');
+
+  const { items: logs, total, loading, currentPage, pageSize, totalPages, setCurrentPage } =
+    usePaginatedFetch<AuditLog>({
+      fetcher: ({ limit, offset }) =>
+        getAuditLogs({
+          environmentId: selectedEnvironmentId || undefined,
+          resourceType: activityResourceTypeFilter || undefined,
+          limit,
+          offset,
+        }).then(r => ({ items: r.logs, total: r.total })),
+      deps: [selectedEnvironmentId, activityResourceTypeFilter],
+      defaultPageSize: 20,
+    });
 
   // Load environments on mount
   useEffect(() => {
@@ -48,24 +57,7 @@ export default function Audit() {
     });
   }, []);
 
-  useEffect(() => {
-    setLoading(true);
-    getAuditLogs({
-      environmentId: selectedEnvironmentId || undefined,
-      resourceType: activityResourceTypeFilter || undefined,
-      limit,
-      offset: page * limit,
-    })
-      .then(({ logs, total }) => {
-        setLogs(logs);
-        setTotal(total);
-      })
-      .finally(() => setLoading(false));
-  }, [selectedEnvironmentId, activityResourceTypeFilter, page]);
-
-  const totalPages = Math.ceil(total / limit);
-
-  if (loading && logs.length === 0) {
+  if (loading) {
     return <LoadingSkeleton rows={5} rowHeight="h-16" headerWidth="w-48" />;
   }
 
@@ -77,7 +69,6 @@ export default function Audit() {
           value={selectedEnvironmentId}
           onChange={(e) => {
             setSelectedEnvironmentId(e.target.value);
-            setPage(0);
           }}
           className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white"
         >
@@ -93,7 +84,6 @@ export default function Audit() {
           value={activityResourceTypeFilter}
           onChange={(e) => {
             setActivityResourceTypeFilter(e.target.value);
-            setPage(0);
           }}
           className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white"
         >
@@ -223,22 +213,22 @@ export default function Audit() {
         {totalPages > 1 && (
           <div className="flex items-center justify-between mt-4 pt-4 border-t border-slate-700">
             <span className="text-sm text-slate-400">
-              Showing {page * limit + 1}-{Math.min((page + 1) * limit, total)} of {total}
+              Showing {currentPage * pageSize + 1}-{Math.min((currentPage + 1) * pageSize, total)} of {total}
             </span>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => setPage(Math.max(0, page - 1))}
-                disabled={page === 0}
+                onClick={() => setCurrentPage(Math.max(0, currentPage - 1))}
+                disabled={currentPage === 0}
                 className="px-3 py-1 rounded bg-slate-700 text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-600"
               >
                 Previous
               </button>
               <span className="text-slate-400">
-                Page {page + 1} of {totalPages}
+                Page {currentPage + 1} of {totalPages}
               </span>
               <button
-                onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
-                disabled={page >= totalPages - 1}
+                onClick={() => setCurrentPage(Math.min(totalPages - 1, currentPage + 1))}
+                disabled={currentPage >= totalPages - 1}
                 className="px-3 py-1 rounded bg-slate-700 text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-600"
               >
                 Next

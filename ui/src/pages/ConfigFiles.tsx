@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useAppStore } from '../lib/store.js';
+import { usePaginatedFetch } from '../hooks/usePaginatedFetch.js';
 import {
   listConfigFiles,
   getConfigFile,
@@ -38,9 +39,35 @@ export default function ConfigFiles() {
     configFilesServiceFilter,
     setConfigFilesServiceFilter,
   } = useAppStore();
-  const [configFiles, setConfigFiles] = useState<ConfigFile[]>([]);
-  const [allServices, setAllServices] = useState<ServiceOption[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { items: configFiles, total, loading, currentPage, pageSize, totalPages, setCurrentPage, setPageSize, reload } =
+    usePaginatedFetch<ConfigFile>({
+      fetcher: ({ limit, offset }) =>
+        listConfigFiles(selectedEnvironment!.id, { limit, offset }).then(r => ({
+          items: r.configFiles,
+          total: r.total,
+        })),
+      deps: [selectedEnvironment?.id],
+      enabled: !!selectedEnvironment?.id,
+    });
+
+  const allServices = useMemo(() => {
+    const serviceMap = new Map<string, ServiceOption>();
+    for (const cf of configFiles) {
+      for (const sf of cf.services || []) {
+        if (!serviceMap.has(sf.service.id)) {
+          serviceMap.set(sf.service.id, {
+            id: sf.service.id,
+            name: sf.service.name,
+            serverName: sf.service.server.name,
+          });
+        }
+      }
+    }
+    return Array.from(serviceMap.values()).sort((a, b) =>
+      `${a.serverName}/${a.name}`.localeCompare(`${b.serverName}/${b.name}`)
+    );
+  }, [configFiles]);
+
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState('');
   const [newFilename, setNewFilename] = useState('');
@@ -64,47 +91,6 @@ export default function ConfigFiles() {
   const [syncingFile, setSyncingFile] = useState<ConfigFile | null>(null);
   const [syncResults, setSyncResults] = useState<OperationResult[] | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<ConfigFile | null>(null);
-  const [totalItems, setTotalItems] = useState(0);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
-
-  useEffect(() => {
-    if (selectedEnvironment?.id) {
-      loadConfigFiles();
-    }
-  }, [selectedEnvironment?.id, currentPage, pageSize]);
-
-  const loadConfigFiles = async () => {
-    if (!selectedEnvironment?.id) return;
-    setLoading(true);
-    try {
-      const offset = (currentPage - 1) * pageSize;
-      const configFilesRes = await listConfigFiles(selectedEnvironment.id, { limit: pageSize, offset });
-      setConfigFiles(configFilesRes.configFiles);
-      setTotalItems(configFilesRes.total);
-
-      // Build unique service options from config file attachments
-      const serviceMap = new Map<string, ServiceOption>();
-      for (const cf of configFilesRes.configFiles) {
-        for (const sf of cf.services || []) {
-          if (!serviceMap.has(sf.service.id)) {
-            serviceMap.set(sf.service.id, {
-              id: sf.service.id,
-              name: sf.service.name,
-              serverName: sf.service.server.name,
-            });
-          }
-        }
-      }
-      // Sort by server name then service name
-      const serviceOptions = Array.from(serviceMap.values()).sort((a, b) =>
-        `${a.serverName}/${a.name}`.localeCompare(`${b.serverName}/${b.name}`)
-      );
-      setAllServices(serviceOptions);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -117,7 +103,7 @@ export default function ConfigFiles() {
         content: newContent,
         description: newDescription || undefined,
       });
-      await loadConfigFiles();
+      reload();
       setShowCreate(false);
       setNewName('');
       setNewFilename('');
@@ -137,14 +123,14 @@ export default function ConfigFiles() {
     setEditingFile(null);
     setEditContent('');
     setEditDescription('');
-    await loadConfigFiles();
+    reload();
   };
 
   const handleDelete = async () => {
     if (!deleteConfirm) return;
     await deleteConfigFile(deleteConfirm.id);
     setDeleteConfirm(null);
-    await loadConfigFiles();
+    reload();
   };
 
   const handleSyncAll = async (file: ConfigFile) => {
@@ -163,7 +149,7 @@ export default function ConfigFiles() {
       }));
       setSyncResults(operationResults);
       // Reload config files to update sync status
-      await loadConfigFiles();
+      reload();
     } catch (err) {
       setSyncResults([{
         id: 'error',
@@ -207,7 +193,7 @@ export default function ConfigFiles() {
     setHistory(updatedHistory);
     setSelectedHistoryEntry(null);
     setRestoreConfirm(null);
-    await loadConfigFiles();
+    reload();
   };
 
   const handleUpload = async (e: React.FormEvent) => {
@@ -222,7 +208,7 @@ export default function ConfigFiles() {
         uploadFilename || uploadFile.name,
         uploadDescription || undefined
       );
-      await loadConfigFiles();
+      reload();
       setShowUpload(false);
       setUploadFile(null);
       setUploadName('');
@@ -255,8 +241,6 @@ export default function ConfigFiles() {
     }
     return true;
   });
-
-  const totalPages = Math.ceil(totalItems / pageSize);
 
   if (!selectedEnvironment) {
     return (
@@ -873,7 +857,7 @@ export default function ConfigFiles() {
           </div>
         )}
 
-        {totalItems === 0 && (
+        {total === 0 && (
           <div className="col-span-full">
             <EmptyState
               message="No config files yet"
@@ -883,14 +867,14 @@ export default function ConfigFiles() {
           </div>
         )}
       </div>
-      {totalItems > 0 && (
+      {total > 0 && (
         <Pagination
           currentPage={currentPage}
           totalPages={totalPages}
-          totalItems={totalItems}
+          totalItems={total}
           pageSize={pageSize}
           onPageChange={setCurrentPage}
-          onPageSizeChange={(size) => { setPageSize(size); setCurrentPage(1); }}
+          onPageSizeChange={setPageSize}
         />
       )}
     </div>
