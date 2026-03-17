@@ -89,7 +89,7 @@ export async function getContainerImage(id: string): Promise<ContainerImage & { 
       registryConnection: true,
       deployedDigest: true,
       digests: {
-        orderBy: { discoveredAt: 'desc' },
+        orderBy: { pushedAt: 'desc' },
         take: 20,
       },
     },
@@ -123,7 +123,7 @@ export async function listContainerImages(
           select: { deployedAt: true },
         },
         digests: {
-          orderBy: { discoveredAt: 'desc' },
+          orderBy: { pushedAt: 'desc' },
           take: 1,
         },
       },
@@ -151,7 +151,7 @@ export async function linkServiceToContainerImage(
 
   const latestDigest = await prisma.imageDigest.findFirst({
     where: { containerImageId },
-    orderBy: { discoveredAt: 'desc' },
+    orderBy: { pushedAt: 'desc' },
   });
 
   const tagFilterPatterns = parseTagFilter(containerImage.tagFilter);
@@ -189,7 +189,7 @@ export async function recordTagDeployment(
   if (!imageDigestId && status === HISTORY_STATUS.SUCCESS) {
     const recentDigests = await prisma.imageDigest.findMany({
       where: { containerImageId },
-      orderBy: { discoveredAt: 'desc' },
+      orderBy: { pushedAt: 'desc' },
       take: 50,
     });
     for (const d of recentDigests) {
@@ -425,6 +425,7 @@ export interface SyncDigestsResult {
   newDigests: number;
   updatedDigests: number;
   hasUpdate: boolean;
+  newestDigestId?: string;
 }
 
 export async function syncDigestsFromRegistry(
@@ -506,10 +507,10 @@ export async function syncDigestsFromRegistry(
   }
 
   // Determine if there's an update available
-  // Get the most recently discovered digest
+  // Get the most recently pushed digest
   const newestDigest = await prisma.imageDigest.findFirst({
     where: { containerImageId: imageId },
-    orderBy: { discoveredAt: 'desc' },
+    orderBy: { pushedAt: 'desc' },
   });
 
   // There's an update if the newest digest differs from the deployed one
@@ -523,7 +524,7 @@ export async function syncDigestsFromRegistry(
     },
   });
 
-  return { newDigests, updatedDigests, hasUpdate };
+  return { newDigests, updatedDigests, hasUpdate, newestDigestId: newestDigest?.id };
 }
 
 /**
@@ -540,7 +541,7 @@ export async function listImageDigests(
   const [digests, total, image] = await Promise.all([
     prisma.imageDigest.findMany({
       where,
-      orderBy: { discoveredAt: 'desc' },
+      orderBy: { pushedAt: 'desc' },
       take: limit,
       skip: offset,
     }),

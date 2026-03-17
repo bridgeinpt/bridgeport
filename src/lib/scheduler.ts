@@ -6,8 +6,9 @@ import { checkServiceHealth } from '../services/services.js';
 import { RegistryFactory, type RegistryCredentials } from './registry.js';
 import { getRegistryCredentials } from '../services/registries.js';
 import { deployService } from '../services/deploy.js';
-import { extractRepoName, getDefaultTag } from './image-utils.js';
-import { syncDigestsFromRegistry, listImageDigests, cleanupOldImageDigests } from '../services/image-management.js';
+import { extractRepoName, getDefaultTag, parseTagFilter, getBestTag } from './image-utils.js';
+import { safeJsonParse } from './helpers.js';
+import { syncDigestsFromRegistry, cleanupOldImageDigests, getImageDigest } from '../services/image-management.js';
 import {
   collectServerMetricsSSH,
   saveServerMetrics,
@@ -281,19 +282,24 @@ async function checkImageForUpdates(
     const allTags = await client.listTags(repoName);
     const result = await syncDigestsFromRegistry(imageId, allTags);
 
-    if (!result.hasUpdate) {
+    if (!result.hasUpdate || !result.newestDigestId) {
       return { hasUpdate: false };
     }
 
-    // Get the newest digest to find best tag for auto-deploy
-    const { digests } = await listImageDigests(imageId, { limit: 1 });
-    const newest = digests[0];
-    const bestTag = newest?.bestTag ?? getDefaultTag(tagFilter);
+    // Fetch the specific newest digest to compute bestTag for auto-deploy
+    const newest = await getImageDigest(result.newestDigestId);
+    if (!newest) {
+      return { hasUpdate: true };
+    }
+
+    const patterns = parseTagFilter(tagFilter);
+    const tags = safeJsonParse(newest.tags as string, [] as string[]);
+    const bestTag = getBestTag(tags, patterns) || getDefaultTag(tagFilter);
 
     return {
       hasUpdate: true,
       bestTag,
-      newestDigestId: newest?.id,
+      newestDigestId: newest.id,
     };
   } catch (error) {
     console.error(`[Scheduler] Failed to check updates for image ${imageName}:`, error);

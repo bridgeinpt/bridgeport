@@ -713,6 +713,7 @@ model ImageDigest {
 
   @@unique([containerImageId, manifestDigest])
   @@index([containerImageId, discoveredAt(sort: Desc)])
+  @@index([containerImageId, pushedAt(sort: Desc)])
 }
 
 // History of deployed tags for a container image
