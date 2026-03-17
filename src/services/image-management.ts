@@ -438,29 +438,31 @@ export async function syncDigestsFromRegistry(
 
   const patterns = parseTagFilter(image.tagFilter);
 
-  // Filter registry tags by the tag filter patterns
-  const matchingTags = registryTags.filter(
-    (t) => matchesTagFilter(t.tag, patterns)
-  );
-
-  // Group matching tags by digest
-  const byDigest = new Map<string, { tags: string[]; size?: number; updatedAt: string }>();
-  for (const t of matchingTags) {
+  // Group ALL tags by digest first
+  const allByDigest = new Map<string, { tags: string[]; size?: number; updatedAt: string }>();
+  for (const t of registryTags) {
     if (!t.digest) continue;
-    const existing = byDigest.get(t.digest);
+    const existing = allByDigest.get(t.digest);
     if (existing) {
       existing.tags.push(t.tag);
-      // Keep the latest updatedAt
       if (t.updatedAt > existing.updatedAt) {
         existing.updatedAt = t.updatedAt;
         if (t.size) existing.size = t.size;
       }
     } else {
-      byDigest.set(t.digest, {
+      allByDigest.set(t.digest, {
         tags: [t.tag],
         size: t.size,
         updatedAt: t.updatedAt,
       });
+    }
+  }
+
+  // Only keep digests that have at least one tag matching the filter
+  const byDigest = new Map<string, { tags: string[]; size?: number; updatedAt: string }>();
+  for (const [digest, info] of allByDigest) {
+    if (info.tags.some((tag) => matchesTagFilter(tag, patterns))) {
+      byDigest.set(digest, info);
     }
   }
 
