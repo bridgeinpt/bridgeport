@@ -123,9 +123,12 @@ export const useAppStore = create<AppState>()(
       // Breadcrumb name resolution (session-only)
       breadcrumbNames: {},
       setBreadcrumbName: (id, name) =>
-        set((state) => ({
-          breadcrumbNames: { ...state.breadcrumbNames, [id]: name },
-        })),
+        set((state) => {
+          const keys = Object.keys(state.breadcrumbNames);
+          // Cap at 200 entries to prevent memory growth in long sessions
+          const base = keys.length >= 200 ? {} : state.breadcrumbNames;
+          return { breadcrumbNames: { ...base, [id]: name } };
+        }),
 
       // Dashboard alert dismissals (session-only)
       dismissedAlerts: [],

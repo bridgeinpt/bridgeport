@@ -267,6 +267,7 @@ vi.mock('../lib/db.js', () => ({
     },
     deploymentPlanStep: {
       create: vi.fn(),
+      createMany: vi.fn(),
       update: vi.fn(),
       updateMany: vi.fn(),
       findUniqueOrThrow: vi.fn(),
@@ -349,7 +350,7 @@ describe('buildDeploymentPlan', () => {
 
     const createdPlan = { id: 'plan-1', name: 'Deploy v1.0' };
     mockPrisma.deploymentPlan.create.mockResolvedValue(createdPlan as any);
-    mockPrisma.deploymentPlanStep.create.mockResolvedValue({} as any);
+    mockPrisma.deploymentPlanStep.createMany.mockResolvedValue({ count: 1 });
     mockPrisma.deploymentPlan.findUniqueOrThrow.mockResolvedValue({
       ...createdPlan,
       steps: [{ id: 'step-1', order: 0, action: 'deploy' }],
@@ -389,7 +390,7 @@ describe('buildDeploymentPlan', () => {
 
     mockPrisma.service.findMany.mockResolvedValue([svc] as any);
     mockPrisma.deploymentPlan.create.mockResolvedValue({ id: 'plan-1' } as any);
-    mockPrisma.deploymentPlanStep.create.mockResolvedValue({} as any);
+    mockPrisma.deploymentPlanStep.createMany.mockResolvedValue({ count: 2 });
     mockPrisma.deploymentPlan.findUniqueOrThrow.mockResolvedValue({ id: 'plan-1', steps: [] } as any);
 
     await buildDeploymentPlan({
@@ -400,11 +401,12 @@ describe('buildDeploymentPlan', () => {
       triggeredBy: 'user-1',
     });
 
-    // Should create both deploy and health_check steps
-    expect(mockPrisma.deploymentPlanStep.create).toHaveBeenCalledTimes(2);
-    const calls = mockPrisma.deploymentPlanStep.create.mock.calls;
-    expect(calls[0][0].data.action).toBe('deploy');
-    expect(calls[1][0].data.action).toBe('health_check');
+    // Should batch-create both deploy and health_check steps
+    expect(mockPrisma.deploymentPlanStep.createMany).toHaveBeenCalledTimes(1);
+    const data = mockPrisma.deploymentPlanStep.createMany.mock.calls[0][0].data;
+    expect(data).toHaveLength(2);
+    expect(data[0].action).toBe('deploy');
+    expect(data[1].action).toBe('health_check');
   });
 });
 

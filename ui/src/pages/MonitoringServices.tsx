@@ -117,6 +117,12 @@ export default function MonitoringServices() {
     );
   };
 
+  // Memoize chart data per metric to avoid recomputing on every render
+  const cpuChartData = useMemo(() => prepareServiceChartData('cpu'), [filteredServiceMetricsHistory]);
+  const memoryChartData = useMemo(() => prepareServiceChartData('memory'), [filteredServiceMetricsHistory]);
+  const networkRxChartData = useMemo(() => prepareServiceChartData('networkRx'), [filteredServiceMetricsHistory]);
+  const networkTxChartData = useMemo(() => prepareServiceChartData('networkTx'), [filteredServiceMetricsHistory]);
+
   const formatTime = (time: string) => {
     const date = new Date(time);
     if (monitoringTimeRange <= 24) {
@@ -223,10 +229,10 @@ export default function MonitoringServices() {
       {filteredServiceMetricsHistory.length > 0 && filteredServiceMetricsHistory.some((s) => s.data.length > 0) ? (
         <>
           <div className="grid grid-cols-2 gap-6 mb-8">
-            <ChartCard title="CPU Usage" data={prepareServiceChartData('cpu')} names={serviceNames} formatTime={formatTime} unit="%" domain={[0, 'auto']} />
-            <ChartCard title="Memory Usage" data={prepareServiceChartData('memory')} names={serviceNames} formatTime={formatTime} unit=" MB" domain={[0, 'auto']} />
-            <ChartCard title="Network RX" data={prepareServiceChartData('networkRx')} names={serviceNames} formatTime={formatTime} unit=" MB" domain={[0, 'auto']} />
-            <ChartCard title="Network TX" data={prepareServiceChartData('networkTx')} names={serviceNames} formatTime={formatTime} unit=" MB" domain={[0, 'auto']} />
+            <ChartCard title="CPU Usage" data={cpuChartData} names={serviceNames} formatTime={formatTime} unit="%" domain={[0, 'auto']} />
+            <ChartCard title="Memory Usage" data={memoryChartData} names={serviceNames} formatTime={formatTime} unit=" MB" domain={[0, 'auto']} />
+            <ChartCard title="Network RX" data={networkRxChartData} names={serviceNames} formatTime={formatTime} unit=" MB" domain={[0, 'auto']} />
+            <ChartCard title="Network TX" data={networkTxChartData} names={serviceNames} formatTime={formatTime} unit=" MB" domain={[0, 'auto']} />
           </div>
 
           {/* Services Table */}

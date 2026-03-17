@@ -139,7 +139,7 @@ export function DeployCard({
         {updateCheckResult && (
           <div className={`text-sm ${updateCheckResult.hasUpdate ? 'text-blue-400' : 'text-green-400'}`}>
             {updateCheckResult.hasUpdate
-              ? `Update available: ${updateCheckResult.latestTag}`
+              ? `Update available: ${updateCheckResult.bestTag || 'new digest'}`
               : 'No updates available'}
           </div>
         )}

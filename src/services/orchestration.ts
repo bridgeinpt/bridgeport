@@ -192,40 +192,47 @@ export async function buildDeploymentPlan(options: BuildPlanOptions): Promise<De
     },
   });
 
-  // Create steps for each service in order
+  // Build all steps then batch-insert them
   let stepOrder = 0;
+  const stepsToCreate: {
+    deploymentPlanId: string;
+    serviceId: string;
+    order: number;
+    action: string;
+    targetTag: string;
+    previousTag: string | null;
+  }[] = [];
+
   for (const level of orderedLevels) {
     for (const service of level) {
       // Check if this service has health_before dependencies
       const hasHealthDependency = service.dependencies.some((d) => d.type === 'health_before');
 
-      // Create deploy step
-      await prisma.deploymentPlanStep.create({
-        data: {
+      // Add deploy step
+      stepsToCreate.push({
+        deploymentPlanId: plan.id,
+        serviceId: service.id,
+        order: stepOrder++,
+        action: 'deploy',
+        targetTag: options.imageTag,
+        previousTag: service.imageTag,
+      });
+
+      // Add health check step if needed
+      if (hasHealthDependency || service.healthCheckUrl) {
+        stepsToCreate.push({
           deploymentPlanId: plan.id,
           serviceId: service.id,
           order: stepOrder++,
-          action: 'deploy',
+          action: 'health_check',
           targetTag: options.imageTag,
           previousTag: service.imageTag,
-        },
-      });
-
-      // Create health check step if needed
-      if (hasHealthDependency || service.healthCheckUrl) {
-        await prisma.deploymentPlanStep.create({
-          data: {
-            deploymentPlanId: plan.id,
-            serviceId: service.id,
-            order: stepOrder++,
-            action: 'health_check',
-            targetTag: options.imageTag,
-            previousTag: service.imageTag,
-          },
         });
       }
     }
   }
+
+  await prisma.deploymentPlanStep.createMany({ data: stepsToCreate });
 
   return prisma.deploymentPlan.findUniqueOrThrow({
     where: { id: plan.id },

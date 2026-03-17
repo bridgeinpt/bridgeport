@@ -89,31 +89,35 @@ export default function Services() {
     if (selectedEnvironment?.id) {
       setLoading(true);
       const offset = (currentPage - 1) * pageSize;
-      Promise.all([
-        listServices(selectedEnvironment.id, { limit: pageSize, offset }),
-        getDependencyGraph(selectedEnvironment.id).catch(() => ({ nodes: [], edges: [], deploymentOrder: [] })),
-      ])
-        .then(([servicesRes, graph]) => {
+      listServices(selectedEnvironment.id, { limit: pageSize, offset })
+        .then((servicesRes) => {
           const allServices: ServiceWithServer[] = servicesRes.services.map((svc) => ({
             ...svc,
             serverName: svc.server?.name || '',
           }));
           setServices(allServices);
           setTotalItems(servicesRes.total);
-
-          // Store full graph data for visualization
-          setGraphNodes(graph.nodes);
-          setGraphEdges(graph.edges);
-          setDeploymentOrder(graph.deploymentOrder);
-
-          // Build map of dependency nodes
-          const nodeMap = new Map<string, DependencyGraphNode>();
-          graph.nodes.forEach((node) => nodeMap.set(node.id, node));
-          setDependencyNodes(nodeMap);
         })
         .finally(() => setLoading(false));
     }
   }, [selectedEnvironment?.id, currentPage, pageSize]);
+
+  // Dependency graph is environment-wide — fetch once per environment, not on pagination change
+  useEffect(() => {
+    if (selectedEnvironment?.id) {
+      getDependencyGraph(selectedEnvironment.id)
+        .catch(() => ({ nodes: [], edges: [], deploymentOrder: [] }))
+        .then((graph) => {
+          setGraphNodes(graph.nodes);
+          setGraphEdges(graph.edges);
+          setDeploymentOrder(graph.deploymentOrder);
+
+          const nodeMap = new Map<string, DependencyGraphNode>();
+          graph.nodes.forEach((node) => nodeMap.set(node.id, node));
+          setDependencyNodes(nodeMap);
+        });
+    }
+  }, [selectedEnvironment?.id]);
 
   // Services with available updates (memoized)
   const servicesWithUpdates = useMemo(

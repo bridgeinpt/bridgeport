@@ -113,6 +113,14 @@ export default function MonitoringServers() {
     );
   };
 
+  // Memoize chart data per metric to avoid recomputing on every render
+  const cpuChartData = useMemo(() => prepareServerChartData('cpu'), [filteredMetricsHistory]);
+  const memoryChartData = useMemo(() => prepareServerChartData('memory'), [filteredMetricsHistory]);
+  const swapChartData = useMemo(() => prepareServerChartData('swap'), [filteredMetricsHistory]);
+  const diskChartData = useMemo(() => prepareServerChartData('disk'), [filteredMetricsHistory]);
+  const loadChartData = useMemo(() => prepareServerChartData('load'), [filteredMetricsHistory]);
+  const tcpChartData = useMemo(() => prepareServerChartData('tcp'), [filteredMetricsHistory]);
+
   const formatTime = (time: string) => {
     const date = new Date(time);
     if (monitoringTimeRange <= 24) {
@@ -192,22 +200,22 @@ export default function MonitoringServers() {
       {filteredMetricsHistory.length > 0 && filteredMetricsHistory.some((s) => s.data.length > 0) ? (
         <div className="grid grid-cols-2 gap-6 mb-8">
           {(schedulerConfig?.collectCpu ?? true) && (
-            <ChartCard title="CPU Usage" data={prepareServerChartData('cpu')} names={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
+            <ChartCard title="CPU Usage" data={cpuChartData} names={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
           )}
           {(schedulerConfig?.collectMemory ?? true) && (
-            <ChartCard title="Memory Usage" data={prepareServerChartData('memory')} names={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
+            <ChartCard title="Memory Usage" data={memoryChartData} names={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
           )}
           {(schedulerConfig?.collectSwap ?? true) && (
-            <ChartCard title="Swap Usage" data={prepareServerChartData('swap')} names={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
+            <ChartCard title="Swap Usage" data={swapChartData} names={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
           )}
           {(schedulerConfig?.collectDisk ?? true) && (
-            <ChartCard title="Disk Usage" data={prepareServerChartData('disk')} names={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
+            <ChartCard title="Disk Usage" data={diskChartData} names={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
           )}
           {(schedulerConfig?.collectLoad ?? true) && (
-            <ChartCard title="Load Average" data={prepareServerChartData('load')} names={serverNames} formatTime={formatTime} domain={[0, 'auto']} />
+            <ChartCard title="Load Average" data={loadChartData} names={serverNames} formatTime={formatTime} domain={[0, 'auto']} />
           )}
           {(schedulerConfig?.collectTcp ?? true) && (
-            <ChartCard title="TCP Connections" data={prepareServerChartData('tcp')} names={serverNames} formatTime={formatTime} domain={[0, 'auto']} />
+            <ChartCard title="TCP Connections" data={tcpChartData} names={serverNames} formatTime={formatTime} domain={[0, 'auto']} />
           )}
         </div>
       ) : (

@@ -4,7 +4,7 @@
 export { createTestUser, resetUserCounter } from './user.js';
 export { createTestEnvironment, resetEnvironmentCounter } from './environment.js';
 export { createTestServer, resetServerCounter } from './server.js';
-export { createTestContainerImage, resetContainerImageCounter } from './container-image.js';
+export { createTestContainerImage, createTestImageDigest, resetContainerImageCounter } from './container-image.js';
 export { createTestService, resetServiceCounter } from './service.js';
 export { createTestDeployment, resetDeploymentCounter } from './deployment.js';
 export { createTestDatabase, resetDatabaseCounter } from './database.js';
@@ -17,7 +17,7 @@ export {
 export type { CreateTestUserOptions } from './user.js';
 export type { CreateTestEnvironmentOptions } from './environment.js';
 export type { CreateTestServerOptions } from './server.js';
-export type { CreateTestContainerImageOptions } from './container-image.js';
+export type { CreateTestContainerImageOptions, CreateTestImageDigestOptions } from './container-image.js';
 export type { CreateTestServiceOptions } from './service.js';
 export type { CreateTestDeploymentOptions } from './deployment.js';
 export type { CreateTestDatabaseOptions } from './database.js';

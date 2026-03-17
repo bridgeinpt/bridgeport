@@ -154,7 +154,7 @@ export default function ServiceDetail() {
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [updateCheckResult, setUpdateCheckResult] = useState<{
     hasUpdate: boolean;
-    latestTag?: string;
+    bestTag?: string;
   } | null>(null);
 
   // Error and health check state
@@ -241,13 +241,13 @@ export default function ServiceDetail() {
       const result = await checkServiceUpdates(id);
       setUpdateCheckResult({
         hasUpdate: result.hasUpdate,
-        latestTag: result.latestTag,
+        bestTag: result.bestTag,
       });
       // Update the service state with new values
       if (service) {
         setService({
           ...service,
-          latestAvailableTag: result.latestTag || service.latestAvailableTag,
+          latestAvailableTag: result.bestTag || service.latestAvailableTag,
           lastUpdateCheckAt: result.lastUpdateCheckAt || service.lastUpdateCheckAt,
         });
       }
@@ -875,7 +875,7 @@ export default function ServiceDetail() {
             {updateCheckResult && (
               <div className={`text-sm ${updateCheckResult.hasUpdate ? 'text-blue-400' : 'text-green-400'}`}>
                 {updateCheckResult.hasUpdate
-                  ? `Update available: ${updateCheckResult.latestTag}`
+                  ? `Update available: ${updateCheckResult.bestTag || 'new digest'}`
                   : 'No updates available'}
               </div>
             )}
@@ -1027,7 +1027,7 @@ export default function ServiceDetail() {
                 </svg>
                 <span className="text-white font-medium">{containerImage.name}</span>
                 <span className="text-xs text-primary-400 font-mono ml-auto">
-                  :{containerImage.currentTag}
+                  :{containerImage.bestTag || containerImage.tagFilter}
                 </span>
               </Link>
             </div>

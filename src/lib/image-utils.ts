@@ -2,8 +2,6 @@
  * Utilities for parsing Docker image names and extracting registry/repository information.
  */
 
-import type { RegistryTag } from './registry.js';
-
 export interface ParsedRegistry {
   registryUrl: string;
   isDockerHub: boolean;
@@ -71,150 +69,93 @@ export function extractRepoName(imageName: string, repositoryPrefix: string | nu
 }
 
 /**
- * Well-known rolling/special tags that should only match themselves exactly.
+ * Parse a comma-separated tag filter string into an array of glob patterns.
+ * Trims whitespace from each pattern and filters out empty strings.
  */
-const SPECIAL_TAGS = new Set([
-  'latest', 'stable', 'edge', 'nightly', 'beta', 'alpha', 'rc', 'lts',
-  'mainline', 'development', 'testing', 'production',
-]);
-
-/**
- * Extract the "family" suffix from a Docker tag.
- *
- * A tag's family is its non-version suffix. Tags in the same family differ
- * only by version number:
- *   "2-alpine"       -> "-alpine"
- *   "2.9.0-alpine"   -> "-alpine"
- *   "2.9.0"          -> ""         (pure version)
- *   "latest"         -> "=latest"  (exact-match family)
- *   "3.19-slim-bookworm" -> "-slim-bookworm"
- *   "bookworm"       -> "=bookworm" (no version prefix, exact match)
- */
-export function getTagFamily(tag: string): string {
-  // Special rolling tags get exact-match families
-  if (SPECIAL_TAGS.has(tag.toLowerCase())) {
-    return `=${tag.toLowerCase()}`;
-  }
-
-  // Try to match version prefix: optional 'v', then digits with dots, then optional suffix
-  const match = tag.match(/^v?(\d+\.)*\d+(-.+)?$/);
-  if (match) {
-    // match[2] is the "-suffix" part (e.g., "-alpine"), or undefined for pure versions
-    return match[2] || '';
-  }
-
-  // No version prefix found — treat as exact-match family (e.g., "bookworm", "noble")
-  return `=${tag.toLowerCase()}`;
+export function parseTagFilter(tagFilter: string): string[] {
+  return tagFilter
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
 }
 
 /**
- * Filter a list of registry tags to those matching the same family as currentTag.
+ * Check if a tag matches any of the given glob patterns.
+ * Simple glob matching where `*` matches any sequence of [a-zA-Z0-9._-] chars.
  */
-export function filterTagsByFamily(tags: RegistryTag[], currentTag: string): RegistryTag[] {
-  const family = getTagFamily(currentTag);
-
-  return tags.filter((t) => getTagFamily(t.tag) === family);
-}
-
-/**
- * Compare two version tag strings numerically.
- * Strips leading 'v' prefix, splits by '.', and compares each segment as a number.
- * For non-version tags, falls back to string comparison.
- * Returns negative if a < b, positive if a > b, 0 if equal.
- */
-export function compareVersionTags(a: string, b: string): number {
-  // Strip leading 'v' prefix
-  const cleanA = a.replace(/^v/, '');
-  const cleanB = b.replace(/^v/, '');
-
-  // Extract version parts (digits before the first hyphen/suffix)
-  const versionPartA = cleanA.match(/^(\d+(?:\.\d+)*)/);
-  const versionPartB = cleanB.match(/^(\d+(?:\.\d+)*)/);
-
-  if (!versionPartA || !versionPartB) {
-    // Not version tags — fall back to string comparison
-    return a.localeCompare(b);
-  }
-
-  const partsA = versionPartA[1].split('.').map(Number);
-  const partsB = versionPartB[1].split('.').map(Number);
-  const maxLen = Math.max(partsA.length, partsB.length);
-
-  for (let i = 0; i < maxLen; i++) {
-    const segA = partsA[i] ?? 0;
-    const segB = partsB[i] ?? 0;
-    if (segA !== segB) return segA - segB;
-  }
-
-  // Version parts are equal — compare full string for suffix differences
-  return cleanA.localeCompare(cleanB);
-}
-
-/**
- * From a pre-fetched tag list, find the latest tag in the same family as currentTag.
- * Also extracts the current tag's digest. This replaces two separate API calls
- * (getLatestTag + getManifestDigest) with one (listTags).
- */
-export function findLatestInFamily(
-  allTags: RegistryTag[],
-  currentTag: string
-): { latestTag: RegistryTag | null; currentDigest: string | null } {
-  const familyTags = filterTagsByFamily(allTags, currentTag);
-
-  // Find current tag's digest
-  const currentEntry = allTags.find((t) => t.tag === currentTag);
-  const currentDigest = currentEntry?.digest || null;
-
-  if (familyTags.length === 0) {
-    return { latestTag: null, currentDigest };
-  }
-
-  // Sort by updatedAt descending, then by version (semver-aware) for ties
-  const sorted = [...familyTags].sort((a, b) => {
-    const timeDiff = new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
-    // If timestamps differ by more than 1 minute, use timestamp ordering
-    if (Math.abs(timeDiff) > 60_000) return timeDiff;
-    // Otherwise fall back to version comparison (higher version first)
-    return compareVersionTags(b.tag, a.tag);
+export function matchesTagFilter(tag: string, patterns: string[]): boolean {
+  return patterns.some((pattern) => {
+    // Escape regex special chars, then replace * with character class
+    const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+    const regexStr = escaped.replace(/\*/g, '[a-zA-Z0-9._-]*');
+    const regex = new RegExp(`^${regexStr}$`);
+    return regex.test(tag);
   });
-
-  return { latestTag: sorted[0], currentDigest };
 }
 
 /**
- * Find a "companion" tag that shares the same digest as the given tag.
- * Useful for rolling tags like "latest" — finds the concrete build tag
- * (e.g., "20260223-30a4f0b") that the rolling tag currently points to.
+ * From a SHA's tag list, pick the best display tag.
  *
- * Returns the best non-rolling companion tag, or null if none found.
+ * - If tags is empty, return null
+ * - Separate tags into filter-matching and non-matching
+ * - Among filter-matching: prefer most specific (longest string or most dot segments)
+ * - If no filter matches: prefer semver-looking tags > named tags > `latest`
+ * - Return the best one
  */
-export function findCompanionTag(
-  allTags: RegistryTag[],
-  currentTag: string,
-  currentDigest: string
-): string | null {
-  // Find all tags sharing the same digest, excluding the current tag
-  const companions = allTags.filter(
-    (t) => t.digest === currentDigest && t.tag !== currentTag
-  );
+export function getBestTag(tags: string[], filterPatterns: string[]): string | null {
+  if (tags.length === 0) return null;
 
-  if (companions.length === 0) return null;
+  // Separate into filter-matching and non-matching
+  const matching = tags.filter((t) => matchesTagFilter(t, filterPatterns));
+  const nonMatching = tags.filter((t) => !matchesTagFilter(t, filterPatterns));
 
-  // Prefer non-rolling tags (build/version tags) over rolling tags
-  const nonRolling = companions.filter(
-    (t) => !SPECIAL_TAGS.has(t.tag.toLowerCase())
-  );
-
-  if (nonRolling.length > 0) {
-    // Sort by updatedAt descending, return the most recent
-    nonRolling.sort(
-      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-    );
-    return nonRolling[0].tag;
+  if (matching.length > 0) {
+    // Among filter matches, prefer most specific match:
+    // 1. Tags matching a pattern without wildcards (exact match) rank higher
+    // 2. Then most dot segments, then longest string
+    const exactPatterns = filterPatterns.filter((p) => !p.includes('*'));
+    return [...matching].sort((a, b) => {
+      const aExact = exactPatterns.includes(a) ? 1 : 0;
+      const bExact = exactPatterns.includes(b) ? 1 : 0;
+      if (aExact !== bExact) return bExact - aExact;
+      const dotsA = a.split('.').length;
+      const dotsB = b.split('.').length;
+      if (dotsA !== dotsB) return dotsB - dotsA;
+      return b.length - a.length;
+    })[0];
   }
 
-  // Fall back to the first companion (even if it's a rolling tag)
-  return companions[0].tag;
+  // No filter matches — rank by category
+  const semverLike = nonMatching.filter((t) => /^v?\d/.test(t));
+  const named = nonMatching.filter((t) => !/^v?\d/.test(t) && t !== 'latest');
+  const latest = nonMatching.filter((t) => t === 'latest');
+
+  if (semverLike.length > 0) return semverLike[0];
+  if (named.length > 0) return named[0];
+  if (latest.length > 0) return latest[0];
+
+  return tags[0];
+}
+
+/**
+ * Get the default tag from a tagFilter string (first pattern, trimmed).
+ * Used as fallback when no bestTag is available from digests.
+ */
+export function getDefaultTag(tagFilter: string): string {
+  return tagFilter.split(',')[0]?.trim() || 'latest';
+}
+
+/**
+ * Format a digest for short display.
+ * If the digest contains `sha256:`, extract the first 12 chars after the prefix.
+ * Otherwise return the first 12 chars.
+ */
+export function formatDigestShort(digest: string): string {
+  const sha256Prefix = 'sha256:';
+  const hashPart = digest.includes(sha256Prefix)
+    ? digest.slice(digest.indexOf(sha256Prefix) + sha256Prefix.length)
+    : digest;
+  return hashPart.slice(0, 12) || hashPart;
 }
 
 /**

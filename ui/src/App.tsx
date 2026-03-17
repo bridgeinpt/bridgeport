@@ -25,6 +25,7 @@ import MonitoringDatabases from './pages/MonitoringDatabases';
 import Settings from './pages/Settings';
 import Notifications from './pages/Notifications';
 import ContainerImages from './pages/ContainerImages';
+import ContainerImageDetail from './pages/ContainerImageDetail';
 import DeploymentPlans from './pages/DeploymentPlans';
 import DeploymentPlanDetail from './pages/DeploymentPlanDetail';
 
@@ -117,6 +118,7 @@ export default function App() {
                 <Route path="/config-files" element={<ConfigFiles />} />
                 <Route path="/registries" element={<Registries />} />
                 <Route path="/container-images" element={<ContainerImages />} />
+                <Route path="/container-images/:id" element={<ContainerImageDetail />} />
                 <Route path="/deployment-plans" element={<DeploymentPlans />} />
                 <Route path="/deployment-plans/:id" element={<DeploymentPlanDetail />} />
                 <Route path="/databases" element={<Databases />} />

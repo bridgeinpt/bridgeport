@@ -21,7 +21,7 @@ export interface HealthCheckResultData {
 
 export interface UpdateCheckResult {
   hasUpdate: boolean;
-  latestTag?: string;
+  bestTag?: string;
 }
 
 export {

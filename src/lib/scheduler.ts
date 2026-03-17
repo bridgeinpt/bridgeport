@@ -5,8 +5,8 @@ import { checkServiceHealth } from '../services/services.js';
 import { RegistryFactory, type RegistryCredentials } from './registry.js';
 import { getRegistryCredentials } from '../services/registries.js';
 import { deployService } from '../services/deploy.js';
-import { extractRepoName } from './image-utils.js';
-import { detectUpdate } from '../services/image-management.js';
+import { extractRepoName, getDefaultTag } from './image-utils.js';
+import { syncDigestsFromRegistry, listImageDigests, cleanupOldImageDigests } from '../services/image-management.js';
 import {
   collectServerMetricsSSH,
   saveServerMetrics,
@@ -265,25 +265,34 @@ async function runDiscovery(): Promise<void> {
 }
 
 /**
- * Check for updates on a container image using shared detectUpdate logic
+ * Check for updates on a container image using digest sync
  */
 async function checkImageForUpdates(
   imageId: string,
   imageName: string,
-  currentTag: string,
-  deployedDigest: string | null,
+  tagFilter: string,
   creds: RegistryCredentials
-): Promise<{ hasUpdate: boolean; latestTag?: string; latestDigest?: string }> {
+): Promise<{ hasUpdate: boolean; bestTag?: string; newestDigestId?: string }> {
   try {
     const client = RegistryFactory.create(creds);
     const repoName = extractRepoName(imageName, creds.repositoryPrefix);
 
     const allTags = await client.listTags(repoName);
-    const result = await detectUpdate(imageId, currentTag, deployedDigest, allTags);
+    const result = await syncDigestsFromRegistry(imageId, allTags);
+
+    if (!result.hasUpdate) {
+      return { hasUpdate: false };
+    }
+
+    // Get the newest digest to find best tag for auto-deploy
+    const { digests } = await listImageDigests(imageId, { limit: 1 });
+    const newest = digests[0];
+    const bestTag = newest?.bestTag ?? getDefaultTag(tagFilter);
+
     return {
-      hasUpdate: result.hasUpdate,
-      latestTag: result.latestTag ?? undefined,
-      latestDigest: result.latestDigest ?? undefined,
+      hasUpdate: true,
+      bestTag,
+      newestDigestId: newest?.id,
     };
   } catch (error) {
     console.error(`[Scheduler] Failed to check updates for image ${imageName}:`, error);
@@ -306,9 +315,7 @@ async function runUpdateChecks(): Promise<void> {
         id: true,
         name: true,
         imageName: true,
-        currentTag: true,
-        latestDigest: true,
-        deployedDigest: true,
+        tagFilter: true,
         autoUpdate: true,
         registryConnectionId: true,
         environmentId: true,
@@ -357,20 +364,19 @@ async function runUpdateChecks(): Promise<void> {
           const result = await checkImageForUpdates(
             image.id,
             image.imageName,
-            image.currentTag,
-            image.deployedDigest,
+            image.tagFilter,
             creds
           );
 
           if (result.hasUpdate) {
             console.log(
-              `[Scheduler] Update available for ${image.name}: ${image.currentTag} -> ${result.latestTag}`
+              `[Scheduler] Update available for ${image.name}: new digest (${result.bestTag})`
             );
 
             // Auto-deploy if enabled — fire-and-forget to avoid blocking remaining image checks
-            if (image.autoUpdate && result.latestTag) {
-              console.log(`[Scheduler] Auto-deploying container image "${image.name}" to ${result.latestTag}`);
-              const tag = result.latestTag;
+            if (image.autoUpdate && result.bestTag) {
+              console.log(`[Scheduler] Auto-deploying container image "${image.name}" to ${result.bestTag}`);
+              const tag = result.bestTag;
               buildDeploymentPlan({
                 environmentId: image.environmentId,
                 containerImageId: image.id,
@@ -399,8 +405,8 @@ async function runUpdateChecks(): Promise<void> {
  */
 export async function checkServiceUpdate(serviceId: string): Promise<{
   hasUpdate: boolean;
-  latestTag?: string;
-  latestDigest?: string;
+  bestTag?: string;
+  newestDigestId?: string;
   error?: string;
 }> {
   const service = await prisma.service.findUnique({
@@ -410,8 +416,7 @@ export async function checkServiceUpdate(serviceId: string): Promise<{
         select: {
           id: true,
           imageName: true,
-          currentTag: true,
-          deployedDigest: true,
+          tagFilter: true,
           registryConnectionId: true,
         },
       },
@@ -434,8 +439,7 @@ export async function checkServiceUpdate(serviceId: string): Promise<{
   return checkImageForUpdates(
     service.containerImage.id,
     service.containerImage.imageName,
-    service.containerImage.currentTag,
-    service.containerImage.deployedDigest,
+    service.containerImage.tagFilter,
     creds
   );
 }
@@ -830,6 +834,21 @@ async function runAuditLogCleanup(): Promise<void> {
 }
 
 /**
+ * Clean up old ImageDigest records not referenced by any Service or History
+ */
+async function runDigestCleanup(): Promise<void> {
+  try {
+    const deleted = await cleanupOldImageDigests(90);
+    if (deleted > 0) {
+      console.log(`[Scheduler] Cleaned up ${deleted} old image digest records`);
+    }
+  } catch (error) {
+    captureException(error, { scheduler: 'digestCleanup' });
+    console.error('[Scheduler] Digest cleanup failed:', error);
+  }
+}
+
+/**
  * Start the scheduler with periodic health checks and discovery
  */
 export function startScheduler(config: Partial<GlobalSchedulerConfig> = {}): void {
@@ -870,6 +889,7 @@ export function startScheduler(config: Partial<GlobalSchedulerConfig> = {}): voi
   timers.set('notificationCleanup', setInterval(() => runNotificationCleanup(cfg.notificationRetentionDays), 24 * 60 * 60 * 1000)); // Daily
   timers.set('healthLogCleanup', setInterval(() => runHealthLogCleanup(cfg.healthLogRetentionDays), 24 * 60 * 60 * 1000)); // Daily
   timers.set('auditLogCleanup', setInterval(runAuditLogCleanup, 24 * 60 * 60 * 1000)); // Daily
+  timers.set('digestCleanup', setInterval(runDigestCleanup, 24 * 60 * 60 * 1000)); // Daily
 }
 
 /**

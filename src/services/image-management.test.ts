@@ -15,11 +15,21 @@ const { mockPrisma } = vi.hoisted(() => ({
     containerImageHistory: {
       create: vi.fn(),
       findMany: vi.fn(),
+      findFirst: vi.fn(),
     },
     service: {
       count: vi.fn(),
       findMany: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
+    },
+    imageDigest: {
+      create: vi.fn(),
+      update: vi.fn(),
+      findUnique: vi.fn(),
+      findFirst: vi.fn(),
+      findMany: vi.fn(),
+      count: vi.fn(),
     },
   },
 }));
@@ -33,8 +43,10 @@ vi.mock('../lib/registry.js', () => ({
 }));
 
 vi.mock('../lib/image-utils.js', () => ({
-  findLatestInFamily: vi.fn().mockReturnValue({ latestTag: null, currentDigest: null }),
-  findCompanionTag: vi.fn().mockReturnValue(null),
+  parseTagFilter: vi.fn().mockReturnValue(['latest']),
+  matchesTagFilter: vi.fn().mockReturnValue(true),
+  getBestTag: vi.fn().mockReturnValue('latest'),
+  getDefaultTag: vi.fn().mockReturnValue('latest'),
   extractRepoName: vi.fn().mockReturnValue('test/repo'),
 }));
 
@@ -50,10 +62,10 @@ import {
   recordTagDeployment,
   getPreviousTag,
   findOrCreateContainerImage,
-  detectUpdate,
+  syncDigestsFromRegistry,
 } from './image-management.js';
 
-import { findLatestInFamily, findCompanionTag } from '../lib/image-utils.js';
+import { matchesTagFilter } from '../lib/image-utils.js';
 
 describe('image-management', () => {
   beforeEach(() => {
@@ -61,167 +73,127 @@ describe('image-management', () => {
   });
 
   describe('createContainerImage', () => {
-    it('creates a container image', async () => {
+    it('creates image with tagFilter', async () => {
       mockPrisma.containerImage.create.mockResolvedValue({
         id: 'img-1',
-        name: 'web-app',
-        imageName: 'registry.example.com/web-app',
-        currentTag: 'v1.0',
-        environmentId: 'env-1',
+        name: 'Test',
+        imageName: 'registry.com/app',
+        tagFilter: 'v1.0',
       });
 
       const image = await createContainerImage({
-        name: 'web-app',
-        imageName: 'registry.example.com/web-app',
-        currentTag: 'v1.0',
+        name: 'Test',
+        imageName: 'registry.com/app',
+        tagFilter: 'v1.0',
         environmentId: 'env-1',
       });
 
-      expect(image.name).toBe('web-app');
-      expect(image.imageName).toBe('registry.example.com/web-app');
-      expect(image.currentTag).toBe('v1.0');
+      expect(image.tagFilter).toBe('v1.0');
+      expect(mockPrisma.containerImage.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ tagFilter: 'v1.0' }),
+      });
     });
   });
 
   describe('updateContainerImage', () => {
-    it('updates specified fields', async () => {
+    it('updates tagFilter', async () => {
       mockPrisma.containerImage.update.mockResolvedValue({
         id: 'img-1',
-        currentTag: 'v2.0',
-        autoUpdate: true,
+        tagFilter: 'v2.*',
       });
 
-      const updated = await updateContainerImage('img-1', {
-        currentTag: 'v2.0',
-        autoUpdate: true,
-      });
-
-      expect(updated.currentTag).toBe('v2.0');
-      expect(updated.autoUpdate).toBe(true);
+      const updated = await updateContainerImage('img-1', { tagFilter: 'v2.*' });
+      expect(updated.tagFilter).toBe('v2.*');
     });
   });
 
   describe('deleteContainerImage', () => {
-    it('deletes an image with no linked services', async () => {
-      mockPrisma.service.count.mockResolvedValue(0);
-      mockPrisma.containerImage.delete.mockResolvedValue({});
-
-      await deleteContainerImage('img-1');
-
-      expect(mockPrisma.containerImage.delete).toHaveBeenCalledWith({
-        where: { id: 'img-1' },
-      });
+    it('throws if services linked', async () => {
+      mockPrisma.service.count.mockResolvedValue(2);
+      await expect(deleteContainerImage('img-1')).rejects.toThrow(/Cannot delete/);
     });
 
-    it('throws when services are linked', async () => {
-      mockPrisma.service.count.mockResolvedValue(1);
+    it('deletes if no services linked', async () => {
+      mockPrisma.service.count.mockResolvedValue(0);
+      mockPrisma.containerImage.delete.mockResolvedValue({});
+      await deleteContainerImage('img-1');
+      expect(mockPrisma.containerImage.delete).toHaveBeenCalledWith({ where: { id: 'img-1' } });
+    });
+  });
 
-      await expect(deleteContainerImage('img-1')).rejects.toThrow(
-        /Cannot delete container image: 1 service\(s\)/
-      );
+  describe('linkServiceToContainerImage', () => {
+    it('links service and sets imageDigestId from latest digest', async () => {
+      mockPrisma.containerImage.findUniqueOrThrow.mockResolvedValue({
+        id: 'img-1',
+        tagFilter: 'latest',
+      });
+      mockPrisma.imageDigest.findFirst.mockResolvedValue({
+        id: 'digest-1',
+        tags: '["latest", "v1.0"]',
+      });
+      mockPrisma.service.update.mockResolvedValue({ id: 'svc-1', imageDigestId: 'digest-1' });
+
+      const result = await linkServiceToContainerImage('img-1', 'svc-1');
+      expect(result.imageDigestId).toBe('digest-1');
+      expect(mockPrisma.service.update).toHaveBeenCalledWith({
+        where: { id: 'svc-1' },
+        data: expect.objectContaining({
+          containerImageId: 'img-1',
+          imageDigestId: 'digest-1',
+        }),
+      });
     });
   });
 
   describe('recordTagDeployment', () => {
-    it('creates history record and updates current tag on success', async () => {
-      const mockImage = {
-        id: 'img-1',
-        currentTag: 'v1.0',
-        latestTag: null,
-        latestDigest: null,
-      };
-      mockPrisma.containerImage.findUnique.mockResolvedValue(mockImage);
+    it('creates history and clears updateAvailable on success', async () => {
+      mockPrisma.containerImage.update.mockResolvedValue({});
+      mockPrisma.service.updateMany.mockResolvedValue({ count: 1 });
       mockPrisma.containerImageHistory.create.mockResolvedValue({
         id: 'hist-1',
         tag: 'v2.0',
         status: 'success',
       });
-      mockPrisma.containerImage.update.mockResolvedValue({});
 
-      const history = await recordTagDeployment('img-1', 'v2.0', undefined, 'user-1', 'success');
-
-      expect(history.tag).toBe('v2.0');
-      expect(history.status).toBe('success');
-      expect(mockPrisma.containerImage.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            currentTag: 'v2.0',
-            updateAvailable: false,
-          }),
-        })
-      );
+      const entry = await recordTagDeployment('img-1', 'v2.0', 'sha256:abc', 'user@test.com', 'success', 'digest-1');
+      expect(entry.status).toBe('success');
+      expect(mockPrisma.containerImage.update).toHaveBeenCalledWith({
+        where: { id: 'img-1' },
+        data: { updateAvailable: false },
+      });
+      expect(mockPrisma.service.updateMany).toHaveBeenCalledWith({
+        where: { containerImageId: 'img-1' },
+        data: { imageDigestId: 'digest-1' },
+      });
     });
 
-    it('does not update current tag on failure', async () => {
-      const mockImage = {
-        id: 'img-1',
-        currentTag: 'v1.0',
-        latestTag: null,
-        latestDigest: null,
-      };
-      mockPrisma.containerImage.findUnique.mockResolvedValue(mockImage);
+    it('does not update services on failure', async () => {
       mockPrisma.containerImageHistory.create.mockResolvedValue({
-        id: 'hist-1',
+        id: 'hist-2',
         tag: 'v2.0',
         status: 'failed',
       });
 
-      await recordTagDeployment('img-1', 'v2.0', undefined, 'user-1', 'failed');
-
-      // Should NOT update current tag on failure
+      await recordTagDeployment('img-1', 'v2.0', undefined, 'user@test.com', 'failed');
       expect(mockPrisma.containerImage.update).not.toHaveBeenCalled();
-    });
-
-    it('resolves digest from latestDigest when deploying latest tag', async () => {
-      const mockImage = {
-        id: 'img-1',
-        currentTag: 'v1.0',
-        latestTag: 'v2.0',
-        latestDigest: 'sha256:abc123',
-      };
-      mockPrisma.containerImage.findUnique.mockResolvedValue(mockImage);
-      mockPrisma.containerImageHistory.create.mockResolvedValue({
-        id: 'hist-1',
-        tag: 'v2.0',
-        status: 'success',
-      });
-      mockPrisma.containerImage.update.mockResolvedValue({});
-
-      await recordTagDeployment('img-1', 'v2.0', undefined, 'user-1', 'success');
-
-      expect(mockPrisma.containerImage.update).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            deployedDigest: 'sha256:abc123',
-          }),
-        })
-      );
+      expect(mockPrisma.service.updateMany).not.toHaveBeenCalled();
     });
   });
 
   describe('getPreviousTag', () => {
     it('returns second most recent successful tag', async () => {
       mockPrisma.containerImageHistory.findMany.mockResolvedValue([
-        { tag: 'v2.0', status: 'success', createdAt: new Date() },
-        { tag: 'v1.0', status: 'success', createdAt: new Date() },
+        { tag: 'v2.0', status: 'success' },
+        { tag: 'v1.0', status: 'success' },
       ]);
 
       const prev = await getPreviousTag('img-1');
       expect(prev).toBe('v1.0');
     });
 
-    it('returns null when only one successful deployment', async () => {
+    it('returns null if only one deployment', async () => {
       mockPrisma.containerImageHistory.findMany.mockResolvedValue([
-        { tag: 'v1.0', status: 'success', createdAt: new Date() },
-      ]);
-
-      const prev = await getPreviousTag('img-1');
-      expect(prev).toBeNull();
-    });
-
-    it('ignores failed deployments', async () => {
-      mockPrisma.containerImageHistory.findMany.mockResolvedValue([
-        { tag: 'v1.0', status: 'success', createdAt: new Date() },
+        { tag: 'v1.0', status: 'success' },
       ]);
 
       const prev = await getPreviousTag('img-1');
@@ -230,121 +202,105 @@ describe('image-management', () => {
   });
 
   describe('findOrCreateContainerImage', () => {
-    it('creates new image if not found', async () => {
+    it('creates new image with tagFilter if not found', async () => {
       mockPrisma.containerImage.findUnique.mockResolvedValue(null);
       mockPrisma.containerImage.create.mockResolvedValue({
         id: 'img-new',
         imageName: 'registry.com/new-app',
-        name: 'new-app',
-        currentTag: 'v1.0',
+        tagFilter: 'v1.0',
       });
 
       const image = await findOrCreateContainerImage('env-1', 'registry.com/new-app', 'v1.0');
-
       expect(image.imageName).toBe('registry.com/new-app');
+      expect(mockPrisma.containerImage.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ tagFilter: 'v1.0' }),
+      });
     });
 
-    it('returns existing image if found', async () => {
+    it('returns existing if found', async () => {
       mockPrisma.containerImage.findUnique.mockResolvedValue({
         id: 'img-1',
         imageName: 'registry.com/app',
-        currentTag: 'v1.0',
+        tagFilter: 'v1.0',
       });
 
       const found = await findOrCreateContainerImage('env-1', 'registry.com/app', 'v2.0');
       expect(found.id).toBe('img-1');
-      expect(found.currentTag).toBe('v1.0');
+      expect(found.tagFilter).toBe('v1.0');
     });
   });
 
-  describe('detectUpdate', () => {
-    it('detects version tag update', async () => {
-      mockPrisma.containerImage.findUnique.mockResolvedValue({ id: 'img-1' });
-      mockPrisma.containerImage.update.mockResolvedValue({});
-
-      vi.mocked(findLatestInFamily).mockReturnValue({
-        latestTag: { tag: 'v2.0', digest: 'sha256:new', lastUpdated: new Date() },
-        currentDigest: 'sha256:old',
-      });
-
-      const result = await detectUpdate('img-1', 'v1.0', null, []);
-
-      expect(result.hasUpdate).toBe(true);
-      expect(result.latestTag).toBe('v2.0');
-    });
-
-    it('detects rolling tag update via digest comparison', async () => {
-      mockPrisma.containerImage.findUnique.mockResolvedValue({ id: 'img-1' });
-      mockPrisma.containerImage.update.mockResolvedValue({});
-
-      vi.mocked(findLatestInFamily).mockReturnValue({
-        latestTag: { tag: 'latest', digest: 'sha256:new-digest', lastUpdated: new Date() },
-        currentDigest: null,
-      });
-
-      const result = await detectUpdate('img-1', 'latest', 'sha256:old-digest', []);
-      expect(result.hasUpdate).toBe(true);
-    });
-
-    it('no update when digest matches', async () => {
-      mockPrisma.containerImage.findUnique.mockResolvedValue({ id: 'img-1' });
-      mockPrisma.containerImage.update.mockResolvedValue({});
-
-      vi.mocked(findLatestInFamily).mockReturnValue({
-        latestTag: { tag: 'latest', digest: 'sha256:same', lastUpdated: new Date() },
-        currentDigest: null,
-      });
-
-      const result = await detectUpdate('img-1', 'latest', 'sha256:same', []);
-      expect(result.hasUpdate).toBe(false);
-    });
-
-    it('returns no update when no latest tag found', async () => {
-      mockPrisma.containerImage.findUnique.mockResolvedValue({ id: 'img-1' });
-      mockPrisma.containerImage.update.mockResolvedValue({});
-
-      vi.mocked(findLatestInFamily).mockReturnValue({
-        latestTag: null,
-        currentDigest: null,
-      });
-
-      const result = await detectUpdate('img-1', 'v1.0', null, []);
-      expect(result.hasUpdate).toBe(false);
-      expect(result.latestTag).toBeNull();
-    });
-
-    it('uses companion tag for rolling tags', async () => {
-      mockPrisma.containerImage.findUnique.mockResolvedValue({ id: 'img-1' });
-      mockPrisma.containerImage.update.mockResolvedValue({});
-
-      vi.mocked(findLatestInFamily).mockReturnValue({
-        latestTag: { tag: 'latest', digest: 'sha256:new', lastUpdated: new Date() },
-        currentDigest: null,
-      });
-      vi.mocked(findCompanionTag).mockReturnValue('20260224-abc1234');
-
-      const result = await detectUpdate('img-1', 'latest', 'sha256:old', []);
-      expect(result.latestTag).toBe('20260224-abc1234');
-    });
-  });
-
-  describe('linkServiceToContainerImage', () => {
-    it('links service and syncs image tag', async () => {
+  describe('syncDigestsFromRegistry', () => {
+    it('creates new digests and sets updateAvailable', async () => {
       mockPrisma.containerImage.findUniqueOrThrow.mockResolvedValue({
         id: 'img-1',
-        imageName: 'test/app',
-        currentTag: 'v2.0',
-      });
-      mockPrisma.service.update.mockResolvedValue({
-        id: 'svc-1',
-        containerImageId: 'img-1',
-        imageTag: 'v2.0',
+        tagFilter: 'latest',
+        services: [{ imageDigestId: null }],
       });
 
-      const updated = await linkServiceToContainerImage('img-1', 'svc-1');
+      vi.mocked(matchesTagFilter).mockReturnValue(true);
 
-      expect(updated.containerImageId).toBe('img-1');
-      expect(updated.imageTag).toBe('v2.0');
+      mockPrisma.imageDigest.findUnique.mockResolvedValue(null);
+      mockPrisma.imageDigest.create.mockResolvedValue({ id: 'new-digest' });
+      mockPrisma.imageDigest.findFirst.mockResolvedValue({ id: 'new-digest' });
+      mockPrisma.containerImage.update.mockResolvedValue({});
+
+      const result = await syncDigestsFromRegistry('img-1', [
+        { tag: 'latest', digest: 'sha256:abc123', size: 100, updatedAt: '2025-01-01T00:00:00Z' },
+      ]);
+
+      expect(result.newDigests).toBe(1);
+      expect(result.hasUpdate).toBe(true);
+      expect(mockPrisma.imageDigest.create).toHaveBeenCalled();
+    });
+
+    it('updates tags on existing digest', async () => {
+      mockPrisma.containerImage.findUniqueOrThrow.mockResolvedValue({
+        id: 'img-1',
+        tagFilter: 'latest',
+        services: [{ imageDigestId: 'existing-digest' }],
+      });
+
+      vi.mocked(matchesTagFilter).mockReturnValue(true);
+
+      mockPrisma.imageDigest.findUnique.mockResolvedValue({
+        id: 'existing-digest',
+        tags: '["latest"]',
+      });
+      mockPrisma.imageDigest.update.mockResolvedValue({});
+      mockPrisma.imageDigest.findFirst.mockResolvedValue({ id: 'existing-digest' });
+      mockPrisma.containerImage.update.mockResolvedValue({});
+
+      const result = await syncDigestsFromRegistry('img-1', [
+        { tag: 'latest', digest: 'sha256:abc123', size: 100, updatedAt: '2025-01-01T00:00:00Z' },
+        { tag: 'v1.0', digest: 'sha256:abc123', size: 100, updatedAt: '2025-01-01T00:00:00Z' },
+      ]);
+
+      expect(result.updatedDigests).toBe(1);
+      expect(mockPrisma.imageDigest.update).toHaveBeenCalledWith({
+        where: { id: 'existing-digest' },
+        data: { tags: JSON.stringify(['latest', 'v1.0']) },
+      });
+    });
+
+    it('skips tags not matching filter', async () => {
+      mockPrisma.containerImage.findUniqueOrThrow.mockResolvedValue({
+        id: 'img-1',
+        tagFilter: 'v*',
+        services: [],
+      });
+
+      vi.mocked(matchesTagFilter).mockReturnValue(false);
+
+      mockPrisma.imageDigest.findFirst.mockResolvedValue(null);
+      mockPrisma.containerImage.update.mockResolvedValue({});
+
+      const result = await syncDigestsFromRegistry('img-1', [
+        { tag: 'nightly', digest: 'sha256:xyz', size: 100, updatedAt: '2025-01-01T00:00:00Z' },
+      ]);
+
+      expect(result.newDigests).toBe(0);
+      expect(mockPrisma.imageDigest.create).not.toHaveBeenCalled();
     });
   });
 });

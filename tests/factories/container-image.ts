@@ -1,5 +1,5 @@
 /**
- * ContainerImage factory for tests.
+ * ContainerImage and ImageDigest factories for tests.
  */
 import { PrismaClient } from '@prisma/client';
 
@@ -12,8 +12,7 @@ export interface CreateTestContainerImageOptions {
   name?: string;
   environmentId: string;
   imageName?: string;
-  currentTag?: string;
-  latestTag?: string;
+  tagFilter?: string;
   autoUpdate?: boolean;
   registryConnectionId?: string;
 }
@@ -27,11 +26,34 @@ export async function createTestContainerImage(
     data: {
       name: options.name ?? `Test Image ${n}`,
       imageName: options.imageName ?? `registry.example.com/test-image-${n}`,
-      currentTag: options.currentTag ?? 'latest',
-      latestTag: options.latestTag,
+      tagFilter: options.tagFilter ?? 'latest',
       autoUpdate: options.autoUpdate ?? false,
       environmentId: options.environmentId,
       registryConnectionId: options.registryConnectionId,
+    },
+  });
+}
+
+export interface CreateTestImageDigestOptions {
+  containerImageId: string;
+  manifestDigest?: string;
+  tags?: string[];
+  size?: bigint;
+  pushedAt?: Date;
+}
+
+export async function createTestImageDigest(
+  prisma: PrismaClient,
+  options: CreateTestImageDigestOptions
+) {
+  const n = nextId();
+  return prisma.imageDigest.create({
+    data: {
+      containerImageId: options.containerImageId,
+      manifestDigest: options.manifestDigest ?? `sha256:${n.toString().padStart(64, 'a')}`,
+      tags: JSON.stringify(options.tags ?? ['latest']),
+      size: options.size,
+      pushedAt: options.pushedAt,
     },
   });
 }

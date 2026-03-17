@@ -202,6 +202,36 @@ Key patterns (API routes, RBAC, DB access, encryption, metrics, orchestration, n
 
 > **Full reference**: [`docs/development/architecture.md`](docs/development/architecture.md)
 
+## Code Conventions
+
+### Shared Helpers (`src/lib/helpers.ts`)
+
+Use these instead of reimplementing:
+- `safeJsonParse(json, defaultValue)` — null-safe JSON.parse with fallback, never throws
+- `getErrorMessage(error, defaultMessage)` — extract message from unknown error values
+- `parsePaginationQuery(query, defaults)` — parse limit/offset from Fastify query params
+
+### Tag Filter Utilities (`src/lib/image-utils.ts`)
+
+- `parseTagFilter(tagFilter)` — split comma-separated glob patterns
+- `matchesTagFilter(tag, patterns)` — glob match a tag against patterns
+- `getBestTag(tags, patterns)` — pick best display tag from a list
+- `getDefaultTag(tagFilter)` — first pattern from tagFilter (fallback tag)
+- `formatDigestShort(digest)` — first 12 chars of SHA digest
+
+### Backend Patterns
+
+- **Batch DB writes**: Use `createMany()` instead of looping with individual `create()` calls
+- **Narrow includes**: When loading relations, `select` only the fields you need (don't load full Server objects just for `name`)
+- **Parallel queries**: Independent DB queries should use `Promise.all()`, not sequential awaits
+- **Cleanup functions**: Retention-based cleanup belongs in the service layer (e.g., `cleanupOldImageDigests()`), called from the scheduler
+
+### Frontend Patterns
+
+- **Memoize chart data**: Wrap `prepareChartData()` calls in `useMemo` — monitoring pages auto-refresh every 30s
+- **Separate effects by dependency**: Don't refetch environment-wide data on pagination changes
+- **Cap unbounded stores**: `breadcrumbNames` capped at 200 entries to prevent memory growth
+
 ## Important Notes
 
 - BridgePort is a **generic, vendor-neutral tool** - do not add code tied to any specific company or hosting provider

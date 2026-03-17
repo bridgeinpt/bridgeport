@@ -9,31 +9,34 @@ import {
   listContainerImages,
   linkServiceToContainerImage,
   getTagHistory,
-  detectUpdate,
+  syncDigestsFromRegistry,
+  listImageDigests,
+  getImageDigest,
   listImageTags,
 } from '../services/image-management.js';
 import { buildDeploymentPlan, executePlan } from '../services/orchestration.js';
 import { logAudit } from '../services/audit.js';
 import { RegistryFactory } from '../lib/registry.js';
 import { getRegistryCredentials } from '../services/registries.js';
-import { extractRepoName } from '../lib/image-utils.js';
+import { extractRepoName, parseTagFilter, getBestTag, getDefaultTag } from '../lib/image-utils.js';
 
 const createContainerImageSchema = z.object({
   name: z.string().min(1),
   imageName: z.string().min(1),
-  currentTag: z.string().min(1),
+  tagFilter: z.string().min(1).default('latest'),
   registryConnectionId: z.string().nullable().optional(),
 });
 
 const updateContainerImageSchema = z.object({
   name: z.string().min(1).optional(),
-  currentTag: z.string().min(1).optional(),
+  tagFilter: z.string().min(1).optional(),
   registryConnectionId: z.string().nullable().optional(),
   autoUpdate: z.boolean().optional(),
 });
 
 const deployImageSchema = z.object({
-  imageTag: z.string().min(1),
+  imageTag: z.string().min(1).optional(),
+  imageDigestId: z.string().optional(),
   autoRollback: z.boolean().default(true),
 });
 
@@ -51,10 +54,30 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
       });
 
       const images = result.images.map((image) => {
-        const { tagHistory, ...rest } = image as typeof image & { tagHistory?: { deployedAt: Date }[] };
+        const { tagHistory, digests, ...rest } = image as typeof image & {
+          tagHistory?: { deployedAt: Date }[];
+          digests?: Array<{ id: string; manifestDigest: string; tags: string; discoveredAt: Date }>;
+        };
+
+        // Compute bestTag from latest digest
+        const latestDigest = digests?.[0];
+        let bestTag: string | null = null;
+        if (latestDigest) {
+          const tags = JSON.parse(latestDigest.tags) as string[];
+          const patterns = parseTagFilter(rest.tagFilter);
+          bestTag = getBestTag(tags, patterns);
+        }
+
         return {
           ...rest,
           lastDeployedAt: tagHistory?.[0]?.deployedAt ?? null,
+          latestDigest: latestDigest ? {
+            id: latestDigest.id,
+            manifestDigest: latestDigest.manifestDigest,
+            tags: JSON.parse(latestDigest.tags),
+            discoveredAt: latestDigest.discoveredAt,
+          } : null,
+          bestTag,
         };
       });
 
@@ -86,7 +109,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
           resourceType: 'container_image',
           resourceId: image.id,
           resourceName: image.name,
-          details: { imageName: image.imageName, currentTag: image.currentTag },
+          details: { imageName: image.imageName, tagFilter: image.tagFilter },
           userId: request.authUser!.id,
           environmentId: envId,
         });
@@ -201,6 +224,11 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
         return reply.code(400).send({ error: 'Invalid input', details: body.error.issues });
       }
 
+      // Must provide either imageTag or imageDigestId
+      if (!body.data.imageTag && !body.data.imageDigestId) {
+        return reply.code(400).send({ error: 'Either imageTag or imageDigestId must be provided' });
+      }
+
       const image = await getContainerImage(id);
       if (!image) {
         return reply.code(404).send({ error: 'Container image not found' });
@@ -210,12 +238,24 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
         return reply.code(400).send({ error: 'No services linked to this image' });
       }
 
+      // Resolve tag from digest if needed
+      let imageTag = body.data.imageTag;
+      if (!imageTag && body.data.imageDigestId) {
+        const digest = await getImageDigest(body.data.imageDigestId);
+        if (!digest) {
+          return reply.code(404).send({ error: 'Image digest not found' });
+        }
+        const digestTags = JSON.parse(digest.tags) as string[];
+        const patterns = parseTagFilter(image.tagFilter);
+        imageTag = getBestTag(digestTags, patterns) || digestTags[0] || getDefaultTag(image.tagFilter);
+      }
+
       try {
         // Build and start the deployment plan
         const plan = await buildDeploymentPlan({
           environmentId: image.environmentId,
           containerImageId: id,
-          imageTag: body.data.imageTag,
+          imageTag: imageTag!,
           triggerType: 'manual',
           triggeredBy: request.authUser!.email,
           userId: request.authUser!.id,
@@ -228,7 +268,8 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
           resourceId: id,
           resourceName: image.name,
           details: {
-            imageTag: body.data.imageTag,
+            imageTag,
+            imageDigestId: body.data.imageDigestId,
             planId: plan.id,
             serviceCount: image.services.length,
           },
@@ -267,7 +308,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
     }
   );
 
-  // List tags from registry for a container image
+  // List tags from registry for a container image (browse mode - unfiltered)
   fastify.get(
     '/api/container-images/:id/tags',
     { preHandler: [fastify.authenticate] },
@@ -290,7 +331,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
     }
   );
 
-  // Check for updates from registry
+  // Check for updates from registry (triggers digest sync)
   fastify.post(
     '/api/container-images/:id/check-updates',
     { preHandler: [fastify.authenticate] },
@@ -318,36 +359,70 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
       try {
         const client = RegistryFactory.create(creds);
         const repoName = extractRepoName(image.imageName, creds.repositoryPrefix);
-
-        // Get all tags and run shared update detection
         const allTags = await client.listTags(repoName);
-        const result = await detectUpdate(
-          image.id,
-          image.currentTag,
-          image.deployedDigest,
-          allTags
-        );
 
-        if (!result.latestTag) {
-          return {
-            hasUpdate: false,
-            currentTag: image.currentTag,
-            latestTag: null,
-            message: 'Could not determine latest tag from registry',
-          };
-        }
+        const result = await syncDigestsFromRegistry(image.id, allTags);
+
+        // Get the newest digest for display
+        const { digests } = await listImageDigests(image.id, { limit: 1 });
+        const newest = digests[0];
 
         return {
           hasUpdate: result.hasUpdate,
-          currentTag: image.currentTag,
-          latestTag: result.latestTag,
-          latestDigest: result.latestDigest,
+          tagFilter: image.tagFilter,
+          newestDigest: newest ? {
+            id: newest.id,
+            manifestDigest: newest.manifestDigest,
+            bestTag: newest.bestTag,
+            tags: JSON.parse(newest.tags),
+            discoveredAt: newest.discoveredAt,
+          } : null,
+          newDigests: result.newDigests,
+          updatedDigests: result.updatedDigests,
           lastCheckedAt: new Date().toISOString(),
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Failed to check for updates';
         return reply.code(500).send({ error: message });
       }
+    }
+  );
+
+  // List digests for a container image (paginated)
+  fastify.get(
+    '/api/container-images/:id/digests',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const { limit, offset } = request.query as { limit?: string; offset?: string };
+
+      const image = await prisma.containerImage.findUnique({ where: { id } });
+      if (!image) {
+        return reply.code(404).send({ error: 'Container image not found' });
+      }
+
+      const result = await listImageDigests(id, {
+        limit: limit ? parseInt(limit) : 20,
+        offset: offset ? parseInt(offset) : 0,
+      });
+
+      return result;
+    }
+  );
+
+  // Get a single digest detail
+  fastify.get(
+    '/api/container-images/:id/digests/:digestId',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { digestId } = request.params as { id: string; digestId: string };
+
+      const digest = await getImageDigest(digestId);
+      if (!digest) {
+        return reply.code(404).send({ error: 'Image digest not found' });
+      }
+
+      return { digest };
     }
   );
 

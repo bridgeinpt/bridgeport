@@ -29,7 +29,7 @@ export async function createNotificationStormScenario(prisma: PrismaClient) {
   const image = await createTestContainerImage(prisma, {
     name: 'Unstable App',
     imageName: 'registry.example.com/unstable',
-    currentTag: 'v1.0.0',
+    tagFilter: 'v1.0.0',
     environmentId: env.id,
   });
 

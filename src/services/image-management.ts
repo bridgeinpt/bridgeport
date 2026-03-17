@@ -1,23 +1,20 @@
 import { prisma } from '../lib/db.js';
 import type { ContainerImage, ContainerImageHistory, Service } from '@prisma/client';
 import { RegistryFactory, type RegistryTag } from '../lib/registry.js';
-import { findLatestInFamily, findCompanionTag, extractRepoName } from '../lib/image-utils.js';
+import { extractRepoName, parseTagFilter, getBestTag, getDefaultTag, matchesTagFilter } from '../lib/image-utils.js';
 import { getRegistryCredentials } from './registries.js';
 
 export interface CreateContainerImageInput {
   name: string;
   imageName: string;
-  currentTag: string;
+  tagFilter?: string;
   environmentId: string;
   registryConnectionId?: string | null;
 }
 
 export interface UpdateContainerImageInput {
   name?: string;
-  currentTag?: string;
-  latestTag?: string;
-  latestDigest?: string;
-  deployedDigest?: string | null;
+  tagFilter?: string;
   lastCheckedAt?: Date;
   registryConnectionId?: string | null;
   autoUpdate?: boolean;
@@ -33,7 +30,7 @@ export async function createContainerImage(
     data: {
       name: input.name,
       imageName: input.imageName,
-      currentTag: input.currentTag,
+      tagFilter: input.tagFilter ?? 'latest',
       environmentId: input.environmentId,
       registryConnectionId: input.registryConnectionId,
     },
@@ -75,7 +72,7 @@ export async function deleteContainerImage(id: string): Promise<void> {
 }
 
 /**
- * Get a container image with its services
+ * Get a container image with its services and recent digests
  */
 export async function getContainerImage(id: string): Promise<ContainerImage & { services: Service[] } | null> {
   return prisma.containerImage.findUnique({
@@ -83,10 +80,14 @@ export async function getContainerImage(id: string): Promise<ContainerImage & { 
     include: {
       services: {
         include: {
-          server: true,
+          server: { select: { id: true, name: true, hostname: true, environmentId: true } },
         },
       },
       registryConnection: true,
+      digests: {
+        orderBy: { discoveredAt: 'desc' },
+        take: 20,
+      },
     },
   });
 }
@@ -117,6 +118,10 @@ export async function listContainerImages(
           take: 1,
           select: { deployedAt: true },
         },
+        digests: {
+          orderBy: { discoveredAt: 'desc' },
+          take: 1,
+        },
       },
       orderBy: { name: 'asc' },
       take: limit,
@@ -130,7 +135,7 @@ export async function listContainerImages(
 
 /**
  * Link a service to a container image
- * Only updates the containerImageId and syncs the imageTag
+ * Only updates the containerImageId and syncs the imageTag/imageDigestId
  */
 export async function linkServiceToContainerImage(
   containerImageId: string,
@@ -140,12 +145,25 @@ export async function linkServiceToContainerImage(
     where: { id: containerImageId },
   });
 
-  // Update the service's containerImageId and sync imageTag
+  const latestDigest = await prisma.imageDigest.findFirst({
+    where: { containerImageId },
+    orderBy: { discoveredAt: 'desc' },
+  });
+
+  const tagFilterPatterns = parseTagFilter(containerImage.tagFilter);
+  let bestTag = getDefaultTag(containerImage.tagFilter);
+
+  if (latestDigest) {
+    const digestTags = JSON.parse(latestDigest.tags) as string[];
+    bestTag = getBestTag(digestTags, tagFilterPatterns) || bestTag;
+  }
+
   return prisma.service.update({
     where: { id: serviceId },
     data: {
       containerImageId,
-      imageTag: containerImage.currentTag,
+      imageTag: bestTag,
+      imageDigestId: latestDigest?.id ?? null,
     },
   });
 }
@@ -158,34 +176,25 @@ export async function recordTagDeployment(
   tag: string,
   digest?: string,
   deployedBy?: string,
-  status: 'success' | 'failed' | 'rolled_back' = 'success'
+  status: 'success' | 'failed' | 'rolled_back' = 'success',
+  imageDigestId?: string
 ): Promise<ContainerImageHistory> {
-  // Only update the container image's current tag on success
   if (status === 'success') {
-    // Resolve the deployed digest: use provided digest, or fall back to latestDigest
-    // if we're deploying the same tag that was just checked
-    let resolvedDigest = digest;
-    if (!resolvedDigest) {
-      const image = await prisma.containerImage.findUnique({
-        where: { id: containerImageId },
-        select: { latestTag: true, latestDigest: true },
-      });
-      if (image?.latestDigest && image.latestTag === tag) {
-        resolvedDigest = image.latestDigest;
-      }
-    }
-
+    // Update container image - just clear updateAvailable
     await prisma.containerImage.update({
       where: { id: containerImageId },
-      data: {
-        currentTag: tag,
-        updateAvailable: false,
-        ...(resolvedDigest ? { deployedDigest: resolvedDigest } : {}),
-      },
+      data: { updateAvailable: false },
     });
+
+    // Update all linked services' imageDigestId
+    if (imageDigestId) {
+      await prisma.service.updateMany({
+        where: { containerImageId },
+        data: { imageDigestId },
+      });
+    }
   }
 
-  // Create history record
   return prisma.containerImageHistory.create({
     data: {
       containerImageId,
@@ -193,6 +202,7 @@ export async function recordTagDeployment(
       digest,
       deployedBy,
       status,
+      imageDigestId,
     },
   });
 }
@@ -370,7 +380,7 @@ export async function findOrCreateContainerImage(
     data: {
       name: displayName,
       imageName,
-      currentTag: imageTag,
+      tagFilter: imageTag,
       environmentId,
       registryConnectionId,
     },
@@ -378,91 +388,187 @@ export async function findOrCreateContainerImage(
 }
 
 /**
- * Shared update detection logic for container images.
- * Handles both version tags (tag name changes) and rolling tags (digest comparison).
- * Also discovers companion tags for rolling tags.
+ * Sync digest information from registry tags into ImageDigest records.
+ * Filters tags by the image's tagFilter, groups by digest, and upserts records.
+ * Returns whether there's an update available (newest digest not deployed).
  */
-export interface DetectUpdateResult {
+export interface SyncDigestsResult {
+  newDigests: number;
+  updatedDigests: number;
   hasUpdate: boolean;
-  latestTag: string | null;
-  latestDigest: string | null;
 }
 
-export async function detectUpdate(
+export async function syncDigestsFromRegistry(
   imageId: string,
-  currentTag: string,
-  deployedDigest: string | null,
-  allTags: RegistryTag[]
-): Promise<DetectUpdateResult> {
-  const { latestTag, currentDigest } = findLatestInFamily(allTags, currentTag);
+  registryTags: RegistryTag[]
+): Promise<SyncDigestsResult> {
+  const image = await prisma.containerImage.findUniqueOrThrow({
+    where: { id: imageId },
+    include: {
+      services: { select: { imageDigestId: true } },
+    },
+  });
 
-  if (!latestTag) {
-    return { hasUpdate: false, latestTag: null, latestDigest: null };
-  }
+  const patterns = parseTagFilter(image.tagFilter);
 
-  let hasUpdate = false;
-  let resolvedLatestTag = latestTag.tag;
+  // Filter registry tags by the tag filter patterns
+  const matchingTags = registryTags.filter(
+    (t) => matchesTagFilter(t.tag, patterns)
+  );
 
-  if (latestTag.tag !== currentTag) {
-    // Different tag name (version upgrade)
-    if (!latestTag.digest || !currentDigest) {
-      // Can't compare digests — if tag name is newer, assume update
-      hasUpdate = true;
-    } else {
-      hasUpdate = currentDigest !== latestTag.digest;
-    }
-  } else {
-    // Same tag name (rolling tag like "latest"): compare digests
-    if (!latestTag.digest) {
-      // Registry didn't return a digest — can't determine update status
-      // Don't false-positive (was causing perpetual "latest available" badges)
-      hasUpdate = false;
-    } else if (deployedDigest) {
-      hasUpdate = latestTag.digest !== deployedDigest;
-    } else {
-      // No deployedDigest yet — check history for the last successful deploy's digest
-      const lastSuccessful = await prisma.containerImageHistory.findFirst({
-        where: { containerImageId: imageId, status: 'success' },
-        orderBy: { deployedAt: 'desc' },
-        select: { digest: true },
-      });
-
-      if (lastSuccessful?.digest) {
-        // History has a digest — compare it to the registry
-        hasUpdate = latestTag.digest !== lastSuccessful.digest;
-      } else {
-        // No history digest at all — can't determine, don't false-positive
-        hasUpdate = false;
+  // Group matching tags by digest
+  const byDigest = new Map<string, { tags: string[]; size?: number; updatedAt: string }>();
+  for (const t of matchingTags) {
+    if (!t.digest) continue;
+    const existing = byDigest.get(t.digest);
+    if (existing) {
+      existing.tags.push(t.tag);
+      // Keep the latest updatedAt
+      if (t.updatedAt > existing.updatedAt) {
+        existing.updatedAt = t.updatedAt;
+        if (t.size) existing.size = t.size;
       }
+    } else {
+      byDigest.set(t.digest, {
+        tags: [t.tag],
+        size: t.size,
+        updatedAt: t.updatedAt,
+      });
     }
   }
 
-  // For rolling tags, try to find a companion tag (e.g., "latest" → "20260223-30a4f0b")
-  if (latestTag.digest) {
-    const companion = findCompanionTag(allTags, latestTag.tag, latestTag.digest);
-    if (companion) {
-      resolvedLatestTag = companion;
+  let newDigests = 0;
+  let updatedDigests = 0;
+
+  // Upsert ImageDigest records
+  for (const [digest, info] of byDigest) {
+    const existing = await prisma.imageDigest.findUnique({
+      where: {
+        containerImageId_manifestDigest: {
+          containerImageId: imageId,
+          manifestDigest: digest,
+        },
+      },
+    });
+
+    if (existing) {
+      // Update tags if changed
+      const existingTags = JSON.parse(existing.tags) as string[];
+      const tagsChanged = JSON.stringify(existingTags.sort()) !== JSON.stringify(info.tags.sort());
+      if (tagsChanged) {
+        await prisma.imageDigest.update({
+          where: { id: existing.id },
+          data: { tags: JSON.stringify(info.tags) },
+        });
+        updatedDigests++;
+      }
+    } else {
+      await prisma.imageDigest.create({
+        data: {
+          containerImageId: imageId,
+          manifestDigest: digest,
+          tags: JSON.stringify(info.tags),
+          size: info.size ? BigInt(info.size) : null,
+          pushedAt: new Date(info.updatedAt),
+        },
+      });
+      newDigests++;
     }
   }
 
-  // Update the containerImage with latest available info
-  const updateData: Record<string, unknown> = {
-    latestTag: resolvedLatestTag,
-    latestDigest: latestTag.digest,
-    lastCheckedAt: new Date(),
-    updateAvailable: hasUpdate,
-  };
+  // Determine if there's an update available
+  // Get the most recently discovered digest
+  const newestDigest = await prisma.imageDigest.findFirst({
+    where: { containerImageId: imageId },
+    orderBy: { discoveredAt: 'desc' },
+  });
+
+  // Get the deployed digest IDs from linked services
+  const deployedDigestIds = new Set(
+    image.services
+      .map((s) => s.imageDigestId)
+      .filter((id): id is string => id !== null)
+  );
+
+  // There's an update if there are new digests AND the newest isn't deployed
+  const hasUpdate = newestDigest !== null && !deployedDigestIds.has(newestDigest.id);
 
   await prisma.containerImage.update({
     where: { id: imageId },
-    data: updateData,
+    data: {
+      lastCheckedAt: new Date(),
+      updateAvailable: hasUpdate,
+    },
   });
 
-  return {
-    hasUpdate,
-    latestTag: resolvedLatestTag,
-    latestDigest: latestTag.digest ?? null,
-  };
+  return { newDigests, updatedDigests, hasUpdate };
+}
+
+/**
+ * List digests for a container image with pagination and bestTag computation.
+ */
+export async function listImageDigests(
+  imageId: string,
+  options?: { limit?: number; offset?: number }
+): Promise<{ digests: any[]; total: number }> {
+  const limit = options?.limit ?? 20;
+  const offset = options?.offset ?? 0;
+  const where = { containerImageId: imageId };
+
+  const [digests, total, image] = await Promise.all([
+    prisma.imageDigest.findMany({
+      where,
+      orderBy: { discoveredAt: 'desc' },
+      take: limit,
+      skip: offset,
+    }),
+    prisma.imageDigest.count({ where }),
+    prisma.containerImage.findUnique({
+      where: { id: imageId },
+      select: { tagFilter: true },
+    }),
+  ]);
+
+  const patterns = image ? parseTagFilter(image.tagFilter) : [];
+
+  const digestsWithBestTag = digests.map((d) => {
+    const tags = JSON.parse(d.tags) as string[];
+    return {
+      ...d,
+      size: d.size !== null ? Number(d.size) : null,
+      bestTag: getBestTag(tags, patterns),
+    };
+  });
+
+  return { digests: digestsWithBestTag, total };
+}
+
+/**
+ * Get a single image digest with its linked services and parent image info.
+ */
+/**
+ * Clean up old ImageDigest records not referenced by any Service or History.
+ */
+export async function cleanupOldImageDigests(retentionDays: number = 90): Promise<number> {
+  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+  const deleted = await prisma.imageDigest.deleteMany({
+    where: {
+      discoveredAt: { lt: cutoff },
+      services: { none: {} },
+      historyEntries: { none: {} },
+    },
+  });
+  return deleted.count;
+}
+
+export async function getImageDigest(digestId: string) {
+  return prisma.imageDigest.findUnique({
+    where: { id: digestId },
+    include: {
+      services: { select: { id: true, name: true } },
+      containerImage: { select: { id: true, tagFilter: true } },
+    },
+  });
 }
 
 /**
@@ -471,7 +577,7 @@ export async function detectUpdate(
  */
 export async function listImageTags(
   imageId: string
-): Promise<{ tags: RegistryTag[]; currentTag: string; deployedDigest: string | null }> {
+): Promise<{ tags: RegistryTag[]; tagFilter: string }> {
   const image = await prisma.containerImage.findUnique({
     where: { id: imageId },
     include: { registryConnection: true },
@@ -496,7 +602,6 @@ export async function listImageTags(
 
   return {
     tags,
-    currentTag: image.currentTag,
-    deployedDigest: image.deployedDigest,
+    tagFilter: image.tagFilter,
   };
 }

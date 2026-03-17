@@ -598,13 +598,13 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         };
 
         // Check for available image updates (uses containerImage.registryConnectionId)
-        let updateInfo: { hasUpdate: boolean; latestTag?: string } | null = null;
+        let updateInfo: { hasUpdate: boolean; bestTag?: string } | null = null;
         try {
           const updateResult = await checkServiceUpdate(id);
           if (!updateResult.error) {
             updateInfo = {
               hasUpdate: updateResult.hasUpdate,
-              latestTag: updateResult.latestTag,
+              bestTag: updateResult.bestTag,
             };
           }
         } catch (err) {
@@ -769,17 +769,16 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
       const updatedContainerImage = await prisma.containerImage.findUnique({
         where: { id: service.containerImageId },
         select: {
-          latestTag: true,
-          latestDigest: true,
           lastCheckedAt: true,
+          updateAvailable: true,
         },
       });
 
       return {
         hasUpdate: result.hasUpdate,
         currentTag: service.imageTag,
-        latestTag: result.latestTag,
-        latestDigest: result.latestDigest,
+        bestTag: result.bestTag,
+        newestDigestId: result.newestDigestId,
         lastUpdateCheckAt: updatedContainerImage?.lastCheckedAt,
       };
     }

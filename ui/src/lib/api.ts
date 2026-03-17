@@ -1035,8 +1035,8 @@ export const listRegistryTags = (id: string, repo: string) =>
 export interface UpdateCheckResult {
   hasUpdate: boolean;
   currentTag: string;
-  latestTag?: string;
-  latestDigest?: string;
+  bestTag?: string;
+  newestDigestId?: string;
   lastUpdateCheckAt?: string;
   error?: string;
 }
@@ -1520,10 +1520,7 @@ export interface ContainerImage {
   id: string;
   name: string;
   imageName: string;
-  currentTag: string;
-  latestTag: string | null;
-  latestDigest: string | null;
-  deployedDigest: string | null;
+  tagFilter: string;
   lastCheckedAt: string | null;
   updateAvailable: boolean;
   autoUpdate: boolean;
@@ -1534,12 +1531,27 @@ export interface ContainerImage {
   registryConnection?: RegistryConnection | null;
   services: Service[];
   lastDeployedAt: string | null;
+  // Computed from latest digest
+  bestTag?: string | null;
+  latestDigest?: ImageDigest | null;
+}
+
+export interface ImageDigest {
+  id: string;
+  manifestDigest: string;
+  configDigest?: string | null;
+  tags: string[];
+  size?: number | null;
+  pushedAt?: string | null;
+  discoveredAt: string;
+  updatedAt?: string;
+  bestTag?: string | null;
 }
 
 export interface ContainerImageInput {
   name: string;
   imageName: string;
-  currentTag: string;
+  tagFilter: string;
   registryConnectionId?: string | null;
 }
 
@@ -1578,8 +1590,8 @@ export const updateContainerImage = (id: string, data: Partial<ContainerImageInp
 export const deleteContainerImage = (id: string) =>
   api.delete<{ success: boolean }>(`/container-images/${id}`);
 
-export const deployContainerImage = (id: string, imageTag: string, autoRollback = true) =>
-  api.post<{ plan: DeploymentPlan }>(`/container-images/${id}/deploy`, { imageTag, autoRollback });
+export const deployContainerImage = (id: string, options: { imageTag?: string; imageDigestId?: string; autoRollback?: boolean }) =>
+  api.post<{ plan: DeploymentPlan }>(`/container-images/${id}/deploy`, options);
 
 export const getContainerImageHistory = (id: string, limit?: number) =>
   api.get<{ history: ContainerImageHistory[] }>(`/container-images/${id}/history${limit ? `?limit=${limit}` : ''}`);
@@ -2262,16 +2274,17 @@ export const getAgentEvents = (serverId: string, limit?: number) =>
 
 export interface ContainerImageUpdateInput {
   name?: string;
-  currentTag?: string;
+  tagFilter?: string;
   registryConnectionId?: string | null;
   autoUpdate?: boolean;
 }
 
 export interface ImageUpdateCheckResult {
   hasUpdate: boolean;
-  currentTag: string;
-  latestTag: string | null;
-  latestDigest: string | null;
+  tagFilter: string;
+  newestDigest: ImageDigest | null;
+  newDigests: number;
+  updatedDigests: number;
   lastCheckedAt: string;
 }
 
@@ -2291,7 +2304,18 @@ export const getEnhancedContainerImageHistory = (id: string, limit?: number) =>
   api.get<{ history: EnhancedContainerImageHistory[] }>(`/container-images/${id}/history${limit ? `?limit=${limit}` : ''}`);
 
 export const getContainerImageTags = (id: string) =>
-  api.get<{ tags: RegistryTag[]; currentTag: string; deployedDigest: string | null }>(`/container-images/${id}/tags`);
+  api.get<{ tags: RegistryTag[]; tagFilter: string }>(`/container-images/${id}/tags`);
+
+export const listContainerImageDigests = (imageId: string, options?: { limit?: number; offset?: number }) => {
+  const params = new URLSearchParams();
+  if (options?.limit) params.append('limit', options.limit.toString());
+  if (options?.offset) params.append('offset', options.offset.toString());
+  const query = params.toString();
+  return api.get<{ digests: ImageDigest[]; total: number }>(`/container-images/${imageId}/digests${query ? `?${query}` : ''}`);
+};
+
+export const getContainerImageDigest = (imageId: string, digestId: string) =>
+  api.get<{ digest: ImageDigest }>(`/container-images/${imageId}/digests/${digestId}`);
 
 // ==================== Slack Integration ====================
 

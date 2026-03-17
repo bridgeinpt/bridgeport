@@ -538,7 +538,7 @@ export async function importFromTerraform(
             data: {
               name,
               imageName: serviceData.image_name,
-              currentTag: serviceData.image_tag ?? 'latest',
+              tagFilter: serviceData.image_tag ?? 'latest',
               environmentId,
             },
           });

@@ -82,7 +82,7 @@ function createMockServiceData() {
     containerImage: {
       id: 'img-1',
       imageName: 'registry.com/web-app',
-      currentTag: 'v1.0',
+      tagFilter: 'v1.0',
     },
   };
 }

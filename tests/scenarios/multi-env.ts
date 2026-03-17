@@ -27,7 +27,7 @@ export async function createMultiEnvScenario(prisma: PrismaClient) {
   const stagingImage = await createTestContainerImage(prisma, {
     name: 'App Staging',
     imageName: 'registry.example.com/myapp',
-    currentTag: 'v1.1.0',
+    tagFilter: 'v1.1.0',
     environmentId: staging.id,
   });
   const stagingService = await createTestService(prisma, {
@@ -48,7 +48,7 @@ export async function createMultiEnvScenario(prisma: PrismaClient) {
   const prodImage = await createTestContainerImage(prisma, {
     name: 'App Production',
     imageName: 'registry.example.com/myapp',
-    currentTag: 'v1.0.0',
+    tagFilter: 'v1.0.0',
     environmentId: production.id,
   });
   const prodService = await createTestService(prisma, {

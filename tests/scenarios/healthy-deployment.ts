@@ -29,7 +29,7 @@ export async function createHealthyDeploymentScenario(prisma: PrismaClient) {
   const image = await createTestContainerImage(prisma, {
     name: 'My App',
     imageName: 'registry.example.com/myapp',
-    currentTag: 'v1.0.0',
+    tagFilter: 'v1.0.0',
     environmentId: env.id,
   });
 

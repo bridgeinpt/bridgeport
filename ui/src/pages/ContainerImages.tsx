@@ -63,8 +63,6 @@ export default function ContainerImages() {
   // Registry tags browser
   const [viewingTags, setViewingTags] = useState<string | null>(null);
   const [registryTags, setRegistryTags] = useState<RegistryTag[]>([]);
-  const [tagCurrentTag, setTagCurrentTag] = useState<string>('');
-  const [tagDeployedDigest, setTagDeployedDigest] = useState<string | null>(null);
   const [loadingTags, setLoadingTags] = useState(false);
 
   // Edit form auto-update state
@@ -74,7 +72,7 @@ export default function ContainerImages() {
   const [formData, setFormData] = useState<ContainerImageInput>({
     name: '',
     imageName: '',
-    currentTag: 'latest',
+    tagFilter: 'latest',
     registryConnectionId: null,
   });
 
@@ -107,7 +105,7 @@ export default function ContainerImages() {
     setFormData({
       name: '',
       imageName: '',
-      currentTag: 'latest',
+      tagFilter: 'latest',
       registryConnectionId: null,
     });
     setEditAutoUpdate(false);
@@ -123,7 +121,7 @@ export default function ContainerImages() {
     setFormData({
       name: image.name,
       imageName: image.imageName,
-      currentTag: image.currentTag,
+      tagFilter: image.tagFilter,
       registryConnectionId: image.registryConnectionId,
     });
     setEditAutoUpdate(image.autoUpdate);
@@ -174,7 +172,7 @@ export default function ContainerImages() {
 
   const openDeployModal = (image: ContainerImage) => {
     setDeployingImage(image);
-    setDeployTag(image.latestTag || image.currentTag);
+    setDeployTag(image.bestTag || image.tagFilter.split(',')[0]?.trim() || 'latest');
     setDeployAutoRollback(true);
   };
 
@@ -183,7 +181,7 @@ export default function ContainerImages() {
 
     setDeploying(true);
     try {
-      const { plan } = await deployContainerImage(deployingImage.id, deployTag, deployAutoRollback);
+      const { plan } = await deployContainerImage(deployingImage.id, { imageTag: deployTag, autoRollback: deployAutoRollback });
       toast.success(`Deployment plan created: ${plan.name}`);
       setDeployingImage(null);
       await reloadImages();
@@ -249,7 +247,7 @@ export default function ContainerImages() {
       const result = await checkContainerImageUpdates(imageId);
       await reloadImages();
       if (result.hasUpdate) {
-        toast.success(`Update available: ${result.latestTag}`);
+        toast.success(`Update available: ${result.newestDigest?.bestTag || 'new digest'}`);
       } else {
         toast.success('No updates available');
       }
@@ -276,8 +274,7 @@ export default function ContainerImages() {
     try {
       const result = await getContainerImageTags(imageId);
       setRegistryTags(result.tags);
-      setTagCurrentTag(result.currentTag);
-      setTagDeployedDigest(result.deployedDigest);
+      // tagFilter available in result.tagFilter if needed
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to load tags');
       setViewingTags(null);
@@ -360,18 +357,15 @@ export default function ContainerImages() {
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <h3 className="text-lg font-semibold text-white">{image.name}</h3>
+                      <Link to={`/container-images/${image.id}`} className="text-lg font-semibold text-white hover:text-primary-400">
+                        {image.name}
+                      </Link>
                       <span className="badge bg-slate-700 text-slate-300 text-xs font-mono">
-                        {image.currentTag}
+                        {image.bestTag || image.tagFilter}
                       </span>
-                      {image.updateAvailable && image.latestTag && image.latestTag !== image.currentTag && (
+                      {image.updateAvailable && (
                         <span className="badge bg-yellow-500/20 text-yellow-400 text-xs">
-                          {image.latestTag} available
-                        </span>
-                      )}
-                      {image.updateAvailable && image.latestTag && image.latestTag === image.currentTag && image.latestDigest && (
-                        <span className="badge bg-yellow-500/20 text-yellow-400 text-xs">
-                          new image available
+                          update available
                         </span>
                       )}
                     </div>
@@ -518,15 +512,7 @@ export default function ContainerImages() {
                               {registryTags.map((tag) => (
                                 <tr key={tag.digest + tag.tag} className="text-sm">
                                   <td className="py-2">
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-mono text-white">{tag.tag}</span>
-                                      {tag.tag === tagCurrentTag && (
-                                        <span className="badge bg-primary-500/20 text-primary-400 text-xs">current</span>
-                                      )}
-                                      {tagDeployedDigest && tag.digest && tag.digest === tagDeployedDigest && (
-                                        <span className="badge bg-green-500/20 text-green-400 text-xs">deployed</span>
-                                      )}
-                                    </div>
+                                    <span className="font-mono text-white">{tag.tag}</span>
                                   </td>
                                   <td className="py-2">
                                     {tag.digest ? (
@@ -679,15 +665,16 @@ export default function ContainerImages() {
               </div>
 
               <div>
-                <label className="block text-sm text-slate-400 mb-1">Current Tag</label>
+                <label className="block text-sm text-slate-400 mb-1">Tag Filter</label>
                 <input
                   type="text"
-                  value={formData.currentTag}
-                  onChange={(e) => setFormData({ ...formData, currentTag: e.target.value })}
-                  placeholder="latest"
+                  value={formData.tagFilter}
+                  onChange={(e) => setFormData({ ...formData, tagFilter: e.target.value })}
+                  placeholder="latest, v*"
                   className="input font-mono text-sm"
                   required
                 />
+                <p className="text-xs text-slate-500 mt-1">Comma-separated glob patterns (e.g., latest, v*, *-alpine)</p>
               </div>
 
               <div>

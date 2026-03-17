@@ -53,7 +53,7 @@ describe('compose', () => {
           environment: { id: 'env-1', name: 'Production' },
         },
         environment: { id: 'env-1', name: 'Production' },
-        containerImage: { id: 'img-1', imageName: 'registry.com/web-app', currentTag: 'v1.0' },
+        containerImage: { id: 'img-1', imageName: 'registry.com/web-app', tagFilter: 'v1.0' },
         files: [],
       };
 

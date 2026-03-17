@@ -268,9 +268,9 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
               id: true,
               name: true,
               imageName: true,
-              latestTag: true,
-              latestDigest: true,
+              tagFilter: true,
               lastCheckedAt: true,
+              updateAvailable: true,
               autoUpdate: true,
             },
           },
@@ -304,7 +304,7 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
         select: { id: true, name: true },
       });
 
-      const results: Array<{ serviceId: string; name: string; hasUpdate: boolean; latestTag?: string; error?: string }> = [];
+      const results: Array<{ serviceId: string; name: string; hasUpdate: boolean; bestTag?: string; error?: string }> = [];
 
       for (const service of services) {
         try {
@@ -314,7 +314,7 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
             serviceId: service.id,
             name: service.name,
             hasUpdate: result.hasUpdate,
-            latestTag: result.latestTag,
+            bestTag: result.bestTag,
             error: result.error,
           });
         } catch (error) {

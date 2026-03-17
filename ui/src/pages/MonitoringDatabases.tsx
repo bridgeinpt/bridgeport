@@ -172,6 +172,25 @@ export default function MonitoringDatabases() {
     return results;
   };
 
+  // Memoize scalar chart data and rows data keyed by query meta
+  const memoizedScalarCharts = useMemo(() => {
+    if (!activeGroup) return new Map<string, { data: unknown[]; names: string[] }>();
+    const map = new Map<string, { data: unknown[]; names: string[] }>();
+    activeGroup.queryMeta.filter(m => m.resultType === 'scalar').forEach(meta => {
+      map.set(meta.name, prepareScalarChartData(meta.name, filteredDatabases));
+    });
+    return map;
+  }, [activeGroup, filteredDatabases]);
+
+  const memoizedRowsData = useMemo(() => {
+    if (!activeGroup) return new Map<string, Array<{ dbName: string; rows: Array<Record<string, unknown>> }>>();
+    const map = new Map<string, Array<{ dbName: string; rows: Array<Record<string, unknown>> }>>();
+    activeGroup.queryMeta.filter(m => m.resultType === 'rows').forEach(meta => {
+      map.set(meta.name, getRowsPerDatabase(meta.name));
+    });
+    return map;
+  }, [activeGroup, filteredDatabases]);
+
   const formatTime = (time: string) => {
     const date = new Date(time);
     if (monitoringTimeRange <= 24) return format(date, 'HH:mm');
@@ -310,7 +329,9 @@ export default function MonitoringDatabases() {
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {activeGroup.queryMeta.filter(m => m.resultType === 'scalar').map(meta => {
-              const { data, names } = prepareScalarChartData(meta.name, filteredDatabases);
+              const cached = memoizedScalarCharts.get(meta.name);
+              if (!cached) return null;
+              const { data, names } = cached;
               if (data.length === 0 || names.length === 0) return null;
               const chartData = meta.unit === 'bytes' ? transformBytesToMB(data, names) : data;
               return (
@@ -329,7 +350,7 @@ export default function MonitoringDatabases() {
 
           {/* Rows queries (latest snapshot tables, e.g. Top Tables by Size) */}
           {activeGroup.queryMeta.filter(m => m.resultType === 'rows').map(meta => {
-            const perDb = getRowsPerDatabase(meta.name);
+            const perDb = memoizedRowsData.get(meta.name) || [];
             if (perDb.length === 0) return null;
             return perDb.map(({ dbName, rows }) => {
               const columns = Object.keys(rows[0]);

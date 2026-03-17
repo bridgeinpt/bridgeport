@@ -22,8 +22,8 @@ vi.mock('../lib/api', async () => {
           id: 'img-1',
           name: 'API Service',
           imageName: 'myrepo/api',
-          currentTag: 'v1.2.0',
-          latestTag: 'v1.3.0',
+          tagFilter: 'v1.*',
+          updateAvailable: true,
           autoUpdate: false,
           registryConnectionId: 'reg-1',
           registryConnection: { id: 'reg-1', name: 'My Registry' },
@@ -33,6 +33,13 @@ vi.mock('../lib/api', async () => {
           environmentId: 'env-1',
           createdAt: '2024-01-01T00:00:00Z',
           updatedAt: '2024-01-15T00:00:00Z',
+          bestTag: 'v1.3.0',
+          latestDigest: {
+            id: 'd-1',
+            manifestDigest: 'sha256:abc123def456',
+            tags: ['v1.3.0', 'latest'],
+            discoveredAt: '2024-01-15T00:00:00Z',
+          },
         },
       ],
       total: 1,
@@ -79,10 +86,10 @@ describe('ContainerImages', () => {
     });
   });
 
-  it('should display current tag', async () => {
+  it('should display best tag', async () => {
     renderWithProviders(<ContainerImages />);
     await waitFor(() => {
-      expect(screen.getByText('v1.2.0')).toBeInTheDocument();
+      expect(screen.getByText('v1.3.0')).toBeInTheDocument();
     });
   });
 

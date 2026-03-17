@@ -97,7 +97,7 @@ describe('container-images routes', () => {
         payload: {
           name: 'New Image',
           imageName: 'registry.example.com/new-image',
-          currentTag: 'v1.0.0',
+          tagFilter: 'v1.0.0',
         },
       });
 
@@ -105,7 +105,7 @@ describe('container-images routes', () => {
       expect(res.json().image).toMatchObject({
         name: 'New Image',
         imageName: 'registry.example.com/new-image',
-        currentTag: 'v1.0.0',
+        tagFilter: 'v1.0.0',
       });
     });
 
@@ -123,7 +123,7 @@ describe('container-images routes', () => {
         payload: {
           name: 'Dup Image 2',
           imageName: 'registry.example.com/dup-image',
-          currentTag: 'latest',
+          tagFilter: 'latest',
         },
       });
 
