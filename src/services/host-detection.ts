@@ -3,6 +3,7 @@ import { SSHClient } from '../lib/ssh.js';
 import { prisma } from '../lib/db.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 import { isDockerSocketAvailable } from '../lib/docker.js';
+import { SERVER_STATUS, SERVER_TYPE, DOCKER_MODE } from '../lib/constants.js';
 
 /**
  * Known Docker gateway IPs that indicate "connect to host from inside container"
@@ -145,7 +146,7 @@ export async function getHostInfo(environmentId: string): Promise<HostInfo> {
   const existingServer = await prisma.server.findFirst({
     where: {
       environmentId,
-      serverType: 'host',
+      serverType: SERVER_TYPE.HOST,
     },
     select: {
       id: true,
@@ -157,7 +158,7 @@ export async function getHostInfo(environmentId: string): Promise<HostInfo> {
   // Check if host server registered in ANY environment (global check)
   const globalServer = existingServer ? null : await prisma.server.findFirst({
     where: {
-      serverType: 'host',
+      serverType: SERVER_TYPE.HOST,
     },
     select: {
       id: true,
@@ -213,7 +214,7 @@ export async function registerHostServer(
   const existing = await prisma.server.findFirst({
     where: {
       environmentId,
-      serverType: 'host',
+      serverType: SERVER_TYPE.HOST,
     },
   });
 
@@ -241,9 +242,9 @@ export async function registerHostServer(
         name,
         hostname: gatewayIp,
         tags: JSON.stringify(['host']),
-        serverType: 'host',
-        dockerMode: 'socket',
-        status: 'healthy',
+        serverType: SERVER_TYPE.HOST,
+        dockerMode: DOCKER_MODE.SOCKET,
+        status: SERVER_STATUS.HEALTHY,
         environmentId,
       },
     });
@@ -270,9 +271,9 @@ export async function registerHostServer(
       name,
       hostname: gatewayIp,
       tags: JSON.stringify(['host']),
-      serverType: 'host',
-      dockerMode: 'ssh',
-      status: 'healthy',
+      serverType: SERVER_TYPE.HOST,
+      dockerMode: DOCKER_MODE.SSH,
+      status: SERVER_STATUS.HEALTHY,
       environmentId,
     },
   });
@@ -307,8 +308,8 @@ export async function bootstrapManagementEnvironment(): Promise<void> {
   if (socketAvailable) {
     const hostServersUsingSSH = await prisma.server.findMany({
       where: {
-        serverType: 'host',
-        dockerMode: 'ssh',
+        serverType: SERVER_TYPE.HOST,
+        dockerMode: DOCKER_MODE.SSH,
       },
     });
 
@@ -316,7 +317,7 @@ export async function bootstrapManagementEnvironment(): Promise<void> {
       console.log(`Docker socket available - upgrading host server "${server.name}" to socket mode`);
       await prisma.server.update({
         where: { id: server.id },
-        data: { dockerMode: 'socket', status: 'healthy' },
+        data: { dockerMode: DOCKER_MODE.SOCKET, status: SERVER_STATUS.HEALTHY },
       });
     }
   }
@@ -349,9 +350,9 @@ export async function bootstrapManagementEnvironment(): Promise<void> {
       name: 'localhost',
       hostname: 'localhost',
       tags: JSON.stringify(['localhost']),
-      serverType: 'host',
-      dockerMode: 'socket',
-      status: 'healthy',
+      serverType: SERVER_TYPE.HOST,
+      dockerMode: DOCKER_MODE.SOCKET,
+      status: SERVER_STATUS.HEALTHY,
       environmentId: managementEnv.id,
     },
   });

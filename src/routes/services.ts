@@ -15,6 +15,7 @@ import { logHealthCheck } from '../services/health-checks.js';
 import { checkServiceUpdate } from '../lib/scheduler.js';
 import { determineHealthStatus, determineOverallStatus } from '../services/servers.js';
 import { getSystemSettings } from '../services/system-settings.js';
+import { HEALTH_STATUS, CONTAINER_STATUS, DISCOVERY_STATUS, HEALTH_CHECK_STATUS } from '../lib/constants.js';
 
 const createServiceSchema = z.object({
   name: z.string().min(1),
@@ -583,9 +584,9 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
             healthStatus,
             exposedPorts,
             imageTag: currentImageTag,
-            discoveryStatus: containerInfo.state === 'not_found' ? 'missing' : 'found',
+            discoveryStatus: containerInfo.state === CONTAINER_STATUS.NOT_FOUND ? DISCOVERY_STATUS.MISSING : DISCOVERY_STATUS.FOUND,
             lastCheckedAt: new Date(),
-            lastDiscoveredAt: containerInfo.state !== 'not_found' ? new Date() : service.lastDiscoveredAt,
+            lastDiscoveredAt: containerInfo.state !== CONTAINER_STATUS.NOT_FOUND ? new Date() : service.lastDiscoveredAt,
           },
         });
 
@@ -630,7 +631,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           resourceId: id,
           resourceName: service.name,
           checkType: urlHealth ? 'url' : 'container_health',
-          status: isHealthy ? 'success' : 'failure',
+          status: isHealthy ? HEALTH_CHECK_STATUS.SUCCESS : HEALTH_CHECK_STATUS.FAILURE,
           durationMs,
           httpStatus: urlHealth?.statusCode,
           errorMessage: urlHealth?.error,
@@ -655,9 +656,9 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         await prisma.service.update({
           where: { id },
           data: {
-            status: 'unknown',
-            containerStatus: 'unknown',
-            healthStatus: 'unknown',
+            status: HEALTH_STATUS.UNKNOWN,
+            containerStatus: HEALTH_STATUS.UNKNOWN,
+            healthStatus: HEALTH_STATUS.UNKNOWN,
             lastCheckedAt: new Date(),
           },
         });
@@ -679,7 +680,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           resourceId: id,
           resourceName: service.name,
           checkType: 'url',
-          status: 'failure',
+          status: HEALTH_CHECK_STATUS.FAILURE,
           durationMs,
           errorMessage: message,
         });

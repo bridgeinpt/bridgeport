@@ -14,6 +14,7 @@ import { getSchedulerConfig } from '../services/health-checks.js';
 import { deployAgent } from '../services/agent-deploy.js';
 import { logAgentEvent } from '../services/agent-events.js';
 import crypto from 'crypto';
+import { SERVER_STATUS, HEALTH_STATUS, CONTAINER_STATUS, METRICS_MODE, AGENT_STATUS, DISCOVERY_STATUS } from '../lib/constants.js';
 
 const metricsQuerySchema = z.object({
   from: z.string().datetime().optional(),
@@ -235,11 +236,11 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.code(404).send({ error: 'Server not found' });
       }
 
-      if (server.metricsMode === 'disabled') {
+      if (server.metricsMode === METRICS_MODE.DISABLED) {
         return reply.code(400).send({ error: 'Metrics collection is disabled for this server' });
       }
 
-      if (server.metricsMode === 'agent') {
+      if (server.metricsMode === METRICS_MODE.AGENT) {
         return reply.code(400).send({ error: 'This server uses agent mode. Wait for agent to push metrics.' });
       }
 
@@ -267,7 +268,7 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
 
     // Find server by agent token
     const server = await prisma.server.findFirst({
-      where: { agentToken: token, metricsMode: 'agent' },
+      where: { agentToken: token, metricsMode: METRICS_MODE.AGENT },
       include: { services: true },
     });
 
@@ -323,20 +324,20 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
       agentStatusChangedAt?: Date;
     } = {
       lastCheckedAt: now,
-      agentStatus: 'active',
+      agentStatus: AGENT_STATUS.ACTIVE,
       lastAgentPushAt: now,
     };
 
     // Track status change time if status is changing
-    if (server.agentStatus !== 'active') {
+    if (server.agentStatus !== AGENT_STATUS.ACTIVE) {
       serverUpdateData.agentStatusChangedAt = now;
 
       // Log status_change event when agent becomes active
       await logAgentEvent({
         serverId: server.id,
         eventType: 'status_change',
-        status: 'active',
-        message: server.agentStatus === 'waiting' || server.agentStatus === 'deploying'
+        status: AGENT_STATUS.ACTIVE,
+        message: server.agentStatus === AGENT_STATUS.WAITING || server.agentStatus === AGENT_STATUS.DEPLOYING
           ? 'Agent connected for the first time'
           : 'Agent recovered and is now active',
         details: { previousStatus: server.agentStatus, version: agentVersion },
@@ -345,7 +346,7 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
 
     // Set server health status if provided
     if (serverHealthy !== undefined) {
-      serverUpdateData.status = serverHealthy ? 'healthy' : 'unhealthy';
+      serverUpdateData.status = serverHealthy ? SERVER_STATUS.HEALTHY : SERVER_STATUS.UNHEALTHY;
     }
 
     // Store agent version if provided
@@ -370,35 +371,35 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
 
           // Update service health status if provided
           if (state !== undefined || health !== undefined) {
-            const isRunning = state === 'running';
+            const isRunning = state === CONTAINER_STATUS.RUNNING;
 
             // Determine health status from container health
-            let healthStatus = 'unknown';
+            let healthStatus: string = HEALTH_STATUS.UNKNOWN;
             if (!isRunning) {
-              healthStatus = 'unknown';
-            } else if (health === 'healthy') {
-              healthStatus = 'healthy';
-            } else if (health === 'unhealthy') {
-              healthStatus = 'unhealthy';
-            } else if (health === 'none' || health === '') {
-              healthStatus = 'none';
+              healthStatus = HEALTH_STATUS.UNKNOWN;
+            } else if (health === HEALTH_STATUS.HEALTHY) {
+              healthStatus = HEALTH_STATUS.HEALTHY;
+            } else if (health === HEALTH_STATUS.UNHEALTHY) {
+              healthStatus = HEALTH_STATUS.UNHEALTHY;
+            } else if (health === HEALTH_STATUS.NONE || health === '') {
+              healthStatus = HEALTH_STATUS.NONE;
             }
 
             // Determine overall status
-            let status = 'running';
+            let status: string = CONTAINER_STATUS.RUNNING;
             if (!isRunning) {
-              status = 'stopped';
-            } else if (healthStatus === 'unhealthy') {
-              status = 'unhealthy';
-            } else if (healthStatus === 'healthy') {
-              status = 'healthy';
+              status = CONTAINER_STATUS.STOPPED;
+            } else if (healthStatus === HEALTH_STATUS.UNHEALTHY) {
+              status = SERVER_STATUS.UNHEALTHY;
+            } else if (healthStatus === HEALTH_STATUS.HEALTHY) {
+              status = SERVER_STATUS.HEALTHY;
             }
 
             await prisma.service.update({
               where: { id: service.id },
               data: {
                 status,
-                containerStatus: state || 'unknown',
+                containerStatus: state || CONTAINER_STATUS.STOPPED,
                 healthStatus,
                 lastCheckedAt: new Date(),
               },
@@ -488,10 +489,10 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
 
     // Find server by agent token
     const server = await prisma.server.findFirst({
-      where: { agentToken: token, metricsMode: 'agent' },
+      where: { agentToken: token, metricsMode: METRICS_MODE.AGENT },
       include: {
         services: {
-          where: { discoveryStatus: 'found' },
+          where: { discoveryStatus: DISCOVERY_STATUS.FOUND },
           select: {
             id: true,
             containerName: true,
@@ -565,7 +566,7 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       // Only allow regeneration if agent mode is enabled
-      if (server.metricsMode !== 'agent') {
+      if (server.metricsMode !== METRICS_MODE.AGENT) {
         return reply.code(400).send({ error: 'Server is not in agent mode' });
       }
 

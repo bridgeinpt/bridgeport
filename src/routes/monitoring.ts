@@ -7,6 +7,7 @@ import { logAudit } from '../services/audit.js';
 import { bundledAgentVersion } from '../lib/version.js';
 import { getAgentEvents } from '../services/agent-events.js';
 import { logHealthCheck } from '../services/health-checks.js';
+import { SERVER_STATUS, HEALTH_STATUS, CONTAINER_STATUS, HEALTH_CHECK_STATUS, DISCOVERY_STATUS, type ServerStatus } from '../lib/constants.js';
 
 const healthLogQuerySchema = z.object({
   type: z.enum(['server', 'service', 'container']).optional(),
@@ -94,9 +95,9 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
       ]);
 
       const summarize = (groups: Array<{ status: string; _count: number }>) => ({
-        success: groups.find((g) => g.status === 'success')?._count ?? 0,
-        failure: groups.find((g) => g.status === 'failure')?._count ?? 0,
-        timeout: groups.find((g) => g.status === 'timeout')?._count ?? 0,
+        success: groups.find((g) => g.status === HEALTH_CHECK_STATUS.SUCCESS)?._count ?? 0,
+        failure: groups.find((g) => g.status === HEALTH_CHECK_STATUS.FAILURE)?._count ?? 0,
+        timeout: groups.find((g) => g.status === HEALTH_CHECK_STATUS.TIMEOUT)?._count ?? 0,
       });
 
       return {
@@ -157,7 +158,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
               resourceId: server.id,
               resourceName: server.name,
               checkType: 'ssh',
-              status: result.status === 'healthy' ? 'success' : 'failure',
+              status: result.status === SERVER_STATUS.HEALTHY ? HEALTH_CHECK_STATUS.SUCCESS : HEALTH_CHECK_STATUS.FAILURE,
               durationMs,
               errorMessage: result.error,
             });
@@ -179,7 +180,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
               resourceId: server.id,
               resourceName: server.name,
               checkType: 'ssh',
-              status: 'failure',
+              status: HEALTH_CHECK_STATUS.FAILURE,
               durationMs,
               errorMessage,
             });
@@ -187,7 +188,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
             results.servers.push({
               id: server.id,
               name: server.name,
-              status: 'unhealthy',
+              status: SERVER_STATUS.UNHEALTHY,
               durationMs,
               error: errorMessage,
             });
@@ -220,7 +221,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
               resourceId: service.id,
               resourceName: service.name,
               checkType: result.url ? 'url' : 'container_health',
-              status: isHealthy ? 'success' : 'failure',
+              status: isHealthy ? HEALTH_CHECK_STATUS.SUCCESS : HEALTH_CHECK_STATUS.FAILURE,
               durationMs,
               httpStatus: result.url?.statusCode,
               errorMessage: result.url?.error,
@@ -243,7 +244,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
               resourceId: service.id,
               resourceName: service.name,
               checkType: 'url',
-              status: 'failure',
+              status: HEALTH_CHECK_STATUS.FAILURE,
               durationMs,
               errorMessage,
             });
@@ -251,7 +252,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
             results.services.push({
               id: service.id,
               name: service.name,
-              status: 'unhealthy',
+              status: SERVER_STATUS.UNHEALTHY,
               durationMs,
               error: errorMessage,
             });
@@ -431,7 +432,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
       const services = await prisma.service.findMany({
         where: {
           server: { environmentId: envId },
-          discoveryStatus: 'found',
+          discoveryStatus: DISCOVERY_STATUS.FOUND,
         },
         select: { id: true, name: true, server: { select: { id: true, name: true } } },
       });
@@ -507,13 +508,13 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
           resourceId: server.id,
           resourceName: server.name,
           checkType: 'ssh',
-          status: result.status === 'healthy' ? 'success' : 'failure',
+          status: result.status === SERVER_STATUS.HEALTHY ? HEALTH_CHECK_STATUS.SUCCESS : HEALTH_CHECK_STATUS.FAILURE,
           durationMs,
           errorMessage: result.error,
         });
 
         return {
-          success: result.status === 'healthy',
+          success: result.status === SERVER_STATUS.HEALTHY,
           durationMs,
           error: result.error,
         };
@@ -527,7 +528,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
           resourceId: server.id,
           resourceName: server.name,
           checkType: 'ssh',
-          status: 'failure',
+          status: HEALTH_CHECK_STATUS.FAILURE,
           durationMs,
           errorMessage,
         });
@@ -572,7 +573,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
               resourceId: server.id,
               resourceName: server.name,
               checkType: 'ssh',
-              status: result.status === 'healthy' ? 'success' : 'failure',
+              status: result.status === SERVER_STATUS.HEALTHY ? HEALTH_CHECK_STATUS.SUCCESS : HEALTH_CHECK_STATUS.FAILURE,
               durationMs,
               errorMessage: result.error,
             });
@@ -581,7 +582,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
               serverId: server.id,
               serverName: server.name,
               hostname: server.hostname,
-              success: result.status === 'healthy',
+              success: result.status === SERVER_STATUS.HEALTHY,
               durationMs,
               error: result.error,
             };
@@ -595,7 +596,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
               resourceId: server.id,
               resourceName: server.name,
               checkType: 'ssh',
-              status: 'failure',
+              status: HEALTH_CHECK_STATUS.FAILURE,
               durationMs,
               errorMessage,
             });
@@ -641,15 +642,15 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
       });
 
       // Count healthy resources
-      const healthyServers = servers.filter((s) => s.status === 'healthy').length;
+      const healthyServers = servers.filter((s) => s.status === SERVER_STATUS.HEALTHY).length;
       const healthyServices = services.filter(
-        (s) => s.containerStatus === 'running' && s.healthStatus !== 'unhealthy'
+        (s) => s.containerStatus === CONTAINER_STATUS.RUNNING && s.healthStatus !== HEALTH_STATUS.UNHEALTHY
       ).length;
 
       // Count alerts (unhealthy resources)
-      const unhealthyServers = servers.filter((s) => s.status === 'unhealthy').length;
+      const unhealthyServers = servers.filter((s) => s.status === SERVER_STATUS.UNHEALTHY).length;
       const unhealthyServices = services.filter(
-        (s) => s.healthStatus === 'unhealthy' || s.containerStatus === 'exited' || s.containerStatus === 'dead'
+        (s) => s.healthStatus === HEALTH_STATUS.UNHEALTHY || s.containerStatus === CONTAINER_STATUS.EXITED || s.containerStatus === CONTAINER_STATUS.DEAD
       ).length;
 
       // Get database monitoring stats
@@ -733,9 +734,9 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
             },
           });
 
-          let status: 'healthy' | 'unhealthy' | 'unknown' = 'unknown';
+          let status: ServerStatus = SERVER_STATUS.UNKNOWN;
           if (lastLog) {
-            status = lastLog.status === 'success' ? 'healthy' : 'unhealthy';
+            status = lastLog.status === HEALTH_CHECK_STATUS.SUCCESS ? SERVER_STATUS.HEALTHY : SERVER_STATUS.UNHEALTHY;
           }
 
           return {
@@ -774,9 +775,9 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
             },
           });
 
-          let status: 'healthy' | 'unhealthy' | 'unknown' = 'unknown';
+          let status: ServerStatus = SERVER_STATUS.UNKNOWN;
           if (lastLog) {
-            status = lastLog.status === 'success' ? 'healthy' : 'unhealthy';
+            status = lastLog.status === HEALTH_CHECK_STATUS.SUCCESS ? SERVER_STATUS.HEALTHY : SERVER_STATUS.UNHEALTHY;
           }
 
           return {
@@ -813,11 +814,11 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
       });
 
       const databaseHealthStatus = databases.map((db) => {
-        let status: 'healthy' | 'unhealthy' | 'unknown' = 'unknown';
+        let status: ServerStatus = SERVER_STATUS.UNKNOWN;
         if (db.monitoringStatus === 'connected') {
-          status = 'healthy';
+          status = SERVER_STATUS.HEALTHY;
         } else if (db.monitoringStatus === 'error') {
-          status = 'unhealthy';
+          status = SERVER_STATUS.UNHEALTHY;
         }
 
         return {

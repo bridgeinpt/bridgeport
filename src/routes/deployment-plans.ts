@@ -10,6 +10,7 @@ import {
   listDeploymentPlans,
 } from '../services/orchestration.js';
 import { logAudit } from '../services/audit.js';
+import { PLAN_STATUS, STEP_STATUS } from '../lib/constants.js';
 
 const createPlanSchema = z.object({
   serviceIds: z.array(z.string()).min(1),
@@ -113,7 +114,7 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
         return reply.code(404).send({ error: 'Deployment plan not found' });
       }
 
-      if (plan.status !== 'pending') {
+      if (plan.status !== PLAN_STATUS.PENDING) {
         return reply.code(400).send({ error: `Cannot execute plan with status: ${plan.status}` });
       }
 
@@ -186,7 +187,7 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
       }
 
       // Can only rollback completed or failed plans
-      if (!['completed', 'failed'].includes(plan.status)) {
+      if (!([PLAN_STATUS.COMPLETED, PLAN_STATUS.FAILED] as string[]).includes(plan.status)) {
         return reply.code(400).send({
           error: `Cannot rollback plan with status: ${plan.status}`,
         });
@@ -194,7 +195,7 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
 
       // Check if any steps have been deployed
       const deployedSteps = plan.steps.filter(
-        (s) => s.action === 'deploy' && (s.status === 'success' || s.status === 'rolled_back')
+        (s) => s.action === 'deploy' && (s.status === STEP_STATUS.SUCCESS || s.status === STEP_STATUS.ROLLED_BACK)
       );
 
       if (deployedSteps.length === 0) {
@@ -269,7 +270,7 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
             reply.raw.write(`data: ${JSON.stringify(currentPlan)}\n\n`);
 
             // If plan is done, stop streaming
-            if (['completed', 'failed', 'cancelled', 'rolled_back'].includes(currentPlan.status)) {
+            if (([PLAN_STATUS.COMPLETED, PLAN_STATUS.FAILED, PLAN_STATUS.CANCELLED, PLAN_STATUS.ROLLED_BACK] as string[]).includes(currentPlan.status)) {
               clearInterval(interval);
               reply.raw.write(`event: done\n`);
               reply.raw.write(`data: ${JSON.stringify({ status: currentPlan.status })}\n\n`);

@@ -3,6 +3,7 @@ import { DockerSSH, createClientForServer } from '../lib/ssh.js';
 import { createDockerClientForServer } from '../lib/docker.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 import { determineHealthStatus, determineOverallStatus, type UrlHealthResult } from './servers.js';
+import { HEALTH_STATUS, CONTAINER_STATUS } from '../lib/constants.js';
 
 export interface HealthVerificationResult {
   healthy: boolean;
@@ -78,8 +79,8 @@ export async function verifyServiceHealth(
     log(`ERROR: Failed to create client: ${clientError}`);
     return {
       healthy: false,
-      containerStatus: 'unknown',
-      healthStatus: 'unknown',
+      containerStatus: HEALTH_STATUS.UNKNOWN,
+      healthStatus: HEALTH_STATUS.UNKNOWN,
       attempts: 0,
       logs,
     };
@@ -95,8 +96,8 @@ export async function verifyServiceHealth(
     log(`Connected to ${service.server.name}`);
 
     let attempt = 0;
-    let lastContainerStatus = 'unknown';
-    let lastHealthStatus = 'unknown';
+    let lastContainerStatus: string = HEALTH_STATUS.UNKNOWN;
+    let lastHealthStatus: string = HEALTH_STATUS.UNKNOWN;
     let lastUrlCheck: UrlHealthResult | undefined;
 
     while (attempt < maxRetries) {
@@ -131,7 +132,7 @@ export async function verifyServiceHealth(
       log(`Container: ${containerHealth.state}, Health: ${lastHealthStatus}, Overall: ${overallStatus}`);
 
       // Check if healthy
-      if (lastHealthStatus === 'healthy') {
+      if (lastHealthStatus === HEALTH_STATUS.HEALTHY) {
         log(`Service ${service.name} is healthy`);
 
         // Update service status in database
@@ -156,7 +157,7 @@ export async function verifyServiceHealth(
       }
 
       // Also accept 'running' or 'none' if there's no health check configured
-      if (lastHealthStatus === 'none' && containerHealth.running) {
+      if (lastHealthStatus === HEALTH_STATUS.NONE && containerHealth.running) {
         log(`Service ${service.name} is running (no health check configured)`);
 
         await prisma.service.update({
@@ -164,7 +165,7 @@ export async function verifyServiceHealth(
           data: {
             containerStatus: lastContainerStatus,
             healthStatus: lastHealthStatus,
-            status: 'running',
+            status: CONTAINER_STATUS.RUNNING,
             lastCheckedAt: new Date(),
           },
         });
@@ -213,8 +214,8 @@ export async function verifyServiceHealth(
 
     return {
       healthy: false,
-      containerStatus: 'unknown',
-      healthStatus: 'unknown',
+      containerStatus: HEALTH_STATUS.UNKNOWN,
+      healthStatus: HEALTH_STATUS.UNKNOWN,
       attempts: 0,
       logs,
     };
@@ -251,7 +252,7 @@ export async function quickHealthCheck(
   );
 
   if (!dockerClient) {
-    return { containerStatus: 'unknown', healthStatus: 'unknown', running: false };
+    return { containerStatus: HEALTH_STATUS.UNKNOWN, healthStatus: HEALTH_STATUS.UNKNOWN, running: false };
   }
 
   // For URL health checks, we need the DockerSSH wrapper
@@ -280,7 +281,7 @@ export async function quickHealthCheck(
       running: containerHealth.running,
     };
   } catch {
-    return { containerStatus: 'unknown', healthStatus: 'unknown', running: false };
+    return { containerStatus: HEALTH_STATUS.UNKNOWN, healthStatus: HEALTH_STATUS.UNKNOWN, running: false };
   } finally {
     if (sshClient) {
       sshClient.disconnect();

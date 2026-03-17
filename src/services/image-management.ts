@@ -3,6 +3,7 @@ import type { ContainerImage, ContainerImageHistory, Service } from '@prisma/cli
 import { RegistryFactory, type RegistryTag } from '../lib/registry.js';
 import { extractRepoName, parseTagFilter, getBestTag, getDefaultTag, matchesTagFilter } from '../lib/image-utils.js';
 import { getRegistryCredentials } from './registries.js';
+import { HISTORY_STATUS } from '../lib/constants.js';
 
 export interface CreateContainerImageInput {
   name: string;
@@ -176,10 +177,10 @@ export async function recordTagDeployment(
   tag: string,
   digest?: string,
   deployedBy?: string,
-  status: 'success' | 'failed' | 'rolled_back' = 'success',
+  status: 'success' | 'failed' | 'rolled_back' = HISTORY_STATUS.SUCCESS,
   imageDigestId?: string
 ): Promise<ContainerImageHistory> {
-  if (status === 'success') {
+  if (status === HISTORY_STATUS.SUCCESS) {
     // Update container image - just clear updateAvailable
     await prisma.containerImage.update({
       where: { id: containerImageId },
@@ -303,7 +304,7 @@ export async function getTagHistory(
  */
 export async function getPreviousTag(containerImageId: string): Promise<string | null> {
   const history = await prisma.containerImageHistory.findMany({
-    where: { containerImageId, status: 'success' },
+    where: { containerImageId, status: HISTORY_STATUS.SUCCESS },
     orderBy: { deployedAt: 'desc' },
     take: 2,
   });

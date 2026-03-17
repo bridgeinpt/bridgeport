@@ -1,3 +1,4 @@
+import { SERVER_STATUS, HEALTH_STATUS, CONTAINER_STATUS, HEALTH_CHECK_STATUS, METRICS_MODE, AGENT_STATUS, DISCOVERY_STATUS } from './constants.js';
 import { captureException } from './sentry.js';
 import { prisma } from './db.js';
 import { checkServerHealth, discoverContainers } from '../services/servers.js';
@@ -76,7 +77,7 @@ function notifyAsync(
 async function runServerHealthChecks(): Promise<void> {
   try {
     const servers = await prisma.server.findMany({
-      where: { metricsMode: { not: 'agent' } }, // Skip agent servers - they report health directly
+      where: { metricsMode: { not: METRICS_MODE.AGENT } }, // Skip agent servers - they report health directly
       select: { id: true, name: true, status: true, environmentId: true },
     });
 
@@ -102,7 +103,7 @@ async function runServerHealthChecks(): Promise<void> {
           resourceId: server.id,
           resourceName: server.name,
           checkType: 'ssh',
-          status: updated?.status === 'healthy' ? 'success' : 'failure',
+          status: updated?.status === SERVER_STATUS.HEALTHY ? HEALTH_CHECK_STATUS.SUCCESS : HEALTH_CHECK_STATUS.FAILURE,
           durationMs,
         });
 
@@ -111,7 +112,7 @@ async function runServerHealthChecks(): Promise<void> {
             eventBus.emitEvent({ type: 'health_status', data: { resourceType: 'server', resourceId: server.id, status: updated.status, environmentId: server.environmentId } });
           }
 
-          if (updated.status === 'unhealthy' && prevStatus !== 'unhealthy') {
+          if (updated.status === SERVER_STATUS.UNHEALTHY && prevStatus !== SERVER_STATUS.UNHEALTHY) {
             // Server became unhealthy - use bounce tracking
             const bounce = await recordFailure('server', server.id, 'offline', NOTIFICATION_TYPES.SYSTEM_SERVER_OFFLINE);
             if (bounce.shouldAlert) {
@@ -121,7 +122,7 @@ async function runServerHealthChecks(): Promise<void> {
                 { serverName: server.name }
               );
             }
-          } else if (updated.status === 'healthy' && prevStatus === 'unhealthy') {
+          } else if (updated.status === SERVER_STATUS.HEALTHY && prevStatus === SERVER_STATUS.UNHEALTHY) {
             // Server recovered
             const bounce = await recordSuccess('server', server.id, 'offline');
             if (bounce.wasRecovered) {
@@ -144,7 +145,7 @@ async function runServerHealthChecks(): Promise<void> {
           resourceId: server.id,
           resourceName: server.name,
           checkType: 'ssh',
-          status: 'failure',
+          status: HEALTH_CHECK_STATUS.FAILURE,
           durationMs,
           errorMessage,
         });
@@ -167,10 +168,10 @@ async function runServiceHealthChecks(): Promise<void> {
     const services = await prisma.service.findMany({
       where: {
         healthCheckUrl: { not: null },
-        discoveryStatus: 'found',
+        discoveryStatus: DISCOVERY_STATUS.FOUND,
         // Skip agent-mode servers - agents now perform health checks
         server: {
-          metricsMode: { not: 'agent' },
+          metricsMode: { not: METRICS_MODE.AGENT },
         },
       },
       select: {
@@ -208,7 +209,7 @@ async function runServiceHealthChecks(): Promise<void> {
           resourceId: service.id,
           resourceName: service.name,
           checkType: 'url',
-          status: isHealthy ? 'success' : 'failure',
+          status: isHealthy ? HEALTH_CHECK_STATUS.SUCCESS : HEALTH_CHECK_STATUS.FAILURE,
           durationMs,
           httpStatus: result.url?.statusCode,
           errorMessage,
@@ -224,7 +225,7 @@ async function runServiceHealthChecks(): Promise<void> {
           resourceId: service.id,
           resourceName: service.name,
           checkType: 'url',
-          status: 'failure',
+          status: HEALTH_CHECK_STATUS.FAILURE,
           durationMs,
           errorMessage,
         });
@@ -244,7 +245,7 @@ async function runServiceHealthChecks(): Promise<void> {
 async function runDiscovery(): Promise<void> {
   try {
     const servers = await prisma.server.findMany({
-      where: { status: 'healthy' }, // Only discover on healthy servers
+      where: { status: SERVER_STATUS.HEALTHY }, // Only discover on healthy servers
       select: { id: true, name: true, environmentId: true },
     });
 
@@ -320,7 +321,7 @@ async function runUpdateChecks(): Promise<void> {
         registryConnectionId: true,
         environmentId: true,
         services: {
-          where: { discoveryStatus: 'found' },
+          where: { discoveryStatus: DISCOVERY_STATUS.FOUND },
           select: {
             id: true,
             name: true,
@@ -453,11 +454,11 @@ async function runMetricsCollection(): Promise<void> {
   try {
     const servers = await prisma.server.findMany({
       where: {
-        metricsMode: 'ssh',
+        metricsMode: METRICS_MODE.SSH,
       },
       include: {
         services: {
-          where: { discoveryStatus: 'found' },
+          where: { discoveryStatus: DISCOVERY_STATUS.FOUND },
           select: { id: true, containerName: true },
         },
       },
@@ -489,7 +490,7 @@ async function runMetricsCollection(): Promise<void> {
 
         // Save server metrics
         if (data.serverMetrics) {
-          await saveServerMetrics(server.id, data.serverMetrics, 'ssh');
+          await saveServerMetrics(server.id, data.serverMetrics, METRICS_MODE.SSH);
           eventBus.emitEvent({ type: 'metrics_updated', data: { serverId: server.id, environmentId: server.environmentId } });
         }
 
@@ -521,25 +522,25 @@ async function runMetricsCollection(): Promise<void> {
           }
 
           // Log container health check result
-          const containerHealthy = serviceData.containerStatus === 'running' &&
-            serviceData.healthStatus !== 'unhealthy';
+          const containerHealthy = serviceData.containerStatus === CONTAINER_STATUS.RUNNING &&
+            serviceData.healthStatus !== HEALTH_STATUS.UNHEALTHY;
           await logHealthCheck({
             environmentId: server.environmentId,
             resourceType: 'container',
             resourceId: service.id,
             resourceName: service.containerName,
             checkType: 'container_health',
-            status: containerHealthy ? 'success' : 'failure',
+            status: containerHealthy ? HEALTH_CHECK_STATUS.SUCCESS : HEALTH_CHECK_STATUS.FAILURE,
             errorMessage: !containerHealthy
               ? `Container status: ${serviceData.containerStatus}, health: ${serviceData.healthStatus}`
               : undefined,
           });
 
           // Handle container status changes (crash detection)
-          const crashStates = ['exited', 'dead'];
+          const crashStates: string[] = [CONTAINER_STATUS.EXITED, CONTAINER_STATUS.DEAD];
           const wasCrashed = prevService && crashStates.includes(prevService.containerStatus);
           const isCrashed = crashStates.includes(serviceData.containerStatus);
-          const isRunning = serviceData.containerStatus === 'running';
+          const isRunning = serviceData.containerStatus === CONTAINER_STATUS.RUNNING;
 
           if (isCrashed && !wasCrashed) {
             // Container crashed
@@ -564,7 +565,7 @@ async function runMetricsCollection(): Promise<void> {
           }
 
           // Handle health check status changes
-          if (serviceData.healthStatus === 'unhealthy' && prevService?.healthStatus !== 'unhealthy') {
+          if (serviceData.healthStatus === HEALTH_STATUS.UNHEALTHY && prevService?.healthStatus !== HEALTH_STATUS.UNHEALTHY) {
             const bounce = await recordFailure('service', service.id, 'health_check', NOTIFICATION_TYPES.SYSTEM_HEALTH_CHECK_FAILED);
             if (bounce.shouldAlert) {
               notifyAsync(
@@ -577,7 +578,7 @@ async function runMetricsCollection(): Promise<void> {
                 }
               );
             }
-          } else if (serviceData.healthStatus === 'healthy' && prevService?.healthStatus === 'unhealthy') {
+          } else if (serviceData.healthStatus === HEALTH_STATUS.HEALTHY && prevService?.healthStatus === HEALTH_STATUS.UNHEALTHY) {
             const bounce = await recordSuccess('service', service.id, 'health_check');
             if (bounce.wasRecovered) {
               notifyAsync(
@@ -623,10 +624,10 @@ async function runAgentStalenessCheck(): Promise<void> {
     // Find all agent-mode servers with lastAgentPushAt set
     const agentServers = await prisma.server.findMany({
       where: {
-        metricsMode: 'agent',
+        metricsMode: METRICS_MODE.AGENT,
         lastAgentPushAt: { not: null },
         // Only check servers that are currently active or stale (not already offline)
-        agentStatus: { in: ['active', 'stale', 'waiting'] },
+        agentStatus: { in: [AGENT_STATUS.ACTIVE, AGENT_STATUS.STALE, AGENT_STATUS.WAITING] },
       },
       select: {
         id: true,
@@ -646,14 +647,14 @@ async function runAgentStalenessCheck(): Promise<void> {
 
       if (lastPush < offlineThreshold) {
         // Agent is offline (exceeds offline threshold)
-        if (server.agentStatus !== 'offline') {
-          newStatus = 'offline';
+        if (server.agentStatus !== AGENT_STATUS.OFFLINE) {
+          newStatus = AGENT_STATUS.OFFLINE;
 
           // Log status_change event
           await logAgentEvent({
             serverId: server.id,
             eventType: 'status_change',
-            status: 'offline',
+            status: AGENT_STATUS.OFFLINE,
             message: 'Agent stopped reporting',
             details: { previousStatus: server.agentStatus, lastPush: server.lastAgentPushAt },
           });
@@ -670,14 +671,14 @@ async function runAgentStalenessCheck(): Promise<void> {
         }
       } else if (lastPush < staleThreshold) {
         // Agent is stale (exceeds stale threshold but not offline)
-        if (server.agentStatus === 'active') {
-          newStatus = 'stale';
+        if (server.agentStatus === AGENT_STATUS.ACTIVE) {
+          newStatus = AGENT_STATUS.STALE;
 
           // Log status_change event
           await logAgentEvent({
             serverId: server.id,
             eventType: 'status_change',
-            status: 'stale',
+            status: AGENT_STATUS.STALE,
             message: 'Agent not reporting recently',
             details: { previousStatus: server.agentStatus, lastPush: server.lastAgentPushAt },
           });
@@ -697,9 +698,9 @@ async function runAgentStalenessCheck(): Promise<void> {
     // These should be marked offline if they've been waiting too long
     const waitingServers = await prisma.server.findMany({
       where: {
-        metricsMode: 'agent',
+        metricsMode: METRICS_MODE.AGENT,
         lastAgentPushAt: null, // Never received a push
-        agentStatus: { in: ['waiting', 'deploying', 'stale'] },
+        agentStatus: { in: [AGENT_STATUS.WAITING, AGENT_STATUS.DEPLOYING, AGENT_STATUS.STALE] },
         agentStatusChangedAt: { not: null }, // Has a status change time to check against
       },
       select: {
@@ -720,7 +721,7 @@ async function runAgentStalenessCheck(): Promise<void> {
         // Agent has been waiting/deploying for too long without connecting - mark offline
         await prisma.server.update({
           where: { id: server.id },
-          data: { agentStatus: 'offline', agentStatusChangedAt: new Date() },
+          data: { agentStatus: AGENT_STATUS.OFFLINE, agentStatusChangedAt: new Date() },
         });
         console.log(`[Scheduler] Agent ${server.name} marked as offline (never connected)`);
 
@@ -728,7 +729,7 @@ async function runAgentStalenessCheck(): Promise<void> {
         await logAgentEvent({
           serverId: server.id,
           eventType: 'status_change',
-          status: 'offline',
+          status: AGENT_STATUS.OFFLINE,
           message: 'Agent never connected after deployment',
           details: { previousStatus: server.agentStatus },
         });
@@ -742,11 +743,11 @@ async function runAgentStalenessCheck(): Promise<void> {
             { serverName: server.name, reason: 'Agent never connected after deployment' }
           );
         }
-      } else if (statusChangedAt < staleThreshold && server.agentStatus === 'waiting') {
+      } else if (statusChangedAt < staleThreshold && server.agentStatus === AGENT_STATUS.WAITING) {
         // Agent has been waiting for a while - mark as stale
         await prisma.server.update({
           where: { id: server.id },
-          data: { agentStatus: 'stale', agentStatusChangedAt: new Date() },
+          data: { agentStatus: AGENT_STATUS.STALE, agentStatusChangedAt: new Date() },
         });
         console.log(`[Scheduler] Agent ${server.name} marked as stale (not connecting)`);
 
@@ -754,7 +755,7 @@ async function runAgentStalenessCheck(): Promise<void> {
         await logAgentEvent({
           serverId: server.id,
           eventType: 'status_change',
-          status: 'stale',
+          status: AGENT_STATUS.STALE,
           message: 'Agent not connecting after deployment',
           details: { previousStatus: server.agentStatus },
         });

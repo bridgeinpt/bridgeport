@@ -5,6 +5,7 @@ import { getEnvironmentSshKey } from '../routes/environments.js';
 import { parseRegistryFromImage } from '../lib/image-utils.js';
 import { checkServiceUpdate } from '../lib/scheduler.js';
 import { findOrCreateContainerImage } from './image-management.js';
+import { SERVER_STATUS, HEALTH_STATUS, CONTAINER_STATUS, DISCOVERY_STATUS } from '../lib/constants.js';
 import type { Server, Service, RegistryConnection } from '@prisma/client';
 
 /**
@@ -136,7 +137,7 @@ export async function deleteServer(serverId: string): Promise<void> {
 }
 
 export async function checkServerHealth(serverId: string): Promise<{
-  status: 'healthy' | 'unhealthy';
+  status: typeof SERVER_STATUS.HEALTHY | typeof SERVER_STATUS.UNHEALTHY;
   error?: string;
 }> {
   const server = await prisma.server.findUnique({
@@ -154,14 +155,14 @@ export async function checkServerHealth(serverId: string): Promise<{
     try {
       await client.connect();
       const result = await client.exec('echo "ok"');
-      const status = result.code === 0 ? 'healthy' : 'unhealthy';
+      const status = result.code === 0 ? SERVER_STATUS.HEALTHY : SERVER_STATUS.UNHEALTHY;
 
       await prisma.server.update({
         where: { id: serverId },
         data: { status, lastCheckedAt: new Date() },
       });
 
-      if (status === 'unhealthy') {
+      if (status === SERVER_STATUS.UNHEALTHY) {
         const errorMsg = result.stderr?.trim() || `Command exited with code ${result.code}`;
         return { status, error: errorMsg };
       }
@@ -170,16 +171,16 @@ export async function checkServerHealth(serverId: string): Promise<{
       const errorMessage = error instanceof Error ? error.message : String(error) || 'Unknown error';
       await prisma.server.update({
         where: { id: serverId },
-        data: { status: 'unhealthy', lastCheckedAt: new Date() },
+        data: { status: SERVER_STATUS.UNHEALTHY, lastCheckedAt: new Date() },
       });
-      return { status: 'unhealthy', error: errorMessage };
+      return { status: SERVER_STATUS.UNHEALTHY, error: errorMessage };
     }
   }
 
   // Get SSH credentials from environment for remote servers
   const sshCreds = await getEnvironmentSshKey(server.environmentId);
   if (!sshCreds) {
-    return { status: 'unhealthy', error: 'SSH key not configured for this environment' };
+    return { status: SERVER_STATUS.UNHEALTHY, error: 'SSH key not configured for this environment' };
   }
 
   const ssh = new SSHClient({
@@ -192,7 +193,7 @@ export async function checkServerHealth(serverId: string): Promise<{
     await ssh.connect();
     const result = await ssh.exec('echo "ok"');
 
-    const status = result.code === 0 ? 'healthy' : 'unhealthy';
+    const status = result.code === 0 ? SERVER_STATUS.HEALTHY : SERVER_STATUS.UNHEALTHY;
 
     await prisma.server.update({
       where: { id: serverId },
@@ -202,7 +203,7 @@ export async function checkServerHealth(serverId: string): Promise<{
       },
     });
 
-    if (status === 'unhealthy') {
+    if (status === SERVER_STATUS.UNHEALTHY) {
       const errorMsg = result.stderr?.trim() || `Command exited with code ${result.code}`;
       return { status, error: errorMsg };
     }
@@ -224,12 +225,12 @@ export async function checkServerHealth(serverId: string): Promise<{
     await prisma.server.update({
       where: { id: serverId },
       data: {
-        status: 'unhealthy',
+        status: SERVER_STATUS.UNHEALTHY,
         lastCheckedAt: new Date(),
       },
     });
 
-    return { status: 'unhealthy', error: errorMessage };
+    return { status: SERVER_STATUS.UNHEALTHY, error: errorMessage };
   } finally {
     ssh.disconnect();
   }
@@ -255,23 +256,23 @@ export function determineHealthStatus(
   urlHealth?: UrlHealthResult | null
 ): string {
   if (!running) {
-    return 'unknown';
+    return HEALTH_STATUS.UNKNOWN;
   }
-  if (containerHealth === 'healthy') {
-    return 'healthy';
+  if (containerHealth === HEALTH_STATUS.HEALTHY) {
+    return HEALTH_STATUS.HEALTHY;
   }
-  if (containerHealth === 'unhealthy') {
-    return 'unhealthy';
+  if (containerHealth === HEALTH_STATUS.UNHEALTHY) {
+    return HEALTH_STATUS.UNHEALTHY;
   }
   // No Docker HEALTHCHECK, but we have URL check
   if (urlHealth) {
-    return urlHealth.success ? 'healthy' : 'unhealthy';
+    return urlHealth.success ? HEALTH_STATUS.HEALTHY : HEALTH_STATUS.UNHEALTHY;
   }
   // Container has no HEALTHCHECK configured and no URL check
   if (!containerHealth) {
-    return 'none';
+    return HEALTH_STATUS.NONE;
   }
-  return 'unknown';
+  return HEALTH_STATUS.UNKNOWN;
 }
 
 /**
@@ -283,15 +284,15 @@ export function determineOverallStatus(
   healthStatus: string
 ): string {
   if (!running) {
-    return containerState === 'not_found' ? 'not_found' : 'stopped';
+    return containerState === CONTAINER_STATUS.NOT_FOUND ? CONTAINER_STATUS.NOT_FOUND : CONTAINER_STATUS.STOPPED;
   }
-  if (healthStatus === 'unhealthy') {
-    return 'unhealthy';
+  if (healthStatus === HEALTH_STATUS.UNHEALTHY) {
+    return HEALTH_STATUS.UNHEALTHY;
   }
-  if (healthStatus === 'healthy') {
-    return 'healthy';
+  if (healthStatus === HEALTH_STATUS.HEALTHY) {
+    return HEALTH_STATUS.HEALTHY;
   }
-  return 'running';
+  return CONTAINER_STATUS.RUNNING;
 }
 
 export async function discoverContainers(serverId: string): Promise<DiscoverResult> {
@@ -391,7 +392,7 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
             healthStatus,
             exposedPorts,
             imageTag, // Update to current running tag
-            discoveryStatus: 'found',
+            discoveryStatus: DISCOVERY_STATUS.FOUND,
             lastCheckedAt: new Date(),
             lastDiscoveredAt: new Date(),
             // Update containerImageId if changed or not set
@@ -409,7 +410,7 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
             containerStatus,
             healthStatus,
             exposedPorts,
-            discoveryStatus: 'found',
+            discoveryStatus: DISCOVERY_STATUS.FOUND,
             lastCheckedAt: new Date(),
             lastDiscoveredAt: new Date(),
             serverId,
@@ -427,10 +428,10 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
         await prisma.service.update({
           where: { id: existingService.id },
           data: {
-            discoveryStatus: 'missing',
-            status: 'stopped',
-            containerStatus: 'not_found',
-            healthStatus: 'unknown',
+            discoveryStatus: DISCOVERY_STATUS.MISSING,
+            status: CONTAINER_STATUS.STOPPED,
+            containerStatus: CONTAINER_STATUS.NOT_FOUND,
+            healthStatus: HEALTH_STATUS.UNKNOWN,
             lastCheckedAt: new Date(),
           },
         });

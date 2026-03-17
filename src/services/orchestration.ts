@@ -4,6 +4,7 @@ import { verifyServiceHealth, type HealthVerificationResult } from './health-ver
 import { recordTagDeployment } from './image-management.js';
 import { sendSystemNotification, NOTIFICATION_TYPES } from './notifications.js';
 import { eventBus } from '../lib/event-bus.js';
+import { DEPLOYMENT_STATUS, PLAN_STATUS, STEP_STATUS } from '../lib/constants.js';
 import type { DeploymentPlan, DeploymentPlanStep, Service, ServiceDependency } from '@prisma/client';
 
 export interface BuildPlanOptions {
@@ -180,7 +181,7 @@ export async function buildDeploymentPlan(options: BuildPlanOptions): Promise<De
   const plan = await prisma.deploymentPlan.create({
     data: {
       name: planName,
-      status: 'pending',
+      status: PLAN_STATUS.PENDING,
       imageTag: options.imageTag,
       triggerType: options.triggerType,
       triggeredBy: options.triggeredBy,
@@ -275,20 +276,20 @@ export async function executePlan(planId: string): Promise<void> {
     },
   });
 
-  if (plan.status !== 'pending') {
+  if (plan.status !== PLAN_STATUS.PENDING) {
     throw new Error(`Plan is already ${plan.status}`);
   }
 
   // Mark plan as running
   await prisma.deploymentPlan.update({
     where: { id: planId },
-    data: { status: 'running', startedAt: new Date() },
+    data: { status: PLAN_STATUS.RUNNING, startedAt: new Date() },
   });
 
   // Emit progress events for all services in the plan
   for (const step of plan.steps) {
     if (step.service && step.action === 'deploy') {
-      eventBus.emitEvent({ type: 'deployment_progress', data: { planId, serviceId: step.service.id, status: 'running', environmentId: plan.environmentId } });
+      eventBus.emitEvent({ type: 'deployment_progress', data: { planId, serviceId: step.service.id, status: PLAN_STATUS.RUNNING, environmentId: plan.environmentId } });
     }
   }
 
@@ -321,7 +322,7 @@ export async function executePlan(planId: string): Promise<void> {
             // Mark step as running
             await prisma.deploymentPlanStep.update({
               where: { id: step.id },
-              data: { status: 'running', startedAt: new Date() },
+              data: { status: STEP_STATUS.RUNNING, startedAt: new Date() },
             });
 
             log(`  Starting ${step.action} ${step.service!.name}`);
@@ -341,7 +342,7 @@ export async function executePlan(planId: string): Promise<void> {
         );
 
         // Check if any step in this level failed
-        const failedStep = results.find((s) => s.status === 'failed');
+        const failedStep = results.find((s) => s.status === STEP_STATUS.FAILED);
         if (failedStep) {
           if (plan.autoRollback) {
             log(`Level ${level} failed (${failedStep.service?.name}), initiating rollback...`);
@@ -352,7 +353,7 @@ export async function executePlan(planId: string): Promise<void> {
             await prisma.deploymentPlan.update({
               where: { id: planId },
               data: {
-                status: 'failed',
+                status: PLAN_STATUS.FAILED,
                 completedAt: new Date(),
                 error: failedStep.error,
                 logs: planLogs.join('\n'),
@@ -383,7 +384,7 @@ export async function executePlan(planId: string): Promise<void> {
         // Mark step as running
         await prisma.deploymentPlanStep.update({
           where: { id: step.id },
-          data: { status: 'running', startedAt: new Date() },
+          data: { status: STEP_STATUS.RUNNING, startedAt: new Date() },
         });
 
         log(`Executing step ${step.order}: ${step.action} ${step.service.name}`);
@@ -399,7 +400,7 @@ export async function executePlan(planId: string): Promise<void> {
           where: { id: step.id },
         });
 
-        if (updatedStep.status === 'failed') {
+        if (updatedStep.status === STEP_STATUS.FAILED) {
           if (plan.autoRollback) {
             log(`Step ${step.order} failed, initiating rollback...`);
             await rollbackPlan(planId, log);
@@ -409,7 +410,7 @@ export async function executePlan(planId: string): Promise<void> {
             await prisma.deploymentPlan.update({
               where: { id: planId },
               data: {
-                status: 'failed',
+                status: PLAN_STATUS.FAILED,
                 completedAt: new Date(),
                 error: updatedStep.error,
                 logs: planLogs.join('\n'),
@@ -441,7 +442,7 @@ export async function executePlan(planId: string): Promise<void> {
     await prisma.deploymentPlan.update({
       where: { id: planId },
       data: {
-        status: 'completed',
+        status: PLAN_STATUS.COMPLETED,
         completedAt: new Date(),
         logs: planLogs.join('\n'),
       },
@@ -450,7 +451,7 @@ export async function executePlan(planId: string): Promise<void> {
     // Emit completion events for all deploy steps
     for (const step of plan.steps) {
       if (step.service && step.action === 'deploy') {
-        eventBus.emitEvent({ type: 'deployment_progress', data: { planId, serviceId: step.service.id, status: 'completed', environmentId: plan.environmentId } });
+        eventBus.emitEvent({ type: 'deployment_progress', data: { planId, serviceId: step.service.id, status: PLAN_STATUS.COMPLETED, environmentId: plan.environmentId } });
       }
     }
 
@@ -462,7 +463,7 @@ export async function executePlan(planId: string): Promise<void> {
     await prisma.deploymentPlan.update({
       where: { id: planId },
       data: {
-        status: 'failed',
+        status: PLAN_STATUS.FAILED,
         completedAt: new Date(),
         error: errorMessage,
         logs: planLogs.join('\n'),
@@ -472,7 +473,7 @@ export async function executePlan(planId: string): Promise<void> {
     // Emit failure events for all deploy steps
     for (const step of plan.steps) {
       if (step.service && step.action === 'deploy') {
-        eventBus.emitEvent({ type: 'deployment_progress', data: { planId, serviceId: step.service.id, status: 'failed', environmentId: plan.environmentId } });
+        eventBus.emitEvent({ type: 'deployment_progress', data: { planId, serviceId: step.service.id, status: PLAN_STATUS.FAILED, environmentId: plan.environmentId } });
       }
     }
 
@@ -503,12 +504,12 @@ async function executeDeployStep(
       }
     );
 
-    if (result.deployment.status === 'success') {
+    if (result.deployment.status === DEPLOYMENT_STATUS.SUCCESS) {
       log(`Deploy ${step.service.name}: success`);
       await prisma.deploymentPlanStep.update({
         where: { id: step.id },
         data: {
-          status: 'success',
+          status: STEP_STATUS.SUCCESS,
           completedAt: new Date(),
           deploymentId: result.deployment.id,
           logs: result.logs,
@@ -519,7 +520,7 @@ async function executeDeployStep(
       await prisma.deploymentPlanStep.update({
         where: { id: step.id },
         data: {
-          status: 'failed',
+          status: STEP_STATUS.FAILED,
           completedAt: new Date(),
           deploymentId: result.deployment.id,
           error: 'Deployment failed',
@@ -533,7 +534,7 @@ async function executeDeployStep(
     await prisma.deploymentPlanStep.update({
       where: { id: step.id },
       data: {
-        status: 'failed',
+        status: STEP_STATUS.FAILED,
         completedAt: new Date(),
         error: errorMessage,
       },
@@ -560,7 +561,7 @@ async function executeHealthCheckStep(
       await prisma.deploymentPlanStep.update({
         where: { id: step.id },
         data: {
-          status: 'success',
+          status: STEP_STATUS.SUCCESS,
           completedAt: new Date(),
           healthPassed: true,
           healthDetails: JSON.stringify({
@@ -577,7 +578,7 @@ async function executeHealthCheckStep(
       await prisma.deploymentPlanStep.update({
         where: { id: step.id },
         data: {
-          status: 'failed',
+          status: STEP_STATUS.FAILED,
           completedAt: new Date(),
           healthPassed: false,
           healthDetails: JSON.stringify({
@@ -597,7 +598,7 @@ async function executeHealthCheckStep(
     await prisma.deploymentPlanStep.update({
       where: { id: step.id },
       data: {
-        status: 'failed',
+        status: STEP_STATUS.FAILED,
         completedAt: new Date(),
         healthPassed: false,
         error: errorMessage,
@@ -635,7 +636,7 @@ export async function rollbackPlan(
   const stepsToRollback = plan.steps.filter(
     (step) =>
       step.action === 'deploy' &&
-      (step.status === 'success' || step.status === 'running') &&
+      (step.status === STEP_STATUS.SUCCESS || step.status === STEP_STATUS.RUNNING) &&
       step.previousTag
   );
 
@@ -656,11 +657,11 @@ export async function rollbackPlan(
         }
       );
 
-      if (result.deployment.status === 'success') {
+      if (result.deployment.status === DEPLOYMENT_STATUS.SUCCESS) {
         log(`Rollback ${step.service.name}: success`);
         await prisma.deploymentPlanStep.update({
           where: { id: step.id },
-          data: { status: 'rolled_back' },
+          data: { status: STEP_STATUS.ROLLED_BACK },
         });
       } else {
         log(`Rollback ${step.service.name}: failed`);
@@ -685,7 +686,7 @@ export async function rollbackPlan(
   await prisma.deploymentPlan.update({
     where: { id: planId },
     data: {
-      status: 'rolled_back',
+      status: PLAN_STATUS.ROLLED_BACK,
       completedAt: new Date(),
       logs: allLogs,
     },
@@ -711,7 +712,7 @@ export async function cancelPlan(planId: string): Promise<void> {
     where: { id: planId },
   });
 
-  if (plan.status !== 'pending' && plan.status !== 'running') {
+  if (plan.status !== PLAN_STATUS.PENDING && plan.status !== PLAN_STATUS.RUNNING) {
     throw new Error(`Cannot cancel plan with status: ${plan.status}`);
   }
 
@@ -719,15 +720,15 @@ export async function cancelPlan(planId: string): Promise<void> {
   await prisma.deploymentPlanStep.updateMany({
     where: {
       deploymentPlanId: planId,
-      status: 'pending',
+      status: STEP_STATUS.PENDING,
     },
-    data: { status: 'skipped' },
+    data: { status: STEP_STATUS.SKIPPED },
   });
 
   await prisma.deploymentPlan.update({
     where: { id: planId },
     data: {
-      status: 'cancelled',
+      status: PLAN_STATUS.CANCELLED,
       completedAt: new Date(),
     },
   });

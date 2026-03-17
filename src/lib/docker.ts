@@ -1,6 +1,7 @@
 import Docker from 'dockerode';
 import { access, constants } from 'fs/promises';
 import type { CommandClient } from './ssh.js';
+import { CONTAINER_STATUS, DOCKER_MODE } from './constants.js';
 
 // ==================== Types ====================
 
@@ -142,7 +143,7 @@ export class DockerSocketClient implements DockerClient {
       };
     } catch (err) {
       if ((err as { statusCode?: number }).statusCode === 404) {
-        return { state: 'not_found', running: false, ports: [], image: '' };
+        return { state: CONTAINER_STATUS.NOT_FOUND, running: false, ports: [], image: '' };
       }
       throw err;
     }
@@ -165,7 +166,7 @@ export class DockerSocketClient implements DockerClient {
       };
     } catch (err) {
       if ((err as { statusCode?: number }).statusCode === 404) {
-        return { state: 'not_found', status: 'Container not found', running: false };
+        return { state: CONTAINER_STATUS.NOT_FOUND, status: 'Container not found', running: false };
       }
       throw err;
     }
@@ -312,8 +313,8 @@ export class DockerSSHClient implements DockerClient {
       this.pathPrefix + `docker inspect --format '{{.State.Status}}|{{.State.Running}}|{{.State.Health.Status}}|{{.Config.Image}}|{{json .NetworkSettings.Ports}}' ${containerName} 2>/dev/null || echo "not_found|false|||{}"`
     );
 
-    if (code !== 0 || stdout.includes('not_found')) {
-      return { state: 'not_found', running: false, ports: [], image: '' };
+    if (code !== 0 || stdout.includes(CONTAINER_STATUS.NOT_FOUND)) {
+      return { state: CONTAINER_STATUS.NOT_FOUND, running: false, ports: [], image: '' };
     }
 
     const parts = stdout.trim().split('|');
@@ -359,15 +360,15 @@ export class DockerSSHClient implements DockerClient {
       this.pathPrefix + `docker inspect --format '{{.State.Status}}|{{.State.Running}}|{{.State.Health.Status}}' ${containerName} 2>/dev/null || echo "not_found|false|"`
     );
 
-    if (code !== 0 || stdout.includes('not_found')) {
-      return { state: 'not_found', status: 'Container not found', running: false };
+    if (code !== 0 || stdout.includes(CONTAINER_STATUS.NOT_FOUND)) {
+      return { state: CONTAINER_STATUS.NOT_FOUND, status: 'Container not found', running: false };
     }
 
     const [state, running, health] = stdout.trim().split('|');
 
     return {
       state: state || 'unknown',
-      status: state === 'running' ? 'Running' : `Container is ${state}`,
+      status: state === CONTAINER_STATUS.RUNNING ? 'Running' : `Container is ${state}`,
       health: health && health !== '' && health !== '<no value>' ? health : undefined,
       running: running === 'true',
     };
@@ -474,7 +475,7 @@ export class DockerSSHClient implements DockerClient {
 // ==================== Factory ====================
 
 export interface DockerClientConfig {
-  mode: 'socket' | 'ssh';
+  mode: typeof DOCKER_MODE.SOCKET | typeof DOCKER_MODE.SSH;
   sshClient?: CommandClient;
 }
 
@@ -482,7 +483,7 @@ export interface DockerClientConfig {
  * Create appropriate Docker client based on configuration.
  */
 export function createDockerClient(config: DockerClientConfig): DockerClient {
-  if (config.mode === 'socket') {
+  if (config.mode === DOCKER_MODE.SOCKET) {
     return new DockerSocketClient();
   }
 
@@ -501,7 +502,7 @@ export interface DockerClientForServerResult {
   dockerClient: DockerClient | null;
   sshClient: SSHCommandClient | null; // SSH client for file operations (compose files, etc.)
   error?: string;
-  mode: 'socket' | 'ssh';
+  mode: typeof DOCKER_MODE.SOCKET | typeof DOCKER_MODE.SSH;
   needsConnect: boolean; // Whether sshClient.connect() needs to be called
 }
 
@@ -516,9 +517,9 @@ export async function createDockerClientForServer(
   server: { hostname: string; dockerMode: string; serverType: string; environmentId: string },
   getCredentials: GetSSHCredentials
 ): Promise<DockerClientForServerResult> {
-  const mode = server.dockerMode as 'socket' | 'ssh';
+  const mode = server.dockerMode as typeof DOCKER_MODE.SOCKET | typeof DOCKER_MODE.SSH;
 
-  if (mode === 'socket') {
+  if (mode === DOCKER_MODE.SOCKET) {
     // Socket mode - use local Docker socket
     // Still create SSH client for file operations if needed
     const { client: sshClient, error } = await createClientForServer(
@@ -532,7 +533,7 @@ export async function createDockerClientForServer(
       dockerClient: new DockerSocketClient(),
       sshClient,
       error,
-      mode: 'socket',
+      mode: DOCKER_MODE.SOCKET,
       needsConnect: !!sshClient && !error, // SSH client needs connect if available
     };
   }
@@ -550,7 +551,7 @@ export async function createDockerClientForServer(
       dockerClient: null,
       sshClient: null,
       error: error || 'Failed to create SSH client',
-      mode: 'ssh',
+      mode: DOCKER_MODE.SSH,
       needsConnect: false,
     };
   }
@@ -558,7 +559,7 @@ export async function createDockerClientForServer(
   return {
     dockerClient: new DockerSSHClient(sshClient),
     sshClient,
-    mode: 'ssh',
+    mode: DOCKER_MODE.SSH,
     needsConnect: true,
   };
 }

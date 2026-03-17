@@ -11,6 +11,7 @@ import { checkServiceUpdate } from '../lib/scheduler.js';
 import { sendSystemNotification, NOTIFICATION_TYPES } from './notifications.js';
 import { recordTagDeployment } from './image-management.js';
 import { eventBus } from '../lib/event-bus.js';
+import { DEPLOYMENT_STATUS, CONTAINER_STATUS, HISTORY_STATUS } from '../lib/constants.js';
 import type { Deployment, Service } from '@prisma/client';
 
 export interface DeployOptions {
@@ -52,7 +53,7 @@ export async function deployService(
     data: {
       imageTag,
       previousTag,
-      status: 'pending',
+      status: DEPLOYMENT_STATUS.PENDING,
       triggeredBy,
       serviceId,
       userId,
@@ -67,10 +68,10 @@ export async function deployService(
   try {
     await prisma.deployment.update({
       where: { id: deployment.id },
-      data: { status: 'deploying' },
+      data: { status: DEPLOYMENT_STATUS.DEPLOYING },
     });
 
-    eventBus.emitEvent({ type: 'deployment_progress', data: { deploymentId: deployment.id, serviceId, status: 'deploying', environmentId: service.server.environmentId } });
+    eventBus.emitEvent({ type: 'deployment_progress', data: { deploymentId: deployment.id, serviceId, status: DEPLOYMENT_STATUS.DEPLOYING, environmentId: service.server.environmentId } });
 
     log(`Starting deployment of ${service.name} with tag ${imageTag}`);
 
@@ -193,7 +194,7 @@ export async function deployService(
     const containers = await dockerClient.listContainers();
     const container = containers.find((c) => c.name === service.containerName);
 
-    if (!container || container.state !== 'running') {
+    if (!container || container.state !== CONTAINER_STATUS.RUNNING) {
       throw new Error(`Container ${service.containerName} is not running after deploy`);
     }
 
@@ -208,7 +209,7 @@ export async function deployService(
       where: { id: serviceId },
       data: {
         imageTag,
-        status: 'running',
+        status: CONTAINER_STATUS.RUNNING,
         lastCheckedAt: new Date(),
       },
     });
@@ -224,7 +225,7 @@ export async function deployService(
       imageTag,
       undefined,
       triggeredBy,
-      'success'
+      HISTORY_STATUS.SUCCESS
     );
 
     // Mark deployment as successful and link to history entry
@@ -232,7 +233,7 @@ export async function deployService(
     const finalDeployment = await prisma.deployment.update({
       where: { id: deployment.id },
       data: {
-        status: 'success',
+        status: DEPLOYMENT_STATUS.SUCCESS,
         logs: logs.join('\n'),
         completedAt: new Date(),
         durationMs,
@@ -240,7 +241,7 @@ export async function deployService(
       },
     });
 
-    eventBus.emitEvent({ type: 'deployment_progress', data: { deploymentId: deployment.id, serviceId, status: 'success', environmentId: service.server.environmentId } });
+    eventBus.emitEvent({ type: 'deployment_progress', data: { deploymentId: deployment.id, serviceId, status: DEPLOYMENT_STATUS.SUCCESS, environmentId: service.server.environmentId } });
 
     // Send success notification
     await sendSystemNotification(
@@ -264,14 +265,14 @@ export async function deployService(
       imageTag,
       undefined,
       triggeredBy,
-      'failed'
+      HISTORY_STATUS.FAILED
     );
 
     const durationMs = Date.now() - startTime;
     const failedDeployment = await prisma.deployment.update({
       where: { id: deployment.id },
       data: {
-        status: 'failed',
+        status: DEPLOYMENT_STATUS.FAILED,
         logs: logs.join('\n'),
         completedAt: new Date(),
         durationMs,
@@ -279,7 +280,7 @@ export async function deployService(
       },
     });
 
-    eventBus.emitEvent({ type: 'deployment_progress', data: { deploymentId: deployment.id, serviceId, status: 'failed', environmentId: service.server.environmentId } });
+    eventBus.emitEvent({ type: 'deployment_progress', data: { deploymentId: deployment.id, serviceId, status: DEPLOYMENT_STATUS.FAILED, environmentId: service.server.environmentId } });
 
     // Send failure notification
     await sendSystemNotification(

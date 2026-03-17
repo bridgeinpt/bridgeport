@@ -11,6 +11,7 @@ import {
 } from '../services/registries.js';
 import { RegistryFactory } from '../lib/registry.js';
 import { logAudit } from '../services/audit.js';
+import { DISCOVERY_STATUS } from '../lib/constants.js';
 
 const registryTypeSchema = z.enum(['digitalocean', 'dockerhub', 'generic']);
 
@@ -300,7 +301,7 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       const services = await prisma.service.findMany({
-        where: { containerImage: { registryConnectionId: id }, discoveryStatus: 'found' },
+        where: { containerImage: { registryConnectionId: id }, discoveryStatus: DISCOVERY_STATUS.FOUND },
         select: { id: true, name: true },
       });
 

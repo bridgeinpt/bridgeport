@@ -5,6 +5,7 @@ import { prisma } from '../lib/db.js';
 import { deployService } from '../services/deploy.js';
 import { buildDeploymentPlan, executePlan } from '../services/orchestration.js';
 import { logAudit } from '../services/audit.js';
+import { DEPLOYMENT_STATUS } from '../lib/constants.js';
 
 const deployWebhookSchema = z.object({
   service: z.string().min(1), // Service name or ID
@@ -106,7 +107,7 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
       });
 
       return {
-        success: result.deployment.status === 'success',
+        success: result.deployment.status === DEPLOYMENT_STATUS.SUCCESS,
         deploymentId: result.deployment.id,
         status: result.deployment.status,
       };
@@ -200,7 +201,7 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
         } catch {
           results.push({
             service: service.name,
-            status: 'failed',
+            status: DEPLOYMENT_STATUS.FAILED,
           });
         }
       }

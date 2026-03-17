@@ -1,4 +1,5 @@
 import { prisma } from '../lib/db.js';
+import { DOCKER_MODE, METRICS_MODE } from '../lib/constants.js';
 
 // ==================== Types ====================
 
@@ -247,22 +248,22 @@ export const OPERATIONS_SETTINGS: SettingDefinition[] = [
   {
     key: 'defaultDockerMode',
     type: 'string',
-    default: 'ssh',
+    default: DOCKER_MODE.SSH,
     label: 'Default Docker Mode',
     description: 'Default method for connecting to Docker daemon on new servers',
     group: 'Server Defaults',
     widget: 'select',
-    options: ['ssh', 'socket'],
+    options: [DOCKER_MODE.SSH, DOCKER_MODE.SOCKET],
   },
   {
     key: 'defaultMetricsMode',
     type: 'string',
-    default: 'disabled',
+    default: METRICS_MODE.DISABLED,
     label: 'Default Metrics Mode',
     description: 'Default metrics collection mode for new servers',
     group: 'Server Defaults',
     widget: 'select',
-    options: ['disabled', 'ssh', 'agent'],
+    options: [METRICS_MODE.DISABLED, METRICS_MODE.SSH, METRICS_MODE.AGENT],
   },
 ];
 

@@ -16,6 +16,7 @@ import { getHostInfo, registerHostServer } from '../services/host-detection.js';
 import { prisma } from '../lib/db.js';
 import { bundledAgentVersion } from '../lib/version.js';
 import { requireAdmin } from '../plugins/authorize.js';
+import { METRICS_MODE } from '../lib/constants.js';
 
 const createServerSchema = z.object({
   name: z.string().min(1),
@@ -376,7 +377,7 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
       const { id } = request.params as { id: string };
       const body = request.body as { mode: 'ssh' | 'agent' | 'disabled' };
 
-      if (!['ssh', 'agent', 'disabled'].includes(body.mode)) {
+      if (![METRICS_MODE.SSH, METRICS_MODE.AGENT, METRICS_MODE.DISABLED].includes(body.mode)) {
         return reply.code(400).send({ error: 'Invalid mode. Must be ssh, agent, or disabled' });
       }
 
@@ -390,7 +391,7 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       // If switching to agent mode, deploy the agent
-      if (body.mode === 'agent' && server.metricsMode !== 'agent') {
+      if (body.mode === METRICS_MODE.AGENT && server.metricsMode !== METRICS_MODE.AGENT) {
         const deployResult = await deployAgent(id);
         if (!deployResult.success) {
           return reply.code(500).send({ error: `Failed to deploy agent: ${deployResult.error}` });
@@ -398,7 +399,7 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       // If switching away from agent mode, remove the agent
-      if (body.mode !== 'agent' && server.metricsMode === 'agent') {
+      if (body.mode !== METRICS_MODE.AGENT && server.metricsMode === METRICS_MODE.AGENT) {
         await removeAgent(id);
       }
 

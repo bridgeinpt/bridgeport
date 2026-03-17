@@ -1,6 +1,7 @@
 import { prisma } from '../lib/db.js';
 import { SSHClient, LocalClient, DockerSSH, isLocalhost } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
+import { HEALTH_STATUS, CONTAINER_STATUS } from '../lib/constants.js';
 
 export interface ServiceHealthResult {
   status: string;
@@ -64,15 +65,15 @@ export async function checkServiceHealth(serviceId: string): Promise<ServiceHeal
     // Determine overall status
     let status: string;
     if (!containerHealth.running) {
-      status = containerHealth.state === 'not_found' ? 'not_found' : 'stopped';
-    } else if (containerHealth.health === 'unhealthy') {
-      status = 'unhealthy';
+      status = containerHealth.state === CONTAINER_STATUS.NOT_FOUND ? CONTAINER_STATUS.NOT_FOUND : CONTAINER_STATUS.STOPPED;
+    } else if (containerHealth.health === HEALTH_STATUS.UNHEALTHY) {
+      status = HEALTH_STATUS.UNHEALTHY;
     } else if (urlHealth && !urlHealth.success) {
-      status = 'unhealthy';
-    } else if (containerHealth.health === 'healthy' || (urlHealth && urlHealth.success)) {
-      status = 'healthy';
+      status = HEALTH_STATUS.UNHEALTHY;
+    } else if (containerHealth.health === HEALTH_STATUS.HEALTHY || (urlHealth && urlHealth.success)) {
+      status = HEALTH_STATUS.HEALTHY;
     } else {
-      status = 'running';
+      status = CONTAINER_STATUS.RUNNING;
     }
 
     // Update service status in database

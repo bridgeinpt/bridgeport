@@ -4,6 +4,7 @@ import { promisify } from 'util';
 import { readFile, stat, writeFile as fsWriteFile } from 'fs/promises';
 import { config } from './config.js';
 import { getSystemSettings } from '../services/system-settings.js';
+import { CONTAINER_STATUS, SERVER_TYPE } from './constants.js';
 
 const execAsync = promisify(exec);
 
@@ -396,7 +397,7 @@ export async function createClientForServer(
   if (isLocalhost(hostname)) {
     // Host-type servers registered as 'localhost' need SSH to the Docker host
     // for file operations (the LocalClient runs inside the container)
-    if (options?.serverType === 'host') {
+    if (options?.serverType === SERVER_TYPE.HOST) {
       const gatewayIp = await detectHostGateway();
       if (!gatewayIp) {
         return { client: null, error: 'Cannot detect Docker host gateway for file operations' };
@@ -758,15 +759,15 @@ export class DockerSSH {
       this.pathPrefix + `docker inspect --format '{{.State.Status}}|{{.State.Running}}|{{.State.Health.Status}}' ${containerName} 2>/dev/null || echo "not_found|false|"`
     );
 
-    if (code !== 0 || stdout.includes('not_found')) {
-      return { state: 'not_found', status: 'Container not found', running: false };
+    if (code !== 0 || stdout.includes(CONTAINER_STATUS.NOT_FOUND)) {
+      return { state: CONTAINER_STATUS.NOT_FOUND, status: 'Container not found', running: false };
     }
 
     const [state, running, health] = stdout.trim().split('|');
 
     return {
       state: state || 'unknown',
-      status: state === 'running' ? 'Running' : `Container is ${state}`,
+      status: state === CONTAINER_STATUS.RUNNING ? 'Running' : `Container is ${state}`,
       health: health && health !== '' && health !== '<no value>' ? health : undefined,
       running: running === 'true',
     };
@@ -786,8 +787,8 @@ export class DockerSSH {
       this.pathPrefix + `docker inspect --format '{{.State.Status}}|{{.State.Running}}|{{.State.Health.Status}}|{{.Config.Image}}|{{json .NetworkSettings.Ports}}' ${containerName} 2>/dev/null || echo "not_found|false|||{}"`
     );
 
-    if (code !== 0 || stdout.includes('not_found')) {
-      return { state: 'not_found', running: false, ports: [], image: '' };
+    if (code !== 0 || stdout.includes(CONTAINER_STATUS.NOT_FOUND)) {
+      return { state: CONTAINER_STATUS.NOT_FOUND, running: false, ports: [], image: '' };
     }
 
     const parts = stdout.trim().split('|');

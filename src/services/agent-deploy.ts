@@ -5,6 +5,7 @@ import { SSHClient, LocalClient, isLocalhost, type CommandClient } from '../lib/
 import { getEnvironmentSshKey } from '../routes/environments.js';
 import { getSystemSettings } from './system-settings.js';
 import { logAgentEvent } from './agent-events.js';
+import { AGENT_STATUS, METRICS_MODE } from '../lib/constants.js';
 import crypto from 'crypto';
 
 const AGENT_PATH = join(process.cwd(), 'agent', 'bridgeport-agent');
@@ -69,7 +70,7 @@ export async function deployAgent(
   // Set agent status to deploying
   await prisma.server.update({
     where: { id: serverId },
-    data: { agentStatus: 'deploying', agentStatusChangedAt: new Date() },
+    data: { agentStatus: AGENT_STATUS.DEPLOYING, agentStatusChangedAt: new Date() },
   });
 
   // Log deploy_started event
@@ -188,8 +189,8 @@ WantedBy=multi-user.target
     await prisma.server.update({
       where: { id: serverId },
       data: {
-        metricsMode: 'agent',
-        agentStatus: 'waiting',
+        metricsMode: METRICS_MODE.AGENT,
+        agentStatus: AGENT_STATUS.WAITING,
         agentStatusChangedAt: new Date(),
       },
     });
@@ -218,7 +219,7 @@ WantedBy=multi-user.target
     // Reset agent status on failure
     await prisma.server.update({
       where: { id: serverId },
-      data: { agentStatus: 'unknown', agentStatusChangedAt: new Date() },
+      data: { agentStatus: AGENT_STATUS.UNKNOWN, agentStatusChangedAt: new Date() },
     });
     return { success: false, error: errorMessage };
   }
@@ -270,7 +271,7 @@ export async function removeAgent(serverId: string): Promise<{ success: boolean;
     // Update server
     await prisma.server.update({
       where: { id: serverId },
-      data: { metricsMode: 'disabled', agentToken: null },
+      data: { metricsMode: METRICS_MODE.DISABLED, agentToken: null },
     });
 
     return { success: true };

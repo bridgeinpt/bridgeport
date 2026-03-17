@@ -3,6 +3,7 @@ import { SSHClient, LocalClient, DockerSSH, isLocalhost, type CommandClient } fr
 import { createDockerClientForServer, type DockerClient } from '../lib/docker.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 import { determineHealthStatus, determineOverallStatus, type UrlHealthResult } from './servers.js';
+import { SERVER_STATUS, DOCKER_MODE, DISCOVERY_STATUS, METRICS_MODE } from '../lib/constants.js';
 
 export interface ServerMetricsData {
   cpuPercent?: number;
@@ -259,7 +260,7 @@ export interface ServiceHealthData {
 
 export interface CombinedServerData {
   serverMetrics: ServerMetricsData | null;
-  serverHealth: { status: 'healthy' | 'unhealthy' };
+  serverHealth: { status: typeof SERVER_STATUS.HEALTHY | typeof SERVER_STATUS.UNHEALTHY };
   serviceData: ServiceHealthData[];
 }
 
@@ -274,7 +275,7 @@ export async function collectServerDataSSH(serverId: string): Promise<CombinedSe
     include: {
       environment: true,
       services: {
-        where: { discoveryStatus: 'found' },
+        where: { discoveryStatus: DISCOVERY_STATUS.FOUND },
         select: { id: true, containerName: true, healthCheckUrl: true },
       },
     },
@@ -296,7 +297,7 @@ export async function collectServerDataSSH(serverId: string): Promise<CombinedSe
   // For socket mode, we can use local commands for system metrics
   // For SSH mode, we need the SSH client for everything
   let systemClient: CommandClient;
-  if (server.dockerMode === 'socket') {
+  if (server.dockerMode === DOCKER_MODE.SOCKET) {
     // Socket mode: use local execution for system metrics
     systemClient = new LocalClient();
   } else if (sshClient) {
@@ -317,7 +318,7 @@ export async function collectServerDataSSH(serverId: string): Promise<CombinedSe
     }
 
     // Server is healthy if we can connect or if socket mode (no connection needed)
-    const serverHealth: { status: 'healthy' | 'unhealthy' } = { status: 'healthy' };
+    const serverHealth: { status: typeof SERVER_STATUS.HEALTHY | typeof SERVER_STATUS.UNHEALTHY } = { status: SERVER_STATUS.HEALTHY };
 
     // Collect server metrics using system client
     const serverMetrics = await collectSystemMetrics(systemClient);
@@ -355,9 +356,9 @@ export async function collectServerDataSSH(serverId: string): Promise<CombinedSe
           serviceData.push({
             containerName: service.containerName,
             metrics: null,
-            containerStatus: 'unknown',
-            healthStatus: 'unknown',
-            overallStatus: 'unknown',
+            containerStatus: SERVER_STATUS.UNKNOWN,
+            healthStatus: SERVER_STATUS.UNKNOWN,
+            overallStatus: SERVER_STATUS.UNKNOWN,
           });
         }
       }
@@ -373,7 +374,7 @@ export async function collectServerDataSSH(serverId: string): Promise<CombinedSe
     // Connection failure means server is unhealthy
     return {
       serverMetrics: null,
-      serverHealth: { status: 'unhealthy' },
+      serverHealth: { status: SERVER_STATUS.UNHEALTHY },
       serviceData: [],
     };
   } finally {
