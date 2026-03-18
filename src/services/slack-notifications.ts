@@ -312,7 +312,12 @@ export function buildSlackMessage(
     });
   }
 
-  if (data.imageTag) {
+  if (data.imageTags && Array.isArray(data.imageTags) && (data.imageTags as string[]).length > 0) {
+    fields.push({
+      type: 'mrkdwn',
+      text: `*Tags:*\n${(data.imageTags as string[]).map((t) => `\`${t}\``).join(', ')}`,
+    });
+  } else if (data.imageTag) {
     fields.push({
       type: 'mrkdwn',
       text: `*Image Tag:*\n\`${data.imageTag}\``,
@@ -341,7 +346,7 @@ export function buildSlackMessage(
     elements: [
       {
         type: 'mrkdwn',
-        text: `${notificationType.code} \u2022 <!date^${Math.floor(Date.now() / 1000)}^{date_short_pretty} at {time}|${new Date().toISOString()}>`,
+        text: `<!date^${Math.floor(Date.now() / 1000)}^{date_short_pretty} at {time}|${new Date().toISOString()}>`,
       },
     ],
   });

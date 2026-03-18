@@ -10,6 +10,7 @@ import { getEnvironmentSshKey } from '../routes/environments.js';
 import { checkServiceUpdate } from '../lib/scheduler.js';
 import { sendSystemNotification, NOTIFICATION_TYPES } from './notifications.js';
 import { recordTagDeployment } from './image-management.js';
+import { safeJsonParse } from '../lib/helpers.js';
 import { eventBus } from '../lib/event-bus.js';
 import { DEPLOYMENT_STATUS, CONTAINER_STATUS, HISTORY_STATUS } from '../lib/constants.js';
 import type { Deployment, Service } from '@prisma/client';
@@ -243,6 +244,16 @@ export async function deployService(
 
     eventBus.emitEvent({ type: 'deployment_progress', data: { deploymentId: deployment.id, serviceId, status: DEPLOYMENT_STATUS.SUCCESS, environmentId: service.server.environmentId } });
 
+    // Collect all tags for the deployed digest to include in notification
+    let imageTags: string[] = [];
+    if (historyEntry.imageDigestId) {
+      const digest = await prisma.imageDigest.findUnique({
+        where: { id: historyEntry.imageDigestId },
+        select: { tags: true },
+      });
+      imageTags = safeJsonParse(digest?.tags as string, [] as string[]);
+    }
+
     // Send success notification
     await sendSystemNotification(
       NOTIFICATION_TYPES.SYSTEM_DEPLOYMENT_SUCCESS,
@@ -250,6 +261,7 @@ export async function deployService(
       {
         serviceName: service.name,
         imageTag,
+        imageTags,
         serverName: service.server.name,
       }
     );
