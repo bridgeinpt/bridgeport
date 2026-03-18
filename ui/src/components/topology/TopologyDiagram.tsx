@@ -338,6 +338,8 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
   const [collapsedServers, setCollapsedServers] = useState<Set<string>>(new Set());
   const [manualConnections, setManualConnections] = useState<ServiceConnection[]>([]);
   const [savedPositions, setSavedPositions] = useState<DiagramLayoutPositions | null>(null);
+  const [showConnectionsList, setShowConnectionsList] = useState(false);
+  const connectionsListRef = useRef<HTMLDivElement>(null);
   const reactFlowInstance = useReactFlow();
   const containerRef = useRef<HTMLDivElement>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -495,6 +497,17 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showExportMenu]);
 
+  useEffect(() => {
+    if (!showConnectionsList) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (connectionsListRef.current && !connectionsListRef.current.contains(e.target as HTMLElement)) {
+        setShowConnectionsList(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showConnectionsList]);
+
   const handleExportMermaid = useCallback(async () => {
     setShowExportMenu(false);
     try {
@@ -521,6 +534,29 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
       a.click();
     } catch {
       // Export failed silently
+    }
+  }, []);
+
+  // Build name lookup for connection list display
+  const nodeNameMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const server of servers) {
+      for (const service of server.services) {
+        map.set(`service:${service.id}`, service.name);
+      }
+    }
+    for (const db of databases) {
+      map.set(`database:${db.id}`, db.name);
+    }
+    return map;
+  }, [servers, databases]);
+
+  const handleDeleteManualConnection = useCallback(async (connectionId: string) => {
+    try {
+      await deleteConnection(connectionId);
+      setManualConnections((prev) => prev.filter((c) => c.id !== connectionId));
+    } catch {
+      // Silently fail
     }
   }, []);
 
@@ -595,6 +631,16 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
                 onExpandAll={handleExpandAll}
                 onFitView={handleFitView}
               />
+              {canInteract && (
+                <ConnectionsListButton
+                  connections={manualConnections}
+                  nodeNameMap={nodeNameMap}
+                  onDelete={handleDeleteManualConnection}
+                  show={showConnectionsList}
+                  onToggle={() => setShowConnectionsList((v) => !v)}
+                  menuRef={connectionsListRef}
+                />
+              )}
               <div className="relative" ref={showExportMenu ? exportMenuRef : undefined}>
                 <button
                   onClick={() => setShowExportMenu((v) => !v)}
@@ -671,6 +717,16 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
               onExpandAll={handleExpandAll}
               onFitView={handleFitView}
             />
+            {canInteract && (
+              <ConnectionsListButton
+                connections={manualConnections}
+                nodeNameMap={nodeNameMap}
+                onDelete={handleDeleteManualConnection}
+                show={showConnectionsList}
+                onToggle={() => setShowConnectionsList((v) => !v)}
+                menuRef={connectionsListRef}
+              />
+            )}
             <div className="relative" ref={showExportMenu ? exportMenuRef : undefined}>
               <button
                 onClick={() => setShowExportMenu((v) => !v)}
@@ -738,6 +794,72 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
         )}
       </div>
     </>
+  );
+}
+
+function ConnectionsListButton({
+  connections,
+  nodeNameMap,
+  onDelete,
+  show,
+  onToggle,
+  menuRef,
+}: {
+  connections: ServiceConnection[];
+  nodeNameMap: Map<string, string>;
+  onDelete: (id: string) => void;
+  show: boolean;
+  onToggle: () => void;
+  menuRef: React.Ref<HTMLDivElement>;
+}) {
+  if (connections.length === 0) return null;
+
+  const resolveName = (type: string, id: string) =>
+    nodeNameMap.get(`${type}:${id}`) || id.slice(0, 8);
+
+  return (
+    <div className="relative" ref={show ? menuRef : undefined}>
+      <button
+        onClick={onToggle}
+        className="p-1.5 text-slate-400 hover:text-white rounded"
+        title="Manage connections"
+      >
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+        </svg>
+      </button>
+      {show && (
+        <div className="absolute right-0 top-full mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-lg py-1 z-50 min-w-[240px] max-h-[300px] overflow-y-auto">
+          <div className="px-3 py-1.5 text-xs font-medium text-slate-400 border-b border-slate-700">
+            Manual Connections ({connections.length})
+          </div>
+          {connections.map((conn) => (
+            <div key={conn.id} className="flex items-center justify-between px-3 py-1.5 hover:bg-slate-700 group">
+              <div className="flex items-center gap-1 text-sm text-slate-300 min-w-0">
+                <span className="truncate max-w-[80px]" title={resolveName(conn.sourceType, conn.sourceId)}>
+                  {resolveName(conn.sourceType, conn.sourceId)}
+                </span>
+                <svg className="w-3 h-3 text-slate-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                </svg>
+                <span className="truncate max-w-[80px]" title={resolveName(conn.targetType, conn.targetId)}>
+                  {resolveName(conn.targetType, conn.targetId)}
+                </span>
+              </div>
+              <button
+                onClick={() => onDelete(conn.id)}
+                className="p-0.5 text-slate-500 hover:text-red-400 rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-2"
+                title="Delete connection"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
