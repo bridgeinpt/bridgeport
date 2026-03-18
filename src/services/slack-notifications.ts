@@ -331,26 +331,6 @@ export function buildSlackMessage(
     });
   }
 
-  // Main message
-  blocks.push({
-    type: 'section',
-    text: {
-      type: 'mrkdwn',
-      text: message,
-    },
-  });
-
-  // Context with notification type and timestamp
-  blocks.push({
-    type: 'context',
-    elements: [
-      {
-        type: 'mrkdwn',
-        text: `<!date^${Math.floor(Date.now() / 1000)}^{date_short_pretty} at {time}|${new Date().toISOString()}>`,
-      },
-    ],
-  });
-
   // Action buttons (if BridgePort URL is configured)
   if (bridgeportUrl) {
     const buttons: SlackBlock['elements'] = [];
