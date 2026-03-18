@@ -343,6 +343,7 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
   const reactFlowInstance = useReactFlow();
   const containerRef = useRef<HTMLDivElement>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectStartNodeRef = useRef<string | null>(null);
 
   const canInteract = userRole === 'admin' || userRole === 'operator';
 
@@ -438,6 +439,11 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     };
   }, []);
 
+  // Track which node the user started dragging from
+  const handleConnectStart = useCallback((_event: MouseEvent | TouchEvent, params: { nodeId: string | null }) => {
+    connectStartNodeRef.current = params.nodeId;
+  }, []);
+
   // Handle on-diagram edge creation
   const handleConnect: OnConnect = useCallback(async (connection: Connection) => {
     if (!canInteract || !connection.source || !connection.target) return;
@@ -448,8 +454,18 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
       return { type: type as 'service' | 'database', id: rest.join(':') };
     };
 
-    const source = parseNodeId(connection.source);
-    const target = parseNodeId(connection.target);
+    // React Flow normalizes connections so source always has a "source" handle,
+    // regardless of drag direction. Use the tracked start node to preserve
+    // the user's intended direction.
+    let sourceNodeId = connection.source;
+    let targetNodeId = connection.target;
+    if (connectStartNodeRef.current && connectStartNodeRef.current !== connection.source) {
+      sourceNodeId = connection.target;
+      targetNodeId = connection.source;
+    }
+
+    const source = parseNodeId(sourceNodeId);
+    const target = parseNodeId(targetNodeId);
 
     // Skip server-to-server connections
     if (source.type !== 'service' && source.type !== 'database') return;
@@ -608,6 +624,7 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     fitView: true,
     fitViewOptions: { padding: 0.2 },
     onConnect: canInteract ? handleConnect : undefined,
+    onConnectStart: canInteract ? handleConnectStart : undefined,
     nodesDraggable: canInteract,
     nodesConnectable: canInteract,
     proOptions: { hideAttribution: true },
