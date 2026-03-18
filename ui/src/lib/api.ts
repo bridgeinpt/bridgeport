@@ -648,6 +648,7 @@ export interface Service {
   certChecks: string | null; // JSON array of CertCheckConfig
   agentCertCheckResults: string | null; // JSON array of CertCheckResult
   agentCertCheckedAt: string | null;
+  updatedAt: string;
 }
 
 export interface ServiceWithServer extends Service {

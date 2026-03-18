@@ -40,6 +40,7 @@ import {
   type CertCheckConfig,
   type CertCheckResult,
 } from '../lib/api';
+import { Modal } from '../components/Modal';
 import { DependencyEditor } from '../components/DependencyEditor';
 import Pagination from '../components/Pagination';
 import { usePagination } from '../hooks/usePagination';
@@ -56,6 +57,10 @@ import { safeJsonParse } from '../lib/helpers';
 
 function parseExposedPorts(portsJson: string | null): ExposedPort[] {
   return safeJsonParse(portsJson, [] as ExposedPort[]);
+}
+
+function formatDigestShort(digest: string): string {
+  return digest.replace('sha256:', '').substring(0, 12);
 }
 
 function parseTCPChecks(jsonStr: string | null): TCPCheckConfig[] {
@@ -90,12 +95,10 @@ export default function ServiceDetail() {
   const [showLogs, setShowLogs] = useState(false);
   const [showConfig, setShowConfig] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [imageTag, setImageTag] = useState('');
 
-  // Inline deploy card editing state
-  const [editingCurrentTag, setEditingCurrentTag] = useState(false);
-  const [inlineCurrentTag, setInlineCurrentTag] = useState('');
-  const [savingInline, setSavingInline] = useState(false);
+  // Deploy modal state
+  const [showDeployModal, setShowDeployModal] = useState(false);
+  const [deployAutoRollback, setDeployAutoRollback] = useState(false);
 
   // Config edit state
   const [editComposePath, setEditComposePath] = useState<string>('');
@@ -175,7 +178,6 @@ export default function ServiceDetail() {
         getService(id).then(({ service }) => {
           setService(service);
           setBreadcrumbName(id, service.name);
-          setImageTag(service.imageTag);
           // Load container image if linked
           if (service.containerImageId) {
             getContainerImage(service.containerImageId)
@@ -281,60 +283,21 @@ export default function ServiceDetail() {
     setDependencies(dependencies);
   };
 
-  // Inline deploy card editing handlers
-  const startEditCurrentTag = () => {
-    if (service) {
-      setInlineCurrentTag(service.imageTag || '');
-      setEditingCurrentTag(true);
-    }
-  };
-
-  const cancelInlineEdit = () => {
-    setEditingCurrentTag(false);
-  };
-
-  const saveInlineCurrentTag = async () => {
-    if (!id || !service || inlineCurrentTag === service.imageTag) {
-      cancelInlineEdit();
-      return;
-    }
-    setSavingInline(true);
-    try {
-      const { service: updated } = await updateService(id, { imageTag: inlineCurrentTag });
-      setService((prev) => (prev ? { ...prev, imageTag: updated.imageTag } : null));
-      setImageTag(updated.imageTag); // Also update the deploy tag input
-      setEditingCurrentTag(false);
-      toast.success('Image tag updated');
-    } catch {
-      toast.error('Failed to update image tag');
-    } finally {
-      setSavingInline(false);
-    }
-  };
-
-  const handleInlineKeyDown = (e: React.KeyboardEvent, saveHandler: () => void) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      saveHandler();
-    } else if (e.key === 'Escape') {
-      cancelInlineEdit();
-    }
-  };
-
-  const handleDeploy = async () => {
+  const handleDeploy = async (tag?: string) => {
     if (!id) return;
+    const deployTag = tag || containerImage?.latestDigest?.bestTag || containerImage?.latestDigest?.tags?.[0] || service?.imageTag || 'latest';
     setDeploying(true);
     setDeployError(null);
+    setShowDeployModal(false);
     try {
-      const result = await deployService(id, { imageTag, pullImage: true });
+      const result = await deployService(id, { imageTag: deployTag, pullImage: true });
       setDeployments((prev) => [result.deployment, ...prev]);
       if (service) {
-        setService({ ...service, imageTag, status: 'running' });
+        setService({ ...service, imageTag: deployTag, status: 'running' });
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Deployment failed';
       setDeployError(message);
-      // Refresh deployment history to get the failed deployment
       getDeploymentHistory(id, 20).then(({ deployments }) => setDeployments(deployments));
     } finally {
       setDeploying(false);
@@ -381,7 +344,6 @@ export default function ServiceDetail() {
           lastCheckedAt: result.lastCheckedAt,
         } : null
       );
-      setImageTag(result.imageTag);
       setHealthCheckResult({
         status: result.status,
         containerStatus: result.containerStatus,
@@ -731,10 +693,7 @@ export default function ServiceDetail() {
               </div>
             </div>
             <button
-              onClick={() => {
-                setImageTag(service.latestAvailableTag!);
-                handleDeploy();
-              }}
+              onClick={() => handleDeploy(service.latestAvailableTag!)}
               disabled={deploying}
               className="btn btn-primary"
             >
@@ -765,80 +724,68 @@ export default function ServiceDetail() {
               <div>
                 <dt className="text-xs text-slate-500 uppercase tracking-wide">Image Name</dt>
                 <dd className="text-white font-mono text-sm mt-0.5">
-                  {containerImage?.imageName || <span className="text-slate-500 italic">Not linked to container image</span>}
+                  {containerImage ? (
+                    <Link to={`/container-images/${containerImage.id}`} className="text-primary-400 hover:text-primary-300">
+                      {containerImage.imageName}
+                    </Link>
+                  ) : (
+                    <span className="text-slate-500 italic">Not linked to container image</span>
+                  )}
                 </dd>
               </div>
               <div>
                 <dt className="text-xs text-slate-500 uppercase tracking-wide">Image Tag</dt>
-                {editingCurrentTag ? (
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <input
-                      type="text"
-                      value={inlineCurrentTag}
-                      onChange={(e) => setInlineCurrentTag(e.target.value)}
-                      onKeyDown={(e) => handleInlineKeyDown(e, saveInlineCurrentTag)}
-                      onBlur={saveInlineCurrentTag}
-                      disabled={savingInline}
-                      autoFocus
-                      className="flex-1 bg-slate-900 border border-primary-500 rounded px-2 py-0.5 text-white font-mono text-sm focus:outline-none focus:ring-1 focus:ring-primary-500"
-                    />
-                  </div>
-                ) : (
-                  <dd
-                    className="text-white font-mono text-sm mt-0.5 cursor-pointer hover:text-primary-400 group flex items-center gap-1"
-                    onClick={startEditCurrentTag}
-                    title="Click to edit"
-                  >
-                    {service.imageTag || <span className="text-slate-500 italic">Not set</span>}
-                    <svg className="w-3 h-3 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                    </svg>
-                  </dd>
-                )}
+                <dd className="mt-0.5 flex flex-wrap gap-1">
+                  {(() => {
+                    const tags = containerImage?.deployedDigest?.tags || containerImage?.latestDigest?.tags;
+                    if (tags && tags.length > 0) {
+                      return tags.map((tag) => (
+                        <span key={tag} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-slate-700 text-slate-200">
+                          {tag}
+                        </span>
+                      ));
+                    }
+                    return service.imageTag ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-slate-700 text-slate-200">
+                        {service.imageTag}
+                      </span>
+                    ) : (
+                      <span className="text-slate-500 italic text-sm">Not set</span>
+                    );
+                  })()}
+                </dd>
               </div>
               <div>
                 <dt className="text-xs text-slate-500 uppercase tracking-wide">Registry</dt>
                 <dd className="text-white text-sm mt-0.5">
                   {containerImage?.registryConnection ? (
-                    <span className="text-primary-400">{containerImage.registryConnection.name}</span>
+                    <Link to="/registries" className="text-primary-400 hover:text-primary-300">
+                      {containerImage.registryConnection.name}
+                    </Link>
                   ) : (
                     <span className="text-slate-500 italic">Not linked</span>
                   )}
                 </dd>
               </div>
               <div>
-                <dt className="text-xs text-slate-500 uppercase tracking-wide">Current Image</dt>
-                <dd className="text-primary-400 font-mono text-sm mt-0.5 break-all">
-                  {containerImage?.imageName && service.imageTag ? (
-                    `${containerImage.imageName}:${service.imageTag}`
+                <dt className="text-xs text-slate-500 uppercase tracking-wide">Last Updated</dt>
+                <dd className="text-white text-sm mt-0.5">
+                  {service.updatedAt ? (
+                    formatDistanceToNow(new Date(service.updatedAt), { addSuffix: true })
                   ) : (
-                    <span className="text-slate-500 italic">Not configured</span>
+                    <span className="text-slate-500 italic">Unknown</span>
                   )}
                 </dd>
               </div>
             </div>
 
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">
-                Deploy Tag
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={imageTag}
-                  onChange={(e) => setImageTag(e.target.value)}
-                  placeholder="latest"
-                  className="input flex-1"
-                />
-                <button
-                  onClick={handleDeploy}
-                  disabled={deploying}
-                  className="btn btn-primary"
-                >
-                  {deploying ? 'Deploying...' : 'Deploy'}
-                </button>
-              </div>
-            </div>
+            <button
+              onClick={() => setShowDeployModal(true)}
+              disabled={deploying}
+              className="btn btn-primary w-full"
+            >
+              {deploying ? 'Deploying...' : 'Deploy'}
+            </button>
 
             {/* Last update check */}
             {service.lastUpdateCheckAt && (
@@ -2095,6 +2042,73 @@ export default function ServiceDetail() {
           </div>
         </div>
       )}
+      {/* Deploy Modal */}
+      <Modal
+        isOpen={showDeployModal}
+        onClose={() => setShowDeployModal(false)}
+        title="Deploy Service"
+        subtitle={service.name}
+        size="lg"
+        footer={
+          <>
+            <button onClick={() => setShowDeployModal(false)} className="btn btn-ghost">
+              Cancel
+            </button>
+            <button
+              onClick={() => handleDeploy()}
+              disabled={deploying}
+              className="btn btn-primary"
+            >
+              {deploying ? 'Starting Deploy...' : 'Deploy'}
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          {containerImage?.latestDigest ? (
+            <>
+              <div className="bg-slate-800/50 rounded p-3">
+                <div className="text-sm text-slate-400 mb-1">Digest</div>
+                <div className="font-mono text-white text-sm">
+                  {formatDigestShort(containerImage.latestDigest.manifestDigest)}
+                </div>
+              </div>
+              <div className="bg-slate-800/50 rounded p-3">
+                <div className="text-sm text-slate-400 mb-2">Tags</div>
+                <div className="flex flex-wrap gap-1">
+                  {containerImage.latestDigest.tags.length > 0 ? (
+                    containerImage.latestDigest.tags.map((tag) => (
+                      <span key={tag} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-slate-700 text-slate-200">
+                        {tag}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-slate-500 italic text-sm">No tags</span>
+                  )}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="bg-slate-800/50 rounded p-3">
+              <div className="text-sm text-slate-400 mb-1">Tag</div>
+              <div className="font-mono text-white text-sm">{service.imageTag || 'latest'}</div>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="serviceDeployAutoRollback"
+              checked={deployAutoRollback}
+              onChange={(e) => setDeployAutoRollback(e.target.checked)}
+              className="rounded bg-slate-700 border-slate-600 text-primary-500 focus:ring-primary-500"
+            />
+            <label htmlFor="serviceDeployAutoRollback" className="text-sm text-slate-300">
+              Auto-rollback on failure
+            </label>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
