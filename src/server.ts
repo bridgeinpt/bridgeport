@@ -45,6 +45,7 @@ import { downloadRoutes } from './routes/downloads.js';
 import { topologyRoutes } from './routes/topology.js';
 import { environmentSettingsRoutes } from './routes/environment-settings.js';
 import { eventRoutes } from './routes/events.js';
+import { configScanRoutes } from './routes/config-scan.js';
 import { sshPool } from './lib/ssh.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -165,6 +166,7 @@ async function buildServer() {
   await fastify.register(topologyRoutes);
   await fastify.register(environmentSettingsRoutes);
   await fastify.register(eventRoutes);
+  await fastify.register(configScanRoutes);
   // Health check
   fastify.get('/health', async () => {
     return {

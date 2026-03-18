@@ -309,6 +309,28 @@ export const CONFIGURATION_SETTINGS: SettingDefinition[] = [
     group: 'Security',
     widget: 'toggle',
   },
+  {
+    key: 'scanMinLength',
+    type: 'integer',
+    default: 6,
+    label: 'Config Scanner Min Length',
+    description: 'Minimum value length for config file scanner suggestions',
+    group: 'Config Scanner',
+    widget: 'number',
+    min: 1,
+    max: 100,
+  },
+  {
+    key: 'scanEntropyThreshold',
+    type: 'integer',
+    default: 25,
+    label: 'Config Scanner Entropy Threshold',
+    description: 'Shannon entropy threshold (×10, e.g. 25 = 2.5 bits/char). Values below this are ignored.',
+    group: 'Config Scanner',
+    widget: 'number',
+    min: 0,
+    max: 80,
+  },
 ];
 
 // ==================== Registry ====================

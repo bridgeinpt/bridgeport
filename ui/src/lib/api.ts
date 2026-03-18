@@ -496,6 +496,29 @@ export const updateSecret = (id: string, data: Partial<SecretInput>) =>
 export const deleteSecret = (id: string) =>
   api.delete<{ success: boolean }>(`/secrets/${id}`);
 
+// Vars
+export const listVars = (envId: string) =>
+  api.get<{ vars: Var[] }>(`/environments/${envId}/vars`);
+
+export const createVar = (envId: string, data: VarInput) =>
+  api.post<{ var: Var }>(`/environments/${envId}/vars`, data);
+
+export const updateVar = (id: string, data: Partial<VarInput>) =>
+  api.patch<{ var: Var }>(`/vars/${id}`, data);
+
+export const deleteVar = (id: string) =>
+  api.delete<{ success: boolean }>(`/vars/${id}`);
+
+// Config Scanner
+export const runConfigScan = (envId: string) =>
+  api.post<ConfigScanResult>(`/environments/${envId}/config-scan`, {});
+
+export const previewConfigScan = (envId: string, data: ConfigScanApplyInput) =>
+  api.post<ConfigScanPreviewResult>(`/environments/${envId}/config-scan/preview`, data);
+
+export const applyConfigScan = (envId: string, data: ConfigScanApplyInput) =>
+  api.post<ConfigScanApplyResult>(`/environments/${envId}/config-scan/apply`, data);
+
 // Types
 export type UserRole = 'admin' | 'operator' | 'viewer';
 
@@ -673,6 +696,80 @@ export interface SecretInput {
   value: string;
   description?: string;
   neverReveal?: boolean;
+}
+
+export interface Var {
+  id: string;
+  key: string;
+  value: string;
+  description: string | null;
+  createdAt: string;
+  updatedAt: string;
+  usedByConfigFiles?: SecretUsageConfigFile[];
+  usedByServices?: SecretUsageService[];
+  usageCount?: number;
+}
+
+export interface VarInput {
+  key: string;
+  value: string;
+  description?: string;
+}
+
+// Config Scanner types
+export interface ConfigScanAffectedFile {
+  id: string;
+  name: string;
+  occurrences: number;
+}
+
+export interface ConfigScanSuggestion {
+  value: string; // masked
+  proposedKey: string;
+  proposedType: 'secret' | 'var';
+  occurrenceCount: number;
+  affectedFiles: ConfigScanAffectedFile[];
+  existingSecretId: string | null;
+  existingSecretKey: string | null;
+}
+
+export interface ConfigScanResult {
+  suggestions: ConfigScanSuggestion[];
+  scannedFileCount: number;
+  skippedBinaryCount: number;
+}
+
+export interface ConfigScanApplyInput {
+  value: string;
+  key: string;
+  type: 'secret' | 'var';
+  fileIds: string[];
+  existingSecretId: string | null;
+}
+
+export interface ConfigScanPreviewDiff {
+  fileId: string;
+  fileName: string;
+  before: string;
+  after: string;
+  replacements: number;
+}
+
+export interface ConfigScanPreviewResult {
+  diffs: ConfigScanPreviewDiff[];
+}
+
+export interface ConfigScanApplyResult {
+  secretOrVarId: string;
+  key: string;
+  type: 'secret' | 'var';
+  results: Array<{
+    fileId: string;
+    fileName: string;
+    success: boolean;
+    replacements: number;
+    error?: string;
+  }>;
 }
 
 export interface DeployOptions {

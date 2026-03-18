@@ -10,6 +10,7 @@ import {
 } from '../services/secrets.js';
 import { logAudit } from '../services/audit.js';
 import { validateBody, findOrNotFound, handleUniqueConstraint } from '../lib/helpers.js';
+import { requireOperator } from '../plugins/authorize.js';
 
 const createSecretSchema = z.object({
   key: z.string().min(1).regex(/^[A-Z][A-Z0-9_]*$/, 'Key must be uppercase with underscores'),
@@ -22,6 +23,17 @@ const updateSecretSchema = z.object({
   value: z.string().min(1).optional(),
   description: z.string().optional(),
   neverReveal: z.boolean().optional(),
+});
+
+const createVarSchema = z.object({
+  key: z.string().min(1).regex(/^[A-Z][A-Z0-9_]*$/, 'Key must be uppercase with underscores'),
+  value: z.string().min(1),
+  description: z.string().optional(),
+});
+
+const updateVarSchema = z.object({
+  value: z.string().min(1).optional(),
+  description: z.string().optional(),
 });
 
 export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
@@ -270,6 +282,234 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
         return { success: true };
       } catch {
         return reply.code(404).send({ error: 'Secret not found' });
+      }
+    }
+  );
+
+  // ── Var endpoints ──────────────────────────────────────────────────────
+
+  // List vars with usage information
+  fastify.get(
+    '/api/environments/:envId/vars',
+    { preHandler: [fastify.authenticate] },
+    async (request) => {
+      const { envId } = request.params as { envId: string };
+
+      const vars = await prisma.var.findMany({
+        where: { environmentId: envId },
+        select: {
+          id: true,
+          key: true,
+          value: true,
+          description: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: { key: 'asc' },
+      });
+
+      // Get all config files for this environment to check for var usage
+      const configFiles = await prisma.configFile.findMany({
+        where: { environmentId: envId },
+        select: {
+          id: true,
+          name: true,
+          filename: true,
+          content: true,
+          services: {
+            select: {
+              service: {
+                select: {
+                  id: true,
+                  name: true,
+                  server: {
+                    select: {
+                      id: true,
+                      name: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+
+      // Build usage map for each var
+      const varsWithUsage = vars.map((v) => {
+        const keyPatterns = [
+          `\${${v.key}}`,
+          `$${v.key}`,
+          `{{${v.key}}}`,
+          new RegExp(`^${v.key}=`, 'm'),
+        ];
+
+        const usedByConfigFiles: Array<{
+          id: string;
+          name: string;
+          filename: string;
+          services: Array<{ id: string; name: string; serverName: string }>;
+        }> = [];
+
+        for (const file of configFiles) {
+          const contentMatches = keyPatterns.some((pattern) => {
+            if (pattern instanceof RegExp) {
+              return pattern.test(file.content);
+            }
+            return file.content.includes(pattern);
+          });
+
+          if (contentMatches) {
+            usedByConfigFiles.push({
+              id: file.id,
+              name: file.name,
+              filename: file.filename,
+              services: file.services.map((sf) => ({
+                id: sf.service.id,
+                name: sf.service.name,
+                serverName: sf.service.server.name,
+              })),
+            });
+          }
+        }
+
+        const usedByServices = new Map<string, { id: string; name: string; serverName: string }>();
+        for (const file of usedByConfigFiles) {
+          for (const service of file.services) {
+            if (!usedByServices.has(service.id)) {
+              usedByServices.set(service.id, service);
+            }
+          }
+        }
+
+        return {
+          ...v,
+          usedByConfigFiles,
+          usedByServices: Array.from(usedByServices.values()),
+          usageCount: usedByServices.size,
+        };
+      });
+
+      return { vars: varsWithUsage };
+    }
+  );
+
+  // Create var
+  fastify.post(
+    '/api/environments/:envId/vars',
+    { preHandler: [fastify.authenticate, requireOperator] },
+    async (request, reply) => {
+      const { envId } = request.params as { envId: string };
+      const body = validateBody(createVarSchema, request, reply);
+      if (!body) return;
+
+      try {
+        const v = await prisma.var.create({
+          data: {
+            key: body.key,
+            value: body.value,
+            description: body.description,
+            environmentId: envId,
+          },
+          select: {
+            id: true,
+            key: true,
+            value: true,
+            description: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        });
+
+        await logAudit({
+          action: 'create',
+          resourceType: 'var',
+          resourceId: v.id,
+          resourceName: v.key,
+          userId: request.authUser!.id,
+          environmentId: envId,
+        });
+
+        return { var: v };
+      } catch (error) {
+        if (handleUniqueConstraint(error, 'Var already exists', reply)) return;
+        throw error;
+      }
+    }
+  );
+
+  // Update var
+  fastify.patch(
+    '/api/vars/:id',
+    { preHandler: [fastify.authenticate, requireOperator] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = validateBody(updateVarSchema, request, reply);
+      if (!body) return;
+
+      try {
+        const existing = await findOrNotFound(prisma.var.findUnique({ where: { id } }), 'Var', reply);
+        if (!existing) return;
+
+        const updateData: { value?: string; description?: string } = {};
+        if (body.value !== undefined) updateData.value = body.value;
+        if (body.description !== undefined) updateData.description = body.description;
+
+        const v = await prisma.var.update({
+          where: { id },
+          data: updateData,
+          select: {
+            id: true,
+            key: true,
+            value: true,
+            description: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        });
+
+        await logAudit({
+          action: 'update',
+          resourceType: 'var',
+          resourceId: v.id,
+          resourceName: v.key,
+          details: { valueChanged: !!body.value, descriptionChanged: !!body.description },
+          userId: request.authUser!.id,
+          environmentId: existing.environmentId,
+        });
+
+        return { var: v };
+      } catch {
+        return reply.code(404).send({ error: 'Var not found' });
+      }
+    }
+  );
+
+  // Delete var
+  fastify.delete(
+    '/api/vars/:id',
+    { preHandler: [fastify.authenticate, requireOperator] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      try {
+        const v = await findOrNotFound(prisma.var.findUnique({ where: { id } }), 'Var', reply);
+        if (!v) return;
+
+        await prisma.var.delete({ where: { id } });
+
+        await logAudit({
+          action: 'delete',
+          resourceType: 'var',
+          resourceId: id,
+          resourceName: v.key,
+          userId: request.authUser!.id,
+          environmentId: v.environmentId,
+        });
+
+        return { success: true };
+      } catch {
+        return reply.code(404).send({ error: 'Var not found' });
       }
     }
   );

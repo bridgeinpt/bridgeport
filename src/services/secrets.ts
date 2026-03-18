@@ -131,17 +131,44 @@ export async function getSecretsForEnv(
 }
 
 /**
- * Resolve ${SECRET_KEY} placeholders in content with actual secret values.
- * Returns the resolved content and any missing secrets.
+ * Get all vars for an environment as a key-value map.
+ */
+export async function getVarsForEnv(
+  environmentId: string
+): Promise<Record<string, string>> {
+  const vars = await prisma.var.findMany({
+    where: { environmentId },
+  });
+
+  const result: Record<string, string> = {};
+  for (const v of vars) {
+    result[v.key] = v.value;
+  }
+  return result;
+}
+
+/**
+ * Resolve ${KEY} placeholders in content with actual secret and var values.
+ * Vars are resolved first, then secrets (secrets take precedence for same key).
+ * Returns the resolved content and any missing keys.
  */
 export async function resolveSecretPlaceholders(
   environmentId: string,
   content: string
 ): Promise<{ content: string; missing: string[] }> {
-  const secrets = await getSecretsForEnv(environmentId);
+  const [secrets, vars] = await Promise.all([
+    getSecretsForEnv(environmentId),
+    getVarsForEnv(environmentId),
+  ]);
 
   let resolvedContent = content;
 
+  // Resolve vars first
+  for (const [key, value] of Object.entries(vars)) {
+    resolvedContent = resolvedContent.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), value);
+  }
+
+  // Then resolve secrets (overrides vars if same key)
   for (const [key, value] of Object.entries(secrets)) {
     resolvedContent = resolvedContent.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), value);
   }
