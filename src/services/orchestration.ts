@@ -5,7 +5,7 @@ import { recordTagDeployment } from './image-management.js';
 import { sendSystemNotification, NOTIFICATION_TYPES } from './notifications.js';
 import { eventBus } from '../lib/event-bus.js';
 import { DEPLOYMENT_STATUS, PLAN_STATUS, STEP_STATUS } from '../lib/constants.js';
-import type { DeploymentPlan, DeploymentPlanStep, Service, ServiceDependency } from '@prisma/client';
+import type { DeploymentPlan, DeploymentPlanStep, Server, Service, ServiceDependency } from '@prisma/client';
 
 export interface BuildPlanOptions {
   environmentId: string;
@@ -245,9 +245,9 @@ export async function buildDeploymentPlan(options: BuildPlanOptions): Promise<De
  * Group steps by their order (dependency level) for parallel execution
  */
 function groupStepsByLevel(
-  steps: (DeploymentPlanStep & { service: Service | null })[]
-): Map<number, (DeploymentPlanStep & { service: Service | null })[]> {
-  const levels = new Map<number, (DeploymentPlanStep & { service: Service | null })[]>();
+  steps: (DeploymentPlanStep & { service: (Service & { server: Server }) | null })[]
+): Map<number, (DeploymentPlanStep & { service: (Service & { server: Server }) | null })[]> {
+  const levels = new Map<number, (DeploymentPlanStep & { service: (Service & { server: Server }) | null })[]>();
 
   for (const step of steps) {
     const level = step.order;
@@ -269,7 +269,7 @@ export async function executePlan(planId: string): Promise<void> {
     include: {
       steps: {
         orderBy: { order: 'asc' },
-        include: { service: true },
+        include: { service: { include: { server: true } } },
       },
       containerImage: true,
       environment: true,
@@ -336,7 +336,7 @@ export async function executePlan(planId: string): Promise<void> {
             // Return the step result
             return prisma.deploymentPlanStep.findUniqueOrThrow({
               where: { id: step.id },
-              include: { service: true },
+              include: { service: { include: { server: true } } },
             });
           })
         );
@@ -366,6 +366,9 @@ export async function executePlan(planId: string): Promise<void> {
               {
                 planName: plan.name,
                 serviceName: failedStep.service?.name,
+                serviceId: failedStep.service?.id,
+                serverName: failedStep.service?.server?.name,
+                imageTag: failedStep.targetTag,
                 error: failedStep.error,
               }
             );
@@ -424,6 +427,9 @@ export async function executePlan(planId: string): Promise<void> {
               {
                 planName: plan.name,
                 serviceName: step.service.name,
+                serviceId: step.service.id,
+                serverName: step.service.server?.name,
+                imageTag: step.targetTag,
                 error: updatedStep.error,
               }
             );
@@ -484,7 +490,7 @@ export async function executePlan(planId: string): Promise<void> {
 }
 
 async function executeDeployStep(
-  step: DeploymentPlanStep & { service: Service | null },
+  step: DeploymentPlanStep & { service: (Service & { server: Server }) | null },
   plan: DeploymentPlan,
   log: (msg: string) => void
 ): Promise<void> {
@@ -543,7 +549,7 @@ async function executeDeployStep(
 }
 
 async function executeHealthCheckStep(
-  step: DeploymentPlanStep & { service: Service | null },
+  step: DeploymentPlanStep & { service: (Service & { server: Server }) | null },
   plan: DeploymentPlan,
   log: (msg: string) => void
 ): Promise<void> {
