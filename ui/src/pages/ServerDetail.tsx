@@ -21,6 +21,7 @@ import {
   syncAllServerFiles,
   listContainerImages,
   getModuleSettings,
+  pruneServerImages,
   type ServerWithServices,
   type MetricsMode,
   type ServerMetrics,
@@ -144,6 +145,8 @@ export default function ServerDetail() {
   // Process snapshot (from agent)
   const [processSnapshot, setProcessSnapshot] = useState<ProcessSnapshot | null>(null);
   const [processUpdatedAt, setProcessUpdatedAt] = useState<string | null>(null);
+
+  const [pruning, setPruning] = useState(false);
 
   // Metrics config (for filtering disabled metrics)
   const [schedulerConfig, setSchedulerConfig] = useState<Record<string, unknown> | null>(null);
@@ -345,6 +348,20 @@ export default function ServerDetail() {
       toast.error('Failed to remove agent');
     } finally {
       setModeChanging(false);
+    }
+  };
+
+  const handlePruneImages = async () => {
+    if (!id) return;
+    if (!confirm('Prune dangling Docker images on this server? This removes untagged image layers that are no longer referenced by any container.')) return;
+    setPruning(true);
+    try {
+      const result = await pruneServerImages(id, 'dangling');
+      toast.success(`Images pruned — ${result.spaceReclaimedHuman} freed`);
+    } catch (error) {
+      toast.error('Failed to prune images');
+    } finally {
+      setPruning(false);
     }
   };
 
@@ -805,6 +822,13 @@ export default function ServerDetail() {
                       />
                     </div>
                   )}
+                  <button
+                    onClick={handlePruneImages}
+                    disabled={pruning}
+                    className="mt-2 text-xs text-slate-400 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {pruning ? 'Pruning...' : 'Prune images'}
+                  </button>
                 </div>
               )}
 

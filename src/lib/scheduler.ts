@@ -1,7 +1,7 @@
 import { SERVER_STATUS, HEALTH_STATUS, CONTAINER_STATUS, HEALTH_CHECK_STATUS, METRICS_MODE, AGENT_STATUS, DISCOVERY_STATUS } from './constants.js';
 import { captureException } from './sentry.js';
 import { prisma } from './db.js';
-import { checkServerHealth, discoverContainers } from '../services/servers.js';
+import { checkServerHealth, discoverContainers, pruneServerImages } from '../services/servers.js';
 import { checkServiceHealth } from '../services/services.js';
 import { RegistryFactory, type RegistryCredentials } from './registry.js';
 import { getRegistryCredentials } from '../services/registries.js';
@@ -861,6 +861,37 @@ async function runDigestCleanup(): Promise<void> {
 }
 
 /**
+ * Prune unused Docker images on all servers that have autoPruneImages enabled.
+ */
+async function runImagePrune(): Promise<void> {
+  const servers = await prisma.server.findMany({
+    where: { status: SERVER_STATUS.HEALTHY },
+    include: { environment: { include: { operationsSettings: true } } },
+  });
+
+  const eligible = servers.filter(s => s.environment.operationsSettings?.autoPruneImages);
+  if (eligible.length === 0) return;
+
+  const limit = pLimit(3);
+  await Promise.allSettled(
+    eligible.map(server =>
+      limit(async () => {
+        try {
+          const mode = (server.environment.operationsSettings?.pruneImagesMode as 'dangling' | 'all') ?? 'dangling';
+          const { spaceReclaimedBytes } = await pruneServerImages(server, mode);
+          if (spaceReclaimedBytes > 0) {
+            console.log(`[Scheduler] Pruned images on ${server.name}: freed ${spaceReclaimedBytes} bytes`);
+          }
+        } catch (error) {
+          captureException(error, { scheduler: 'imagePrune', serverId: server.id });
+          console.error(`[Scheduler] Image prune failed for ${server.name}:`, error);
+        }
+      })
+    )
+  );
+}
+
+/**
  * Start the scheduler with periodic health checks and discovery
  */
 export function startScheduler(config: Partial<GlobalSchedulerConfig> = {}): void {
@@ -902,6 +933,7 @@ export function startScheduler(config: Partial<GlobalSchedulerConfig> = {}): voi
   timers.set('healthLogCleanup', setInterval(() => runHealthLogCleanup(cfg.healthLogRetentionDays), 24 * 60 * 60 * 1000)); // Daily
   timers.set('auditLogCleanup', setInterval(runAuditLogCleanup, 24 * 60 * 60 * 1000)); // Daily
   timers.set('digestCleanup', setInterval(runDigestCleanup, 24 * 60 * 60 * 1000)); // Daily
+  timers.set('imagePrune', setInterval(runImagePrune, 7 * 24 * 60 * 60 * 1000)); // Weekly
 }
 
 /**

@@ -9,6 +9,7 @@ import {
   checkServerHealth,
   discoverContainers,
   importFromTerraform,
+  pruneServerImages,
 } from '../services/servers.js';
 import { logAudit } from '../services/audit.js';
 import { deployAgent, removeAgent, checkAgentStatus } from '../services/agent-deploy.js';
@@ -483,4 +484,46 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
       };
     }
   );
+
+  // Prune unused Docker images on server to reclaim disk space
+  fastify.post(
+    '/api/servers/:id/prune-images',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = request.body as { mode?: 'dangling' | 'all' } | undefined;
+      const mode = body?.mode === 'all' ? 'all' : 'dangling';
+
+      const server = await findOrNotFound(prisma.server.findUnique({
+        where: { id },
+        select: { id: true, name: true, hostname: true, dockerMode: true, serverType: true, environmentId: true },
+      }), 'Server', reply);
+      if (!server) return;
+
+      try {
+        const { spaceReclaimedBytes } = await pruneServerImages(server, mode);
+
+        await logAudit({
+          action: 'prune_images',
+          resourceType: 'server',
+          resourceId: server.id,
+          resourceName: server.name,
+          details: { mode, spaceReclaimedBytes },
+          userId: request.authUser!.id,
+          environmentId: server.environmentId,
+        });
+
+        return { success: true, spaceReclaimedBytes, spaceReclaimedHuman: formatBytes(spaceReclaimedBytes) };
+      } catch (error) {
+        return reply.code(500).send({ error: getErrorMessage(error, 'Failed to prune images') });
+      }
+    }
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return `${(bytes / Math.pow(1024, i)).toFixed(2)} ${units[i]}`;
 }

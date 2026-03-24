@@ -58,6 +58,7 @@ export interface DockerClient {
   restartContainer(containerName: string): Promise<void>;
   pullImage(image: string): Promise<void>;
   getContainerLogs(containerName: string, options?: { tail?: number }): Promise<string>;
+  pruneImages(mode: 'dangling' | 'all'): Promise<{ spaceReclaimedBytes: number }>;
 }
 
 // ==================== Socket Implementation ====================
@@ -274,6 +275,13 @@ export class DockerSocketClient implements DockerClient {
     // This is a simplified approach - works for most cases
     return logString.replace(/[\x00-\x07]/g, '').trim();
   }
+
+  async pruneImages(mode: 'dangling' | 'all'): Promise<{ spaceReclaimedBytes: number }> {
+    // For "all" mode, include non-dangling images (dangling: false means "not dangling only")
+    const filters = mode === 'all' ? { dangling: ['false'] } : {};
+    const result = await this.docker.pruneImages({ filters: JSON.stringify(filters) });
+    return { spaceReclaimedBytes: (result as { SpaceReclaimed?: number }).SpaceReclaimed ?? 0 };
+  }
 }
 
 // ==================== SSH Implementation ====================
@@ -470,6 +478,28 @@ export class DockerSSHClient implements DockerClient {
       throw new Error(`Failed to get logs: ${stderr}`);
     }
     return stdout + stderr;
+  }
+
+  async pruneImages(mode: 'dangling' | 'all'): Promise<{ spaceReclaimedBytes: number }> {
+    const cmd = mode === 'all' ? 'docker image prune -af' : 'docker image prune -f';
+    const { stdout, code, stderr } = await this.client.exec(this.pathPrefix + cmd);
+    if (code !== 0) {
+      throw new Error(`Failed to prune images: ${stderr}`);
+    }
+    // Parse "Total reclaimed space: 1.23GB" from docker output
+    const match = stdout.match(/Total reclaimed space:\s*([\d.]+)\s*([KMGT]?B)/i);
+    const spaceReclaimedBytes = match ? this.parseSizeToBytes(match[1], match[2]) : 0;
+    return { spaceReclaimedBytes };
+  }
+
+  private parseSizeToBytes(value: string, unit: string): number {
+    const num = parseFloat(value);
+    const u = unit.toUpperCase();
+    if (u === 'TB') return num * 1024 ** 4;
+    if (u === 'GB') return num * 1024 ** 3;
+    if (u === 'MB') return num * 1024 ** 2;
+    if (u === 'KB') return num * 1024;
+    return num;
   }
 }
 

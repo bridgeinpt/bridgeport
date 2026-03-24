@@ -265,6 +265,25 @@ export const OPERATIONS_SETTINGS: SettingDefinition[] = [
     widget: 'select',
     options: [METRICS_MODE.DISABLED, METRICS_MODE.SSH, METRICS_MODE.AGENT],
   },
+  {
+    key: 'autoPruneImages',
+    type: 'boolean',
+    default: false,
+    label: 'Auto-Prune Images',
+    description: 'Automatically prune unused Docker images after each deployment and weekly to reclaim disk space',
+    group: 'Image Cleanup',
+    widget: 'toggle',
+  },
+  {
+    key: 'pruneImagesMode',
+    type: 'string',
+    default: 'dangling',
+    label: 'Prune Mode',
+    description: 'dangling: only untagged layers (safe); all: any image not referenced by a running container (more aggressive)',
+    group: 'Image Cleanup',
+    widget: 'select',
+    options: ['dangling', 'all'],
+  },
 ];
 
 export const DATA_SETTINGS: SettingDefinition[] = [

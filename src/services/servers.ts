@@ -584,3 +584,21 @@ export async function importFromTerraform(
 
   return servers;
 }
+
+/**
+ * Prune unused Docker images on a server to reclaim disk space.
+ * Handles both socket and SSH docker modes; manages the SSH connection lifecycle internally.
+ */
+export async function pruneServerImages(
+  server: { id: string; name: string; hostname: string; dockerMode: string; serverType: string; environmentId: string },
+  mode: 'dangling' | 'all' = 'dangling'
+): Promise<{ spaceReclaimedBytes: number }> {
+  const { dockerClient, sshClient, error, needsConnect } = await createDockerClientForServer(server, getEnvironmentSshKey);
+  if (!dockerClient) throw new Error(error || 'Failed to create Docker client');
+  try {
+    if (needsConnect && sshClient) await sshClient.connect();
+    return await dockerClient.pruneImages(mode);
+  } finally {
+    if (sshClient) sshClient.disconnect();
+  }
+}

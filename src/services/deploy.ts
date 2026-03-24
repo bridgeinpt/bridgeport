@@ -8,6 +8,7 @@ import { extractRepoName, stripRegistryPrefix } from '../lib/image-utils.js';
 import { generateDeploymentArtifacts, saveDeploymentArtifacts } from './compose.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 import { checkServiceUpdate } from '../lib/scheduler.js';
+import { pruneServerImages } from './servers.js';
 import { sendSystemNotification, NOTIFICATION_TYPES } from './notifications.js';
 import { recordTagDeployment } from './image-management.js';
 import { safeJsonParse } from '../lib/helpers.js';
@@ -219,6 +220,21 @@ export async function deployService(
     checkServiceUpdate(serviceId).catch((err) => {
       console.error(`[Deploy] Failed to check updates for service ${serviceId}:`, err);
     });
+
+    // Auto-prune images if enabled for this environment (non-blocking)
+    prisma.operationsSettings.findUnique({
+      where: { environmentId: service.server.environmentId },
+      select: { autoPruneImages: true, pruneImagesMode: true },
+    }).then((opSettings) => {
+      if (opSettings?.autoPruneImages) {
+        const mode = (opSettings.pruneImagesMode as 'dangling' | 'all') ?? 'dangling';
+        pruneServerImages(service.server, mode)
+          .then(({ spaceReclaimedBytes }) => {
+            if (spaceReclaimedBytes > 0) log(`[Auto-prune] Freed ${spaceReclaimedBytes} bytes on ${service.server.name}`);
+          })
+          .catch(err => console.error('[Deploy] Auto-prune failed:', err));
+      }
+    }).catch(err => console.error('[Deploy] Failed to check auto-prune settings:', err));
 
     // Record successful deployment in container image history
     const historyEntry = await recordTagDeployment(

@@ -114,6 +114,8 @@ model OperationsSettings {
 
   defaultDockerMode  String @default("ssh")      // "ssh" | "socket"
   defaultMetricsMode String @default("disabled")  // "disabled" | "ssh" | "agent"
+  autoPruneImages    Boolean @default(false)       // auto-prune after deploy and weekly
+  pruneImagesMode    String  @default("dangling")  // "dangling" | "all"
 }
 
 model DataSettings {

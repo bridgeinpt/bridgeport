@@ -413,6 +413,9 @@ export const getAgentStatus = (id: string) =>
 export const setMetricsMode = (id: string, mode: 'ssh' | 'agent' | 'disabled') =>
   api.patch<{ metricsMode: string }>(`/servers/${id}/metrics-mode`, { mode });
 
+export const pruneServerImages = (id: string, mode: 'dangling' | 'all' = 'dangling') =>
+  api.post<{ success: boolean; spaceReclaimedBytes: number; spaceReclaimedHuman: string }>(`/servers/${id}/prune-images`, { mode });
+
 // Services
 export interface ServiceWithServerName extends Service {
   server: { id: string; name: string };
