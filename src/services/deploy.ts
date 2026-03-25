@@ -316,6 +316,7 @@ export async function deployService(
       service.server.environmentId,
       {
         serviceName: service.name,
+        serviceId: service.id,
         imageTag,
         serverName: service.server.name,
         error: errorMessage,

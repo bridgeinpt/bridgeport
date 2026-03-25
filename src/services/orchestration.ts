@@ -625,7 +625,7 @@ export async function rollbackPlan(
     include: {
       steps: {
         orderBy: { order: 'desc' }, // Reverse order for rollback
-        include: { service: true },
+        include: { service: { include: { server: true } } },
       },
     },
   });
@@ -698,12 +698,19 @@ export async function rollbackPlan(
     },
   });
 
+  // Find the step that triggered the rollback to include in notification
+  const failedStep = plan.steps.find((s) => s.status === STEP_STATUS.FAILED);
+
   // Send rollback notification
   await sendSystemNotification(
     NOTIFICATION_TYPES.SYSTEM_DEPLOYMENT_FAILED,
     plan.environmentId,
     {
       planName: plan.name,
+      serviceName: failedStep?.service?.name,
+      serviceId: failedStep?.service?.id,
+      serverName: failedStep?.service?.server?.name,
+      imageTag: failedStep?.targetTag,
       error: 'Deployment rolled back due to failure',
       rollback: true,
     }
