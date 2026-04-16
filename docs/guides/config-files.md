@@ -9,7 +9,7 @@ Config files let you store, version, and sync configuration to your servers via 
 - [Creating Config Files](#creating-config-files)
 - [Attaching Files to Services](#attaching-files-to-services)
 - [Syncing Files to Servers](#syncing-files-to-servers)
-- [Secret Placeholders](#secret-placeholders)
+- [Secret and Variable Placeholders](#secret-and-variable-placeholders)
 - [Edit History and Rollback](#edit-history-and-rollback)
 - [Sync Status](#sync-status)
 - [Use Cases](#use-cases)
@@ -242,15 +242,16 @@ sequenceDiagram
 
 ---
 
-## Secret Placeholders
+## Secret and Variable Placeholders
 
-Text config files support `${SECRET_KEY}` placeholders that are resolved at sync time. See [Secrets > Using Secrets in Config Files](secrets.md#using-secrets-in-config-files) for the full details.
+Text config files support `${KEY}` placeholders that are resolved at sync time against both [secrets](secrets.md) and [variables](secrets.md#creating-variables) from the same environment. See [Secrets and Variables > Using Placeholders in Config Files](secrets.md#using-placeholders-in-config-files) for the full details.
 
 Quick summary:
 - Use `${KEY}` syntax in your config file content.
-- Placeholders are resolved at sync time using secrets from the same environment.
-- If any referenced secret is missing, the sync fails for that file with an error listing the missing keys.
+- Placeholders resolve against vars first, then secrets; if the same key exists as both, the secret wins.
+- If any referenced key is missing (not a secret and not a var), the sync fails for that file with an error listing the missing keys.
 - The stored config file always contains the placeholder, never the actual value.
+- A [Config File Scanner](secrets.md#config-file-scanner) can detect hardcoded values across your config files and offer to promote them to secrets or vars.
 
 ```env
 # Template stored in BridgePort:

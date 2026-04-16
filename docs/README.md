@@ -41,7 +41,7 @@ Learn how to use each feature. Every guide includes a quick start, step-by-step 
 
 | Doc | Description |
 |-----|-------------|
-| [Secrets](guides/secrets.md) | Encrypted secret storage, env templates, reveal controls |
+| [Secrets and Variables](guides/secrets.md) | Encrypted secrets, plaintext vars, config file scanner, reveal controls |
 | [Config Files](guides/config-files.md) | Manage and sync configuration files with edit history |
 
 ### Data
