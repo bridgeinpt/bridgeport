@@ -247,6 +247,7 @@ Use these instead of reimplementing:
 - Per-environment settings are created eagerly on environment creation via `createDefaultSettings()`
 - Admin pages use a separate layout (`AdminLayout` + `AdminSidebar`) at `/admin/*` routes
 - ContainerImage is required for every Service - central entity for image management
+- **Docs stay in sync with code.** When you change `src/routes/**`, `src/services/**`, `prisma/schema.prisma`, `ui/src/pages/**`, or settings, update the matching file under `docs/guides/` or `docs/reference/` in the same PR. A Stop hook (`scripts/check-docs-drift.sh`) prints a reminder when code paths change without any `docs/` update.
 
 ## UI/UX Guidelines
 

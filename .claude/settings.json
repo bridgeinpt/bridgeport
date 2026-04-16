@@ -6,7 +6,8 @@
       "Bash(docker *)",
       "Bash(go *)",
       "Bash(make *)",
-      "Bash(curl *)"
+      "Bash(curl *)",
+      "Bash(git *)"
     ],
     "deny": [
       "Bash(rm -rf /)",
@@ -20,5 +21,18 @@
     "frontend-design@claude-plugins-official": true,
     "code-simplifier@claude-plugins-official": true,
     "github@claude-plugins-official": true
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash scripts/check-docs-drift.sh"
+          }
+        ]
+      }
+    ]
   }
 }
