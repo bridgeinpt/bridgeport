@@ -11,6 +11,7 @@ Visualize your entire infrastructure at a glance with BridgePort's interactive t
   - [Connection Properties](#connection-properties)
   - [Direction Explained](#direction-explained)
 - [Working with the Diagram](#working-with-the-diagram)
+  - [Toolbar](#toolbar)
   - [Node Types](#node-types)
   - [Server Grouping](#server-grouping)
   - [Dragging and Layout Persistence](#dragging-and-layout-persistence)
@@ -156,6 +157,16 @@ Expected response (201):
 ---
 
 ## Working with the Diagram
+
+### Toolbar
+
+The top-right of the diagram canvas has a toolbar with three controls:
+
+- **Add Connection** (+) -- opens the Create Connection modal. Same as the Dashboard-level button.
+- **Connections list** (chain-link icon) -- opens a dropdown listing every manual connection in the environment with its source → target names. Hover a row to reveal a quick delete icon; the connection is removed without leaving the dashboard.
+- **Layout controls** -- fit-to-view, reset layout, and export as Mermaid (see [Exporting as Mermaid](#exporting-as-mermaid)).
+
+The connections dropdown is the fastest way to audit and prune stale links when a diagram has grown dense.
 
 ### Node Types
 

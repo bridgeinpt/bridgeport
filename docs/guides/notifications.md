@@ -234,12 +234,27 @@ Outgoing webhooks send notification data as JSON POST requests to your endpoints
   "message": "Deployment of \"api-backend\" failed: Image pull error",
   "data": {
     "serviceName": "api-backend",
+    "serviceId": "svc_abc123",
+    "serverName": "web-server-01",
+    "imageTag": "v2.3.1",
     "error": "Image pull error"
   },
   "environment": "production",
   "timestamp": "2026-02-25T10:30:00.000Z"
 }
 ```
+
+> [!NOTE]
+> `deployment_failed` payloads include `serviceId`, `serverName`, and `imageTag` for both direct service failures and failures that trigger a deployment plan rollback. This lets downstream handlers (Slack messages, incident tools) build deep links back to the exact service and tag without extra lookups.
+
+### Slack Notifications
+
+The built-in Slack integration renders a compact message per notification. Recent tuning:
+
+- **No redundant message block.** The Slack Block Kit payload omits the free-text `message` block when the structured fields already convey the same information -- the title plus context fields are enough.
+- **No footer timestamp.** Slack already renders the message time; the duplicate `{timestamp}` footer block was removed.
+- **Deployment success** messages include every tag pointing to the deployed digest (e.g., `v2.3.1, latest`) rather than just the one that was requested, so you can see the full set of identifiers at a glance.
+- **Action buttons** use `serviceId` to link back to the service detail page in BridgePort when `publicUrl` is configured.
 
 ### Retry Behavior
 
