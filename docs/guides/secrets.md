@@ -1,16 +1,25 @@
-# Secrets
+# Secrets and Variables
 
-BridgePort stores your sensitive configuration values -- API keys, database passwords, tokens -- encrypted at rest and makes them available to services through config file templates with automatic placeholder substitution.
+BridgePort stores your configuration values -- encrypted secrets (API keys, passwords, tokens) or plaintext variables (hostnames, ports, feature flags) -- and makes them available to services through config file templates with automatic `${KEY}` placeholder substitution.
+
+Two entities, one resolution pipeline:
+
+- **Secrets** -- encrypted at rest (AES-256-GCM), access-controlled, audit-logged. For sensitive values.
+- **Variables (Vars)** -- stored as plaintext, no reveal restrictions. For non-sensitive values you still want to centralize and reuse across files.
+
+Both are environment-scoped and resolve the same `${KEY}` placeholder syntax. If the same key exists as both a var and a secret, the **secret wins**.
 
 ## Table of Contents
 
 - [Quick Start](#quick-start)
 - [How It Works](#how-it-works)
 - [Creating Secrets](#creating-secrets)
-- [Using Secrets in Config Files](#using-secrets-in-config-files)
+- [Creating Variables](#creating-variables)
+- [Using Placeholders in Config Files](#using-placeholders-in-config-files)
+- [Config File Scanner](#config-file-scanner)
 - [Reveal Controls](#reveal-controls)
-- [Secret Usage Tracking](#secret-usage-tracking)
-- [Updating and Rotating Secrets](#updating-and-rotating-secrets)
+- [Usage Tracking](#usage-tracking)
+- [Updating and Rotating](#updating-and-rotating)
 - [Best Practices](#best-practices)
 - [Configuration Options](#configuration-options)
 - [Troubleshooting](#troubleshooting)
@@ -33,24 +42,27 @@ Store a secret and use it in a config file in under a minute:
 
 ## How It Works
 
-Secrets in BridgePort follow a simple flow: store encrypted, reference by name, resolve at sync time.
+Secrets and vars in BridgePort follow a simple flow: store (encrypted for secrets, plaintext for vars), reference by name, resolve at sync time.
 
 ```mermaid
 flowchart LR
-    U[User creates secret<br/>key: DATABASE_URL<br/>value: postgres://...] --> E[Encrypted with<br/>AES-256-GCM]
-    E --> DB[(Database<br/>encrypted value + nonce)]
+    S[Secret<br/>key: DATABASE_URL] --> E[Encrypted with<br/>AES-256-GCM]
+    V[Var<br/>key: LOG_LEVEL] --> P[Plaintext]
+    E --> DB[(Database)]
+    P --> DB
 
-    CF[Config file template<br/>with secret placeholders] --> Sync[Sync to server]
+    CF[Config file template<br/>with ${KEY} placeholders] --> Sync[Sync to server]
     DB --> Sync
-    Sync --> Server[Server file<br/>DATABASE_URL=postgres://...]
+    Sync --> Server[Server file<br/>resolved values]
 ```
 
 **Key concepts:**
 
-- **Environment-scoped.** Secrets belong to an environment. A secret named `DATABASE_URL` in staging is completely independent from `DATABASE_URL` in production.
-- **Encrypted at rest.** Every secret value is encrypted using AES-256-GCM with the `MASTER_KEY` before being stored. The encryption nonce is stored alongside the ciphertext. The plaintext value never touches the database.
-- **Audit-logged.** Every access to a secret value (reveal, sync, update) is recorded in the [audit log](../audit.md) with the user who performed the action.
-- **Template-based usage.** Secrets are not injected at runtime. They are substituted into config file templates at sync time and written as static files to the server.
+- **Environment-scoped.** Both secrets and vars belong to an environment. A `DATABASE_URL` in staging is independent from one in production. Keys must be unique within `(environment, entity)` -- you can have `FOO` as both a secret and a var in the same environment, but not two secrets named `FOO`.
+- **Encryption only for secrets.** Secret values are encrypted using AES-256-GCM with the `MASTER_KEY` before being stored; the nonce is stored alongside the ciphertext. Vars are stored as plaintext.
+- **Audit-logged.** Secret access (reveal, sync, update) is recorded in the audit log. Var create/update/delete are also audited.
+- **Template-based usage.** Neither secrets nor vars are injected at runtime. They are substituted into config file templates at sync time and written as static files to the server.
+- **Resolution order.** Vars are substituted first, then secrets. If the same key exists in both, the secret value wins.
 
 ---
 
@@ -105,9 +117,63 @@ Content-Type: application/json
 
 ---
 
-## Using Secrets in Config Files
+## Creating Variables
 
-Secrets come to life when you reference them in [config files](config-files.md). The standard placeholder syntax is `${SECRET_KEY}`.
+Variables live on the **Vars** tab of the Secrets and Variables page. Use them for non-sensitive values you still want to centralize -- log levels, feature flags, hostnames, ports -- so the same value doesn't get duplicated across config files.
+
+### Via the UI
+
+1. Navigate to **Configuration > Secrets and Variables**.
+2. Switch to the **Vars** tab.
+3. Click **Add Variable**.
+4. Fill in the form:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| **Key** | Yes | Uppercase name with underscores (e.g., `LOG_LEVEL`). Must match `^[A-Z][A-Z0-9_]*$`. |
+| **Value** | Yes | The variable value. Any string. |
+| **Description** | No | Optional description for documentation. |
+
+5. Click **Create**.
+
+### Via the API
+
+```http
+POST /api/environments/:envId/vars
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "key": "LOG_LEVEL",
+  "value": "info",
+  "description": "Application log level"
+}
+```
+
+```http
+PATCH /api/vars/:id
+DELETE /api/vars/:id
+```
+
+> [!NOTE]
+> Var values are stored as plaintext and are always visible in the UI and API. Do not use vars for passwords, tokens, or any value you wouldn't want in a shared document. Use secrets instead.
+
+### When to Use a Var Instead of a Secret
+
+| Use a **Var** for | Use a **Secret** for |
+|-------------------|----------------------|
+| Log levels, feature flags | API keys, tokens |
+| Public hostnames, URLs | Passwords, private keys |
+| Ports, timeouts | Certificates, signing keys |
+| Docker image tags | Database connection strings with credentials |
+
+If in doubt, prefer a secret -- it costs nothing extra and preserves future flexibility.
+
+---
+
+## Using Placeholders in Config Files
+
+Secrets and vars come to life when you reference them in [config files](config-files.md). The standard placeholder syntax is `${KEY}` -- the same for both.
 
 ### Example: .env File
 
@@ -146,28 +212,97 @@ BridgePort recognizes the following placeholder formats when listing secret usag
 > [!WARNING]
 > Only the `${KEY}` format is resolved during config file sync. The `$KEY` and `{{KEY}}` formats are used for usage tracking only -- they will *not* be substituted with secret values when syncing files to servers.
 
-### Missing Secrets
+### Missing Keys
 
-If a config file references a secret that does not exist in the environment, the sync fails with an error listing the missing keys:
-
-```
-Missing secrets: STRIPE_API_KEY, SENDGRID_KEY
-```
-
-This is a safety measure -- BridgePort will not write a file with unresolved placeholders to your server. Create the missing secrets first, then retry the sync.
+If a config file references a key that does not exist as either a secret or a var in the environment, the sync fails with an error listing the missing keys. This is a safety measure -- BridgePort will not write a file with unresolved placeholders to your server. Create the missing secret or var first, then retry the sync.
 
 ### Template Flow
 
 ```mermaid
 flowchart TD
     A[Config file template<br/>stored in BridgePort] --> B[Sync triggered<br/>per-service or per-server]
-    B --> C[Fetch all secrets<br/>for the environment]
-    C --> D[Replace each placeholder<br/>with decrypted value]
+    B --> C[Fetch vars + decrypted secrets<br/>for the environment]
+    C --> D[Substitute vars first,<br/>then secrets over them]
     D --> E{Any unresolved<br/>placeholders?}
-    E -->|Yes| F[Sync fails<br/>lists missing secrets]
+    E -->|Yes| F[Sync fails<br/>lists missing keys]
     E -->|No| G[Write resolved file<br/>to target path via SSH]
     G --> H[Update lastSyncedAt<br/>timestamp]
 ```
+
+---
+
+## Config File Scanner
+
+The **Config File Scanner** inspects every non-binary config file in the environment and flags hardcoded values that should probably be promoted to a secret or a var. It catches three kinds of issues:
+
+- **Cross-file repetition** -- the same literal value appears in two or more files (classic duplication -- rotate one, forget the other).
+- **Cross-key repetition** -- the same literal value appears under two or more different keys (often a sign the value has drifted from its canonical name).
+- **Plaintext leaks** -- the literal value matches an existing secret or var, meaning the plaintext is sitting in a config file it shouldn't be.
+
+Binary files are skipped. The scan runs on demand; nothing is scanned or stored automatically.
+
+### Running a Scan
+
+1. Navigate to **Configuration > Secrets and Variables**.
+2. Expand the **Scan Suggestions** panel (or click **Run Scan**).
+3. BridgePort reports all suggestions sorted by occurrence count (highest first), with secret-looking values ranked above var-looking ones on ties.
+
+Each suggestion includes:
+
+- A **masked preview** of the value (first 3 + `...` + last 3 chars, or dots for short values) so the raw value never appears on screen.
+- A **proposed key** derived from the most common key name seen, normalized to `UPPER_SNAKE_CASE`.
+- A **proposed type** (`secret` or `var`). Keys containing `password`, `secret`, `key`, `token`, `api`, `auth`, `credential`, `cert`, or `private` are classified as secrets; everything else as vars.
+- The **affected files** and per-file occurrence counts.
+- If the value matches an existing secret/var, a pointer to it so you can reuse the existing key rather than creating a duplicate.
+
+### Review and Apply
+
+Applying a suggestion walks through a 3-step modal:
+
+1. **Confirm** -- review the proposed key, type, and affected files. Edit the key or type before proceeding.
+2. **Preview** -- see a diff for every affected file showing `literal-value` → `${KEY}` with a replacement count. Nothing is written yet.
+3. **Apply** -- BridgePort creates the secret or var (if not already present), substitutes the value in every selected file, saves the previous content to [file history](config-files.md#file-history) for rollback, and writes an audit log entry per mutation with `source: config_scan`.
+
+The scan itself is read-only and always safe to run. Only the apply step mutates data.
+
+### Tuning the Scanner
+
+Two per-environment settings control sensitivity (both are in **Settings > Configuration**, group "Config Scanner"):
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `scanMinLength` | 6 | Minimum value length to consider. Shorter values are ignored. Valid range 1--100. |
+| `scanEntropyThreshold` | 25 | Shannon entropy threshold, stored as `×10` (25 = 2.5 bits/char). Values below this are filtered out. Valid range 0--80. |
+
+Raise `scanEntropyThreshold` if you're getting too many suggestions for low-entropy strings (short words, common defaults). Lower it if real secrets are being missed.
+
+Values that already look like placeholders (start with `${`, `$`, or `{{`) are never suggested.
+
+### API
+
+```http
+POST /api/environments/:envId/config-scan
+Authorization: Bearer <token>
+```
+
+Returns `{ suggestions, scannedFileCount, skippedBinaryCount }`. Values in `suggestions[].value` are masked, not raw.
+
+```http
+POST /api/environments/:envId/config-scan/preview
+POST /api/environments/:envId/config-scan/apply
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "value": "the-literal-value-to-replace",
+  "key": "MY_KEY",
+  "type": "secret",
+  "fileIds": ["cf1", "cf2"],
+  "existingSecretId": null
+}
+```
+
+Set `existingSecretId` to reuse an existing secret or var instead of creating a new one.
 
 ---
 
@@ -222,24 +357,25 @@ Content-Type: application/json
 
 ---
 
-## Secret Usage Tracking
+## Usage Tracking
 
-The secrets list page shows where each secret is referenced, so you can understand the impact of changing or deleting a secret before you do it.
+The Secrets and Vars tabs both show where each key is referenced, so you can understand the impact of changing or deleting an entry before you do it.
 
-For each secret, BridgePort scans all config files in the environment and reports:
+For every secret and var, BridgePort scans all config files in the environment and reports:
 
-- **Config files** that reference the secret key (by detecting `${KEY}`, `$KEY`, or `{{KEY}}` patterns)
-- **Services** that those config files are attached to
-- **Usage count** -- the number of unique services using the secret
+- **Config files** that reference the key (by detecting `${KEY}`, `$KEY`, or `{{KEY}}` patterns; vars also match leading `KEY=` lines).
+- **Services** that those config files are attached to.
+- **Usage count** -- the number of unique services using the key.
 
 This is computed at list time by scanning config file content, not stored separately.
 
 ```http
 GET /api/environments/:envId/secrets
+GET /api/environments/:envId/vars
 Authorization: Bearer <token>
 ```
 
-Each secret in the response includes:
+Each entry in the response includes:
 ```json
 {
   "key": "DATABASE_URL",
@@ -264,7 +400,7 @@ Each secret in the response includes:
 
 ---
 
-## Updating and Rotating Secrets
+## Updating and Rotating
 
 ### Updating a Value
 
@@ -281,7 +417,7 @@ Content-Type: application/json
 }
 ```
 
-Updating a secret re-encrypts the value with the current `MASTER_KEY`. After updating, config files that reference the secret will show a "pending" sync status until re-synced.
+Updating a secret re-encrypts the value with the current `MASTER_KEY`. Vars use `PATCH /api/vars/:id` with the same `{ value?, description? }` shape and are updated in place. After updating either, config files that reference the key will show a "pending" sync status until re-synced.
 
 ### Rotation Workflow
 
@@ -336,11 +472,21 @@ Use consistent, descriptive key names:
 | `description` | string | null | Optional documentation |
 | `neverReveal` | boolean | false | Write-only flag |
 
+### Var Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `key` | string | -- | Uppercase key name (unique per environment) |
+| `value` | string | -- | Plaintext value |
+| `description` | string | null | Optional documentation |
+
 ### Related Environment Settings
 
 | Setting | Location | Default | Description |
 |---------|----------|---------|-------------|
-| `allowSecretReveal` | Settings > Configuration | true | Environment-level reveal toggle (admin only) |
+| `allowSecretReveal` | Settings > Configuration > Security | true | Environment-level reveal toggle (admin only) |
+| `scanMinLength` | Settings > Configuration > Config Scanner | 6 | Minimum value length considered by the scanner |
+| `scanEntropyThreshold` | Settings > Configuration > Config Scanner | 25 | Shannon entropy threshold ×10 (25 = 2.5 bits/char) |
 
 ### Related Environment Variables
 
@@ -365,10 +511,16 @@ An admin has disabled secret reveal for this environment. Secrets can still be u
 The secret has `neverReveal: true`. This cannot be reversed. If you need to see the value, delete the secret and recreate it without the write-only flag.
 
 **"Missing secrets: KEY1, KEY2" during config file sync**
-The config file references secrets that do not exist in this environment. Create the missing secrets, then retry the sync.
+The config file references keys that exist as neither a secret nor a var in this environment. Create the missing entry (as a secret if sensitive, as a var otherwise), then retry the sync.
 
 **Secret value not updating on the server after change**
-Updating a secret in BridgePort does not automatically sync config files. After updating a secret, re-sync the config files attached to the affected services. The sync status will show "pending" for files that need re-syncing.
+Updating a secret or var in BridgePort does not automatically sync config files. After updating, re-sync the config files attached to the affected services. The sync status will show "pending" for files that need re-syncing.
+
+**"Var already exists"**
+Var keys must be unique within an environment (same rule as secrets, but tracked on a separate table). The same key *can* exist as both a secret and a var in one environment -- the secret takes precedence at resolution time.
+
+**Config scanner returns no suggestions**
+The scanner only surfaces values that (a) meet `scanMinLength`, (b) exceed `scanEntropyThreshold`, and (c) appear in multiple files, under multiple keys, or match an existing secret/var. If nothing qualifies, the panel stays empty. Lower the entropy threshold in Settings > Configuration to catch more candidates.
 
 ---
 

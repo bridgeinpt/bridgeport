@@ -40,8 +40,8 @@ Get started:
   bridgeport health env       # View health check logs
   bridgeport audit            # View audit logs`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Skip auth check for login, help, version, and completion commands
-		skipAuth := cmd.Name() == "login" || cmd.Name() == "help" || cmd.Name() == "version" || cmd.Name() == "completion"
+		// Skip auth check for login, config, help, version, and completion commands
+		skipAuth := cmd.Name() == "login" || cmd.Name() == "config" || cmd.Name() == "help" || cmd.Name() == "version" || cmd.Name() == "completion"
 		if cmd.Parent() != nil && cmd.Parent().Name() == "completion" {
 			skipAuth = true
 		}
