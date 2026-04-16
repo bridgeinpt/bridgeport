@@ -39,16 +39,40 @@ The BridgePort CLI provides terminal access to your infrastructure -- SSH into s
 
 ## Installation
 
-Download the CLI binary from your BridgePort instance at **Admin > About**, or build from source:
+Download the CLI binary from your BridgePort instance (click **CLI** in the top bar, or go to **Admin > About**). The modal picks the right build for your architecture; follow the on-screen steps for your OS. If you'd rather install from the terminal:
+
+### macOS
+
+```bash
+# Replace arm64 with amd64 for Intel Macs
+BIN=bridgeport-darwin-arm64
+chmod +x ~/Downloads/$BIN
+
+# Clear Gatekeeper's quarantine flag so the binary runs without the
+# "cannot be opened because the developer cannot be verified" dialog
+xattr -d com.apple.quarantine ~/Downloads/$BIN
+
+sudo mv ~/Downloads/$BIN /usr/local/bin/bridgeport
+```
+
+If you skip the `xattr` step, macOS will block the binary on first run. Either run the command above, or right-click the binary in Finder and pick **Open** once -- macOS then whitelists it permanently.
+
+### Linux
+
+```bash
+# Replace amd64 with arm64 for ARM machines
+BIN=bridgeport-linux-amd64
+chmod +x ~/Downloads/$BIN
+sudo mv ~/Downloads/$BIN /usr/local/bin/bridgeport
+```
+
+If `/usr/local/bin` is not writable, use `~/.local/bin/bridgeport` and make sure it's on your `PATH`.
+
+### Build from Source
 
 ```bash
 cd cli && make build
-```
-
-The binary is a single standalone executable. Place it in your `PATH`:
-
-```bash
-sudo mv bridgeport /usr/local/bin/
+sudo mv cli/bin/bridgeport /usr/local/bin/
 ```
 
 ---

@@ -51,10 +51,62 @@ interface CLIModalProps {
   onClose: () => void;
 }
 
+type Platform = 'macos' | 'linux';
+
+function detectPlatform(): Platform {
+  if (typeof navigator === 'undefined') return 'linux';
+  return /Mac|iPhone|iPad/i.test(navigator.userAgent) ? 'macos' : 'linux';
+}
+
+function platformInstructions(platform: Platform, filename: string | null) {
+  const binary = filename ?? (platform === 'macos' ? 'bridgeport-darwin-arm64' : 'bridgeport-linux-amd64');
+  if (platform === 'macos') {
+    return {
+      steps: [
+        {
+          label: 'Make the binary executable',
+          code: `chmod +x ~/Downloads/${binary}`,
+        },
+        {
+          label: 'Remove the Gatekeeper quarantine flag',
+          code: `xattr -d com.apple.quarantine ~/Downloads/${binary}`,
+          hint: 'macOS blocks downloaded binaries until you either clear this attribute or right-click > Open once.',
+        },
+        {
+          label: 'Move it onto your PATH',
+          code: `sudo mv ~/Downloads/${binary} /usr/local/bin/bridgeport`,
+        },
+        {
+          label: 'Log in to BridgePort',
+          code: 'bridgeport login',
+        },
+      ],
+    };
+  }
+  return {
+    steps: [
+      {
+        label: 'Make the binary executable',
+        code: `chmod +x ~/Downloads/${binary}`,
+      },
+      {
+        label: 'Move it onto your PATH',
+        code: `sudo mv ~/Downloads/${binary} /usr/local/bin/bridgeport`,
+        hint: 'Use ~/.local/bin instead if /usr/local/bin is not writable on your distribution.',
+      },
+      {
+        label: 'Log in to BridgePort',
+        code: 'bridgeport login',
+      },
+    ],
+  };
+}
+
 export function CLIModal({ isOpen, onClose }: CLIModalProps) {
   const [cliVersion, setCliVersion] = useState<string | null>(null);
   const [cliDownloads, setCliDownloads] = useState<CliDownload[]>([]);
   const [loading, setLoading] = useState(true);
+  const [platform, setPlatform] = useState<Platform>(detectPlatform);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -71,6 +123,10 @@ export function CLIModal({ isOpen, onClose }: CLIModalProps) {
       })
       .finally(() => setLoading(false));
   }, [isOpen]);
+
+  const platformFilename =
+    cliDownloads.find((d) => d.os === (platform === 'macos' ? 'darwin' : 'linux'))?.filename ?? null;
+  const { steps } = platformInstructions(platform, platformFilename);
 
   return (
     <Modal
@@ -118,23 +174,47 @@ export function CLIModal({ isOpen, onClose }: CLIModalProps) {
               </div>
 
               <div className="border-t border-slate-700 pt-4">
-                <h3 className="text-sm font-medium text-slate-300 mb-3">Installation</h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-medium text-slate-300">Installation</h3>
+                  <div className="flex gap-1 bg-slate-800/50 rounded-lg p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setPlatform('macos')}
+                      className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                        platform === 'macos'
+                          ? 'bg-slate-700 text-white'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      macOS
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPlatform('linux')}
+                      className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
+                        platform === 'linux'
+                          ? 'bg-slate-700 text-white'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      Linux
+                    </button>
+                  </div>
+                </div>
                 <div className="space-y-3">
-                  <div>
-                    <p className="text-xs text-slate-500 mb-1">1. Download for your platform</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-slate-500 mb-1">2. Make executable and move to PATH</p>
-                    <code className="block bg-slate-800 px-3 py-2 rounded text-sm text-slate-300 font-mono">
-                      chmod +x bridgeport-* && sudo mv bridgeport-* /usr/local/bin/bridgeport
-                    </code>
-                  </div>
-                  <div>
-                    <p className="text-xs text-slate-500 mb-1">3. Login to BridgePort</p>
-                    <code className="block bg-slate-800 px-3 py-2 rounded text-sm text-slate-300 font-mono">
-                      bridgeport login
-                    </code>
-                  </div>
+                  {steps.map((step, idx) => (
+                    <div key={idx}>
+                      <p className="text-xs text-slate-500 mb-1">
+                        {idx + 1}. {step.label}
+                      </p>
+                      <code className="block bg-slate-800 px-3 py-2 rounded text-sm text-slate-300 font-mono">
+                        {step.code}
+                      </code>
+                      {step.hint && (
+                        <p className="text-xs text-slate-500 mt-1 italic">{step.hint}</p>
+                      )}
+                    </div>
+                  ))}
                 </div>
               </div>
             </>
