@@ -136,15 +136,19 @@ Health checks, metrics collection, retention, and alert configuration.
 
 ## Operations Settings
 
-Defaults for new servers in this environment.
+Defaults for new servers and environment-wide operational behavior.
 
 | Setting | Type | Default | Options | Description |
 |---------|------|---------|---------|-------------|
 | `defaultDockerMode` | `string` | `"ssh"` | `ssh`, `socket` | Default Docker daemon connection method for new servers |
 | `defaultMetricsMode` | `string` | `"disabled"` | `disabled`, `ssh`, `agent` | Default metrics collection mode for new servers |
+| `autoPruneImages` | `boolean` | `false` | -- | Run `docker image prune` automatically after every deploy to the affected server, and weekly on all healthy servers in this environment |
+| `pruneImagesMode` | `string` | `"dangling"` | `dangling`, `all` | Which images are pruned. `dangling` removes only untagged layers (safe default). `all` removes any image not used by a running container, including rollback targets -- use with care. |
 
 > [!NOTE]
-> These defaults apply when creating new servers. Existing servers are not affected when you change these settings.
+> The server-type defaults (`defaultDockerMode`, `defaultMetricsMode`) apply when creating new servers. Existing servers are not affected when you change these settings.
+>
+> The prune settings apply immediately -- the next deploy and the next weekly scheduler tick will honor the new values.
 
 ---
 
@@ -169,7 +173,9 @@ Database backup and monitoring defaults.
 
 ## Configuration Settings
 
-Security-related configuration for this environment.
+Security and config-scanner settings for this environment.
+
+### Security
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
@@ -177,6 +183,15 @@ Security-related configuration for this environment.
 
 > [!TIP]
 > For production environments with strict security requirements, set `allowSecretReveal` to `false`. Operators can still update secrets, but the values are never shown in the UI. Secrets marked as `neverReveal` always remain hidden regardless of this setting.
+
+### Config Scanner
+
+Controls sensitivity of the [config file scanner](../guides/secrets.md#config-file-scanner) that detects hardcoded values and suggests promoting them to secrets or vars.
+
+| Setting | Type | Default | Range | Description |
+|---------|------|---------|-------|-------------|
+| `scanMinLength` | `integer` | `6` | 1 -- 100 | Minimum value length to consider. Shorter values are ignored. |
+| `scanEntropyThreshold` | `integer` | `25` | 0 -- 80 | Shannon entropy threshold stored as ×10 (25 = 2.5 bits/char). Values below this are filtered out as low-entropy. |
 
 ---
 
