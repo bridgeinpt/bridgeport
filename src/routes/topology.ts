@@ -18,7 +18,7 @@ const createConnectionSchema = z.object({
 
 const upsertLayoutSchema = z.object({
   environmentId: z.string().min(1),
-  positions: z.record(z.object({ x: z.number(), y: z.number() })),
+  positions: z.record(z.string(), z.object({ x: z.number(), y: z.number() })),
 });
 
 export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {

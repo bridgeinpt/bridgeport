@@ -47,7 +47,7 @@ const containerInfoSchema = z.object({
     type: z.string(),
     ip: z.string().optional(),
   })).optional(),
-  labels: z.record(z.string()).optional(),
+  labels: z.record(z.string(), z.string()).optional(),
   mounts: z.array(z.object({
     source: z.string(),
     destination: z.string(),
