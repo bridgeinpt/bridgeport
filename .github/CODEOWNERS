@@ -1,0 +1,54 @@
+# CODEOWNERS for BRIDGEPORT
+#
+# Lines are evaluated top-to-bottom; the LAST matching line wins for a given
+# path. For reviews to be required, branch protection on `master` must also
+# have "Require review from Code Owners" enabled.
+#
+# The engineering team must have Write access on the repo for CODEOWNERS to
+# block merges (Read access only auto-requests reviewers).
+
+# Default: every PR gets an engineering review.
+*                                       @bridgeinpt/engineering
+
+# --- Self-protection ---------------------------------------------------------
+# Prevent silent changes to review requirements.
+/.github/CODEOWNERS                     @bridgeinpt/engineering
+
+# --- CI, build, and supply-chain surface -------------------------------------
+# Workflow changes can swap runners, add actions, or alter push targets — any
+# change here hits every future build and is a common abuse vector.
+/.github/workflows/                     @bridgeinpt/engineering
+/.github/ISSUE_TEMPLATE/                @bridgeinpt/engineering
+/.github/dependabot.yml                 @bridgeinpt/engineering
+
+# --- Database schema and migrations ------------------------------------------
+# Migrations auto-apply on container start in every deployment. Bad schema
+# edits ship to every self-hoster.
+/prisma/schema.prisma                   @bridgeinpt/engineering
+/prisma/migrations/                     @bridgeinpt/engineering
+
+# --- Auth, crypto, and secret handling ---------------------------------------
+/src/lib/crypto.ts                      @bridgeinpt/engineering
+/src/lib/config.ts                      @bridgeinpt/engineering
+/src/plugins/authenticate.ts            @bridgeinpt/engineering
+/src/routes/auth.ts                     @bridgeinpt/engineering
+/src/services/auth.ts                   @bridgeinpt/engineering
+
+# --- Container build artefacts -----------------------------------------------
+/docker/Dockerfile                      @bridgeinpt/engineering
+/docker/entrypoint.sh                   @bridgeinpt/engineering
+/docker/docker-compose.yml              @bridgeinpt/engineering
+
+# --- Dependencies (supply chain) ---------------------------------------------
+/package.json                           @bridgeinpt/engineering
+/package-lock.json                      @bridgeinpt/engineering
+/ui/package.json                        @bridgeinpt/engineering
+/ui/package-lock.json                   @bridgeinpt/engineering
+/cli/go.mod                             @bridgeinpt/engineering
+/cli/go.sum                             @bridgeinpt/engineering
+/bridgeport-agent/go.mod                @bridgeinpt/engineering
+/bridgeport-agent/go.sum                @bridgeinpt/engineering
+
+# --- Legal and security policy -----------------------------------------------
+/LICENSE                                @bridgeinpt/engineering
+/docs/SECURITY.md                       @bridgeinpt/engineering
