@@ -1,5 +1,5 @@
 # Build stage for Go agent
-FROM golang:1.22-alpine AS agent-build
+FROM golang:1.26-alpine AS agent-build
 WORKDIR /build
 ARG AGENT_VERSION=dev
 COPY bridgeport-agent/ ./
@@ -8,7 +8,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X main.Versi
 RUN echo "${AGENT_VERSION}" > agent-version.txt
 
 # Build stage for Go CLI (multi-platform)
-FROM golang:1.22-alpine AS cli-build
+FROM golang:1.26-alpine AS cli-build
 WORKDIR /build
 ARG CLI_VERSION=dev
 COPY cli/ ./
