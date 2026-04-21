@@ -1,4 +1,4 @@
-module bridgeport-agent
+module github.com/bridgeinpt/bridgeport-agent
 
 go 1.21
 

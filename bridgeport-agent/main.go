@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"bridgeport-agent/collector"
+	"github.com/bridgeinpt/bridgeport-agent/collector"
 )
 
 // Version is set at build time

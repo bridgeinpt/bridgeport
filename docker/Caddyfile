@@ -1,14 +1,18 @@
 # BRIDGEPORT Caddy Configuration
+#
+# Replace `admin@example.com` with an email Let's Encrypt can reach, and
+# replace `bridgeport.example.com` with the public hostname you point at
+# this Caddy instance. Both are required for automatic HTTPS to work.
 {
-	# Global options
-	email infra@bridgein.com
+	# Email used by Let's Encrypt for expiry notices and ACME account recovery.
+	email admin@example.com
 
 	# Enable automatic HTTPS
 	auto_https on
 }
 
 # BRIDGEPORT application
-deploy.bridgein.com {
+bridgeport.example.com {
 	reverse_proxy bridgeport:3000
 
 	# Security headers

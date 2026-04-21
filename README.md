@@ -7,7 +7,7 @@
 
 A lightweight, self-hosted deployment management tool for Docker-based infrastructure. Manage servers, deploy containers, monitor health, and orchestrate multi-service rollouts -- all from one place, no Kubernetes required.
 
-Created by the Engineering Team at [BridgeIn](https://bridgein.pt).
+Created by the Engineering Team at [BRIDGE IN](https://bridgein.pt).
 
 ## The Problem
 
@@ -186,4 +186,4 @@ BRIDGEPORT is licensed under the [GNU Affero General Public License v3.0](LICENS
 - If you modify BRIDGEPORT and offer it as a hosted service to others, you must share your modifications under the same license
 - If you just run BRIDGEPORT internally (even at a company), you have no obligations beyond the license terms
 
-Copyright 2024-2025 BridgeIn.
+Copyright 2024-2026 BRIDGE IN.

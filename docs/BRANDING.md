@@ -9,7 +9,7 @@
 | **Name** | BRIDGEPORT |
 | **Tagline** | Dock. Run. Ship. Repeat. |
 | **License** | Closed source / Proprietary |
-| **Created by** | Engineering Team at BridgeIn (bridgein.pt) |
+| **Created by** | Engineering Team at BRIDGE IN (bridgein.pt) |
 
 ---
 
@@ -138,7 +138,7 @@ no fine details, flat vector
 |         [BRIDGEIN]                        |
 |        bridgein.pt                        |
 |                                           |
-|   (c) 2024-2025 BridgeIn. All rights      |
+|   (c) 2024-2025 BRIDGE IN. All rights      |
 |              reserved.                    |
 |                                           |
 +-------------------------------------------+
@@ -184,7 +184,7 @@ no fine details, flat vector
 - Add About link (info icon) in sidebar footer
 
 ### Step 5: Create About.tsx
-- New page with branding, features, and BridgeIn credits
+- New page with branding, features, and BRIDGE IN credits
 - Styled consistently with existing dark theme
 
 ### Step 6: Update App.tsx

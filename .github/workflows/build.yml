@@ -11,9 +11,18 @@ on:
         required: false
         default: 'latest'
 
+# Image is published to ghcr.io using the built-in GITHUB_TOKEN so forks and
+# external contributors can build without any extra secrets.
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       - name: Checkout code
@@ -42,13 +51,12 @@ jobs:
           echo "CLI_VERSION=${CLI_VER}" >> $GITHUB_ENV
           echo "CLI version (from git): ${CLI_VER}"
 
-      - name: Install doctl
-        uses: digitalocean/action-doctl@v2
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
         with:
-          token: ${{ secrets.DO_REGISTRY_TOKEN }}
-
-      - name: Log in to DigitalOcean Container Registry
-        run: doctl registry login --expiry-seconds 1200
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build BRIDGEPORT Docker image
         run: |
@@ -57,11 +65,11 @@ jobs:
             --build-arg AGENT_VERSION=${{ env.AGENT_VERSION }} \
             --build-arg CLI_VERSION=${{ env.CLI_VERSION }} \
             -f docker/Dockerfile \
-            -t registry.digitalocean.com/bios-registry/bridgeport:${{ env.VERSION_TAG }} \
-            -t registry.digitalocean.com/bios-registry/bridgeport:latest \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.VERSION_TAG }} \
+            -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
             .
 
       - name: Push BRIDGEPORT Docker image
         run: |
-          docker push registry.digitalocean.com/bios-registry/bridgeport:${{ env.VERSION_TAG }}
-          docker push registry.digitalocean.com/bios-registry/bridgeport:latest
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.VERSION_TAG }}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest

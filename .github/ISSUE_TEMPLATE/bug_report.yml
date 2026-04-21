@@ -1,0 +1,77 @@
+name: Bug report
+description: Something isn't working the way the docs promise
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting an issue. Please fill out as much as you can — reproduction steps and environment details are what make bugs fixable.
+        **For security issues, do NOT open a public issue.** See [SECURITY.md](../blob/master/docs/SECURITY.md) instead.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened, and what did you expect instead?
+      placeholder: |
+        When I deploy a service with an invalid image tag, BRIDGEPORT shows "Deployed" instead of reporting the pull error.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps — commands, UI clicks, or API calls. Include minimal config if relevant.
+      placeholder: |
+        1. Create a service with `image: nginx:does-not-exist`
+        2. Click Deploy
+        3. Observe the status badge
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs. actual behaviour
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: BRIDGEPORT version
+      description: Shown on the About page or in `/health`. Example `20260225-abc1234`.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: How are you running BRIDGEPORT?
+      options:
+        - Docker (docker run)
+        - Docker Compose
+        - Local development (npm run dev)
+        - Other (describe below)
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Host OS and Docker version
+      placeholder: "Ubuntu 24.04, Docker 27.3.1"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Output of `docker logs bridgeport` or the browser console. Redact any secrets first.
+      render: shell
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Screenshots, config snippets (with secrets redacted), anything else that helps.

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/bridgein/bridgeport-cli/internal/api"
-	"github.com/bridgein/bridgeport-cli/internal/config"
-	"github.com/bridgein/bridgeport-cli/internal/output"
+	"github.com/bridgeinpt/bridgeport-cli/internal/api"
+	"github.com/bridgeinpt/bridgeport-cli/internal/config"
+	"github.com/bridgeinpt/bridgeport-cli/internal/output"
 	"github.com/spf13/cobra"
 )
 

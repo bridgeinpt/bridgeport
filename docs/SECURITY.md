@@ -1,12 +1,17 @@
 # Security Policy
 
-BRIDGEPORT takes security seriously. This document describes how to report vulnerabilities and what to expect from us.
+BRIDGEPORT takes security seriously. This document describes how to report vulnerabilities and what to expect from the maintainers.
 
 ## Reporting a Vulnerability
 
 **Please do not open public GitHub issues for security vulnerabilities.**
 
-Instead, email us at **security@bridgein.pt** with:
+Instead, either:
+
+- Open a private advisory via [GitHub Security Advisories](https://github.com/bridgeinpt/bridgeport/security/advisories/new), or
+- Email the maintainers at **security@bridgein.pt**
+
+Include:
 
 1. A description of the vulnerability
 2. Steps to reproduce (or a proof-of-concept)
@@ -50,7 +55,7 @@ Instead, email us at **security@bridgein.pt** with:
 
 ## Supported Versions
 
-BRIDGEPORT follows a rolling release model. We support the **latest release** with security patches.
+BRIDGEPORT follows a rolling release model. The **latest release** receives security patches.
 
 | Version | Supported |
 |---------|-----------|

@@ -1,7 +1,15 @@
 {
   "name": "bridgeport",
   "version": "1.0.0",
-  "description": "BRIDGEPORT - Dock. Run. Ship. Repeat. A lightweight deployment management tool by BridgeIn.",
+  "description": "BRIDGEPORT - Dock. Run. Ship. Repeat. A lightweight, self-hosted deployment management tool for Docker-based infrastructure.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bridgeinpt/bridgeport.git"
+  },
+  "bugs": {
+    "url": "https://github.com/bridgeinpt/bridgeport/issues"
+  },
+  "homepage": "https://github.com/bridgeinpt/bridgeport#readme",
   "type": "module",
   "main": "dist/server.js",
   "scripts": {
@@ -26,10 +34,12 @@
   "keywords": [
     "deployment",
     "infrastructure",
-    "bridgein"
+    "docker",
+    "self-hosted",
+    "orchestration"
   ],
-  "author": "BridgeIn",
-  "license": "UNLICENSED",
+  "author": "BRIDGE IN <https://bridgein.pt>",
+  "license": "AGPL-3.0-only",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.980.0",
     "@aws-sdk/s3-request-presigner": "^3.980.0",

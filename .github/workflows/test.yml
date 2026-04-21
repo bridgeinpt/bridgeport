@@ -8,9 +8,19 @@ on:
   schedule:
     - cron: '0 3 * * *'  # Nightly at 3 AM UTC
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+# Hardcoded non-secret values used by integration/system tests. These are
+# deterministic test fixtures, not real credentials — real secrets are never
+# committed. Kept in one place so they stay consistent across jobs.
+env:
+  TEST_MASTER_KEY: test-key-for-ci-only-not-real
+  TEST_JWT_SECRET: test-jwt-secret-for-ci-only
 
 jobs:
   # ── Tier 1: Unit Tests (fast, every commit) ──────────────
@@ -69,8 +79,8 @@ jobs:
       - run: npx prisma generate
       - run: npx vitest run --config config/vitest.config.ts --reporter=github-actions
         env:
-          MASTER_KEY: test-key-for-ci-only-not-real
-          JWT_SECRET: test-jwt-secret-for-ci-only
+          MASTER_KEY: ${{ env.TEST_MASTER_KEY }}
+          JWT_SECRET: ${{ env.TEST_JWT_SECRET }}
 
   integration-frontend:
     name: Frontend Integration Tests
@@ -124,8 +134,8 @@ jobs:
       - run: npx vitest run --config config/vitest.unit.config.ts
       - run: npx vitest run --config config/vitest.config.ts
         env:
-          MASTER_KEY: test-key-for-ci-only-not-real
-          JWT_SECRET: test-jwt-secret-for-ci-only
+          MASTER_KEY: ${{ env.TEST_MASTER_KEY }}
+          JWT_SECRET: ${{ env.TEST_JWT_SECRET }}
       - run: cd bridgeport-agent && go test ./... -count=1
       - run: cd cli && go test ./... -count=1
 

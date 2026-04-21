@@ -3,7 +3,7 @@
 BINARY_NAME=bridgeport
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 BUILD_TIME=$(shell date -u '+%Y-%m-%d_%H:%M:%S')
-LDFLAGS=-ldflags "-X github.com/bridgein/bridgeport-cli/cmd.Version=${VERSION}"
+LDFLAGS=-ldflags "-X github.com/bridgeinpt/bridgeport-cli/cmd.Version=${VERSION}"
 
 .PHONY: build build-all install clean test lint
 

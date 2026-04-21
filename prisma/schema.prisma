@@ -858,7 +858,7 @@ model SystemSettings {
   defaultLogLines     Int @default(50)
 
   // URLs
-  publicUrl        String? // Public URL for links in notifications (e.g., https://deploy.bridgein.com)
+  publicUrl        String? // Public URL for links in notifications (e.g., https://bridgeport.example.com)
   agentCallbackUrl String? // Internal URL for agents to reach BRIDGEPORT (e.g., http://10.30.10.5:3000)
 
   // Agent Configuration

@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/bridgein/bridgeport-cli/internal/docker"
+	"github.com/bridgeinpt/bridgeport-cli/internal/docker"
 	"github.com/spf13/cobra"
 )
 

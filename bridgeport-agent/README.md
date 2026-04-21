@@ -221,4 +221,4 @@ ExecStart=/usr/local/bin/bridgeport-agent -interval 60s
 
 ## License
 
-Copyright 2024-2025 BridgeIn. All rights reserved.
+Copyright 2024-2025 BRIDGE IN. All rights reserved.

@@ -245,7 +245,7 @@ Produces binaries in `dist/`:
 make build VERSION=20260225-a1b2c3d
 ```
 
-The version is injected via Go linker flags (`-ldflags "-X github.com/bridgein/bridgeport-cli/cmd.Version=..."`) and displayed by `bridgeport version`.
+The version is injected via Go linker flags (`-ldflags "-X github.com/bridgeinpt/bridgeport-cli/cmd.Version=..."`) and displayed by `bridgeport version`.
 
 ### Other Make Targets
 

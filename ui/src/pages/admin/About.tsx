@@ -98,7 +98,7 @@ export default function About() {
 
         {/* Copyright */}
         <p className="text-slate-500 text-xs">
-          &copy; 2024-2026 BridgeIn. All rights reserved.
+          &copy; 2024-2026 BRIDGE IN. All rights reserved.
         </p>
       </div>
     </div>

@@ -98,12 +98,20 @@ async function buildServer() {
   await mkdir(config.UPLOAD_DIR, { recursive: true });
 
   // Register plugins
+  // In production, CORS_ORIGIN must be set explicitly. If unset, cross-origin
+  // requests are rejected (same-origin only) — a safe default for self-hosted deployments.
+  if (config.NODE_ENV === 'production' && !config.CORS_ORIGIN) {
+    fastify.log.warn(
+      'CORS_ORIGIN is not set. Cross-origin requests will be rejected. ' +
+      'Set CORS_ORIGIN to your UI origin(s) (comma-separated) if the UI is served from a different origin.'
+    );
+  }
   await fastify.register(cors, {
     origin: config.NODE_ENV === 'development'
       ? true
       : config.CORS_ORIGIN
         ? config.CORS_ORIGIN.split(',').map(s => s.trim())
-        : ['https://deploy.bridgein.com'],
+        : false,
     credentials: true,
   });
 

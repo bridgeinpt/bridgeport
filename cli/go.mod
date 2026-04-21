@@ -1,4 +1,4 @@
-module github.com/bridgein/bridgeport-cli
+module github.com/bridgeinpt/bridgeport-cli
 
 go 1.22
 
