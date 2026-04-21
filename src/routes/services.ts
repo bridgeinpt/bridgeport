@@ -8,7 +8,7 @@ import {
   getContainerLogs,
   getLatestImageTags,
 } from '../services/deploy.js';
-import { DockerSSH, createClientForServer } from '../lib/ssh.js';
+import { DockerSSH, createClientForServer, shellEscape } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from './environments.js';
 import { logAudit } from '../services/audit.js';
 import { logHealthCheck } from '../services/health-checks.js';
@@ -395,7 +395,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
 
         // Stream logs (add PATH for non-interactive SSH)
         await client.execStream(
-          `export PATH="/usr/local/bin:/usr/bin:$PATH" && docker logs -f --tail ${defaultLogLines} ${service.containerName}`,
+          `export PATH="/usr/local/bin:/usr/bin:$PATH" && docker logs -f --tail ${defaultLogLines} ${shellEscape(service.containerName)}`,
           (data, isStderr) => {
             const eventType = isStderr ? 'stderr' : 'stdout';
             reply.raw.write(`event: ${eventType}\n`);
