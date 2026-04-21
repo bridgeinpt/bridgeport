@@ -164,6 +164,7 @@ describe('my-service', () => {
 4. **Use `vi.clearAllMocks()`** in `beforeEach`
 5. **Mock only what's needed** — only the Prisma models/methods your service uses
 6. **Also mock other services** if your service imports them (e.g., `vi.mock('./audit.js')`)
+7. **Keep mock factories in sync with module exports.** When adding a new named export to a commonly-mocked module (`lib/ssh.ts`, `lib/db.ts`, `lib/crypto.ts`, `ui/src/lib/api.ts`), update every `vi.mock(module, () => ({...}))` factory that targets it. Missing exports resolve to `undefined` at test runtime and surface as misleading errors — `X is not a function`, or assertion flips like `expected true to be true → false` when the thrown exception is caught and reshaped into a return value. Grep for `vi.mock('the/module'` before merging a new export.
 
 ## Available Factories
 
