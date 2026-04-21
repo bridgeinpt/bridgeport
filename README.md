@@ -1,4 +1,4 @@
-[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-ghcr.io%2Fbridgeinpt%2Fbridgeport-blue)](https://ghcr.io/bridgeinpt/bridgeport)
 
 # BRIDGEPORT
@@ -177,13 +177,13 @@ flowchart TD
 
 ## License
 
-BRIDGEPORT is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
+BRIDGEPORT is licensed under the [Apache License 2.0](LICENSE).
 
 **What this means for you:**
 
-- You can use BRIDGEPORT freely for any purpose, including commercial use
-- You can modify and self-host BRIDGEPORT without restriction
-- If you modify BRIDGEPORT and offer it as a hosted service to others, you must share your modifications under the same license
-- If you just run BRIDGEPORT internally (even at a company), you have no obligations beyond the license terms
+- You can use, modify, and distribute BRIDGEPORT freely, including for commercial use
+- You must preserve the copyright notice and license text in redistributions
+- You receive an explicit patent grant from the contributors
+- No obligation to share your modifications, whether you run it internally or offer it as a service
 
 Copyright 2024-2026 BRIDGE IN.

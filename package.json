@@ -39,7 +39,7 @@
     "orchestration"
   ],
   "author": "BRIDGE IN <https://bridgein.pt>",
-  "license": "AGPL-3.0-only",
+  "license": "Apache-2.0",
   "dependencies": {
     "@aws-sdk/client-s3": "^3.980.0",
     "@aws-sdk/s3-request-presigner": "^3.980.0",

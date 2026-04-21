@@ -8,7 +8,7 @@
 |--------|-------|
 | **Name** | BRIDGEPORT |
 | **Tagline** | Dock. Run. Ship. Repeat. |
-| **License** | Closed source / Proprietary |
+| **License** | Apache License 2.0 |
 | **Created by** | Engineering Team at BRIDGE IN (bridgein.pt) |
 
 ---

@@ -221,4 +221,6 @@ ExecStart=/usr/local/bin/bridgeport-agent -interval 60s
 
 ## License
 
-Copyright 2024-2025 BRIDGE IN. All rights reserved.
+Licensed under the Apache License 2.0. See the [LICENSE](../LICENSE) file at the repo root.
+
+Copyright 2024-2026 BRIDGE IN.
