@@ -4,6 +4,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
 import multipart from '@fastify/multipart';
+import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -117,6 +118,23 @@ async function buildServer() {
 
   await fastify.register(jwt, {
     secret: config.JWT_SECRET,
+  });
+
+  // Global rate limiting — 100 requests/minute per client IP.
+  // Self-hosted admin tools rarely see legitimate bursts above this, and the
+  // cap protects against credential-stuffing, webhook floods, and accidental
+  // client-side polling loops.  `/health` and `/api/client-config` are
+  // allow-listed so external monitors don't get throttled.
+  await fastify.register(rateLimit, {
+    global: true,
+    max: 100,
+    timeWindow: '1 minute',
+    allowList: (req) => req.url === '/health' || req.url === '/api/client-config',
+    errorResponseBuilder: (_req, context) => ({
+      error: 'Too many requests',
+      message: `Rate limit exceeded. Try again in ${Math.ceil(context.ttl / 1000)} seconds.`,
+      retryAfterSeconds: Math.ceil(context.ttl / 1000),
+    }),
   });
 
   // Register authenticate decorator (must be before routes)
