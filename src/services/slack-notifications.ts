@@ -391,6 +391,18 @@ export function buildSlackMessage(
     }
   }
 
+  // Context block with the notification type code — gives operators a quick
+  // way to see which rule fired in Slack without opening BRIDGEPORT.
+  blocks.push({
+    type: 'context',
+    elements: [
+      {
+        type: 'mrkdwn',
+        text: `Type: \`${notificationType.code}\``,
+      },
+    ],
+  });
+
   return {
     attachments: [
       {
