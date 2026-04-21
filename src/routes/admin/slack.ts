@@ -15,13 +15,23 @@ import {
 } from '../../services/slack-notifications.js';
 import { logAudit } from '../../services/audit.js';
 
+// Match hooks.slack.com exactly (not a substring of the URL) so that URLs
+// like https://evil.com/?x=hooks.slack.com or https://hooks.slack.com.evil.com
+// are rejected. Parses the URL and checks the hostname.
+const isSlackWebhookUrl = (url: string): boolean => {
+  try {
+    return new URL(url).hostname === 'hooks.slack.com';
+  } catch {
+    return false;
+  }
+};
+
 const createChannelSchema = z.object({
   name: z.string().min(1).max(100),
   slackChannelName: z.string().max(100).optional(),
-  webhookUrl: z.string().url().refine(
-    (url) => url.includes('hooks.slack.com'),
-    { message: 'Must be a valid Slack webhook URL' }
-  ),
+  webhookUrl: z.string().url().refine(isSlackWebhookUrl, {
+    message: 'Must be a valid Slack webhook URL (hooks.slack.com)',
+  }),
   isDefault: z.boolean().optional(),
   enabled: z.boolean().optional(),
 });
@@ -29,10 +39,13 @@ const createChannelSchema = z.object({
 const updateChannelSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   slackChannelName: z.string().max(100).optional(),
-  webhookUrl: z.string().url().refine(
-    (url) => url.includes('hooks.slack.com'),
-    { message: 'Must be a valid Slack webhook URL' }
-  ).optional(),
+  webhookUrl: z
+    .string()
+    .url()
+    .refine(isSlackWebhookUrl, {
+      message: 'Must be a valid Slack webhook URL (hooks.slack.com)',
+    })
+    .optional(),
   isDefault: z.boolean().optional(),
   enabled: z.boolean().optional(),
 });
