@@ -22,7 +22,7 @@ RUN mkdir -p dist && \
 RUN echo "${CLI_VERSION}" > cli-version.txt
 
 # Build stage for UI
-FROM node:22-alpine AS ui-build
+FROM node:25-alpine AS ui-build
 WORKDIR /app/ui
 ARG APP_VERSION=dev
 
@@ -35,7 +35,7 @@ ENV VITE_APP_VERSION=${APP_VERSION}
 RUN npm run build
 
 # Build stage for API (TypeScript compilation)
-FROM node:22-alpine AS api-build
+FROM node:25-alpine AS api-build
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
@@ -51,7 +51,7 @@ COPY src/ ./src/
 RUN npm run build
 
 # Prisma CLI stage - generates client and provides CLI for migrations
-FROM node:22-alpine AS prisma-build
+FROM node:25-alpine AS prisma-build
 WORKDIR /app
 
 # Install prisma CLI (needed for generate and migrate deploy)
@@ -65,7 +65,7 @@ COPY prisma/ ./prisma/
 RUN npx prisma generate
 
 # Production dependencies stage (no native modules needed anymore)
-FROM node:22-alpine AS deps-prod
+FROM node:25-alpine AS deps-prod
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
@@ -101,7 +101,7 @@ RUN find node_modules -type f \( -name "libquery*" -o -name "schema-engine*" \) 
     \( ! -name "*linux-musl-openssl*" -o -name "*arm64*" \) -delete 2>/dev/null || true
 
 # Production stage (minimal Alpine)
-FROM node:22-alpine AS production
+FROM node:25-alpine AS production
 WORKDIR /app
 
 # Install runtime dependencies (openssh-client for SSH, docker-cli + compose for localhost, db clients for backups)
