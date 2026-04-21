@@ -3,19 +3,23 @@
  */
 
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import type { ZodType, ZodTypeDef } from 'zod';
+import type { z, ZodType } from 'zod';
 
 /**
  * Validate the request body against a Zod schema.
  * Returns the parsed data (output type, with defaults applied), or null after sending a 400 response.
  */
-export function validateBody<T>(schema: ZodType<T, ZodTypeDef, unknown>, request: FastifyRequest, reply: FastifyReply): T | null {
+export function validateBody<S extends ZodType>(
+  schema: S,
+  request: FastifyRequest,
+  reply: FastifyReply
+): z.infer<S> | null {
   const result = schema.safeParse(request.body);
   if (!result.success) {
     reply.code(400).send({ error: 'Invalid input', details: result.error.issues });
     return null;
   }
-  return result.data;
+  return result.data as z.infer<S>;
 }
 
 /**
