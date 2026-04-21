@@ -27,6 +27,7 @@ vi.mock('../lib/ssh.js', () => ({
   SSHClient: vi.fn().mockImplementation(function() { return mockSSHClientInstance; }),
   LocalClient: vi.fn().mockImplementation(function() { return mockLocalClientInstance; }),
   isLocalhost: vi.fn().mockReturnValue(false),
+  shellEscape: (value: string) => `'${value.replace(/'/g, `'\\''`)}'`,
 }));
 
 vi.mock('../routes/environments.js', () => ({

@@ -1,7 +1,7 @@
 import { readFile } from 'fs/promises';
 import { join } from 'path';
 import { prisma } from '../lib/db.js';
-import { SSHClient, LocalClient, isLocalhost, type CommandClient } from '../lib/ssh.js';
+import { SSHClient, LocalClient, isLocalhost, shellEscape, type CommandClient } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 import { getSystemSettings } from './system-settings.js';
 import { logAgentEvent } from './agent-events.js';
@@ -125,11 +125,11 @@ export async function deployAgent(
     await client.exec('systemctl stop bridgeport-agent 2>/dev/null || true');
 
     // Clear temp file first
-    await client.exec(`rm -f ${tempPath}`);
+    await client.exec(`rm -f ${shellEscape(tempPath)}`);
 
     // Write chunks
     for (const chunk of chunks) {
-      const result = await client.exec(`echo -n '${chunk}' >> ${tempPath}`);
+      const result = await client.exec(`printf %s ${shellEscape(chunk)} >> ${shellEscape(tempPath)}`);
       if (result.code !== 0) {
         throw new Error(`Failed to transfer agent: ${result.stderr}`);
       }
@@ -137,7 +137,7 @@ export async function deployAgent(
 
     // Decode and install
     const installResult = await client.exec(
-      `base64 -d ${tempPath} > ${AGENT_INSTALL_PATH} && chmod +x ${AGENT_INSTALL_PATH} && rm -f ${tempPath}`
+      `base64 -d ${shellEscape(tempPath)} > ${shellEscape(AGENT_INSTALL_PATH)} && chmod +x ${shellEscape(AGENT_INSTALL_PATH)} && rm -f ${shellEscape(tempPath)}`
     );
     if (installResult.code !== 0) {
       throw new Error(`Failed to install agent: ${installResult.stderr}`);
@@ -262,8 +262,8 @@ export async function removeAgent(serverId: string): Promise<{ success: boolean;
     await client.exec('systemctl disable bridgeport-agent 2>/dev/null || true');
 
     // Remove files
-    await client.exec(`rm -f ${SYSTEMD_SERVICE_PATH}`);
-    await client.exec(`rm -f ${AGENT_INSTALL_PATH}`);
+    await client.exec(`rm -f ${shellEscape(SYSTEMD_SERVICE_PATH)}`);
+    await client.exec(`rm -f ${shellEscape(AGENT_INSTALL_PATH)}`);
     await client.exec('systemctl daemon-reload');
 
     client.disconnect();
@@ -317,7 +317,7 @@ export async function checkAgentStatus(
     await client.connect();
 
     // Check if binary exists
-    const binaryCheck = await client.exec(`test -f ${AGENT_INSTALL_PATH} && echo "yes" || echo "no"`);
+    const binaryCheck = await client.exec(`test -f ${shellEscape(AGENT_INSTALL_PATH)} && echo "yes" || echo "no"`);
     const installed = binaryCheck.stdout.trim() === 'yes';
 
     // Check if service is running
