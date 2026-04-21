@@ -77,7 +77,7 @@ describe('Layout', () => {
     // "Servers" appears twice (Operations + Monitoring), use getAllByText
     expect(screen.getAllByText('Servers').length).toBeGreaterThanOrEqual(2);
     expect(screen.getAllByText('Services').length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText('Secrets')).toBeInTheDocument();
+    expect(screen.getByText('Secrets & Vars')).toBeInTheDocument();
   });
 
   it('should render children content', () => {
