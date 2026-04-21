@@ -9,6 +9,9 @@ const { mockPrisma } = vi.hoisted(() => ({
       findMany: vi.fn(),
       delete: vi.fn(),
     },
+    var: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
   },
 }));
 
