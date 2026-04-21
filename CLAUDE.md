@@ -225,6 +225,7 @@ Use these instead of reimplementing:
 - **Narrow includes**: When loading relations, `select` only the fields you need (don't load full Server objects just for `name`)
 - **Parallel queries**: Independent DB queries should use `Promise.all()`, not sequential awaits
 - **Cleanup functions**: Retention-based cleanup belongs in the service layer (e.g., `cleanupOldImageDigests()`), called from the scheduler
+- **Shell composition**: Any value interpolated into a command string passed to `client.exec()`, `client.execStream()`, or local `execAsync()` must be wrapped in `shellEscape()` from `src/lib/ssh.ts`. Double-quoting (`"${path}"`) is insufficient — `$`, backticks, and `$()` are still interpreted by the shell. For file contents that need to reach a remote file, prefer `client.writeFile()` over heredocs so the content isn't subject to shell parsing at all.
 
 ### Frontend Patterns
 
