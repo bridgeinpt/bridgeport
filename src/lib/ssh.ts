@@ -9,6 +9,25 @@ import { CONTAINER_STATUS, SERVER_TYPE } from './constants.js';
 
 const execAsync = promisify(exec);
 
+/**
+ * Escape a value for safe interpolation as a single argument in a POSIX shell
+ * command. Wraps in single quotes and escapes any embedded single quotes.
+ *
+ * Use this for any value interpolated into a command string — paths, names,
+ * container IDs — that could contain spaces, quotes, backticks, `$()`, or
+ * other shell metacharacters. Double-quoting (`"${x}"`) alone is not enough
+ * because `$`, backticks, and backslashes are still interpreted.
+ *
+ * Example:
+ * ```ts
+ * await client.exec(`mkdir -p ${shellEscape(path)}`);
+ * // safe even if path is `/tmp/foo; rm -rf /`
+ * ```
+ */
+export function shellEscape(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
 export interface SSHExecResult {
   stdout: string;
   stderr: string;

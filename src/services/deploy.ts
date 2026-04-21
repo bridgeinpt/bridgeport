@@ -1,6 +1,6 @@
 import path from 'path';
 import { prisma } from '../lib/db.js';
-import { DockerSSH, createClientForServer, type CommandClient } from '../lib/ssh.js';
+import { DockerSSH, createClientForServer, shellEscape, type CommandClient } from '../lib/ssh.js';
 import { createDockerClientForServer, type DockerClient } from '../lib/docker.js';
 import { RegistryFactory } from '../lib/registry.js';
 import { getRegistryCredentials } from './registries.js';
@@ -110,7 +110,7 @@ export async function deployService(
 
     // File operations require SSH client (even in socket mode)
     if (sshClient) {
-      await sshClient.exec(`mkdir -p ${deployDir}`);
+      await sshClient.exec(`mkdir -p ${shellEscape(deployDir)}`);
     }
 
     // Generate deployment artifacts (compose, env, config files)
@@ -128,7 +128,7 @@ export async function deployService(
       // Upload compose file (preserve existing path if set, otherwise use generated name)
       const composePath = service.composePath || `${deployDir}/${artifacts.compose.name}`;
       log(`Writing compose file to ${composePath}`);
-      await sshClient.exec(`cat > ${composePath} << 'COMPOSEEOF'\n${artifacts.compose.content}\nCOMPOSEEOF`);
+      await sshClient.exec(`cat > ${shellEscape(composePath)} << 'COMPOSEEOF'\n${artifacts.compose.content}\nCOMPOSEEOF`);
 
       // Upload config files to their configured target paths
       for (const cf of artifacts.configFiles) {
@@ -137,7 +137,7 @@ export async function deployService(
 
         // Ensure target directory exists
         const cfDir = path.dirname(cfPath);
-        await sshClient.exec(`mkdir -p "${cfDir}"`);
+        await sshClient.exec(`mkdir -p ${shellEscape(cfDir)}`);
 
         log(`Writing config file: ${cf.name} -> ${cfPath}`);
 
@@ -147,12 +147,12 @@ export async function deployService(
           await sshClient.writeFile(cfPath, fileBuffer);
         } else {
           // Text files: use heredoc
-          await sshClient.exec(`cat > "${cfPath}" << 'CFEOF'\n${cf.content}\nCFEOF`);
+          await sshClient.exec(`cat > ${shellEscape(cfPath)} << 'CFEOF'\n${cf.content}\nCFEOF`);
         }
 
         // Set restrictive permissions for .env files (contain secrets)
         if (cf.name.endsWith('.env')) {
-          await sshClient.exec(`chmod 600 "${cfPath}"`);
+          await sshClient.exec(`chmod 600 ${shellEscape(cfPath)}`);
         }
       }
 

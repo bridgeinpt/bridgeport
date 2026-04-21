@@ -1,7 +1,7 @@
 import pg from 'pg';
 import mysql from 'mysql2/promise';
 import Redis from 'ioredis';
-import { SSHClient, LocalClient, isLocalhost, type CommandClient } from '../lib/ssh.js';
+import { SSHClient, LocalClient, isLocalhost, shellEscape, type CommandClient } from '../lib/ssh.js';
 import { decrypt } from '../lib/crypto.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 
@@ -438,7 +438,7 @@ export async function pingDatabase(
 
     try {
       const filePath = database.filePath || '/tmp/test.db';
-      const result = await client.exec(`sqlite3 "${filePath}" "SELECT sqlite_version()"`);
+      const result = await client.exec(`sqlite3 ${shellEscape(filePath)} 'SELECT sqlite_version()'`);
       const latencyMs = Date.now() - start;
       const serverVersion = `SQLite ${result.stdout.trim()}`;
       return { success: true, latencyMs, serverVersion };

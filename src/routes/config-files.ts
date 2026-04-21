@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma, isPrismaNotFoundError } from '../lib/db.js';
-import { createClientForServer, type CommandClient } from '../lib/ssh.js';
+import { createClientForServer, shellEscape, type CommandClient } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from './environments.js';
 import { requireOperator } from '../plugins/authorize.js';
 import { logAudit } from '../services/audit.js';
@@ -619,7 +619,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           try {
             // Ensure target directory exists
             const targetDir = targetPath.substring(0, targetPath.lastIndexOf('/'));
-            await client.exec(`mkdir -p "${targetDir}"`);
+            await client.exec(`mkdir -p ${shellEscape(targetDir)}`);
 
             let code: number;
             let stderr: string;
@@ -655,7 +655,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
 
               // Write file content using heredoc with quoted delimiter to prevent shell expansion
               ({ code, stderr } = await client.exec(
-                `cat > "${targetPath}" << 'CONFIGFILE_EOF'\n${resolvedContent}\nCONFIGFILE_EOF`
+                `cat > ${shellEscape(targetPath)} << 'CONFIGFILE_EOF'\n${resolvedContent}\nCONFIGFILE_EOF`
               ));
             }
 
@@ -885,7 +885,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           try {
             // Ensure target directory exists
             const targetDir = sf.targetPath.substring(0, sf.targetPath.lastIndexOf('/'));
-            await client.exec(`mkdir -p "${targetDir}"`);
+            await client.exec(`mkdir -p ${shellEscape(targetDir)}`);
 
             let code: number;
             let stderr: string;
@@ -919,7 +919,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
               }
 
               ({ code, stderr } = await client.exec(
-                `cat > "${sf.targetPath}" << 'CONFIGFILE_EOF'\n${resolvedContent}\nCONFIGFILE_EOF`
+                `cat > ${shellEscape(sf.targetPath)} << 'CONFIGFILE_EOF'\n${resolvedContent}\nCONFIGFILE_EOF`
               ));
             }
 
@@ -1055,7 +1055,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
             try {
               // Ensure target directory exists
               const targetDir = sf.targetPath.substring(0, sf.targetPath.lastIndexOf('/'));
-              await client.exec(`mkdir -p "${targetDir}"`);
+              await client.exec(`mkdir -p ${shellEscape(targetDir)}`);
 
               let code: number;
               let stderr: string;
@@ -1090,7 +1090,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
                 }
 
                 ({ code, stderr } = await client.exec(
-                  `cat > "${sf.targetPath}" << 'CONFIGFILE_EOF'\n${resolvedContent}\nCONFIGFILE_EOF`
+                  `cat > ${shellEscape(sf.targetPath)} << 'CONFIGFILE_EOF'\n${resolvedContent}\nCONFIGFILE_EOF`
                 ));
               }
 

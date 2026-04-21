@@ -1,6 +1,6 @@
 import { prisma } from '../lib/db.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
-import { SSHClient, LocalClient, isLocalhost, type CommandClient, type LocalExecOptions } from '../lib/ssh.js';
+import { SSHClient, LocalClient, isLocalhost, shellEscape, type CommandClient, type LocalExecOptions } from '../lib/ssh.js';
 import { getEnvironmentSshKey, getEnvironmentSpacesConfig } from '../routes/environments.js';
 import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
@@ -600,7 +600,7 @@ async function executeBackup(backupId: string): Promise<void> {
     // Ensure backup directory exists (for local storage)
     if (!useSpaces) {
       const targetDir = targetPath.substring(0, targetPath.lastIndexOf('/'));
-      await client.exec(`mkdir -p "${targetDir}"`);
+      await client.exec(`mkdir -p ${shellEscape(targetDir)}`);
     }
 
     const result = await client.exec(dumpCommand, execOptions);
@@ -624,7 +624,7 @@ async function executeBackup(backupId: string): Promise<void> {
 
     // Get file size (use server temp path for SQLite + Spaces)
     const sizeCheckPath = sqliteServerTempPath || targetPath;
-    const sizeResult = await client.exec(`stat -c %s "${sizeCheckPath}" 2>/dev/null || stat -f %z "${sizeCheckPath}"`);
+    const sizeResult = await client.exec(`stat -c %s ${shellEscape(sizeCheckPath)} 2>/dev/null || stat -f %z ${shellEscape(sizeCheckPath)}`);
     const size = parseInt(sizeResult.stdout.trim()) || 0;
 
     // For SQLite + Spaces, download the dump from server before disconnecting
@@ -636,7 +636,7 @@ async function executeBackup(backupId: string): Promise<void> {
         // Paths are the same on localhost - file is already in place, no need to download
         // Don't delete since we need it for S3 upload
       } else {
-        const downloadResult = await client.exec(`cat "${sqliteServerTempPath}" | base64`);
+        const downloadResult = await client.exec(`cat ${shellEscape(sqliteServerTempPath)} | base64`);
         if (downloadResult.code !== 0) {
           throw new Error(`Failed to download backup from server: ${downloadResult.stderr}`);
         }
@@ -644,7 +644,7 @@ async function executeBackup(backupId: string): Promise<void> {
         const { writeFile } = await import('fs/promises');
         await writeFile(tempPath, fileContent);
         // Clean up server temp file (only if different from local temp)
-        await client.exec(`rm -f "${sqliteServerTempPath}"`);
+        await client.exec(`rm -f ${shellEscape(sqliteServerTempPath)}`);
       }
     }
 
@@ -827,7 +827,7 @@ export async function deleteBackup(id: string): Promise<void> {
 
     try {
       await client.connect();
-      await client.exec(`rm -f "${backup.storagePath}"`);
+      await client.exec(`rm -f ${shellEscape(backup.storagePath)}`);
       client.disconnect();
     } catch {
       // Ignore errors when deleting file
@@ -957,7 +957,7 @@ export async function getBackupDownload(
     }
 
     await client.connect();
-    const result = await client.exec(`cat "${backup.storagePath}" | base64`);
+    const result = await client.exec(`cat ${shellEscape(backup.storagePath)} | base64`);
     client.disconnect();
 
     if (result.code !== 0) {
