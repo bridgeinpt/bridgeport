@@ -6,12 +6,16 @@ updates:
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 5
     labels:
       - dependencies
       - backend
     groups:
-      minor-and-patch:
+      backend-security:
+        applies-to: security-updates
+        patterns: ["*"]
+      backend-minor-and-patch:
+        applies-to: version-updates
         update-types: [minor, patch]
 
   # Frontend (React UI)
@@ -20,12 +24,16 @@ updates:
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 5
     labels:
       - dependencies
       - frontend
     groups:
-      minor-and-patch:
+      frontend-security:
+        applies-to: security-updates
+        patterns: ["*"]
+      frontend-minor-and-patch:
+        applies-to: version-updates
         update-types: [minor, patch]
 
   # CLI (Go)
@@ -34,11 +42,16 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    open-pull-requests-limit: 5
     labels:
       - dependencies
       - cli
     groups:
-      minor-and-patch:
+      cli-security:
+        applies-to: security-updates
+        patterns: ["*"]
+      cli-minor-and-patch:
+        applies-to: version-updates
         update-types: [minor, patch]
 
   # Monitoring agent (Go)
@@ -47,11 +60,16 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    open-pull-requests-limit: 5
     labels:
       - dependencies
       - agent
     groups:
-      minor-and-patch:
+      agent-security:
+        applies-to: security-updates
+        patterns: ["*"]
+      agent-minor-and-patch:
+        applies-to: version-updates
         update-types: [minor, patch]
 
   # GitHub Actions workflows
@@ -60,11 +78,16 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    open-pull-requests-limit: 5
     labels:
       - dependencies
       - ci
     groups:
-      actions:
+      actions-security:
+        applies-to: security-updates
+        patterns: ["*"]
+      actions-version:
+        applies-to: version-updates
         patterns: ["*"]
 
   # Docker base images
@@ -73,6 +96,14 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    open-pull-requests-limit: 5
     labels:
       - dependencies
       - docker
+    groups:
+      docker-security:
+        applies-to: security-updates
+        patterns: ["*"]
+      docker-minor-and-patch:
+        applies-to: version-updates
+        update-types: [minor, patch]
