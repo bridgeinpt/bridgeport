@@ -36,6 +36,10 @@ vi.mock('../lib/api', async () => {
     getSecretValue: vi.fn(),
     updateSecret: vi.fn(),
     deleteSecret: vi.fn(),
+    listVars: vi.fn().mockResolvedValue({ vars: [] }),
+    createVar: vi.fn(),
+    updateVar: vi.fn(),
+    deleteVar: vi.fn(),
   };
 });
 
