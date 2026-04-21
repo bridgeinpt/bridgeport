@@ -20,11 +20,11 @@ export function generateAgentToken(): string {
 }
 
 /**
- * Get the BridgePort server URL for the agent to connect to.
+ * Get the BRIDGEPORT server URL for the agent to connect to.
  * Must be configured in System Settings - no fallbacks.
  * Returns null if not configured.
  */
-async function getBridgePortUrl(): Promise<string | null> {
+async function getBRIDGEPORTUrl(): Promise<string | null> {
   const settings = await getSystemSettings();
   return settings.agentCallbackUrl || null;
 }
@@ -47,7 +47,7 @@ export async function deployAgent(
 
   // Determine the URL the agent should use to connect back
   // Use provided URL, or get from system settings
-  const serverUrl = bridgeportUrl || (await getBridgePortUrl());
+  const serverUrl = bridgeportUrl || (await getBRIDGEPORTUrl());
 
   // Validate that callback URL is configured
   if (!serverUrl) {
@@ -145,7 +145,7 @@ export async function deployAgent(
 
     // Create systemd service file
     const serviceContent = `[Unit]
-Description=BridgePort Monitoring Agent
+Description=BRIDGEPORT Monitoring Agent
 After=network.target docker.service
 
 [Service]

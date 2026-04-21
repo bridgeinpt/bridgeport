@@ -314,7 +314,7 @@ export default function SystemSettings() {
                 className="input w-full"
               />
               <p className="text-xs text-slate-500 mt-1">
-                Internal URL for agents to reach BridgePort (VPC IP).
+                Internal URL for agents to reach BRIDGEPORT (VPC IP).
                 <span className="text-amber-500 font-medium"> Required for agent deployment.</span>
               </p>
             </div>

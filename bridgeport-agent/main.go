@@ -61,7 +61,7 @@ type MetricsConfig struct {
 	CollectCertChecks bool `json:"collectCertChecks"`
 }
 
-// AgentConfig is the configuration fetched from BridgePort
+// AgentConfig is the configuration fetched from BRIDGEPORT
 type AgentConfig struct {
 	ServerID      string                `json:"serverId"`
 	ServerName    string                `json:"serverName"`
@@ -106,7 +106,7 @@ type CertCheckResult struct {
 	Error           *string `json:"error,omitempty"`
 }
 
-// agentConfig stores the current configuration from BridgePort
+// agentConfig stores the current configuration from BRIDGEPORT
 var agentConfig *AgentConfig
 var agentConfigMutex sync.RWMutex
 
@@ -206,7 +206,7 @@ type ServiceMetrics struct {
 }
 
 func main() {
-	serverURL := flag.String("server", "", "BridgePort server URL (e.g., https://deploy.example.com)")
+	serverURL := flag.String("server", "", "BRIDGEPORT server URL (e.g., https://deploy.example.com)")
 	token := flag.String("token", "", "Agent authentication token")
 	interval := flag.Duration("interval", 30*time.Second, "Collection interval")
 	flag.Parse()
@@ -229,7 +229,7 @@ func main() {
 		Interval:  *interval,
 	}
 
-	log.Printf("BridgePort Agent starting (version %s)", Version)
+	log.Printf("BRIDGEPORT Agent starting (version %s)", Version)
 	log.Printf("Server: %s", config.ServerURL)
 	log.Printf("Interval: %s", config.Interval)
 
@@ -257,7 +257,7 @@ func main() {
 	}
 }
 
-// configFetcher periodically fetches configuration from BridgePort
+// configFetcher periodically fetches configuration from BRIDGEPORT
 func configFetcher(config Config) {
 	// Fetch immediately on start
 	fetchConfig(config)
@@ -271,7 +271,7 @@ func configFetcher(config Config) {
 	}
 }
 
-// fetchConfig fetches the agent configuration from BridgePort
+// fetchConfig fetches the agent configuration from BRIDGEPORT
 func fetchConfig(config Config) {
 	url := fmt.Sprintf("%s/api/agent/config", config.ServerURL)
 	req, err := http.NewRequest("GET", url, nil)

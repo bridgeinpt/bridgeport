@@ -1,6 +1,6 @@
-# BridgePort Agent
+# BRIDGEPORT Agent
 
-A lightweight monitoring agent that collects server and container metrics and pushes them to BridgePort.
+A lightweight monitoring agent that collects server and container metrics and pushes them to BRIDGEPORT.
 
 ## Overview
 
@@ -8,13 +8,13 @@ The agent runs on monitored servers and periodically collects:
 - **System metrics**: CPU usage, memory usage, disk usage, load averages, uptime
 - **Container metrics**: Per-container CPU, memory, network I/O, block I/O, restart counts
 
-Metrics are pushed to BridgePort via HTTP POST every 30 seconds (configurable).
+Metrics are pushed to BRIDGEPORT via HTTP POST every 30 seconds (configurable).
 
 ## Versioning
 
 The agent version is derived from git at build time (format: `YYYYMMDD-{7-char SHA}`) and only changes when the `bridgeport-agent/` directory is modified.
 
-**Upgrade Indicators**: BridgePort UI shows an "Update available" badge on servers when the deployed agent version differs from the bundled version. Check the Monitoring > Agents page to see which servers need agent updates.
+**Upgrade Indicators**: BRIDGEPORT UI shows an "Update available" badge on servers when the deployed agent version differs from the bundled version. Check the Monitoring > Agents page to see which servers need agent updates.
 
 ## Building
 
@@ -33,9 +33,9 @@ Output binary: `bridgeport-agent` (or `bridgeport-agent-linux` for cross-compile
 
 ## Installation
 
-### 1. Enable Agent Mode in BridgePort
+### 1. Enable Agent Mode in BRIDGEPORT
 
-1. Go to the server's settings page in BridgePort UI
+1. Go to the server's settings page in BRIDGEPORT UI
 2. Set **Metrics Mode** to "Agent"
 3. Copy the generated **Agent Token**
 
@@ -52,7 +52,7 @@ ssh root@server chmod +x /usr/local/bin/bridgeport-agent
 ```bash
 cat > /etc/systemd/system/bridgeport-agent.service << 'EOF'
 [Unit]
-Description=BridgePort Monitoring Agent
+Description=BRIDGEPORT Monitoring Agent
 After=network.target docker.service
 
 [Service]
@@ -84,7 +84,7 @@ journalctl -u bridgeport-agent -f
 
 | Flag | Environment Variable | Description | Default |
 |------|---------------------|-------------|---------|
-| `-server` | `BRIDGEPORT_SERVER` | BridgePort server URL | Required |
+| `-server` | `BRIDGEPORT_SERVER` | BRIDGEPORT server URL | Required |
 | `-token` | `BRIDGEPORT_TOKEN` | Agent authentication token | Required |
 | `-interval` | - | Collection/push interval | 30s |
 | `-version` | - | Print version and exit | - |
@@ -102,8 +102,8 @@ Environment="BRIDGEPORT_SERVER=http://10.30.10.5:3000"
 ```
 
 Requirements for internal networking:
-- BridgePort must be in the same VPC or a peered VPC
-- BridgePort's `HOST` config should be `0.0.0.0`
+- BRIDGEPORT must be in the same VPC or a peered VPC
+- BRIDGEPORT's `HOST` config should be `0.0.0.0`
 - Firewall allows port 3000 from agent servers
 
 ## How It Works
@@ -128,7 +128,7 @@ Requirements for internal networking:
             │ (every 30s)
             ▼
 ┌──────────────────────────────────────────────────────────┐
-│                     BridgePort                           │
+│                     BRIDGEPORT                           │
 │                                                          │
 │  ┌─────────────────┐    ┌─────────────────┐              │
 │  │ Metrics Ingest  │───▶│ ServerMetrics   │              │
@@ -205,12 +205,12 @@ ls -la /var/run/docker.sock
 usermod -aG docker <user>
 ```
 
-### Metrics not appearing in BridgePort
+### Metrics not appearing in BRIDGEPORT
 
 1. Check agent logs: `journalctl -u bridgeport-agent -f`
-2. Verify the token matches the one in BridgePort UI
+2. Verify the token matches the one in BRIDGEPORT UI
 3. Ensure the server URL is reachable from the monitored server
-4. Check that the server's metrics mode is set to "Agent" in BridgePort
+4. Check that the server's metrics mode is set to "Agent" in BRIDGEPORT
 
 ### High CPU usage
 

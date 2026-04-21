@@ -1,4 +1,4 @@
-name: Build and Push BridgePort
+name: Build and Push BRIDGEPORT
 
 on:
   push:
@@ -23,7 +23,7 @@ jobs:
 
       - name: Set versions
         run: |
-          # BridgePort version (always updates with each build)
+          # BRIDGEPORT version (always updates with each build)
           if [ -n "${{ github.event.inputs.tag }}" ] && [ "${{ github.event.inputs.tag }}" != "latest" ]; then
             echo "VERSION_TAG=${{ github.event.inputs.tag }}" >> $GITHUB_ENV
           else
@@ -50,7 +50,7 @@ jobs:
       - name: Log in to DigitalOcean Container Registry
         run: doctl registry login --expiry-seconds 1200
 
-      - name: Build BridgePort Docker image
+      - name: Build BRIDGEPORT Docker image
         run: |
           docker build \
             --build-arg APP_VERSION=${{ env.VERSION_TAG }} \
@@ -61,7 +61,7 @@ jobs:
             -t registry.digitalocean.com/bios-registry/bridgeport:latest \
             .
 
-      - name: Push BridgePort Docker image
+      - name: Push BRIDGEPORT Docker image
         run: |
           docker push registry.digitalocean.com/bios-registry/bridgeport:${{ env.VERSION_TAG }}
           docker push registry.digitalocean.com/bios-registry/bridgeport:latest

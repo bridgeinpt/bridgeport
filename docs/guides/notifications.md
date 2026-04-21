@@ -1,6 +1,6 @@
 # Notifications
 
-BridgePort delivers notifications through four channels -- in-app, email (SMTP), Slack, and outgoing webhooks -- with per-user preferences, environment filtering, and bounce logic to keep you informed without alert fatigue.
+BRIDGEPORT delivers notifications through four channels -- in-app, email (SMTP), Slack, and outgoing webhooks -- with per-user preferences, environment filtering, and bounce logic to keep you informed without alert fatigue.
 
 ## Quick Start
 
@@ -19,7 +19,7 @@ In-app notifications work out of the box. Click the bell icon in the top navigat
    Username:     noreply@example.com
    Password:     ••••••••
    From Address: noreply@example.com
-   From Name:    BridgePort
+   From Name:    BRIDGEPORT
    ```
 3. Click **Test Connection** to verify.
 4. Click **Send Test Email** to your address.
@@ -39,7 +39,7 @@ In-app notifications work out of the box. Click the bell icon in the top navigat
 1. Go to **Admin > Notifications** and open the **Webhooks** tab.
 2. Click **Add Webhook** and enter the endpoint URL.
 3. Optionally filter by environment or notification type.
-4. BridgePort sends a POST with JSON payload to your endpoint when matching notifications fire.
+4. BRIDGEPORT sends a POST with JSON payload to your endpoint when matching notifications fire.
 
 ## How It Works
 
@@ -66,17 +66,17 @@ flowchart TD
 
 When a system event occurs (server offline, deployment failed, backup succeeded, etc.):
 
-1. BridgePort looks up the `NotificationType` by code.
+1. BRIDGEPORT looks up the `NotificationType` by code.
 2. If the type is disabled, nothing happens.
-3. For each user, BridgePort checks their `NotificationPreference`:
+3. For each user, BRIDGEPORT checks their `NotificationPreference`:
    - **In-app**: Creates a `Notification` record and emits an SSE event for real-time bell updates.
    - **Email**: If the user (or type default) has email enabled, sends via SMTP.
-4. If the type's `defaultChannels` includes `webhook`, BridgePort dispatches to all configured outgoing webhooks.
+4. If the type's `defaultChannels` includes `webhook`, BRIDGEPORT dispatches to all configured outgoing webhooks.
 5. Slack routing rules determine which Slack channels receive the notification.
 
 ## Notification Types
 
-BridgePort ships with these predefined notification types:
+BRIDGEPORT ships with these predefined notification types:
 
 ### User Notifications
 
@@ -213,12 +213,12 @@ If no routing matches, the notification goes to the **default channel** (if one 
 
 ### Slack Message Format
 
-BridgePort sends rich Slack messages using Block Kit:
+BRIDGEPORT sends rich Slack messages using Block Kit:
 
 - Color-coded sidebar (red for critical, amber for warning, green for info)
 - Header with severity emoji
 - Fields for environment, server, service, and image tag
-- Action buttons linking back to BridgePort (requires `publicUrl` in System Settings)
+- Action buttons linking back to BRIDGEPORT (requires `publicUrl` in System Settings)
 
 ## Outgoing Webhooks
 
@@ -254,7 +254,7 @@ The built-in Slack integration renders a compact message per notification. Recen
 - **No redundant message block.** The Slack Block Kit payload omits the free-text `message` block when the structured fields already convey the same information -- the title plus context fields are enough.
 - **No footer timestamp.** Slack already renders the message time; the duplicate `{timestamp}` footer block was removed.
 - **Deployment success** messages include every tag pointing to the deployed digest (e.g., `v2.3.1, latest`) rather than just the one that was requested, so you can see the full set of identifiers at a glance.
-- **Action buttons** use `serviceId` to link back to the service detail page in BridgePort when `publicUrl` is configured.
+- **Action buttons** use `serviceId` to link back to the service detail page in BRIDGEPORT when `publicUrl` is configured.
 
 ### Retry Behavior
 
@@ -279,7 +279,7 @@ Configure these in **Admin > System Settings**:
 
 | Setting | Default | Description |
 |---|---|---|
-| `publicUrl` | -- | BridgePort URL for Slack action buttons |
+| `publicUrl` | -- | BRIDGEPORT URL for Slack action buttons |
 | `webhookMaxRetries` | `3` | Outgoing webhook retry count |
 | `webhookTimeoutMs` | `10000` | Outgoing webhook timeout |
 
@@ -295,7 +295,7 @@ Configured in **Admin > Notifications > Email**:
 | Username | No | SMTP auth username |
 | Password | No | SMTP auth password (encrypted at rest) |
 | From Address | Yes | Sender email address |
-| From Name | No | Sender display name (default: `BridgePort`) |
+| From Name | No | Sender display name (default: `BRIDGEPORT`) |
 | Enabled | Yes | Kill switch for email delivery |
 
 ## Troubleshooting
@@ -332,10 +332,10 @@ Configured in **Admin > Notifications > Email**:
 
 ### Outgoing webhooks failing
 
-1. **Check endpoint**: Verify the URL is reachable from BridgePort.
+1. **Check endpoint**: Verify the URL is reachable from BRIDGEPORT.
 2. **Check timeout**: If the endpoint is slow, increase `webhookTimeoutMs` in System Settings.
-3. **Check retries**: BridgePort retries up to `webhookMaxRetries` times.
-4. **Check logs**: Look for `[Webhook]` messages in BridgePort container logs.
+3. **Check retries**: BRIDGEPORT retries up to `webhookMaxRetries` times.
+4. **Check logs**: Look for `[Webhook]` messages in BRIDGEPORT container logs.
 
 ## Related
 

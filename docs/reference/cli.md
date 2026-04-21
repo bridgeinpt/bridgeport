@@ -1,6 +1,6 @@
 # CLI Reference
 
-The BridgePort CLI provides terminal access to your infrastructure -- SSH into servers, view logs, run commands in containers, and manage resources without leaving the command line.
+The BRIDGEPORT CLI provides terminal access to your infrastructure -- SSH into servers, view logs, run commands in containers, and manage resources without leaving the command line.
 
 ## Table of Contents
 
@@ -39,7 +39,7 @@ The BridgePort CLI provides terminal access to your infrastructure -- SSH into s
 
 ## Installation
 
-Download the CLI binary from your BridgePort instance (click **CLI** in the top bar, or go to **Admin > About**). The modal picks the right build for your architecture; follow the on-screen steps for your OS. If you'd rather install from the terminal:
+Download the CLI binary from your BRIDGEPORT instance (click **CLI** in the top bar, or go to **Admin > About**). The modal picks the right build for your architecture; follow the on-screen steps for your OS. If you'd rather install from the terminal:
 
 ### macOS
 
@@ -83,7 +83,7 @@ These flags are available on every command:
 
 | Flag | Description |
 |------|-------------|
-| `--url <url>` | BridgePort server URL (overrides config file) |
+| `--url <url>` | BRIDGEPORT server URL (overrides config file) |
 | `--token <token>` | API token (overrides config file) |
 | `--config <path>` | Config file path (default: `~/.bridgeport/config.yaml`) |
 | `--no-color` | Disable colored output |
@@ -97,7 +97,7 @@ The CLI stores its configuration in `~/.bridgeport/config.yaml`. This file holds
 
 | Key | Description |
 |-----|-------------|
-| `url` | BridgePort server URL (e.g., `https://deploy.example.com`) |
+| `url` | BRIDGEPORT server URL (e.g., `https://deploy.example.com`) |
 | `token` | Authentication token (JWT or API token) |
 | `defaultEnvironment` | Default environment name for commands that accept `--env` |
 
@@ -109,7 +109,7 @@ You can set these interactively with [`bridgeport config`](#config) or by loggin
 
 ### login
 
-Authenticate with a BridgePort server. Credentials can be provided interactively or via flags.
+Authenticate with a BRIDGEPORT server. Credentials can be provided interactively or via flags.
 
 ```
 bridgeport login [flags]
@@ -302,7 +302,7 @@ bridgeport ssh staging app-api -- df -h
 ```
 
 > [!NOTE]
-> The SSH key is fetched from BridgePort for the server's environment. You do not need local SSH key configuration.
+> The SSH key is fetched from BRIDGEPORT for the server's environment. You do not need local SSH key configuration.
 
 ---
 
@@ -414,7 +414,7 @@ Available commands for app-api (Django):
 ```
 
 > [!TIP]
-> Predefined commands are configured per service type. Assign a service type (Django, Node.js, etc.) to your service in the BridgePort UI to enable predefined commands. See the [Plugin Reference](plugins.md) for creating custom service types.
+> Predefined commands are configured per service type. Assign a service type (Django, Node.js, etc.) to your service in the BRIDGEPORT UI to enable predefined commands. See the [Plugin Reference](plugins.md) for creating custom service types.
 
 ---
 
@@ -760,13 +760,13 @@ bridgeport completion powershell | Out-String | Invoke-Expression
 ```
 
 > [!TIP]
-> After installing completions, restart your shell or run `compinit` (zsh) to activate them. The CLI provides dynamic completions that query the BridgePort API for environment, server, and service names.
+> After installing completions, restart your shell or run `compinit` (zsh) to activate them. The CLI provides dynamic completions that query the BRIDGEPORT API for environment, server, and service names.
 
 ---
 
 ## Shell Completion
 
-The CLI supports dynamic shell completions powered by the BridgePort API. When you press Tab, the CLI queries your BridgePort instance to suggest:
+The CLI supports dynamic shell completions powered by the BRIDGEPORT API. When you press Tab, the CLI queries your BRIDGEPORT instance to suggest:
 
 - **Environment names** for the first positional argument of `ssh`, `status`, `exec`, `logs`, `run`, `health`, `secrets`, `configs`, `registries`, `images`, and `backups`
 - **Server names** for the second positional argument (filtered by the selected environment)

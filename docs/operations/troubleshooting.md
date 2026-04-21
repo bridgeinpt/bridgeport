@@ -1,6 +1,6 @@
 # Troubleshooting
 
-A practical guide to diagnosing and fixing common BridgePort issues, with a quick-reference table and step-by-step debugging instructions.
+A practical guide to diagnosing and fixing common BRIDGEPORT issues, with a quick-reference table and step-by-step debugging instructions.
 
 ---
 
@@ -24,9 +24,9 @@ A practical guide to diagnosing and fixing common BridgePort issues, with a quic
 
 ## General Debugging
 
-### Reading BridgePort Logs
+### Reading BRIDGEPORT Logs
 
-BridgePort logs structured JSON in production and pretty-printed output in development. Start here for any issue:
+BRIDGEPORT logs structured JSON in production and pretty-printed output in development. Start here for any issue:
 
 ```bash
 # View recent logs
@@ -57,17 +57,17 @@ curl -s http://localhost:3000/health | jq .
 }
 ```
 
-If this endpoint does not respond, BridgePort is not running or not reachable.
+If this endpoint does not respond, BRIDGEPORT is not running or not reachable.
 
 ### Common Log Messages
 
 | Log Message | Meaning |
 |-------------|---------|
-| `=== BridgePort Startup ===` | Entrypoint script began |
+| `=== BRIDGEPORT Startup ===` | Entrypoint script began |
 | `Applying migrations...` | Prisma is running pending database migrations |
 | `Prisma Migrate applied all migrations.` | Migrations completed successfully |
-| `=== Starting BridgePort ===` | Application is about to start |
-| `BridgePort running at http://0.0.0.0:3000` | Startup completed, ready to accept requests |
+| `=== Starting BRIDGEPORT ===` | Application is about to start |
+| `BRIDGEPORT running at http://0.0.0.0:3000` | Startup completed, ready to accept requests |
 | `[Scheduler] Starting with intervals:` | Background scheduler started |
 | `[Scheduler] Health check failed for server X` | SSH or URL health check failed for a server |
 | `[Scheduler] Auto-deploying container image` | Auto-update triggered a deployment |
@@ -98,7 +98,7 @@ If this endpoint does not respond, BridgePort is not running or not reachable.
 
 ### Missing Environment Variables
 
-BridgePort requires three environment variables to start. If any are missing, it exits immediately:
+BRIDGEPORT requires three environment variables to start. If any are missing, it exits immediately:
 
 ```bash
 # Check your .env file has these
@@ -116,7 +116,7 @@ openssl rand -base64 32  # For JWT_SECRET (use a different value)
 
 ### Database File Permissions
 
-If the data directory is not writable, BridgePort cannot create or modify the database:
+If the data directory is not writable, BRIDGEPORT cannot create or modify the database:
 
 ```bash
 # Check ownership (should be writable by UID 1000, the node user)
@@ -145,9 +145,9 @@ The initial admin user is only created when:
 1. `ADMIN_EMAIL` and `ADMIN_PASSWORD` are set in the environment
 2. No users exist in the database yet
 
-If you started BridgePort without these variables, the database was created with no users.
+If you started BRIDGEPORT without these variables, the database was created with no users.
 
-**Fix**: Stop BridgePort, delete the database, set the variables, and restart:
+**Fix**: Stop BRIDGEPORT, delete the database, set the variables, and restart:
 
 ```bash
 docker compose stop
@@ -179,7 +179,7 @@ JWT tokens expire after 7 days. The UI handles token refresh automatically. If u
 
 3. **Test connectivity** from **Monitoring > Agents** using the SSH test feature
 
-4. **Try manual SSH** from the BridgePort container:
+4. **Try manual SSH** from the BRIDGEPORT container:
    ```bash
    docker exec -it bridgeport sh
    ssh -i /tmp/test-key user@server-ip -o StrictHostKeyChecking=no
@@ -189,10 +189,10 @@ JWT tokens expire after 7 days. The UI handles token refresh automatically. If u
 
 | Issue | Fix |
 |-------|-----|
-| "Connection refused" | Ensure sshd is running on port 22 and firewall allows connections from BridgePort's network |
+| "Connection refused" | Ensure sshd is running on port 22 and firewall allows connections from BRIDGEPORT's network |
 | "Permission denied" | Verify the public key is in `~/.ssh/authorized_keys` on the target server |
-| "Host key verification failed" | BridgePort uses `StrictHostKeyChecking=no` by default; this error is rare but check SSH config |
-| "Key format not supported" | BridgePort expects OpenSSH format keys. Convert with `ssh-keygen -p -m PEM -f key.pem` |
+| "Host key verification failed" | BRIDGEPORT uses `StrictHostKeyChecking=no` by default; this error is rare but check SSH config |
+| "Key format not supported" | BRIDGEPORT expects OpenSSH format keys. Convert with `ssh-keygen -p -m PEM -f key.pem` |
 | "Timeout" | Network routing issue. Verify the server hostname/IP is reachable from the Docker network |
 
 ---
@@ -246,7 +246,7 @@ journalctl -u bridgeport-agent -f --no-pager -n 50
 
 ### Verify Connectivity
 
-From the agent server, check that BridgePort is reachable:
+From the agent server, check that BRIDGEPORT is reachable:
 
 ```bash
 curl http://your-bridgeport-host:3000/health
@@ -258,7 +258,7 @@ If using an internal IP, ensure `agentCallbackUrl` is set correctly in **Admin >
 
 If the agent logs show authentication errors:
 
-1. Go to the server's detail page in BridgePort
+1. Go to the server's detail page in BRIDGEPORT
 2. Regenerate the agent token
 3. Redeploy the agent (this updates the token automatically)
 
@@ -309,9 +309,9 @@ If auto-rollback activated during an orchestrated deployment:
 
 | Symptom | Fix |
 |---------|-----|
-| "Connection refused" | Verify database host/port are reachable from BridgePort's server |
+| "Connection refused" | Verify database host/port are reachable from BRIDGEPORT's server |
 | "Authentication failed" | Re-enter database credentials on the database detail page |
-| "pg_dump: command not found" | The BridgePort Docker image includes `postgresql16-client`. If using a different version, ensure compatibility |
+| "pg_dump: command not found" | The BRIDGEPORT Docker image includes `postgresql16-client`. If using a different version, ensure compatibility |
 | Timeout | Increase `pgDumpTimeoutMs` in **Admin > System Settings** (default: 300000ms / 5 minutes) |
 
 ### Spaces Upload Fails
@@ -340,7 +340,7 @@ If auto-rollback activated during an orchestrated deployment:
 
 1. Verify SMTP is configured in **Admin > Notifications > SMTP**
 2. Test the SMTP connection from the admin page
-3. Check BridgePort logs for SMTP errors: `docker logs bridgeport 2>&1 | grep -i smtp`
+3. Check BRIDGEPORT logs for SMTP errors: `docker logs bridgeport 2>&1 | grep -i smtp`
 4. Verify the user has `email` enabled in their notification preferences
 
 ### Slack Notifications Not Sending
@@ -361,7 +361,7 @@ If auto-rollback activated during an orchestrated deployment:
    ```bash
    ls -lh ./data/bridgeport.db
    ```
-4. **Vacuum the database** (requires stopping BridgePort):
+4. **Vacuum the database** (requires stopping BRIDGEPORT):
    ```bash
    docker compose stop
    sqlite3 ./data/bridgeport.db "VACUUM;"
@@ -378,14 +378,14 @@ If auto-rollback activated during an orchestrated deployment:
 
 ## Database Migration Issues
 
-BridgePort runs `prisma migrate deploy` automatically on every startup. If a migration fails:
+BRIDGEPORT runs `prisma migrate deploy` automatically on every startup. If a migration fails:
 
 1. **Check the error message** in `docker logs bridgeport`
 2. **Do not modify the database manually** -- this breaks Prisma's migration state
 3. **Restore your pre-upgrade backup** if the migration corrupted data
 4. **Pin the previous version** until the issue is fixed upstream
 
-For legacy databases (created before migration tracking was added), BridgePort automatically creates a migration baseline on first startup. This is a one-time operation and should not require intervention.
+For legacy databases (created before migration tracking was added), BRIDGEPORT automatically creates a migration baseline on first startup. This is a one-time operation and should not require intervention.
 
 ---
 
@@ -406,7 +406,7 @@ If you lose your `MASTER_KEY`, all encrypted data becomes irrecoverable:
 
 1. Generate a new key: `openssl rand -base64 32`
 2. Update `.env` with the new `MASTER_KEY`
-3. Restart BridgePort
+3. Restart BRIDGEPORT
 4. Re-create all encrypted resources (SSH keys, secrets, registry credentials, SMTP config)
 
 See [Backup & Restore > Lost MASTER_KEY](backup-restore.md#lost-master_key) for detailed steps.

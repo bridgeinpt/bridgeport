@@ -1,7 +1,7 @@
 {
   "name": "bridgeport",
   "version": "1.0.0",
-  "description": "BridgePort - Dock. Run. Ship. Repeat. A lightweight deployment management tool by BridgeIn.",
+  "description": "BRIDGEPORT - Dock. Run. Ship. Repeat. A lightweight deployment management tool by BridgeIn.",
   "type": "module",
   "main": "dist/server.js",
   "scripts": {

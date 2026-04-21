@@ -1,6 +1,6 @@
 # Webhooks
 
-Connect your CI/CD pipelines to BridgePort for automatic deployments on push, and send BridgePort events to external systems like Slack, PagerDuty, or custom dashboards.
+Connect your CI/CD pipelines to BRIDGEPORT for automatic deployments on push, and send BRIDGEPORT events to external systems like Slack, PagerDuty, or custom dashboards.
 
 ## Table of Contents
 
@@ -32,12 +32,12 @@ Connect your CI/CD pipelines to BridgePort for automatic deployments on push, an
 
 ## Overview
 
-BridgePort has two webhook systems that serve different purposes:
+BRIDGEPORT has two webhook systems that serve different purposes:
 
 | Direction | Purpose | Who configures it | Auth mechanism |
 |-----------|---------|-------------------|----------------|
-| **Incoming** | CI/CD pipelines call BridgePort to trigger deployments | DevOps engineer (env vars on BridgePort + CI secrets) | HMAC signature (`X-Webhook-Signature` or `X-Hub-Signature-256`) |
-| **Outgoing** | BridgePort calls external URLs when events occur (deploy success, health failure, etc.) | Admin (via Admin > Notifications > Webhooks) | Optional HMAC signature (`X-Webhook-Signature`) |
+| **Incoming** | CI/CD pipelines call BRIDGEPORT to trigger deployments | DevOps engineer (env vars on BRIDGEPORT + CI secrets) | HMAC signature (`X-Webhook-Signature` or `X-Hub-Signature-256`) |
+| **Outgoing** | BRIDGEPORT calls external URLs when events occur (deploy success, health failure, etc.) | Admin (via Admin > Notifications > Webhooks) | Optional HMAC signature (`X-Webhook-Signature`) |
 
 ```mermaid
 flowchart LR
@@ -47,7 +47,7 @@ flowchart LR
         CT[Custom Script]
     end
 
-    subgraph BridgePort
+    subgraph BRIDGEPORT
         IN[Incoming<br/>Webhook Routes]
         CORE[Deploy Engine /<br/>Orchestration]
         OUT[Outgoing<br/>Webhook Dispatch]
@@ -75,8 +75,8 @@ flowchart LR
 
 **Incoming webhook** -- deploy a service after a CI build:
 
-1. Set the `WEBHOOK_SECRET` environment variable on your BridgePort instance.
-2. In your CI pipeline, add a step that calls BridgePort after a successful build:
+1. Set the `WEBHOOK_SECRET` environment variable on your BRIDGEPORT instance.
+2. In your CI pipeline, add a step that calls BRIDGEPORT after a successful build:
 
 ```bash
 curl -X POST https://your-bridgeport.example.com/api/webhooks/deploy \
@@ -99,7 +99,7 @@ curl -X POST https://your-bridgeport.example.com/api/webhooks/deploy \
 ```mermaid
 sequenceDiagram
     participant CI as CI/CD Pipeline
-    participant BP as BridgePort
+    participant BP as BRIDGEPORT
     participant SRV as Target Server
     participant EXT as External Webhook
 
@@ -152,7 +152,7 @@ curl -X POST https://your-bridgeport.example.com/api/webhooks/deploy \
 ```
 
 > [!NOTE]
-> The `service` field accepts either the service name or its ID. BridgePort tries both. If `imageTag` is omitted, the service deploys using its current configured tag.
+> The `service` field accepts either the service name or its ID. BRIDGEPORT tries both. If `imageTag` is omitted, the service deploys using its current configured tag.
 
 ### Deploy All Services for an Image
 
@@ -211,7 +211,7 @@ A GitHub-native webhook endpoint that handles GitHub's signature format and even
 4. Set the secret to match your `GITHUB_WEBHOOK_SECRET` environment variable.
 5. Select the `Packages` event (or choose individual events).
 
-GitHub sends `X-Hub-Signature-256` with each request, which BridgePort verifies using `sha256=` prefixed HMAC.
+GitHub sends `X-Hub-Signature-256` with each request, which BRIDGEPORT verifies using `sha256=` prefixed HMAC.
 
 ### Payload Reference
 
@@ -238,9 +238,9 @@ Incoming webhooks use HMAC-SHA256 signature verification.
 
 **How it works:**
 
-1. Set the `WEBHOOK_SECRET` environment variable on your BridgePort instance (or `GITHUB_WEBHOOK_SECRET` for the GitHub endpoint).
+1. Set the `WEBHOOK_SECRET` environment variable on your BRIDGEPORT instance (or `GITHUB_WEBHOOK_SECRET` for the GitHub endpoint).
 2. When sending a webhook, compute `HMAC-SHA256(request_body, secret)` and include it in the header.
-3. BridgePort recomputes the signature and compares using constant-time comparison.
+3. BRIDGEPORT recomputes the signature and compares using constant-time comparison.
 
 **Header format:**
 
@@ -264,13 +264,13 @@ curl -X POST https://your-bridgeport.example.com/api/webhooks/deploy \
 ```
 
 > [!TIP]
-> If `WEBHOOK_SECRET` is not set on BridgePort, signature verification is skipped entirely. This is convenient for testing but not recommended for production. Always set a strong secret.
+> If `WEBHOOK_SECRET` is not set on BRIDGEPORT, signature verification is skipped entirely. This is convenient for testing but not recommended for production. Always set a strong secret.
 
 ---
 
 ## Outgoing Webhooks (Event Notifications)
 
-Outgoing webhooks let BridgePort push events to your external systems. When something happens (a deployment succeeds, a health check fails, a backup completes), BridgePort POSTs a JSON payload to each matching webhook endpoint.
+Outgoing webhooks let BRIDGEPORT push events to your external systems. When something happens (a deployment succeeds, a health check fails, a backup completes), BRIDGEPORT POSTs a JSON payload to each matching webhook endpoint.
 
 ### Setting Up Outgoing Webhooks
 
@@ -281,8 +281,8 @@ Outgoing webhooks let BridgePort push events to your external systems. When some
 | Field | Required | Description |
 |-------|----------|-------------|
 | **Name** | Yes | Display name (e.g., "Slack deploy channel", "PagerDuty alerts") |
-| **URL** | Yes | The endpoint BridgePort will POST to |
-| **Secret** | No | Shared secret for HMAC signing. If set, BridgePort signs every payload. |
+| **URL** | Yes | The endpoint BRIDGEPORT will POST to |
+| **Secret** | No | Shared secret for HMAC signing. If set, BRIDGEPORT signs every payload. |
 | **Headers** | No | Custom HTTP headers (JSON key-value pairs) |
 | **Enabled** | Yes | Toggle webhook on/off without deleting it |
 | **Type filter** | No | Array of notification type codes. If set, only matching events trigger this webhook. |
@@ -320,7 +320,7 @@ Every outgoing webhook POST includes a JSON body with this structure:
 
 ```
 Content-Type: application/json
-User-Agent: BridgePort-Webhook/1.0
+User-Agent: BRIDGEPORT-Webhook/1.0
 X-Webhook-Signature: sha256=<hmac>  (only if secret is configured)
 ```
 
@@ -335,7 +335,7 @@ If no filters are set, the webhook fires for all event types and all environment
 
 ### Signature Verification
 
-If a secret is configured on the outgoing webhook, BridgePort includes an `X-Webhook-Signature` header with every request:
+If a secret is configured on the outgoing webhook, BRIDGEPORT includes an `X-Webhook-Signature` header with every request:
 
 ```
 X-Webhook-Signature: sha256=<hex-encoded HMAC-SHA256>
@@ -384,7 +384,7 @@ Result: Webhook marked as failed, failure count incremented
 A delivery is considered successful if the endpoint returns any 2xx status code. Any other status code or network error triggers a retry.
 
 > [!NOTE]
-> BridgePort tracks `successCount` and `failureCount` for each outgoing webhook. You can see these stats on the webhook list page in the admin UI.
+> BRIDGEPORT tracks `successCount` and `failureCount` for each outgoing webhook. You can see these stats on the webhook list page in the admin UI.
 
 ### Testing Outgoing Webhooks
 
@@ -395,7 +395,7 @@ After creating a webhook, click the **Test** button to send a test payload:
   "event": "test",
   "timestamp": "2026-02-25T14:30:00.000Z",
   "data": {
-    "message": "This is a test webhook from BridgePort"
+    "message": "This is a test webhook from BRIDGEPORT"
   }
 }
 ```
@@ -435,7 +435,7 @@ jobs:
           docker build -t registry.example.com/myapp/api:${{ github.sha }} .
           docker push registry.example.com/myapp/api:${{ github.sha }}
 
-      - name: Deploy to BridgePort
+      - name: Deploy to BRIDGEPORT
         env:
           BRIDGEPORT_URL: ${{ secrets.BRIDGEPORT_URL }}
           WEBHOOK_SECRET: ${{ secrets.BRIDGEPORT_WEBHOOK_SECRET }}
@@ -586,18 +586,18 @@ Configurable under **Admin > System Settings**:
 
 ### Incoming webhook returns 401 "Missing signature"
 
-The `WEBHOOK_SECRET` environment variable is set on BridgePort, so signature verification is active, but your request is missing the `X-Webhook-Signature` header. Make sure your CI pipeline computes and includes the signature.
+The `WEBHOOK_SECRET` environment variable is set on BRIDGEPORT, so signature verification is active, but your request is missing the `X-Webhook-Signature` header. Make sure your CI pipeline computes and includes the signature.
 
 ### Incoming webhook returns 401 "Invalid signature"
 
 The signature does not match. Common causes:
 
-- The secret in your CI differs from the `WEBHOOK_SECRET` on BridgePort
-- The payload body sent to BridgePort differs from the string you signed (watch for whitespace, JSON formatting differences)
+- The secret in your CI differs from the `WEBHOOK_SECRET` on BRIDGEPORT
+- The payload body sent to BRIDGEPORT differs from the string you signed (watch for whitespace, JSON formatting differences)
 - Make sure you are signing the **exact JSON string** you are sending in the request body
 
 > [!TIP]
-> For debugging, temporarily unset `WEBHOOK_SECRET` on BridgePort to skip verification. Once your pipeline works, set it back and ensure the secret matches.
+> For debugging, temporarily unset `WEBHOOK_SECRET` on BRIDGEPORT to skip verification. Once your pipeline works, set it back and ensure the secret matches.
 
 ### Incoming webhook returns 404 "Service not found" or "Environment not found"
 
@@ -611,7 +611,7 @@ The container image exists but its `autoUpdate` flag is `false`. Enable it in th
 
 ### Outgoing webhook shows high failure count
 
-1. Check that the endpoint URL is reachable from the BridgePort server.
+1. Check that the endpoint URL is reachable from the BRIDGEPORT server.
 2. Click **Test** on the webhook to see if it responds.
 3. Check the endpoint's logs for errors (authentication failures, payload parsing issues).
 4. Increase `webhookTimeoutMs` in System Settings if the endpoint is slow.

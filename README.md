@@ -1,7 +1,7 @@
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 [![Docker](https://img.shields.io/badge/Docker-ghcr.io%2Fbridgeinpt%2Fbridgeport-blue)](https://ghcr.io/bridgeinpt/bridgeport)
 
-# BridgePort
+# BRIDGEPORT
 
 **Dock. Run. Ship. Repeat.**
 
@@ -15,7 +15,7 @@ Managing Docker containers across multiple servers means SSH-ing into each machi
 
 ## The Solution
 
-BridgePort gives you a single web UI to manage all your Docker infrastructure. Connect your servers via SSH (or Docker socket for the local host), and you get one-click deploys with auto-rollback, real-time health monitoring, encrypted secrets, database backups, and multi-channel notifications. It's designed for teams that want production-grade tooling without the complexity of Kubernetes.
+BRIDGEPORT gives you a single web UI to manage all your Docker infrastructure. Connect your servers via SSH (or Docker socket for the local host), and you get one-click deploys with auto-rollback, real-time health monitoring, encrypted secrets, database backups, and multi-channel notifications. It's designed for teams that want production-grade tooling without the complexity of Kubernetes.
 
 ## Key Features
 
@@ -36,7 +36,7 @@ BridgePort gives you a single web UI to manage all your Docker infrastructure. C
 
 ## Quick Start
 
-Get BridgePort running in 30 seconds:
+Get BRIDGEPORT running in 30 seconds:
 
 ```bash
 docker run -d \
@@ -74,13 +74,13 @@ curl http://localhost:3000/health
 Open [http://localhost:3000](http://localhost:3000) and log in with your `ADMIN_EMAIL` and `ADMIN_PASSWORD`.
 
 > [!WARNING]
-> This quick start is for trying BridgePort out. For production, use Docker Compose with persistent volumes, HTTPS, and strong credentials. See the [Installation Guide](docs/installation.md).
+> This quick start is for trying BRIDGEPORT out. For production, use Docker Compose with persistent volumes, HTTPS, and strong credentials. See the [Installation Guide](docs/installation.md).
 
 ## Feature Highlights
 
 ### Deploy and Monitor Flow
 
-BridgePort coordinates deployments across your services, verifies health after each step, and rolls back automatically if something goes wrong.
+BRIDGEPORT coordinates deployments across your services, verifies health after each step, and rolls back automatically if something goes wrong.
 
 ```mermaid
 flowchart LR
@@ -95,11 +95,11 @@ flowchart LR
 
 ### Multi-Server Architecture
 
-Connect all your servers to a single BridgePort instance. Manage staging and production environments independently, each with their own SSH keys, secrets, and settings.
+Connect all your servers to a single BRIDGEPORT instance. Manage staging and production environments independently, each with their own SSH keys, secrets, and settings.
 
 ```mermaid
 flowchart TB
-    BP[BridgePort]
+    BP[BRIDGEPORT]
 
     subgraph staging[Staging Environment]
         S1[Web Server]
@@ -123,7 +123,7 @@ flowchart TB
 
 ### Deployment Orchestration
 
-Define dependencies between services, and BridgePort builds an execution plan that respects the correct order -- deploying databases before APIs, APIs before frontends, with health checks between each step.
+Define dependencies between services, and BRIDGEPORT builds an execution plan that respects the correct order -- deploying databases before APIs, APIs before frontends, with health checks between each step.
 
 ```mermaid
 flowchart TD
@@ -142,7 +142,7 @@ flowchart TD
 
 | Section | Description |
 |---|---|
-| [Getting Started](docs/getting-started.md) | Deploy BridgePort and manage your first server in 5 minutes |
+| [Getting Started](docs/getting-started.md) | Deploy BRIDGEPORT and manage your first server in 5 minutes |
 | [Core Concepts](docs/concepts.md) | Architecture overview and glossary |
 | [Installation Guide](docs/installation.md) | Docker run, Docker Compose, and development setup |
 | [Configuration](docs/configuration.md) | Environment variables, recipes, and settings reference |
@@ -156,7 +156,7 @@ flowchart TD
 
 | I want to... | Go here |
 |---|---|
-| Deploy BridgePort for production | [Installation Guide](docs/installation.md) |
+| Deploy BRIDGEPORT for production | [Installation Guide](docs/installation.md) |
 | Add my first server | [Server Guide](docs/guides/servers.md) |
 | Deploy a service update | [Service Guide](docs/guides/services.md) |
 | Set up monitoring | [Monitoring Guide](docs/guides/monitoring.md) |
@@ -165,7 +165,7 @@ flowchart TD
 | Set up notifications | [Notifications Guide](docs/guides/notifications.md) |
 | Use the CLI | [CLI Reference](docs/reference/cli.md) |
 | Orchestrate multi-service deploys | [Deployment Plans](docs/guides/deployment-plans.md) |
-| Contribute to BridgePort | [Contributing Guide](CONTRIBUTING.md) |
+| Contribute to BRIDGEPORT | [Contributing Guide](CONTRIBUTING.md) |
 | Report a security issue | [Security Policy](docs/SECURITY.md) |
 
 ## Community and Support
@@ -177,13 +177,13 @@ flowchart TD
 
 ## License
 
-BridgePort is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
+BRIDGEPORT is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0).
 
 **What this means for you:**
 
-- You can use BridgePort freely for any purpose, including commercial use
-- You can modify and self-host BridgePort without restriction
-- If you modify BridgePort and offer it as a hosted service to others, you must share your modifications under the same license
-- If you just run BridgePort internally (even at a company), you have no obligations beyond the license terms
+- You can use BRIDGEPORT freely for any purpose, including commercial use
+- You can modify and self-host BRIDGEPORT without restriction
+- If you modify BRIDGEPORT and offer it as a hosted service to others, you must share your modifications under the same license
+- If you just run BRIDGEPORT internally (even at a company), you have no obligations beyond the license terms
 
 Copyright 2024-2025 BridgeIn.

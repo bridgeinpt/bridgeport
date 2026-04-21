@@ -1,6 +1,6 @@
 # Agent Reference
 
-The BridgePort agent is a lightweight Go binary that runs on your servers, pushing system metrics, container stats, health check results, and process snapshots to BridgePort at regular intervals.
+The BRIDGEPORT agent is a lightweight Go binary that runs on your servers, pushing system metrics, container stats, health check results, and process snapshots to BRIDGEPORT at regular intervals.
 
 ## Table of Contents
 
@@ -32,7 +32,7 @@ The BridgePort agent is a lightweight Go binary that runs on your servers, pushi
 
 ## What the Agent Does
 
-The agent replaces BridgePort's default SSH-based metrics collection with a **push model**. Instead of BridgePort SSHing into each server to gather metrics, the agent runs locally and pushes data to BridgePort on a configurable interval (default: 30 seconds).
+The agent replaces BRIDGEPORT's default SSH-based metrics collection with a **push model**. Instead of BRIDGEPORT SSHing into each server to gather metrics, the agent runs locally and pushes data to BRIDGEPORT on a configurable interval (default: 30 seconds).
 
 The agent collects:
 
@@ -44,7 +44,7 @@ The agent collects:
 - **Container discovery** -- Full container list for automatic service detection
 - **Process snapshots** -- Top processes by CPU and memory usage
 
-Which metrics are collected is controlled by per-environment monitoring settings in BridgePort. The agent fetches its configuration from BridgePort every 60 seconds.
+Which metrics are collected is controlled by per-environment monitoring settings in BRIDGEPORT. The agent fetches its configuration from BRIDGEPORT every 60 seconds.
 
 ---
 
@@ -54,15 +54,15 @@ Which metrics are collected is controlled by per-environment monitoring settings
 
 The simplest way to install the agent:
 
-1. Go to the server detail page in BridgePort
+1. Go to the server detail page in BRIDGEPORT
 2. Set **Metrics Mode** to "Agent"
 3. Click **Deploy Agent**
 
-BridgePort will SSH into the server, upload the agent binary, create a systemd service, and start it. The agent token is generated automatically.
+BRIDGEPORT will SSH into the server, upload the agent binary, create a systemd service, and start it. The agent token is generated automatically.
 
 ### Manual Installation
 
-1. Download the agent binary from **Admin > About** in BridgePort, or copy it from the BridgePort container:
+1. Download the agent binary from **Admin > About** in BRIDGEPORT, or copy it from the BRIDGEPORT container:
 
    ```bash
    # From Admin > About page, download the binary for your architecture
@@ -77,7 +77,7 @@ BridgePort will SSH into the server, upload the agent binary, create a systemd s
    chmod +x /usr/local/bin/bridgeport-agent
    ```
 
-3. Get the agent token from BridgePort:
+3. Get the agent token from BRIDGEPORT:
    - Go to the server detail page
    - Set Metrics Mode to "Agent"
    - Copy the displayed agent token
@@ -113,8 +113,8 @@ This produces `bridgeport-agent-linux-amd64` and `bridgeport-agent-linux-arm64` 
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-server` | (required) | BridgePort server URL (e.g., `https://deploy.example.com`) |
-| `-token` | (required) | Agent authentication token (from server settings in BridgePort) |
+| `-server` | (required) | BRIDGEPORT server URL (e.g., `https://deploy.example.com`) |
+| `-token` | (required) | Agent authentication token (from server settings in BRIDGEPORT) |
 | `-interval` | `30s` | How often to collect and send metrics |
 
 ### Environment Variables
@@ -132,7 +132,7 @@ Create `/etc/systemd/system/bridgeport-agent.service`:
 
 ```ini
 [Unit]
-Description=BridgePort Monitoring Agent
+Description=BRIDGEPORT Monitoring Agent
 After=network-online.target docker.service
 Wants=network-online.target
 
@@ -177,7 +177,7 @@ Agent starts
   +--> Collect and send immediately
   |
   +--> Every <interval> seconds:
-         1. Fetch metrics config from BridgePort (cached, refreshed every 60s)
+         1. Fetch metrics config from BRIDGEPORT (cached, refreshed every 60s)
          2. Perform health checks on configured services
          3. Perform TCP/cert checks (if enabled)
          4. Collect system metrics (CPU, memory, disk, etc.)
@@ -195,13 +195,13 @@ The agent fetches its configuration from `GET /api/agent/config` every 60 second
 - **Service list** -- Services with health check URLs, TCP checks, and certificate checks
 - **Metrics config** -- Which metric categories to collect (controlled by environment monitoring settings)
 
-This means you can enable/disable specific metrics in the BridgePort UI, and the agent will pick up changes within 60 seconds without a restart.
+This means you can enable/disable specific metrics in the BRIDGEPORT UI, and the agent will pick up changes within 60 seconds without a restart.
 
 ### Internal Networking
 
-The agent needs to reach BridgePort's API. In typical deployments:
+The agent needs to reach BRIDGEPORT's API. In typical deployments:
 
-- If BridgePort and the agent are on the same private network, use the internal IP (e.g., `http://10.30.10.5:3000`)
+- If BRIDGEPORT and the agent are on the same private network, use the internal IP (e.g., `http://10.30.10.5:3000`)
 - If they are on different networks, use the public URL (e.g., `https://deploy.example.com`)
 
 You can configure a separate agent callback URL in **Admin > System Settings > Agent Callback URL** to override the public URL for agent-to-server communication.
@@ -281,7 +281,7 @@ For services with a configured `healthCheckUrl`, the agent performs HTTP GET req
 
 ### Container Discovery
 
-The agent reports the full list of Docker containers (running and stopped) on each collection cycle. BridgePort uses this data for automatic service discovery.
+The agent reports the full list of Docker containers (running and stopped) on each collection cycle. BRIDGEPORT uses this data for automatic service discovery.
 
 ### Process Snapshots
 
@@ -291,10 +291,10 @@ When enabled (`collectProcesses`), the agent reports the top 10 processes by CPU
 
 ## Upgrade Detection
 
-BridgePort tracks agent versions and indicates when an upgrade is available:
+BRIDGEPORT tracks agent versions and indicates when an upgrade is available:
 
 - The agent reports its version on every metrics push (`agentVersion` field)
-- BridgePort compares this against the bundled agent version in the Docker image
+- BRIDGEPORT compares this against the bundled agent version in the Docker image
 - The **server detail page** shows an "Update available" badge when versions differ
 - The **Monitoring > Agents** page shows upgrade status for all agents
 
@@ -316,17 +316,17 @@ Or manually download the new binary and restart the systemd service.
    sudo journalctl -u bridgeport-agent -f
    ```
 
-2. Verify the agent can reach BridgePort:
+2. Verify the agent can reach BRIDGEPORT:
    ```bash
    curl -v https://deploy.example.com/api/agent/config \
      -H "Authorization: Bearer YOUR_AGENT_TOKEN"
    ```
 
-3. Check that the agent token matches what BridgePort expects (visible on the server detail page)
+3. Check that the agent token matches what BRIDGEPORT expects (visible on the server detail page)
 
 **"Config fetch failed with status 401"**
 
-The agent token is invalid or was regenerated. Go to the server detail page in BridgePort, copy the current token, and update the agent configuration.
+The agent token is invalid or was regenerated. Go to the server detail page in BRIDGEPORT, copy the current token, and update the agent configuration.
 
 **"Error collecting Docker metrics"**
 
@@ -342,11 +342,11 @@ The agent cannot access the Docker socket. Ensure:
 
 **Agent shows "stale" or "offline"**
 
-BridgePort marks agents based on how recently they pushed metrics:
+BRIDGEPORT marks agents based on how recently they pushed metrics:
 - **Stale**: No push in the last 3 minutes (configurable via `agentStaleThresholdMs` in system settings)
 - **Offline**: No push in the last 5 minutes (configurable via `agentOfflineThresholdMs`)
 
-Check if the agent process is running and if there are network issues between the agent and BridgePort.
+Check if the agent process is running and if there are network issues between the agent and BRIDGEPORT.
 
 ---
 

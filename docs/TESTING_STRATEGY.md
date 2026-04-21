@@ -1,6 +1,6 @@
-# BridgePort Testing Strategy
+# BRIDGEPORT Testing Strategy
 
-Comprehensive testing spec for full coverage of the BridgePort codebase — backend (Node.js/Fastify/Prisma), frontend (React/Vite), and Go components (agent + CLI).
+Comprehensive testing spec for full coverage of the BRIDGEPORT codebase — backend (Node.js/Fastify/Prisma), frontend (React/Vite), and Go components (agent + CLI).
 
 ---
 

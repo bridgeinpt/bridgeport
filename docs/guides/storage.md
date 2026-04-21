@@ -1,6 +1,6 @@
 # S3-Compatible Storage
 
-Configure S3-compatible object storage so BridgePort can upload database backups to a remote bucket instead of (or in addition to) the local filesystem.
+Configure S3-compatible object storage so BRIDGEPORT can upload database backups to a remote bucket instead of (or in addition to) the local filesystem.
 
 ## Table of Contents
 
@@ -45,7 +45,7 @@ Your next backup will upload to S3.
 
 ## How It Works
 
-BridgePort's storage feature provides a single, globally configured S3-compatible endpoint that any environment can opt into. The storage is used exclusively for database backup files.
+BRIDGEPORT's storage feature provides a single, globally configured S3-compatible endpoint that any environment can opt into. The storage is used exclusively for database backup files.
 
 ```mermaid
 flowchart LR
@@ -65,17 +65,17 @@ flowchart LR
 **What storage is for:**
 
 - Offsite storage for database backup files (PostgreSQL dumps, MySQL dumps, SQLite exports)
-- Download via presigned URL instead of streaming through the BridgePort server
+- Download via presigned URL instead of streaming through the BRIDGEPORT server
 
 **What storage is not for:**
 
 - General file hosting
 - Config file syncing (that uses SSH directly)
-- BridgePort's own database (see [Backup & Restore](../backup-restore.md))
+- BRIDGEPORT's own database (see [Backup & Restore](../backup-restore.md))
 
 **Architecture:**
 
-- One storage configuration per BridgePort installation (global credentials)
+- One storage configuration per BRIDGEPORT installation (global credentials)
 - Each environment can independently opt in or out
 - Each database can use a different bucket with a custom key prefix
 - Credentials are encrypted at rest using AES-256-GCM
@@ -85,7 +85,7 @@ flowchart LR
 
 ## Supported Providers
 
-BridgePort uses the AWS S3 SDK internally, so any provider that speaks the S3 API works.
+BRIDGEPORT uses the AWS S3 SDK internally, so any provider that speaks the S3 API works.
 
 | Provider | Custom Endpoint? | ListBuckets? | Notes |
 |----------|:----------------:|:------------:|-------|
@@ -142,17 +142,17 @@ For non-DigitalOcean providers, use the API to set a custom `endpoint` value sep
 
 ### Step 3: Configure Buckets
 
-BridgePort needs to know which buckets are available for backup storage. There are two modes:
+BRIDGEPORT needs to know which buckets are available for backup storage. There are two modes:
 
-**Auto-discovery (full-access keys):** If your key has permission to call `ListBuckets`, BridgePort discovers available buckets automatically. Leave the Buckets field empty.
+**Auto-discovery (full-access keys):** If your key has permission to call `ListBuckets`, BRIDGEPORT discovers available buckets automatically. Leave the Buckets field empty.
 
-**Manual list (scoped keys):** If your key is restricted to specific buckets, `ListBuckets` will return a 403 and auto-discovery will not work. Add the bucket names manually in the **Buckets** field. BridgePort will test access to each bucket individually using `HeadBucket`.
+**Manual list (scoped keys):** If your key is restricted to specific buckets, `ListBuckets` will return a 403 and auto-discovery will not work. Add the bucket names manually in the **Buckets** field. BRIDGEPORT will test access to each bucket individually using `HeadBucket`.
 
 See [Scoped Keys](#scoped-keys) for more on when and why to use this.
 
 ### Step 4: Test the Connection
 
-After saving, click **Test Connection**. BridgePort will:
+After saving, click **Test Connection**. BRIDGEPORT will:
 
 1. Attempt `ListBuckets` if no buckets are manually configured.
 2. If `ListBuckets` returns 403, report that the key appears to be scoped and prompt you to add bucket names.
@@ -265,7 +265,7 @@ For AWS, the SDK resolves the correct regional endpoint. Leave the Buckets field
 }
 ```
 
-BridgePort prepends `https://` to the endpoint automatically. Ensure your MinIO instance has a valid TLS certificate, or use a reverse proxy that terminates TLS.
+BRIDGEPORT prepends `https://` to the endpoint automatically. Ensure your MinIO instance has a valid TLS certificate, or use a reverse proxy that terminates TLS.
 
 ### Backblaze B2
 
@@ -322,7 +322,7 @@ A scoped (bucket-scoped) key is a set of credentials that has been granted acces
 - Required by some organizational policies
 - R2 and some other providers effectively issue scoped keys by default
 
-**How BridgePort handles scoped keys:**
+**How BRIDGEPORT handles scoped keys:**
 
 ```mermaid
 flowchart TD
@@ -342,8 +342,8 @@ flowchart TD
 
 1. You enter the key credentials and save.
 2. You add the bucket names manually in the Buckets field (since `ListBuckets` will return 403).
-3. BridgePort tests each configured bucket with `HeadBucket` and reports which are accessible.
-4. During backup upload, BridgePort writes to the configured bucket for that database.
+3. BRIDGEPORT tests each configured bucket with `HeadBucket` and reports which are accessible.
+4. During backup upload, BRIDGEPORT writes to the configured bucket for that database.
 
 If you run the connection test with a scoped key but no buckets configured, you will see:
 
@@ -370,7 +370,7 @@ Storage is configured globally (one set of credentials for the whole installatio
 
 When a backup runs for a database configured with `storage type: spaces`:
 
-1. BridgePort checks whether storage is enabled for that environment.
+1. BRIDGEPORT checks whether storage is enabled for that environment.
 2. If enabled, it reads the global credentials, constructs an S3 client, and uploads to the configured bucket.
 3. If storage is not enabled for the environment, the backup fails with: `Spaces not configured for this environment. Go to Settings > Spaces to configure.`
 
@@ -430,7 +430,7 @@ The key does not have access to that specific bucket. Verify:
 The endpoint is constructed as `https://{endpoint}`. Verify:
 - No `https://` prefix in the endpoint field
 - No trailing slash
-- The hostname resolves and is reachable from the BridgePort server
+- The hostname resolves and is reachable from the BRIDGEPORT server
 
 For DigitalOcean Spaces, the endpoint is auto-derived as `{region}.digitaloceanspaces.com`. If you see a connection error, check that the region code is valid.
 
@@ -443,7 +443,7 @@ Check that:
 
 **Presigned download URL does not work**
 
-Presigned URLs generated for Spaces backups are valid for 1 hour. If the link is expired, trigger a new download from the BridgePort UI.
+Presigned URLs generated for Spaces backups are valid for 1 hour. If the link is expired, trigger a new download from the BRIDGEPORT UI.
 
 > [!NOTE]
 > Backup downloads via presigned URL are subject to the **Allow Backup Download** environment setting (found in Settings > Data). This is disabled by default.

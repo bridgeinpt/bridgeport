@@ -1,6 +1,6 @@
 # Upgrade Guide
 
-BridgePort upgrades are zero-intervention: pull the new image, restart the container, and migrations run automatically.
+BRIDGEPORT upgrades are zero-intervention: pull the new image, restart the container, and migrations run automatically.
 
 ---
 
@@ -17,7 +17,7 @@ BridgePort upgrades are zero-intervention: pull the new image, restart the conta
 
 ## How Upgrades Work
 
-Every time the BridgePort container starts, the entrypoint script handles database migrations before the application boots. You never need to run migrations manually.
+Every time the BRIDGEPORT container starts, the entrypoint script handles database migrations before the application boots. You never need to run migrations manually.
 
 ```mermaid
 flowchart TD
@@ -29,7 +29,7 @@ flowchart TD
     D -->|No| E[Baseline legacy database]
     E --> G
     F --> G
-    G --> H[Start BridgePort]
+    G --> H[Start BRIDGEPORT]
     H --> I[Application ready on :3000]
 ```
 
@@ -75,13 +75,13 @@ docker run -d \
 After starting the new container, you should see output like this:
 
 ```
-=== BridgePort Startup ===
+=== BRIDGEPORT Startup ===
 Database path: /data/bridgeport.db
 Database exists
 Migration history found
 Applying migrations...
 Prisma Migrate applied all migrations.
-=== Starting BridgePort ===
+=== Starting BRIDGEPORT ===
 ```
 
 If there are pending migrations from the new version, you will also see lines like:
@@ -101,7 +101,7 @@ The following migration(s) have been applied:
 | **Data** | All data is preserved. The SQLite database lives in the mounted volume (`./data`). |
 | **Migrations** | Applied automatically. No manual steps required. |
 | **Configuration** | Your `.env` file and volume mounts remain unchanged. |
-| **Agent/CLI** | These are separate binaries. Check for updates after upgrading BridgePort (see [Agent Upgrades](#agent-upgrades)). |
+| **Agent/CLI** | These are separate binaries. Check for updates after upgrading BRIDGEPORT (see [Agent Upgrades](#agent-upgrades)). |
 
 > [!TIP]
 > Always back up your database before upgrading, especially for major version jumps. A simple file copy is sufficient:
@@ -145,14 +145,14 @@ Navigate to **Admin > About** in the UI. This page displays:
 docker logs bridgeport --tail 50
 ```
 
-Look for `BridgePort running at http://0.0.0.0:3000` as confirmation that startup completed successfully. Any migration errors will appear before this line.
+Look for `BRIDGEPORT running at http://0.0.0.0:3000` as confirmation that startup completed successfully. Any migration errors will appear before this line.
 
 ---
 
 ## Rollback
 
 > [!WARNING]
-> Database migrations are **forward-only**. If a new version adds or modifies database tables, the older BridgePort version may not be compatible with the updated schema.
+> Database migrations are **forward-only**. If a new version adds or modifies database tables, the older BRIDGEPORT version may not be compatible with the updated schema.
 
 ### Rolling Back to a Previous Version
 
@@ -191,23 +191,23 @@ If you have been running the new version in production and new data has been wri
 
 ## Agent Upgrades
 
-The BridgePort monitoring agent is a separate Go binary deployed to your servers. It is versioned independently from the main application -- its version only changes when code in the `bridgeport-agent/` directory is modified.
+The BRIDGEPORT monitoring agent is a separate Go binary deployed to your servers. It is versioned independently from the main application -- its version only changes when code in the `bridgeport-agent/` directory is modified.
 
 ### Detecting an Agent Version Mismatch
 
-BridgePort makes it easy to spot outdated agents:
+BRIDGEPORT makes it easy to spot outdated agents:
 
-- **Server detail page**: Shows an "Update available" badge when the deployed agent version differs from the version bundled in the current BridgePort image.
+- **Server detail page**: Shows an "Update available" badge when the deployed agent version differs from the version bundled in the current BRIDGEPORT image.
 - **Monitoring > Agents page**: Shows an upgrade status column for all agent-managed servers.
-- **Health endpoint**: The `bundledAgentVersion` field in `/health` tells you what version the current BridgePort image ships.
+- **Health endpoint**: The `bundledAgentVersion` field in `/health` tells you what version the current BRIDGEPORT image ships.
 
 ### Upgrading the Agent
 
-The simplest way to upgrade an agent is through the BridgePort UI:
+The simplest way to upgrade an agent is through the BRIDGEPORT UI:
 
 1. Navigate to the server's detail page
 2. Click **Deploy Agent** (or **Redeploy Agent** if one is already running)
-3. BridgePort will SSH into the server and deploy the new agent binary automatically
+3. BRIDGEPORT will SSH into the server and deploy the new agent binary automatically
 
 The agent runs as a systemd service, so the new binary replaces the old one and the service restarts.
 
@@ -216,7 +216,7 @@ The agent runs as a systemd service, so the new binary replaces the old one and 
 If you prefer manual control:
 
 ```bash
-# Copy the new agent binary from the BridgePort container
+# Copy the new agent binary from the BRIDGEPORT container
 docker cp bridgeport:/app/agent/bridgeport-agent ./bridgeport-agent
 
 # Transfer to the target server

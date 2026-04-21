@@ -63,7 +63,7 @@ describe('admin smtp routes', () => {
           port: 587,
           secure: false,
           fromAddress: 'noreply@example.com',
-          fromName: 'BridgePort',
+          fromName: 'BRIDGEPORT',
           enabled: true,
         },
       });

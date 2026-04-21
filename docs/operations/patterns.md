@@ -1,6 +1,6 @@
 # Architecture Patterns
 
-Common deployment patterns for BridgePort, from a single VPS to multi-server production stacks with staging environments.
+Common deployment patterns for BRIDGEPORT, from a single VPS to multi-server production stacks with staging environments.
 
 ---
 
@@ -15,12 +15,12 @@ Common deployment patterns for BridgePort, from a single VPS to multi-server pro
 
 ## Pattern 1: Single Server
 
-The simplest setup: BridgePort and your application running on the same machine.
+The simplest setup: BRIDGEPORT and your application running on the same machine.
 
 ```mermaid
 graph TB
     subgraph Server ["Single VPS"]
-        BP[BridgePort<br/>:3000]
+        BP[BRIDGEPORT<br/>:3000]
         RP[Caddy / Nginx<br/>Reverse Proxy]
         APP[Your App<br/>:8000]
         DB[(PostgreSQL<br/>:5432)]
@@ -46,15 +46,15 @@ graph TB
 
 ### Setup Walkthrough
 
-1. **Install BridgePort** using Docker Compose on your VPS (see [Installation](../installation.md))
+1. **Install BRIDGEPORT** using Docker Compose on your VPS (see [Installation](../installation.md))
 
 2. **Choose a Docker connection mode**:
-   - **Socket mode** (recommended for single server): Mount `/var/run/docker.sock` in the compose file. BridgePort can manage containers directly without SSH.
-   - **SSH mode**: BridgePort connects via SSH even to the local machine. Useful if you want a consistent experience across all servers.
+   - **Socket mode** (recommended for single server): Mount `/var/run/docker.sock` in the compose file. BRIDGEPORT can manage containers directly without SSH.
+   - **SSH mode**: BRIDGEPORT connects via SSH even to the local machine. Useful if you want a consistent experience across all servers.
 
-3. **Create an environment** (e.g., "production") in BridgePort
+3. **Create an environment** (e.g., "production") in BRIDGEPORT
 
-4. **The host server is auto-detected**: When the Docker socket is mounted, BridgePort automatically creates a "localhost" server entry
+4. **The host server is auto-detected**: When the Docker socket is mounted, BRIDGEPORT automatically creates a "localhost" server entry
 
 5. **Discover containers**: Click "Discover" on the server page to find all running containers
 
@@ -76,18 +76,18 @@ services:
 ```
 
 > [!TIP]
-> Socket mode eliminates the need for SSH key setup on a single server. BridgePort communicates directly with the Docker daemon.
+> Socket mode eliminates the need for SSH key setup on a single server. BRIDGEPORT communicates directly with the Docker daemon.
 
 ---
 
 ## Pattern 2: Multi-Server
 
-Separate concerns across multiple servers, all managed from a single BridgePort instance.
+Separate concerns across multiple servers, all managed from a single BRIDGEPORT instance.
 
 ```mermaid
 graph TB
     subgraph Management ["Management Server"]
-        BP[BridgePort<br/>:3000]
+        BP[BRIDGEPORT<br/>:3000]
         RP[Reverse Proxy<br/>HTTPS]
     end
 
@@ -123,7 +123,7 @@ graph TB
 
 ### Setup Walkthrough
 
-1. **Install BridgePort** on a dedicated management server (or alongside your reverse proxy)
+1. **Install BRIDGEPORT** on a dedicated management server (or alongside your reverse proxy)
 
 2. **Create an environment** (e.g., "production")
 
@@ -146,18 +146,18 @@ graph TB
 ### Key Considerations
 
 - **SSH keys**: One key per environment. All servers in an environment share the same SSH key.
-- **Firewall rules**: BridgePort needs SSH access (port 22) to all managed servers.
-- **Agent callback URL**: If using agents, set `agentCallbackUrl` in **Admin > System Settings** so agents can reach BridgePort from their network.
+- **Firewall rules**: BRIDGEPORT needs SSH access (port 22) to all managed servers.
+- **Agent callback URL**: If using agents, set `agentCallbackUrl` in **Admin > System Settings** so agents can reach BRIDGEPORT from their network.
 
 ---
 
 ## Pattern 3: Staging + Production
 
-Use BridgePort environments to separate staging from production, with a clear promotion workflow.
+Use BRIDGEPORT environments to separate staging from production, with a clear promotion workflow.
 
 ```mermaid
 graph LR
-    subgraph BridgePort
+    subgraph BRIDGEPORT
         ENV_S[Staging<br/>Environment]
         ENV_P[Production<br/>Environment]
     end
@@ -191,7 +191,7 @@ graph LR
 
 ### Setup Walkthrough
 
-1. **Create two environments** in BridgePort:
+1. **Create two environments** in BRIDGEPORT:
    - "staging" with its own SSH key
    - "production" with a separate SSH key
 
@@ -234,7 +234,7 @@ A concrete example: deploying a **Django + Celery + Redis + PostgreSQL** stack a
 ```mermaid
 graph TB
     subgraph BP ["Management"]
-        BridgePort[BridgePort]
+        BRIDGEPORT[BRIDGEPORT]
     end
 
     subgraph AppServer ["App Server (10.0.1.10)"]
@@ -251,9 +251,9 @@ graph TB
         PG[(PostgreSQL<br/>:5432)]
     end
 
-    BridgePort -->|SSH| AppServer
-    BridgePort -->|SSH| CacheServer
-    BridgePort -->|SSH| DBServer
+    BRIDGEPORT -->|SSH| AppServer
+    BRIDGEPORT -->|SSH| CacheServer
+    BRIDGEPORT -->|SSH| DBServer
 
     DJANGO -->|TCP :5432| PG
     DJANGO -->|TCP :6379| REDIS
@@ -311,19 +311,19 @@ Configure health check URLs:
 
 ### Step 5: Monitoring
 
-Deploy the BridgePort agent to each server for real-time metrics:
+Deploy the BRIDGEPORT agent to each server for real-time metrics:
 
 1. Go to each server's detail page
 2. Switch metrics mode to "Agent"
 3. Click "Deploy Agent"
-4. Set `agentCallbackUrl` in System Settings to BridgePort's internal IP
+4. Set `agentCallbackUrl` in System Settings to BRIDGEPORT's internal IP
 
 Configure database monitoring for PostgreSQL:
 
 1. Go to the PostgreSQL database entry
 2. Enable monitoring
 3. Set collection interval (e.g., 300 seconds)
-4. BridgePort will collect plugin-defined metrics (connections, table sizes, slow queries, etc.)
+4. BRIDGEPORT will collect plugin-defined metrics (connections, table sizes, slow queries, etc.)
 
 ### Step 6: Backups
 
@@ -340,7 +340,7 @@ Configure PostgreSQL backups:
 
 When you push a new version:
 
-1. **Single-image deploy**: From the Container Images page, click "Deploy" on the Django Backend image. BridgePort creates a deployment plan that:
+1. **Single-image deploy**: From the Container Images page, click "Deploy" on the Django Backend image. BRIDGEPORT creates a deployment plan that:
    - Checks PostgreSQL and Redis are healthy
    - Deploys the Django API
    - Runs a health check on the Django API

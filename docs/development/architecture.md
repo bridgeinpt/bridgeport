@@ -1,6 +1,6 @@
 # Development Architecture
 
-A deep dive into how BridgePort's codebase is organized, how the pieces fit together, and the key design decisions behind them.
+A deep dive into how BRIDGEPORT's codebase is organized, how the pieces fit together, and the key design decisions behind them.
 
 ---
 
@@ -217,7 +217,7 @@ The frontend is a **React** single-page application built with **Vite** and **Ty
 
 ### State Management
 
-BridgePort uses **Zustand** for state management with the persist middleware:
+BRIDGEPORT uses **Zustand** for state management with the persist middleware:
 
 - **`useAppStore`** in `ui/src/lib/store.ts` -- Single store for all persisted state
 - User preferences (filters, time ranges, collapsed states) survive navigation and page refreshes
@@ -257,7 +257,7 @@ Admin pages use a completely separate layout at `/admin/*`.
 
 ## Database Layer
 
-BridgePort uses **SQLite** with **Prisma ORM**.
+BRIDGEPORT uses **SQLite** with **Prisma ORM**.
 
 ### Why SQLite?
 
@@ -348,7 +348,7 @@ METRICS_RETENTION_DAYS=7
 
 ## Authentication Flow
 
-BridgePort supports two authentication methods, both using the `Authorization: Bearer <token>` header:
+BRIDGEPORT supports two authentication methods, both using the `Authorization: Bearer <token>` header:
 
 ```mermaid
 flowchart TD
@@ -404,19 +404,19 @@ Separating business logic from route handlers enables:
 
 ### Why Zustand instead of Redux?
 
-Zustand is simpler, has less boilerplate, supports persist middleware out of the box, and works well for BridgePort's state management needs (mostly persisted preferences).
+Zustand is simpler, has less boilerplate, supports persist middleware out of the box, and works well for BRIDGEPORT's state management needs (mostly persisted preferences).
 
 ### Why setInterval instead of a Job Queue?
 
-BridgePort is designed to be self-contained with zero external dependencies. A timer-based scheduler avoids the need for Redis, RabbitMQ, or any external job queue. The concurrency limiter (`p-limit`) prevents resource exhaustion. For BridgePort's workload (health checks, metrics collection, cleanup), this approach is simple and sufficient.
+BRIDGEPORT is designed to be self-contained with zero external dependencies. A timer-based scheduler avoids the need for Redis, RabbitMQ, or any external job queue. The concurrency limiter (`p-limit`) prevents resource exhaustion. For BRIDGEPORT's workload (health checks, metrics collection, cleanup), this approach is simple and sufficient.
 
 ### Why Single-File SQLite?
 
-BridgePort manages Docker infrastructure -- it does not handle high-throughput application data. SQLite provides:
+BRIDGEPORT manages Docker infrastructure -- it does not handle high-throughput application data. SQLite provides:
 - Atomic transactions without a separate database server
 - Simple backup (copy one file)
 - No connection management complexity
-- Sufficient performance for the operational data BridgePort stores
+- Sufficient performance for the operational data BRIDGEPORT stores
 
 ### Why AES-256-GCM?
 

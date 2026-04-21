@@ -1,6 +1,6 @@
 # Services
 
-A service is BridgePort's representation of a Docker container running on a server -- linked to a container image for centralized tag management, deployment, and health monitoring.
+A service is BRIDGEPORT's representation of a Docker container running on a server -- linked to a container image for centralized tag management, deployment, and health monitoring.
 
 ## Table of Contents
 
@@ -41,7 +41,7 @@ Get a service deployed in 3 steps:
 
 ## How It Works
 
-Every service in BridgePort is a Docker container linked to a `ContainerImage`. The container image is the central entity that tracks the image name, current tag, available tags from the registry, and deployment history. One container image can be shared across multiple services.
+Every service in BRIDGEPORT is a Docker container linked to a `ContainerImage`. The container image is the central entity that tracks the image name, current tag, available tags from the registry, and deployment history. One container image can be shared across multiple services.
 
 ```mermaid
 flowchart LR
@@ -57,7 +57,7 @@ flowchart LR
     style REG fill:#374151,color:#fff
 ```
 
-When you deploy a tag to a service, BridgePort:
+When you deploy a tag to a service, BRIDGEPORT:
 
 1. Creates a deployment record (status: `pending`).
 2. Generates deployment artifacts (compose file, config files) if applicable.
@@ -142,7 +142,7 @@ Content-Type: application/json
 **What happens during deploy:**
 
 1. A `Deployment` record is created with status `pending`, then updated to `deploying`.
-2. BridgePort connects to the server (SSH or socket mode).
+2. BRIDGEPORT connects to the server (SSH or socket mode).
 3. If `generateArtifacts` is true:
    - Creates the deploy directory (`/opt/<service-name>/` or the compose path's directory).
    - Generates and uploads the compose file (auto-generated or from custom template).
@@ -205,7 +205,7 @@ Returns audit log entries for this service (deploys, restarts, health checks, up
 
 ### Service Actions
 
-BridgePort supports several container lifecycle actions:
+BRIDGEPORT supports several container lifecycle actions:
 
 **Restart container:**
 ```http
@@ -383,7 +383,7 @@ Content-Type: application/json
 }
 ```
 
-The `targetPath` is the absolute path on the server where the file will be written during deployment. During deploy, BridgePort:
+The `targetPath` is the absolute path on the server where the file will be written during deployment. During deploy, BRIDGEPORT:
 
 1. Resolves any `{{SECRET_NAME}}` placeholders in the file content with actual secret values.
 2. Uploads the file to the target path via SSH.
@@ -393,11 +393,11 @@ See [Config Files](config-files.md) for creating and managing config files.
 
 ### Docker Compose Templates
 
-BridgePort generates a Docker Compose file for each service during deployment. You can use the auto-generated default or provide a custom template.
+BRIDGEPORT generates a Docker Compose file for each service during deployment. You can use the auto-generated default or provide a custom template.
 
 #### Auto-Generated Template
 
-If no custom template is set, BridgePort generates a minimal compose file:
+If no custom template is set, BRIDGEPORT generates a minimal compose file:
 
 ```yaml
 services:

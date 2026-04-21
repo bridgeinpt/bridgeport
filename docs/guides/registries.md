@@ -1,6 +1,6 @@
 # Registry Connections
 
-Registry connections link BridgePort to your container registries, enabling update detection, tag browsing, digest-based comparison, and automated deployments.
+Registry connections link BRIDGEPORT to your container registries, enabling update detection, tag browsing, digest-based comparison, and automated deployments.
 
 ## Table of Contents
 
@@ -21,7 +21,7 @@ Registry connections link BridgePort to your container registries, enabling upda
 
 ## Quick Start
 
-Connect BridgePort to your container registry in under a minute:
+Connect BRIDGEPORT to your container registry in under a minute:
 
 1. Go to **Orchestration > Registries** in the sidebar.
 2. Click **Add Registry**.
@@ -29,13 +29,13 @@ Connect BridgePort to your container registry in under a minute:
 4. Click **Test Connection** to verify.
 5. Click **Save**.
 
-BridgePort will start checking for image updates every 30 minutes automatically.
+BRIDGEPORT will start checking for image updates every 30 minutes automatically.
 
 ---
 
 ## Supported Registry Types
 
-BridgePort supports three registry types. The "Generic" type covers any Docker Registry V2-compatible service, which includes most private registries.
+BRIDGEPORT supports three registry types. The "Generic" type covers any Docker Registry V2-compatible service, which includes most private registries.
 
 | Type | Description | Auth Method | Use For |
 |------|-------------|-------------|---------|
@@ -57,12 +57,12 @@ The Generic client works with any registry that implements the [OCI Distribution
 
 ## How It Works
 
-BridgePort's registry system connects your container registries to the [Container Images](container-images.md) system. Registries are checked on a schedule, and when new tags are detected, the information flows through to linked images and services.
+BRIDGEPORT's registry system connects your container registries to the [Container Images](container-images.md) system. Registries are checked on a schedule, and when new tags are detected, the information flows through to linked images and services.
 
 ```mermaid
 sequenceDiagram
     participant Sched as Scheduler
-    participant BP as BridgePort
+    participant BP as BRIDGEPORT
     participant Reg as Container Registry
     participant DB as Database
 
@@ -201,7 +201,7 @@ Password:     glpat-abc123...  (GitLab personal access token with read_registry 
 
 ## Refresh Intervals
 
-Each registry connection has a configurable refresh interval that controls how often BridgePort checks for new tags.
+Each registry connection has a configurable refresh interval that controls how often BRIDGEPORT checks for new tags.
 
 | Setting | Range | Default |
 |---------|-------|---------|
@@ -240,7 +240,7 @@ Returns results for each checked service:
 
 ## Auto-Link Patterns
 
-An auto-link pattern is a string that BridgePort matches against image names during container discovery. When a new container is discovered and its image name matches the pattern, BridgePort creates a `ContainerImage` linked to this registry automatically.
+An auto-link pattern is a string that BRIDGEPORT matches against image names during container discovery. When a new container is discovered and its image name matches the pattern, BRIDGEPORT creates a `ContainerImage` linked to this registry automatically.
 
 **Examples:**
 
@@ -308,7 +308,7 @@ Each tag includes:
 
 ## Update Detection
 
-BridgePort uses a digest-based comparison system to detect updates accurately, even for rolling tags like `latest`.
+BRIDGEPORT uses a digest-based comparison system to detect updates accurately, even for rolling tags like `latest`.
 
 ### Version Tags (e.g., `v2.3.1` to `v2.4.0`)
 
@@ -321,7 +321,7 @@ Only tags in the same family as the current tag are compared. If a newer tag exi
 
 ### Rolling Tags (e.g., `latest`)
 
-For rolling tags where the tag name never changes, BridgePort compares the manifest digest from the registry against the `deployedDigest` recorded after the last deployment. If the digests differ, the image was updated.
+For rolling tags where the tag name never changes, BRIDGEPORT compares the manifest digest from the registry against the `deployedDigest` recorded after the last deployment. If the digests differ, the image was updated.
 
 ```mermaid
 flowchart TD
@@ -394,7 +394,7 @@ flowchart TD
 ## Troubleshooting
 
 **"Connection test failed"**
-Verify the registry URL, credentials, and that the BridgePort server can reach the registry. For Generic registries, ensure the URL includes the scheme (e.g., `https://registry.example.com`). The test calls the `/v2/` endpoint.
+Verify the registry URL, credentials, and that the BRIDGEPORT server can reach the registry. For Generic registries, ensure the URL includes the scheme (e.g., `https://registry.example.com`). The test calls the `/v2/` endpoint.
 
 **"Registry API error: 401"**
 Credentials are invalid or expired. For Docker Hub, ensure your access token has not expired. For GHCR, ensure the personal access token has the `read:packages` scope.
@@ -406,7 +406,7 @@ The credentials are valid but lack permissions. For DO registries, the API token
 Container images must be unlinked or deleted before the registry can be removed. Edit each container image and either set `registryConnectionId` to null or delete the image.
 
 **Tags show "0 bytes" and no real timestamps**
-This is normal for Generic V2 registries. The Docker Registry V2 API does not provide size or timestamp information in tag listings. BridgePort fetches digests via manifest HEAD requests but cannot retrieve sizes or timestamps.
+This is normal for Generic V2 registries. The Docker Registry V2 API does not provide size or timestamp information in tag listings. BRIDGEPORT fetches digests via manifest HEAD requests but cannot retrieve sizes or timestamps.
 
 **Update check finds updates but they are false positives**
 This can happen if the deployed digest was not recorded (e.g., the service was deployed before the digest tracking feature was added). Deploy the current tag once to store the digest, which will clear the false positive.

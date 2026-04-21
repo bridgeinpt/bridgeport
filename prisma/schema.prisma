@@ -643,7 +643,7 @@ model SmtpConfig {
   encryptedPassword String?
   passwordNonce     String?
   fromAddress       String
-  fromName          String   @default("BridgePort")
+  fromName          String   @default("BRIDGEPORT")
   enabled           Boolean  @default(true)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
@@ -722,7 +722,7 @@ model ImageDigest {
   tags             String    @default("[]") // JSON array of tags pointing to this digest
   size             BigInt? // Compressed image size in bytes
   pushedAt         DateTime? // When this digest was pushed to the registry
-  discoveredAt     DateTime  @default(now()) // When BridgePort first ingested this digest
+  discoveredAt     DateTime  @default(now()) // When BRIDGEPORT first ingested this digest
   updatedAt        DateTime  @updatedAt
 
   services         Service[]
@@ -859,7 +859,7 @@ model SystemSettings {
 
   // URLs
   publicUrl        String? // Public URL for links in notifications (e.g., https://deploy.bridgein.com)
-  agentCallbackUrl String? // Internal URL for agents to reach BridgePort (e.g., http://10.30.10.5:3000)
+  agentCallbackUrl String? // Internal URL for agents to reach BRIDGEPORT (e.g., http://10.30.10.5:3000)
 
   // Agent Configuration
   agentStaleThresholdMs   Int @default(180000) // 3 min - mark agent as "stale"

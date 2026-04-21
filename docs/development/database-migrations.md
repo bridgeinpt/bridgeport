@@ -1,6 +1,6 @@
 # Database Migrations
 
-BridgePort's migration system is designed around one golden rule: container updates must always work automatically with zero human intervention.
+BRIDGEPORT's migration system is designed around one golden rule: container updates must always work automatically with zero human intervention.
 
 ---
 
@@ -19,7 +19,7 @@ BridgePort's migration system is designed around one golden rule: container upda
 
 ## The Golden Rule
 
-**When someone pulls a new BridgePort image and restarts the container, it must just work.**
+**When someone pulls a new BRIDGEPORT image and restarts the container, it must just work.**
 
 No SSH-ing into the server. No running manual commands. No reading release notes for migration instructions. The container starts, detects pending migrations, applies them, and boots the application.
 
@@ -29,7 +29,7 @@ If this process fails, the deployment is broken and the user is stuck. Every sch
 
 ## How Migrations Run in Production
 
-Every time the BridgePort container starts, the entrypoint script (`docker/entrypoint.sh`) runs before the application:
+Every time the BRIDGEPORT container starts, the entrypoint script (`docker/entrypoint.sh`) runs before the application:
 
 ```mermaid
 flowchart TD

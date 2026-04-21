@@ -1,6 +1,6 @@
 # API Reference
 
-BridgePort exposes a JSON REST API for all operations -- deployments, server management, monitoring, and more. This page covers authentication, error handling, and a high-level overview of endpoint categories.
+BRIDGEPORT exposes a JSON REST API for all operations -- deployments, server management, monitoring, and more. This page covers authentication, error handling, and a high-level overview of endpoint categories.
 
 ## Table of Contents
 
@@ -18,7 +18,7 @@ BridgePort exposes a JSON REST API for all operations -- deployments, server man
 
 ## Base URL
 
-All API endpoints are prefixed with `/api`. If BridgePort runs at `https://deploy.example.com`, the full base URL is:
+All API endpoints are prefixed with `/api`. If BRIDGEPORT runs at `https://deploy.example.com`, the full base URL is:
 
 ```
 https://deploy.example.com/api
@@ -30,7 +30,7 @@ All requests and responses use `Content-Type: application/json` unless otherwise
 
 ## Authentication
 
-BridgePort supports two authentication methods: short-lived JWT tokens for interactive sessions, and long-lived API tokens for programmatic access.
+BRIDGEPORT supports two authentication methods: short-lived JWT tokens for interactive sessions, and long-lived API tokens for programmatic access.
 
 ### JWT Authentication
 
@@ -88,7 +88,7 @@ Once at least one user exists, this endpoint returns `403 Registration disabled`
 API tokens are designed for CI/CD pipelines, scripts, and long-running integrations. Unlike JWTs, they do not expire by default (though you can set an expiry).
 
 > [!WARNING]
-> The full token value is returned **only once** at creation time. BridgePort stores a hash of the token -- it cannot be retrieved later. Copy it immediately and store it securely.
+> The full token value is returned **only once** at creation time. BRIDGEPORT stores a hash of the token -- it cannot be retrieved later. Copy it immediately and store it securely.
 
 **Create a token**
 
@@ -214,7 +214,7 @@ For validation errors (HTTP 400), an additional `details` array provides field-l
 
 ## Endpoint Categories
 
-BridgePort's API is organized into the following categories. Each category corresponds to a route module in `src/routes/`.
+BRIDGEPORT's API is organized into the following categories. Each category corresponds to a route module in `src/routes/`.
 
 | Category | Base Path | Description |
 |----------|-----------|-------------|
@@ -243,7 +243,7 @@ BridgePort's API is organized into the following categories. Each category corre
 | **Spaces** | `/api/spaces/*` | Global S3/Spaces storage configuration |
 
 > [!TIP]
-> BridgePort uses three RBAC roles: **admin** > **operator** > **viewer**. Most read endpoints require any authenticated user. Write operations generally require operator or admin. User management and system settings require admin. See [Users & Roles](../guides/users.md) for the full permission matrix.
+> BRIDGEPORT uses three RBAC roles: **admin** > **operator** > **viewer**. Most read endpoints require any authenticated user. Write operations generally require operator or admin. User management and system settings require admin. See [Users & Roles](../guides/users.md) for the full permission matrix.
 
 ---
 

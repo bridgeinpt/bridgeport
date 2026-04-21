@@ -202,7 +202,7 @@ export async function getHostInfo(environmentId: string): Promise<HostInfo> {
 }
 
 /**
- * Register the Docker host as a server in BridgePort.
+ * Register the Docker host as a server in BRIDGEPORT.
  * Uses socket mode if Docker socket is available (preferred for host),
  * otherwise falls back to SSH mode.
  */

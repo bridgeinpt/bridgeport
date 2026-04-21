@@ -10,7 +10,7 @@ export default function About() {
         <div className="mb-6">
           <img
             src="/logo.png"
-            alt="BridgePort"
+            alt="BRIDGEPORT"
             className="h-28 mx-auto mb-4"
           />
           <p className="text-primary-400 mt-1 font-medium">

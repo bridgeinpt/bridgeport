@@ -1,8 +1,8 @@
 # Changelog
 
-All notable changes to BridgePort are documented in this file.
+All notable changes to BRIDGEPORT are documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). BridgePort uses git-based versioning in the format `YYYYMMDDHH-{7-char SHA}`.
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). BRIDGEPORT uses git-based versioning in the format `YYYYMMDDHH-{7-char SHA}`.
 
 ## [Unreleased]
 
@@ -10,7 +10,7 @@ _Nothing yet._
 
 ## [1.0.0] - 2026-02-25
 
-Initial public release of BridgePort.
+Initial public release of BRIDGEPORT.
 
 ### Added
 
@@ -51,7 +51,7 @@ Initial public release of BridgePort.
 - Lightweight Go monitoring agent with push-based metrics delivery
 - Container-level metrics (CPU, memory, network I/O, block I/O)
 - Agent container snapshots and process snapshots
-- Agent auto-deployment via SSH from the BridgePort UI
+- Agent auto-deployment via SSH from the BRIDGEPORT UI
 - Agent lifecycle event tracking (deploy, status change, token regeneration)
 - Agent upgrade detection with "Update available" indicators
 - Database monitoring with plugin-driven queries for PostgreSQL, MySQL, SQLite, MongoDB, and Redis
@@ -139,7 +139,7 @@ Initial public release of BridgePort.
 - Reset to defaults capability
 
 **CLI Tool**
-- `login` -- authenticate with a BridgePort instance
+- `login` -- authenticate with a BRIDGEPORT instance
 - `whoami` -- show current user and server info
 - `config` -- manage CLI configuration
 - `list` -- list servers in an environment

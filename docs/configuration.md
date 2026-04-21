@@ -1,6 +1,6 @@
 # Configuration Reference
 
-Everything you can configure in BridgePort -- environment variables for the container, plus an overview of UI-based settings.
+Everything you can configure in BRIDGEPORT -- environment variables for the container, plus an overview of UI-based settings.
 
 ---
 
@@ -16,11 +16,11 @@ Everything you can configure in BridgePort -- environment variables for the cont
 
 ## Essential Configuration
 
-BridgePort requires three environment variables. Everything else has sensible defaults.
+BRIDGEPORT requires three environment variables. Everything else has sensible defaults.
 
 ### MASTER_KEY
 
-The encryption key for all secrets and SSH keys stored in BridgePort. Generate it once and keep it safe.
+The encryption key for all secrets and SSH keys stored in BRIDGEPORT. Generate it once and keep it safe.
 
 ```bash
 openssl rand -base64 32
@@ -39,7 +39,7 @@ openssl rand -base64 32
 
 ### DATABASE_URL
 
-The path to BridgePort's SQLite database. For Docker deployments, this should point to a file inside your mounted data volume.
+The path to BRIDGEPORT's SQLite database. For Docker deployments, this should point to a file inside your mounted data volume.
 
 ```
 DATABASE_URL=file:/data/bridgeport.db
@@ -52,7 +52,7 @@ DATABASE_URL=file:/data/bridgeport.db
 
 ## Environment Variable Reference
 
-All environment variables BridgePort accepts, grouped by concern.
+All environment variables BRIDGEPORT accepts, grouped by concern.
 
 ### Core
 
@@ -79,7 +79,7 @@ All environment variables BridgePort accepts, grouped by concern.
 | `ADMIN_PASSWORD` | string | _(none)_ | Password for the initial admin account. Minimum 8 characters. Only used on first boot. |
 
 > [!NOTE]
-> `ADMIN_EMAIL` and `ADMIN_PASSWORD` are only used once -- when BridgePort starts for the first time with an empty database. After the initial admin account is created, these variables are ignored. You can remove them from your `.env` file after first boot.
+> `ADMIN_EMAIL` and `ADMIN_PASSWORD` are only used once -- when BRIDGEPORT starts for the first time with an empty database. After the initial admin account is created, these variables are ignored. You can remove them from your `.env` file after first boot.
 
 ### Scheduler
 
@@ -116,7 +116,7 @@ Background job intervals. All values are in **seconds**. These set the global ca
 | `SSH_USER` | string | `root` | Default SSH username. **Deprecated** -- use per-environment settings instead. |
 
 > [!NOTE]
-> `SSH_KEY_PATH` and `SSH_USER` are legacy fallbacks from before BridgePort had per-environment SSH configuration. New deployments should configure SSH keys in the UI under **Configuration > Environment Settings**.
+> `SSH_KEY_PATH` and `SSH_USER` are legacy fallbacks from before BRIDGEPORT had per-environment SSH configuration. New deployments should configure SSH keys in the UI under **Configuration > Environment Settings**.
 
 ### Webhooks
 
@@ -127,7 +127,7 @@ Background job intervals. All values are in **seconds**. These set the global ca
 
 ### Sentry (Error Monitoring)
 
-All Sentry configuration is optional. BridgePort works fine without it.
+All Sentry configuration is optional. BRIDGEPORT works fine without it.
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
@@ -146,14 +146,14 @@ All Sentry configuration is optional. BridgePort works fine without it.
 
 ### Minimal (Trying It Out)
 
-The bare minimum to get BridgePort running:
+The bare minimum to get BRIDGEPORT running:
 
 ```env
 MASTER_KEY=your-generated-key-here
 JWT_SECRET=your-generated-secret-here
 ```
 
-BridgePort will use defaults for everything else: SQLite at `./data/bridgeport.db`, port 3000, all schedulers enabled.
+BRIDGEPORT will use defaults for everything else: SQLite at `./data/bridgeport.db`, port 3000, all schedulers enabled.
 
 ### Production (Recommended)
 
@@ -204,7 +204,7 @@ METRICS_RETENTION_DAYS=30
 ```
 
 > [!NOTE]
-> Higher frequency means more SSH connections to your servers. If you're managing many servers, consider deploying the [monitoring agent](reference/agent.md) instead -- it pushes metrics without BridgePort needing to poll.
+> Higher frequency means more SSH connections to your servers. If you're managing many servers, consider deploying the [monitoring agent](reference/agent.md) instead -- it pushes metrics without BRIDGEPORT needing to poll.
 
 ### CI/CD Integration
 

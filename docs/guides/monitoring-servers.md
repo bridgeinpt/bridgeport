@@ -1,12 +1,12 @@
 # Server Monitoring
 
-BridgePort collects server-level metrics (CPU, memory, disk, load, swap, TCP connections, and file descriptors) via SSH polling or a lightweight push agent, stores them as time-series data, and visualizes them in interactive charts.
+BRIDGEPORT collects server-level metrics (CPU, memory, disk, load, swap, TCP connections, and file descriptors) via SSH polling or a lightweight push agent, stores them as time-series data, and visualizes them in interactive charts.
 
 ## Quick Start
 
 1. Navigate to **Servers** and select a server.
 2. In the **Monitoring** card, choose a metrics mode:
-   - **SSH** -- BridgePort polls the server over SSH on a schedule.
+   - **SSH** -- BRIDGEPORT polls the server over SSH on a schedule.
    - **Agent** -- A lightweight Go binary runs on the server and pushes metrics.
 3. Go to **Monitoring > Servers** to see your first data points.
 
@@ -18,7 +18,7 @@ BridgePort collects server-level metrics (CPU, memory, disk, load, swap, TCP con
 ```mermaid
 sequenceDiagram
     participant S as Scheduler
-    participant BP as BridgePort
+    participant BP as BRIDGEPORT
     participant SRV as Your Server
     participant A as Agent (optional)
     participant DB as SQLite
@@ -104,8 +104,8 @@ Charts auto-refresh every 30 seconds. Toggle auto-refresh on or off with the che
 
 When you set a server's metrics mode to `agent`:
 
-1. BridgePort generates a unique agent token for the server.
-2. BridgePort SSHs into the server and deploys the agent binary.
+1. BRIDGEPORT generates a unique agent token for the server.
+2. BRIDGEPORT SSHs into the server and deploys the agent binary.
 3. The agent starts pushing to `POST /api/metrics/ingest` using the token.
 4. The server's `agentStatus` transitions from `waiting` to `active`.
 
@@ -133,11 +133,11 @@ If you need to rotate the agent token:
 
 1. Go to **Monitoring > Agents & SSH**.
 2. Click **Regenerate Token** on the server.
-3. BridgePort generates a new token and redeploys the agent automatically.
+3. BRIDGEPORT generates a new token and redeploys the agent automatically.
 
 ### Agent Upgrade Indicators
 
-The server detail page and the **Monitoring > Agents** page show an "Update available" badge when the deployed agent version differs from the bundled version in BridgePort.
+The server detail page and the **Monitoring > Agents** page show an "Update available" badge when the deployed agent version differs from the bundled version in BRIDGEPORT.
 
 ## Collection Intervals
 
@@ -204,13 +204,13 @@ Old `ServerMetrics` and `ServiceMetrics` rows older than the retention period ar
 1. **Check agent status**: Go to **Monitoring > Agents & SSH**. The agent should show `active`.
 2. **If status is `waiting`**: The agent may not have connected yet. Check the server's Docker logs or system journal.
 3. **If status is `offline`**: The agent stopped pushing. SSH into the server and check if the agent process is running.
-4. **Check firewall**: The agent needs outbound HTTPS access to your BridgePort instance.
+4. **Check firewall**: The agent needs outbound HTTPS access to your BRIDGEPORT instance.
 5. **Regenerate token**: If the token is compromised or lost, use **Regenerate Token** to redeploy.
 
 ### Stale or missing data points
 
 - Check the **Metrics Mode** is not `disabled`.
-- Verify the scheduler is running (check BridgePort container logs for `[Scheduler]` messages).
+- Verify the scheduler is running (check BRIDGEPORT container logs for `[Scheduler]` messages).
 - For SSH mode, large collection intervals mean fewer data points. Decrease `SCHEDULER_METRICS_INTERVAL` for more granularity.
 
 ### Charts show flat lines

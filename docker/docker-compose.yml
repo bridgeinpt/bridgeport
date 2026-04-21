@@ -1,7 +1,7 @@
-# BridgePort Docker Compose Configuration
+# BRIDGEPORT Docker Compose Configuration
 #
 # Host Server Management:
-# BridgePort can manage Docker containers on the host machine in two ways:
+# BRIDGEPORT can manage Docker containers on the host machine in two ways:
 #
 # Option 1: Docker Socket (Recommended for host management)
 # - Mount the Docker socket to allow direct Docker API access
@@ -34,7 +34,7 @@ services:
       - ./data:/data
       # Docker socket mount (optional - for host container management)
       # Uncomment to enable socket mode for managing containers on this host.
-      # Security note: This gives BridgePort full access to the Docker daemon.
+      # Security note: This gives BRIDGEPORT full access to the Docker daemon.
       # - /var/run/docker.sock:/var/run/docker.sock
       #
       # Custom plugins (optional - mount to add/override plugin JSON files)
@@ -42,7 +42,7 @@ services:
       #
       # SSH keys are configured via the UI per environment (Settings > SSH)
       # Each environment has its own SSH key for security isolation
-      # Keys are encrypted and stored in the BridgePort database
+      # Keys are encrypted and stored in the BRIDGEPORT database
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/health"]
       interval: 30s

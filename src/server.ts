@@ -268,7 +268,7 @@ async function main() {
       port: config.PORT,
     });
 
-    console.log(`🚀 BridgePort running at http://${config.HOST}:${config.PORT}`);
+    console.log(`🚀 BRIDGEPORT running at http://${config.HOST}:${config.PORT}`);
   } catch (error) {
     console.error('Failed to start server:', error);
     process.exit(1);

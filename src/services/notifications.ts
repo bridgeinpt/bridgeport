@@ -50,7 +50,7 @@ const DEFAULT_TYPES: Array<{
     category: 'user',
     name: 'Account Created',
     description: 'Your account has been created',
-    template: 'Welcome to BridgePort! Your account has been created.',
+    template: 'Welcome to BRIDGEPORT! Your account has been created.',
     defaultChannels: ['in_app', 'email'],
     severity: 'info',
     bounceEnabled: false,
@@ -379,7 +379,7 @@ export async function send(
       const { html, text } = generateNotificationEmail(title, message, notificationType.severity, envName);
       const emailResult = await sendEmail({
         to: user.email,
-        subject: `[BridgePort] ${title}`,
+        subject: `[BRIDGEPORT] ${title}`,
         html,
         text,
       });

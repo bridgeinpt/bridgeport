@@ -1,25 +1,25 @@
 # Backup & Restore
 
-Protect your BridgePort instance and managed databases with regular backups, and know exactly how to restore when things go wrong.
+Protect your BRIDGEPORT instance and managed databases with regular backups, and know exactly how to restore when things go wrong.
 
 ---
 
 ## Table of Contents
 
-- [BridgePort's Own Data](#bridgeports-own-data)
+- [BRIDGEPORT's Own Data](#bridgeports-own-data)
 - [Backup Methods](#backup-methods)
 - [Automating Backups with Cron](#automating-backups-with-cron)
 - [The MASTER_KEY](#the-master_key)
-- [Restoring BridgePort](#restoring-bridgeport)
+- [Restoring BRIDGEPORT](#restoring-bridgeport)
 - [Managed Database Backups](#managed-database-backups)
 - [Storage Options](#storage-options)
 - [Recovery Scenarios](#recovery-scenarios)
 
 ---
 
-## BridgePort's Own Data
+## BRIDGEPORT's Own Data
 
-All BridgePort data lives in a single SQLite database file. This includes:
+All BRIDGEPORT data lives in a single SQLite database file. This includes:
 
 - Server, service, and environment configurations
 - Config files (text and binary, stored as base64)
@@ -48,7 +48,7 @@ All BridgePort data lives in a single SQLite database file. This includes:
 
 ### Simple File Copy (requires brief stop)
 
-Stop BridgePort to ensure the database is not being written to:
+Stop BRIDGEPORT to ensure the database is not being written to:
 
 ```bash
 docker compose stop
@@ -69,7 +69,7 @@ sqlite3 ./data/bridgeport.db ".backup './backups/bridgeport-$(date +%Y%m%d).db'"
 This is the recommended method for production. It uses SQLite's backup API, which handles concurrent writes safely.
 
 > [!TIP]
-> If `sqlite3` is not installed on your host, you can run it from inside the BridgePort container:
+> If `sqlite3` is not installed on your host, you can run it from inside the BRIDGEPORT container:
 > ```bash
 > docker exec bridgeport sqlite3 /data/bridgeport.db ".backup '/data/backups/bridgeport-$(date +%Y%m%d).db'"
 > ```
@@ -99,7 +99,7 @@ To clean up old backups automatically, add a second cron entry:
 
 ## The MASTER_KEY
 
-The `MASTER_KEY` is a 32-byte (base64-encoded) value used to encrypt and decrypt all sensitive data in BridgePort. It is the single most important secret in your deployment.
+The `MASTER_KEY` is a 32-byte (base64-encoded) value used to encrypt and decrypt all sensitive data in BRIDGEPORT. It is the single most important secret in your deployment.
 
 ### What It Protects
 
@@ -120,11 +120,11 @@ The `MASTER_KEY` is a 32-byte (base64-encoded) value used to encrypt and decrypt
 
 ---
 
-## Restoring BridgePort
+## Restoring BRIDGEPORT
 
 ### Standard Restore
 
-1. Stop BridgePort:
+1. Stop BRIDGEPORT:
    ```bash
    docker compose stop
    ```
@@ -136,7 +136,7 @@ The `MASTER_KEY` is a 32-byte (base64-encoded) value used to encrypt and decrypt
 
 3. Verify your `MASTER_KEY` in `.env` matches the key used when the backup was created.
 
-4. Start BridgePort:
+4. Start BRIDGEPORT:
    ```bash
    docker compose up -d
    ```
@@ -147,20 +147,20 @@ The `MASTER_KEY` is a 32-byte (base64-encoded) value used to encrypt and decrypt
    ```
 
 > [!NOTE]
-> If you are restoring a backup made with an older version of BridgePort onto a newer version, the entrypoint script will automatically apply any pending migrations. This is safe and expected.
+> If you are restoring a backup made with an older version of BRIDGEPORT onto a newer version, the entrypoint script will automatically apply any pending migrations. This is safe and expected.
 
 ### Restoring to a Different Server
 
 1. Copy the database backup and your `.env` file to the new server
 2. Ensure the `MASTER_KEY` and `JWT_SECRET` in `.env` match the original deployment
 3. Set up the same volume mount structure (or adjust `DATABASE_URL` and `UPLOAD_DIR`)
-4. Start BridgePort -- it will detect the existing database and apply any needed migrations
+4. Start BRIDGEPORT -- it will detect the existing database and apply any needed migrations
 
 ---
 
 ## Managed Database Backups
 
-BridgePort can manage backups for your application databases (PostgreSQL, MySQL, SQLite). For full setup instructions, see the [Databases guide](../guides/databases.md).
+BRIDGEPORT can manage backups for your application databases (PostgreSQL, MySQL, SQLite). For full setup instructions, see the [Databases guide](../guides/databases.md).
 
 ### Quick Summary
 
@@ -172,7 +172,7 @@ BridgePort can manage backups for your application databases (PostgreSQL, MySQL,
 
 ### Restoring a Managed Database
 
-BridgePort tracks backup files but does not perform automated restores. Download the backup and use the appropriate tool:
+BRIDGEPORT tracks backup files but does not perform automated restores. Download the backup and use the appropriate tool:
 
 **PostgreSQL (plain SQL format)**:
 ```bash
@@ -225,13 +225,13 @@ For detailed setup, see the [Storage guide](../guides/storage.md).
 
 ## Recovery Scenarios
 
-### Corrupted BridgePort Database
+### Corrupted BRIDGEPORT Database
 
-**Symptoms**: BridgePort won't start, logs show "database disk image is malformed" or migration errors.
+**Symptoms**: BRIDGEPORT won't start, logs show "database disk image is malformed" or migration errors.
 
 **Recovery**:
 
-1. Stop BridgePort:
+1. Stop BRIDGEPORT:
    ```bash
    docker compose stop
    ```
@@ -269,7 +269,7 @@ For detailed setup, see the [Storage guide](../guides/storage.md).
 
 2. Update your `.env` with the new key
 
-3. Restart BridgePort:
+3. Restart BRIDGEPORT:
    ```bash
    docker compose up -d
    ```
@@ -291,21 +291,21 @@ For detailed setup, see the [Storage guide](../guides/storage.md).
    docker logs bridgeport
    ```
 
-2. The issue is in the migration SQL. This is a bug in the BridgePort release.
+2. The issue is in the migration SQL. This is a bug in the BRIDGEPORT release.
 
 3. Restore your pre-upgrade database backup:
    ```bash
    cp ./backups/bridgeport-pre-upgrade.db ./data/bridgeport.db
    ```
 
-4. Pin BridgePort to the previous working version until the issue is fixed:
+4. Pin BRIDGEPORT to the previous working version until the issue is fixed:
    ```yaml
    services:
      bridgeport:
        image: ghcr.io/bridgeinpt/bridgeport:previous-tag
    ```
 
-5. Report the migration issue to the BridgePort maintainers.
+5. Report the migration issue to the BRIDGEPORT maintainers.
 
 ### Lost SSH Key
 
@@ -318,7 +318,7 @@ If an environment's SSH key is lost or compromised:
 
 2. Add the public key to `~/.ssh/authorized_keys` on all servers in that environment
 
-3. Upload the new private key in BridgePort: **Settings > SSH** for that environment
+3. Upload the new private key in BRIDGEPORT: **Settings > SSH** for that environment
 
 4. Test connectivity from **Monitoring > Agents** using the SSH test feature
 

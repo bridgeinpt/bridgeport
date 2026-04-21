@@ -1,6 +1,6 @@
 # Service Topology Diagram
 
-Visualize your entire infrastructure at a glance with BridgePort's interactive topology diagram -- see which services talk to which databases, how traffic flows between components, and where everything runs.
+Visualize your entire infrastructure at a glance with BRIDGEPORT's interactive topology diagram -- see which services talk to which databases, how traffic flows between components, and where everything runs.
 
 ## Table of Contents
 
@@ -46,7 +46,7 @@ The topology diagram lives on your **Dashboard** page and renders an interactive
 
 You need at least one environment with services or databases already created. If you are starting from scratch, see [Services](services.md) and [Databases](databases.md) first.
 
-1. Navigate to the **Dashboard** (click the BridgePort logo or go to `/`).
+1. Navigate to the **Dashboard** (click the BRIDGEPORT logo or go to `/`).
 2. Select your environment from the sidebar dropdown.
 3. Your services and databases appear as nodes, grouped by server.
 4. Click **Add Connection** to draw a line between two nodes.
@@ -211,7 +211,7 @@ Databases that have a `serverId` appear inside that server's group. Standalone d
 
 ### Dragging and Layout Persistence
 
-Every node on the diagram is draggable. When you release a node, BridgePort saves the new position to the database:
+Every node on the diagram is draggable. When you release a node, BRIDGEPORT saves the new position to the database:
 
 ```
 PUT /api/diagram-layout
@@ -275,7 +275,7 @@ During an outage, the topology diagram shows unhealthy nodes in red. Follow the 
 
 ### 3. Architecture Documentation
 
-Export the topology as Mermaid and embed it in your project's README or wiki. Since connections are maintained in BridgePort, the exported diagram stays up to date with a single API call.
+Export the topology as Mermaid and embed it in your project's README or wiki. Since connections are maintained in BRIDGEPORT, the exported diagram stays up to date with a single API call.
 
 ### 4. Planning Infrastructure Changes
 

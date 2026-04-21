@@ -1,6 +1,6 @@
 # Secrets and Variables
 
-BridgePort stores your configuration values -- encrypted secrets (API keys, passwords, tokens) or plaintext variables (hostnames, ports, feature flags) -- and makes them available to services through config file templates with automatic `${KEY}` placeholder substitution.
+BRIDGEPORT stores your configuration values -- encrypted secrets (API keys, passwords, tokens) or plaintext variables (hostnames, ports, feature flags) -- and makes them available to services through config file templates with automatic `${KEY}` placeholder substitution.
 
 Two entities, one resolution pipeline:
 
@@ -36,13 +36,13 @@ Store a secret and use it in a config file in under a minute:
 3. Enter key `DATABASE_URL`, value `postgres://user:pass@db:5432/app`, and click **Create**.
 4. Go to **Configuration > Config Files**, create or edit a `.env` file.
 5. Add `DATABASE_URL=${DATABASE_URL}` to the file content.
-6. Attach the config file to a service, then **Sync Files** -- BridgePort writes the resolved value to the server.
+6. Attach the config file to a service, then **Sync Files** -- BRIDGEPORT writes the resolved value to the server.
 
 ---
 
 ## How It Works
 
-Secrets and vars in BridgePort follow a simple flow: store (encrypted for secrets, plaintext for vars), reference by name, resolve at sync time.
+Secrets and vars in BRIDGEPORT follow a simple flow: store (encrypted for secrets, plaintext for vars), reference by name, resolve at sync time.
 
 ```mermaid
 flowchart LR
@@ -188,7 +188,7 @@ DEBUG=false
 LOG_LEVEL=info
 ```
 
-When you sync this file to a server, BridgePort resolves each `${KEY}` placeholder with the corresponding secret value from the environment. The file written to the server contains the actual values:
+When you sync this file to a server, BRIDGEPORT resolves each `${KEY}` placeholder with the corresponding secret value from the environment. The file written to the server contains the actual values:
 
 ```env
 # Application configuration
@@ -201,7 +201,7 @@ LOG_LEVEL=info
 
 ### Placeholder Syntax
 
-BridgePort recognizes the following placeholder formats when listing secret usage:
+BRIDGEPORT recognizes the following placeholder formats when listing secret usage:
 
 | Format | Example | Used For |
 |--------|---------|----------|
@@ -214,13 +214,13 @@ BridgePort recognizes the following placeholder formats when listing secret usag
 
 ### Missing Keys
 
-If a config file references a key that does not exist as either a secret or a var in the environment, the sync fails with an error listing the missing keys. This is a safety measure -- BridgePort will not write a file with unresolved placeholders to your server. Create the missing secret or var first, then retry the sync.
+If a config file references a key that does not exist as either a secret or a var in the environment, the sync fails with an error listing the missing keys. This is a safety measure -- BRIDGEPORT will not write a file with unresolved placeholders to your server. Create the missing secret or var first, then retry the sync.
 
 ### Template Flow
 
 ```mermaid
 flowchart TD
-    A[Config file template<br/>stored in BridgePort] --> B[Sync triggered<br/>per-service or per-server]
+    A[Config file template<br/>stored in BRIDGEPORT] --> B[Sync triggered<br/>per-service or per-server]
     B --> C[Fetch vars + decrypted secrets<br/>for the environment]
     C --> D[Substitute vars first,<br/>then secrets over them]
     D --> E{Any unresolved<br/>placeholders?}
@@ -245,7 +245,7 @@ Binary files are skipped. The scan runs on demand; nothing is scanned or stored 
 
 1. Navigate to **Configuration > Secrets and Variables**.
 2. Expand the **Scan Suggestions** panel (or click **Run Scan**).
-3. BridgePort reports all suggestions sorted by occurrence count (highest first), with secret-looking values ranked above var-looking ones on ties.
+3. BRIDGEPORT reports all suggestions sorted by occurrence count (highest first), with secret-looking values ranked above var-looking ones on ties.
 
 Each suggestion includes:
 
@@ -261,7 +261,7 @@ Applying a suggestion walks through a 3-step modal:
 
 1. **Confirm** -- review the proposed key, type, and affected files. Edit the key or type before proceeding.
 2. **Preview** -- see a diff for every affected file showing `literal-value` → `${KEY}` with a replacement count. Nothing is written yet.
-3. **Apply** -- BridgePort creates the secret or var (if not already present), substitutes the value in every selected file, saves the previous content to [file history](config-files.md#file-history) for rollback, and writes an audit log entry per mutation with `source: config_scan`.
+3. **Apply** -- BRIDGEPORT creates the secret or var (if not already present), substitutes the value in every selected file, saves the previous content to [file history](config-files.md#file-history) for rollback, and writes an audit log entry per mutation with `source: config_scan`.
 
 The scan itself is read-only and always safe to run. Only the apply step mutates data.
 
@@ -308,7 +308,7 @@ Set `existingSecretId` to reuse an existing secret or var instead of creating a 
 
 ## Reveal Controls
 
-BridgePort has two independent layers of reveal control to protect sensitive values.
+BRIDGEPORT has two independent layers of reveal control to protect sensitive values.
 
 ### Environment-Level Control
 
@@ -361,7 +361,7 @@ Content-Type: application/json
 
 The Secrets and Vars tabs both show where each key is referenced, so you can understand the impact of changing or deleting an entry before you do it.
 
-For every secret and var, BridgePort scans all config files in the environment and reports:
+For every secret and var, BRIDGEPORT scans all config files in the environment and reports:
 
 - **Config files** that reference the key (by detecting `${KEY}`, `$KEY`, or `{{KEY}}` patterns; vars also match leading `KEY=` lines).
 - **Services** that those config files are attached to.
@@ -423,7 +423,7 @@ Updating a secret re-encrypts the value with the current `MASTER_KEY`. Vars use 
 
 When rotating a secret (e.g., a database password):
 
-1. Update the secret value in BridgePort.
+1. Update the secret value in BRIDGEPORT.
 2. Check which services use the secret (via usage tracking).
 3. Sync config files to all affected services.
 4. Restart the services to pick up the new configuration.
@@ -514,7 +514,7 @@ The secret has `neverReveal: true`. This cannot be reversed. If you need to see 
 The config file references keys that exist as neither a secret nor a var in this environment. Create the missing entry (as a secret if sensitive, as a var otherwise), then retry the sync.
 
 **Secret value not updating on the server after change**
-Updating a secret or var in BridgePort does not automatically sync config files. After updating, re-sync the config files attached to the affected services. The sync status will show "pending" for files that need re-syncing.
+Updating a secret or var in BRIDGEPORT does not automatically sync config files. After updating, re-sync the config files attached to the affected services. The sync status will show "pending" for files that need re-syncing.
 
 **"Var already exists"**
 Var keys must be unique within an environment (same rule as secrets, but tracked on a separate table). The same key *can* exist as both a secret and a var in one environment -- the secret takes precedence at resolution time.

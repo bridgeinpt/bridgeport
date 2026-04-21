@@ -133,7 +133,7 @@ Content-Type: application/json
 }
 ```
 
-The `targetPath` is the absolute path on the server where the file will be written during sync. BridgePort creates parent directories automatically if they do not exist.
+The `targetPath` is the absolute path on the server where the file will be written during sync. BRIDGEPORT creates parent directories automatically if they do not exist.
 
 ### Detaching a File
 
@@ -191,7 +191,7 @@ Authorization: Bearer <token>
 
 ### Per-File Sync
 
-Syncs a specific config file to every service it is attached to. BridgePort groups by server to minimize SSH connections:
+Syncs a specific config file to every service it is attached to. BRIDGEPORT groups by server to minimize SSH connections:
 
 **UI:** Config file detail page > **Sync to All** button.
 
@@ -205,7 +205,7 @@ Authorization: Bearer <token>
 
 ```mermaid
 sequenceDiagram
-    participant BP as BridgePort
+    participant BP as BRIDGEPORT
     participant SSH as Server (SSH)
 
     BP->>SSH: Connect via SSH
@@ -254,7 +254,7 @@ Quick summary:
 - A [Config File Scanner](secrets.md#config-file-scanner) can detect hardcoded values across your config files and offer to promote them to secrets or vars.
 
 ```env
-# Template stored in BridgePort:
+# Template stored in BRIDGEPORT:
 DATABASE_URL=${DATABASE_URL}
 SECRET_KEY=${DJANGO_SECRET_KEY}
 DEBUG=false
@@ -387,7 +387,7 @@ Upload a certificate file (`.pem`, `.crt`, `.key`) as a binary asset. Attach it 
 
 ### Crontabs and Systemd Units
 
-Any text-based configuration file can be managed through BridgePort. Sync crontab files, systemd service units, or application-specific configs.
+Any text-based configuration file can be managed through BRIDGEPORT. Sync crontab files, systemd service units, or application-specific configs.
 
 ---
 
@@ -437,8 +437,8 @@ The SSH connection succeeded but writing to the target path failed. Common cause
 Check the error details in the sync results for the specific failure message.
 
 **"Connection failed" during sync**
-BridgePort could not establish an SSH connection to the server. Verify:
-- The server's hostname is reachable from BridgePort.
+BRIDGEPORT could not establish an SSH connection to the server. Verify:
+- The server's hostname is reachable from BRIDGEPORT.
 - The environment's SSH key is configured and valid.
 - The SSH user has access to the server.
 
@@ -446,7 +446,7 @@ BridgePort could not establish an SSH connection to the server. Verify:
 If `${KEY}` placeholders appear as literal text in the synced file, the secret either does not exist or is named differently than expected. Check the exact key name -- it is case-sensitive and must match `^[A-Z][A-Z0-9_]*$`.
 
 **Config file edit does not update the server**
-Editing a config file in BridgePort does not automatically sync to servers. After editing, check the sync status (it should show "Pending") and trigger a sync manually.
+Editing a config file in BRIDGEPORT does not automatically sync to servers. After editing, check the sync status (it should show "Pending") and trigger a sync manually.
 
 **"Config file with this name already exists"**
 Config file names are unique per environment. Choose a different name, or find and edit the existing file.

@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { eventBus, type BridgePortEvent } from '../lib/event-bus.js';
+import { eventBus, type BRIDGEPORTEvent } from '../lib/event-bus.js';
 import { validateApiToken, getUserById } from '../services/auth.js';
 
 export async function eventRoutes(fastify: FastifyInstance): Promise<void> {
@@ -52,7 +52,7 @@ export async function eventRoutes(fastify: FastifyInstance): Promise<void> {
         reply.raw.write(':keepalive\n\n');
       }, 30000);
 
-      const onEvent = (event: BridgePortEvent) => {
+      const onEvent = (event: BRIDGEPORTEvent) => {
         // Filter by environment if specified
         if (environmentId && 'environmentId' in event.data && event.data.environmentId !== environmentId) {
           return;

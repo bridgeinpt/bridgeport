@@ -1,6 +1,6 @@
 # Security Policy
 
-BridgePort takes security seriously. This document describes how to report vulnerabilities and what to expect from us.
+BRIDGEPORT takes security seriously. This document describes how to report vulnerabilities and what to expect from us.
 
 ## Reporting a Vulnerability
 
@@ -50,7 +50,7 @@ Instead, email us at **security@bridgein.pt** with:
 
 ## Supported Versions
 
-BridgePort follows a rolling release model. We support the **latest release** with security patches.
+BRIDGEPORT follows a rolling release model. We support the **latest release** with security patches.
 
 | Version | Supported |
 |---------|-----------|
@@ -61,7 +61,7 @@ We recommend always running the latest version. Upgrades are designed to be seam
 
 ## Security Architecture
 
-BridgePort includes several security features by default:
+BRIDGEPORT includes several security features by default:
 
 - **Encryption at rest**: Secrets, SSH keys, and registry credentials are encrypted with AES-256-GCM using the `MASTER_KEY`
 - **Authentication**: JWT tokens with bcrypt password hashing, plus API tokens for programmatic access
@@ -73,20 +73,20 @@ For the full security architecture and production hardening checklist, see [docs
 
 ## Security Configuration Recommendations
 
-When deploying BridgePort in production:
+When deploying BRIDGEPORT in production:
 
 - [ ] Run behind a reverse proxy with HTTPS (Caddy, Nginx, or Traefik)
 - [ ] Generate strong, unique values for `MASTER_KEY` and `JWT_SECRET`
 - [ ] Change the default admin credentials immediately after first login
 - [ ] Set `CORS_ORIGIN` to your specific domain(s)
-- [ ] Restrict network access to the BridgePort port (3000) via firewall rules
+- [ ] Restrict network access to the BRIDGEPORT port (3000) via firewall rules
 - [ ] Use the Docker socket mount only in trusted environments (it provides root-equivalent access)
 - [ ] Back up your `MASTER_KEY` securely and separately from the database -- without it, encrypted data cannot be recovered
 - [ ] Review audit logs periodically for unexpected activity
 
 ## Acknowledgments
 
-We gratefully acknowledge security researchers who help keep BridgePort secure. With your permission, we will list your name or handle here after coordinated disclosure.
+We gratefully acknowledge security researchers who help keep BRIDGEPORT secure. With your permission, we will list your name or handle here after coordinated disclosure.
 
 ## Contact
 

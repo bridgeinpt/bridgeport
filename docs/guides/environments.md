@@ -33,11 +33,11 @@ You are ready to add servers to this environment.
 
 ## How It Works
 
-An environment is a top-level container in BridgePort. Everything lives inside an environment: servers, services, container images, secrets, config files, databases, and registries.
+An environment is a top-level container in BRIDGEPORT. Everything lives inside an environment: servers, services, container images, secrets, config files, databases, and registries.
 
 ```mermaid
 flowchart TD
-    BP[BridgePort] --> E1[Environment: staging]
+    BP[BRIDGEPORT] --> E1[Environment: staging]
     BP --> E2[Environment: production]
 
     E1 --> SK1[SSH Key<br>encrypted]
@@ -68,7 +68,7 @@ flowchart TD
 - Per-module settings are configured independently for each environment.
 - Users and system settings are global (not environment-scoped).
 
-When creating an environment, BridgePort automatically creates default settings for all five modules (General, Monitoring, Operations, Data, Configuration).
+When creating an environment, BRIDGEPORT automatically creates default settings for all five modules (General, Monitoring, Operations, Data, Configuration).
 
 ---
 
@@ -366,7 +366,7 @@ Use clear, lowercase names that map to your deployment stages:
 
 1. Generate a new key pair.
 2. Add the new public key to all servers in the environment.
-3. Upload the new private key to BridgePort via `PUT /api/environments/:envId/ssh`.
+3. Upload the new private key to BRIDGEPORT via `PUT /api/environments/:envId/ssh`.
 4. Verify connectivity by running a health check on each server.
 5. Remove the old public key from servers.
 

@@ -26,12 +26,12 @@ var Version = "dev"
 
 var rootCmd = &cobra.Command{
 	Use:   "bridgeport",
-	Short: "BridgePort CLI - Manage your infrastructure",
-	Long: `BridgePort CLI provides SSH access, server management, and deployment
-tools for your BridgePort-managed infrastructure.
+	Short: "BRIDGEPORT CLI - Manage your infrastructure",
+	Long: `BRIDGEPORT CLI provides SSH access, server management, and deployment
+tools for your BRIDGEPORT-managed infrastructure.
 
 Get started:
-  bridgeport login            # Authenticate with BridgePort
+  bridgeport login            # Authenticate with BRIDGEPORT
   bridgeport whoami           # Show current user info
   bridgeport list             # List all servers
   bridgeport services         # List all services
@@ -88,7 +88,7 @@ func Execute() error {
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default: ~/.bridgeport/config.yaml)")
-	rootCmd.PersistentFlags().StringVar(&serverURL, "url", "", "BridgePort server URL (default: localhost:3000)")
+	rootCmd.PersistentFlags().StringVar(&serverURL, "url", "", "BRIDGEPORT server URL (default: localhost:3000)")
 	rootCmd.PersistentFlags().StringVar(&token, "token", "", "API token (overrides config)")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable colored output")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")

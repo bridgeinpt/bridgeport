@@ -1,6 +1,6 @@
 # Container Images
 
-Container images are BridgePort's central abstraction for managing Docker images across multiple services and servers -- one image definition, deployed everywhere.
+Container images are BRIDGEPORT's central abstraction for managing Docker images across multiple services and servers -- one image definition, deployed everywhere.
 
 ## Table of Contents
 
@@ -29,13 +29,13 @@ Create a container image, link it to services, and deploy a digest to all of the
 2. Click **Create Image**.
 3. Fill in the name, full image path, and a [tag filter](#tag-filters) (default: `latest`).
 4. Link one or more services to the image.
-5. From the image detail page, pick a digest from the list and click **Deploy** -- BridgePort deploys it to every linked service via an orchestrated plan.
+5. From the image detail page, pick a digest from the list and click **Deploy** -- BRIDGEPORT deploys it to every linked service via an orchestrated plan.
 
 ---
 
 ## How It Works
 
-A `ContainerImage` is a shared entity that sits between your registry and your services. Instead of each service tracking its own image independently, all services that run the same image point to a single `ContainerImage` record. BridgePort tracks every image digest (SHA) ingested from the registry as a separate `ImageDigest` row, and deployments target a specific digest -- not a tag name that can drift.
+A `ContainerImage` is a shared entity that sits between your registry and your services. Instead of each service tracking its own image independently, all services that run the same image point to a single `ContainerImage` record. BRIDGEPORT tracks every image digest (SHA) ingested from the registry as a separate `ImageDigest` row, and deployments target a specific digest -- not a tag name that can drift.
 
 ```mermaid
 flowchart LR
@@ -53,16 +53,16 @@ flowchart LR
 **Key concepts:**
 
 - **One image, many services.** A `ContainerImage` named "My App Backend" pointing to `registry.digitalocean.com/my-registry/my-app` can be linked to `app-api` on server-1, `app-api` on server-2, and `app-worker` on server-3.
-- **Digest-first.** The canonical identity of a deployed image is its manifest digest (SHA). Tags are labels that can point to any digest at any time. BridgePort records the `deployedDigestId` after each successful deploy so "what's running" is never ambiguous, even when the registry later moves a tag.
-- **Tag filter controls ingestion.** Each image has a `tagFilter` (comma-separated glob patterns, default `latest`). Only digests whose tags match the filter are tracked in BridgePort, keeping the digest list focused on tags you actually care about.
+- **Digest-first.** The canonical identity of a deployed image is its manifest digest (SHA). Tags are labels that can point to any digest at any time. BRIDGEPORT records the `deployedDigestId` after each successful deploy so "what's running" is never ambiguous, even when the registry later moves a tag.
+- **Tag filter controls ingestion.** Each image has a `tagFilter` (comma-separated glob patterns, default `latest`). Only digests whose tags match the filter are tracked in BRIDGEPORT, keeping the digest list focused on tags you actually care about.
 - **Deployment orchestration.** Deploying a digest creates a `DeploymentPlan` that respects service dependencies, performs health checks, and supports auto-rollback.
-- **Automatic discovery.** When BridgePort discovers new containers on a server, it automatically creates or links `ContainerImage` records for them.
+- **Automatic discovery.** When BRIDGEPORT discovers new containers on a server, it automatically creates or links `ContainerImage` records for them.
 
 ---
 
 ## Digest-Centric Model
 
-Earlier versions of BridgePort tracked a single `currentTag` / `latestTag` on each container image. That works for strict version tags (`v2.3.1`), but breaks down for rolling tags (`latest`, `main`) that point to different digests over time. BridgePort now tracks digests directly:
+Earlier versions of BRIDGEPORT tracked a single `currentTag` / `latestTag` on each container image. That works for strict version tags (`v2.3.1`), but breaks down for rolling tags (`latest`, `main`) that point to different digests over time. BRIDGEPORT now tracks digests directly:
 
 - Every digest pulled from the registry is stored as an `ImageDigest` row with `manifestDigest`, `configDigest`, `pushedAt`, `size`, and a JSON `tags` array of every tag pointing to that digest.
 - A container image's **deployed digest** (`deployedDigestId`) is set to the exact `ImageDigest` that was most recently deployed successfully. This is the source of truth for "what is running."
@@ -70,7 +70,7 @@ Earlier versions of BridgePort tracked a single `currentTag` / `latestTag` on ea
 - **Display tags** are picked from a digest's tag array by `getBestTag()`: filter-matching tags win, with exact-match patterns preferred over wildcards, then most dot segments, then longest string.
 
 > [!TIP]
-> Deploying by digest means that if the registry later moves `latest` to point to a different image, your running services are unaffected -- BridgePort pulls by SHA, not by tag. To roll forward, deploy the newer digest explicitly.
+> Deploying by digest means that if the registry later moves `latest` to point to a different image, your running services are unaffected -- BRIDGEPORT pulls by SHA, not by tag. To roll forward, deploy the newer digest explicitly.
 
 ---
 
@@ -86,7 +86,7 @@ Earlier versions of BridgePort tracked a single `currentTag` / `latestTag` on ea
 |-------|----------|-------------|
 | **Name** | Yes | Display name (e.g., "My App Backend") |
 | **Image Name** | Yes | Full Docker image path without the tag (e.g., `registry.digitalocean.com/my-registry/my-app`) |
-| **Tag Filter** | Yes | Comma-separated glob patterns for which tags BridgePort ingests. Default: `latest`. See [Tag Filters](#tag-filters). |
+| **Tag Filter** | Yes | Comma-separated glob patterns for which tags BRIDGEPORT ingests. Default: `latest`. See [Tag Filters](#tag-filters). |
 | **Registry Connection** | No | Link to a [registry](registries.md) for update checking and digest ingestion |
 
 4. Click **Create**.
@@ -108,7 +108,7 @@ Content-Type: application/json
 
 ### Automatic Creation
 
-Container images are also created automatically during **container discovery**. When BridgePort discovers a running container on a server, it extracts the image name and creates a `ContainerImage` if one does not already exist for that image in the environment. If a registry has an [auto-link pattern](registries.md#auto-link-patterns) that matches the image name, the image is automatically linked to that registry.
+Container images are also created automatically during **container discovery**. When BRIDGEPORT discovers a running container on a server, it extracts the image name and creates a `ContainerImage` if one does not already exist for that image in the environment. If a registry has an [auto-link pattern](registries.md#auto-link-patterns) that matches the image name, the image is automatically linked to that registry.
 
 > [!NOTE]
 > Each image name is unique per environment. If you try to create a container image with an image name that already exists, you will receive a `409 Conflict` response.
@@ -117,7 +117,7 @@ Container images are also created automatically during **container discovery**. 
 
 ## Tag Filters
 
-The `tagFilter` controls which tags BridgePort ingests digests for. Comma-separated glob patterns; whitespace around commas is trimmed.
+The `tagFilter` controls which tags BRIDGEPORT ingests digests for. Comma-separated glob patterns; whitespace around commas is trimmed.
 
 Glob syntax is intentionally narrow:
 
@@ -137,10 +137,10 @@ Examples:
 ### Picking a Filter
 
 - **Single version tag family** -- use a precise glob like `v*.*.*` to avoid ingesting every commit SHA.
-- **Rolling tag** -- just `latest` (or whatever rolling tag your registry exposes). BridgePort will track every digest that tag has ever pointed to.
+- **Rolling tag** -- just `latest` (or whatever rolling tag your registry exposes). BRIDGEPORT will track every digest that tag has ever pointed to.
 - **Mixed** -- combine patterns: `v*.*.*, latest` tracks both the canonical releases and the rolling pointer.
 
-Tightening the filter after the fact stops BridgePort from ingesting new mismatched digests but does **not** delete existing digest rows. Broadening the filter backfills on the next registry sync.
+Tightening the filter after the fact stops BRIDGEPORT from ingesting new mismatched digests but does **not** delete existing digest rows. Broadening the filter backfills on the next registry sync.
 
 > [!TIP]
 > The first pattern in `tagFilter` is used as the fallback display tag when a digest has no matching tags (e.g., untagged manifests). Put your most "canonical" pattern first.
@@ -149,10 +149,10 @@ Tightening the filter after the fact stops BridgePort from ingesting new mismatc
 
 ## Linking Services
 
-Every service in BridgePort must be linked to a container image. The link is established when:
+Every service in BRIDGEPORT must be linked to a container image. The link is established when:
 
 - A service is created manually (you select a container image during creation).
-- A container is discovered automatically (BridgePort links it to an existing or new `ContainerImage`).
+- A container is discovered automatically (BRIDGEPORT links it to an existing or new `ContainerImage`).
 - You re-link a service to a different container image.
 
 ### Re-linking a Service
@@ -188,13 +188,13 @@ Linking a container image to a [registry connection](registries.md) enables thre
 
 ### Digest Sync
 
-On a schedule, BridgePort lists tags on the registry, filters them with the image's `tagFilter`, fetches the manifest for each matching tag, and upserts an `ImageDigest` row keyed on `(containerImageId, manifestDigest)`. All tags pointing to the same digest are collapsed into that digest's `tags` JSON array, so you never see duplicate rows for `latest` and `v2.4.0` when they're the same image.
+On a schedule, BRIDGEPORT lists tags on the registry, filters them with the image's `tagFilter`, fetches the manifest for each matching tag, and upserts an `ImageDigest` row keyed on `(containerImageId, manifestDigest)`. All tags pointing to the same digest are collapsed into that digest's `tags` JSON array, so you never see duplicate rows for `latest` and `v2.4.0` when they're the same image.
 
 The digest list on the container image detail page is sorted by `pushedAt` (newest first), so the most recently built image is always at the top -- even when the registry reports tag order differently.
 
 ### Update Detection
 
-BridgePort flags `updateAvailable = true` on an image when:
+BRIDGEPORT flags `updateAvailable = true` on an image when:
 
 1. The image has a `registryConnectionId` and a `deployedDigestId`.
 2. At least one digest matching the `tagFilter` was pushed more recently than the deployed digest.
@@ -266,7 +266,7 @@ Tag history provides a complete audit trail of every image change, making it eas
 
 ## Auto-Update
 
-When `autoUpdate` is enabled on a container image, BridgePort automatically deploys new versions as they are detected:
+When `autoUpdate` is enabled on a container image, BRIDGEPORT automatically deploys new versions as they are detected:
 
 1. The scheduler detects a new tag in the registry.
 2. A deployment plan is created for all linked services.
@@ -310,7 +310,7 @@ The primary deploy path is the container image detail page:
 2. Click **Deploy** on a digest row (or on the service detail page's Deploy card).
 3. Confirm the deployment.
 
-BridgePort resolves the display tag for the deploy (via `getBestTag()`, preferring filter-matching tags) and pulls by manifest digest, so the running container matches the SHA you selected even if the registry later moves the tag.
+BRIDGEPORT resolves the display tag for the deploy (via `getBestTag()`, preferring filter-matching tags) and pulls by manifest digest, so the running container matches the SHA you selected even if the registry later moves the tag.
 
 ### From the Images List
 
@@ -346,7 +346,7 @@ The plan is executed asynchronously. Track its progress on the [Deployment Plans
 
 ## Image Pruning
 
-Docker image layers accumulate on servers as you deploy new versions. Left unchecked, they fill disk. BridgePort can prune unused images manually, after every deploy, and weekly on a schedule.
+Docker image layers accumulate on servers as you deploy new versions. Left unchecked, they fill disk. BRIDGEPORT can prune unused images manually, after every deploy, and weekly on a schedule.
 
 ### Manual Prune
 
@@ -407,7 +407,7 @@ Both paths honor the environment's `pruneImagesMode` setting.
 | `tags` | string | JSON array of tags pointing to this digest |
 | `size` | bigint? | Compressed image size in bytes |
 | `pushedAt` | datetime? | When the digest was pushed to the registry |
-| `discoveredAt` | datetime | When BridgePort first ingested this digest |
+| `discoveredAt` | datetime | When BRIDGEPORT first ingested this digest |
 
 ### Related Settings
 
@@ -441,7 +441,7 @@ Services must be reassigned to a different container image or deleted before the
 
 ## Related
 
-- [Registries](registries.md) -- Connect BridgePort to your container registries
+- [Registries](registries.md) -- Connect BRIDGEPORT to your container registries
 - [Deployment Plans](deployment-plans.md) -- Orchestrated multi-service deployments
 - [Services](services.md) -- Individual service management
 - [Webhooks](webhooks.md) -- CI/CD integration for automated deployments

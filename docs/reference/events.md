@@ -1,6 +1,6 @@
 # Real-Time Events (SSE) Reference
 
-BridgePort exposes a Server-Sent Events endpoint for live updates -- health status changes, deployment progress, new notifications, metric refreshes, and container discovery events stream to connected clients without polling.
+BRIDGEPORT exposes a Server-Sent Events endpoint for live updates -- health status changes, deployment progress, new notifications, metric refreshes, and container discovery events stream to connected clients without polling.
 
 ## Table of Contents
 
@@ -36,7 +36,7 @@ Returns an unbounded `text/event-stream` response. Keep the connection open for 
 
 ### Authentication
 
-The browser `EventSource` API does not support custom request headers, so authentication is passed as a query parameter. BridgePort accepts two token formats and tries them in order:
+The browser `EventSource` API does not support custom request headers, so authentication is passed as a query parameter. BRIDGEPORT accepts two token formats and tries them in order:
 
 1. **API token** -- A long-lived token created under My Account or via `POST /api/auth/tokens`. Validated by hashing and looking up in the database. Recommended for scripts and server-side consumers.
 2. **JWT** -- The short-lived session token returned by `POST /api/auth/login`. Suitable for browser sessions where the JWT is already in memory.
@@ -82,7 +82,7 @@ data: <JSON payload>
 The `event` field matches one of the five named types below. Clients should ignore unknown event types to remain forward-compatible.
 
 > [!NOTE]
-> BridgePort also sends SSE comment lines (`:ok` on connect, `:keepalive` every 30 seconds). These are not data events -- the `EventSource` API silently discards them, but they keep the TCP connection alive through idle-timeout firewalls and load balancers.
+> BRIDGEPORT also sends SSE comment lines (`:ok` on connect, `:keepalive` every 30 seconds). These are not data events -- the `EventSource` API silently discards them, but they keep the TCP connection alive through idle-timeout firewalls and load balancers.
 
 ---
 
@@ -189,7 +189,7 @@ Fired when a new in-app notification is created for a specific user. Unlike othe
 
 **When it fires**
 
-Any time BridgePort creates a notification for the authenticated user: deployment failures, health state changes that trigger alerts, or other system events with notification types configured in Admin > Notifications.
+Any time BRIDGEPORT creates a notification for the authenticated user: deployment failures, health state changes that trigger alerts, or other system events with notification types configured in Admin > Notifications.
 
 > [!TIP]
 > `count` is always `1` per event. To get the current unread total, call `GET /api/notifications/unread-count` after receiving this event.
@@ -226,7 +226,7 @@ On each metrics collection cycle for the server. The interval depends on the met
 
 ### `container_discovery`
 
-Fired after BridgePort's scheduled container discovery scan completes for a server. The event signals that the server's container list may have changed; clients should re-fetch service data if they display live container state.
+Fired after BRIDGEPORT's scheduled container discovery scan completes for a server. The event signals that the server's container list may have changed; clients should re-fetch service data if they display live container state.
 
 **Payload**
 

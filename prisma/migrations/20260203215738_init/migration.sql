@@ -378,7 +378,7 @@ CREATE TABLE "SmtpConfig" (
     "encryptedPassword" TEXT,
     "passwordNonce" TEXT,
     "fromAddress" TEXT NOT NULL,
-    "fromName" TEXT NOT NULL DEFAULT 'BridgePort',
+    "fromName" TEXT NOT NULL DEFAULT 'BRIDGEPORT',
     "enabled" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL

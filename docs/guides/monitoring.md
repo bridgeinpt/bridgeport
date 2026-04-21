@@ -1,6 +1,6 @@
 # Monitoring Quick Start
 
-BridgePort monitors your servers, containers, and databases through three complementary systems -- pick the one that fits your infrastructure and follow the link to its deep-dive guide.
+BRIDGEPORT monitors your servers, containers, and databases through three complementary systems -- pick the one that fits your infrastructure and follow the link to its deep-dive guide.
 
 ## Which Monitoring Do You Need?
 
@@ -12,7 +12,7 @@ flowchart TD
     START --> Q2{Container metrics?<br/>CPU, memory, network I/O}
     START --> Q3{Database metrics?<br/>Size, queries, performance}
 
-    Q1 -->|Yes| Q1A{Is BridgePort agent<br/>deployed on the server?}
+    Q1 -->|Yes| Q1A{Is BRIDGEPORT agent<br/>deployed on the server?}
     Q1A -->|No - SSH polling| SERVERS["<b>Server Monitoring</b><br/>SSH mode collects metrics<br/>every 5 minutes"]
     Q1A -->|Yes - Agent push| SERVERS_AGENT["<b>Server Monitoring</b><br/>Agent pushes real-time<br/>metrics + processes"]
 
@@ -34,7 +34,7 @@ flowchart TD
 
 ### SSH Polling (simplest)
 
-No agent required. BridgePort connects over SSH to collect server metrics.
+No agent required. BRIDGEPORT connects over SSH to collect server metrics.
 
 1. Go to **Servers** and select a server.
 2. In the **Monitoring** card, set **Metrics Mode** to `ssh`.
@@ -48,7 +48,7 @@ The agent runs on each server and pushes metrics in real time, including contain
 
 1. Go to **Servers** and select a server.
 2. Set **Metrics Mode** to `agent`.
-3. BridgePort auto-deploys the agent via SSH.
+3. BRIDGEPORT auto-deploys the agent via SSH.
 4. Within 30 seconds you should see the agent status change to `active`.
 
 View charts at **Monitoring > Servers** and **Monitoring > Services**. See [Server Monitoring](monitoring-servers.md) and [Service Monitoring](monitoring-services.md).

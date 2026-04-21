@@ -193,7 +193,7 @@ async function sendWebhookWithRetry(
   const payloadString = JSON.stringify(payload);
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'User-Agent': 'BridgePort-Webhook/1.0',
+    'User-Agent': 'BRIDGEPORT-Webhook/1.0',
   };
 
   // Add custom headers if configured
@@ -311,7 +311,7 @@ export async function testWebhook(id: string): Promise<{ success: boolean; error
     event: 'test',
     timestamp: new Date().toISOString(),
     data: {
-      message: 'This is a test webhook from BridgePort',
+      message: 'This is a test webhook from BRIDGEPORT',
     },
   };
 

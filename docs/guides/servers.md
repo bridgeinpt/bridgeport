@@ -1,6 +1,6 @@
 # Servers
 
-Servers represent the physical or virtual machines where your Docker containers run -- BridgePort connects to them via SSH or Docker socket to deploy, monitor, and manage services.
+Servers represent the physical or virtual machines where your Docker containers run -- BRIDGEPORT connects to them via SSH or Docker socket to deploy, monitor, and manage services.
 
 ## Table of Contents
 
@@ -23,7 +23,7 @@ Servers represent the physical or virtual machines where your Docker containers 
 
 ## Quick Start
 
-Get a server managed by BridgePort in 3 steps:
+Get a server managed by BRIDGEPORT in 3 steps:
 
 1. **Configure SSH key** for your environment (one-time setup):
    - Go to **Configuration > Environment Settings** and upload your SSH private key.
@@ -39,11 +39,11 @@ Get a server managed by BridgePort in 3 steps:
 
 ## How It Works
 
-BridgePort manages servers through two connection modes. Each server belongs to one environment and inherits that environment's SSH key.
+BRIDGEPORT manages servers through two connection modes. Each server belongs to one environment and inherits that environment's SSH key.
 
 ```mermaid
 flowchart TD
-    A[BridgePort] -->|SSH connection| B[Remote Server]
+    A[BRIDGEPORT] -->|SSH connection| B[Remote Server]
     A -->|Docker socket| C[Host Machine]
     B --> D[Docker Daemon]
     C --> E[Docker Daemon]
@@ -55,9 +55,9 @@ flowchart TD
     style C fill:#1e293b,color:#fff
 ```
 
-**SSH mode** (default): BridgePort connects to the server over SSH using the environment's private key, then runs Docker commands remotely. This is the standard mode for remote servers.
+**SSH mode** (default): BRIDGEPORT connects to the server over SSH using the environment's private key, then runs Docker commands remotely. This is the standard mode for remote servers.
 
-**Socket mode**: BridgePort connects directly to the Docker daemon via the local Docker socket (`/var/run/docker.sock`). This is for the host machine when BridgePort itself runs as a Docker container.
+**Socket mode**: BRIDGEPORT connects directly to the Docker daemon via the local Docker socket (`/var/run/docker.sock`). This is for the host machine when BRIDGEPORT itself runs as a Docker container.
 
 ---
 
@@ -127,7 +127,7 @@ ssh-keygen -t ed25519 -C "bridgeport-staging" -f ~/.ssh/bridgeport_staging
 ssh-copy-id -i ~/.ssh/bridgeport_staging.pub root@10.20.10.3
 ```
 
-**Step 3: Upload the private key to BridgePort.**
+**Step 3: Upload the private key to BRIDGEPORT.**
 
 Navigate to **Configuration > Environment Settings > General** and paste your private key, or use the API:
 
@@ -164,12 +164,12 @@ On the server detail page, click the **Health Check** button. A successful check
 
 ### Docker Mode Setup
 
-Each server has a `dockerMode` that determines how BridgePort communicates with Docker:
+Each server has a `dockerMode` that determines how BRIDGEPORT communicates with Docker:
 
 | Mode | How it connects | When to use |
 |------|----------------|-------------|
 | `ssh` (default) | SSH into server, run `docker` commands | Remote servers |
-| `socket` | `/var/run/docker.sock` directly | Host machine (BridgePort is a container) |
+| `socket` | `/var/run/docker.sock` directly | Host machine (BRIDGEPORT is a container) |
 
 **Changing Docker mode:**
 
@@ -184,11 +184,11 @@ Content-Type: application/json
 ```
 
 > [!TIP]
-> If BridgePort runs as a Docker container on the same machine it manages, use `socket` mode for that server. This avoids SSH overhead and does not require an SSH key.
+> If BRIDGEPORT runs as a Docker container on the same machine it manages, use `socket` mode for that server. This avoids SSH overhead and does not require an SSH key.
 
 ### Server Health Monitoring
 
-Health checks verify that BridgePort can connect to the server and that Docker is responsive.
+Health checks verify that BRIDGEPORT can connect to the server and that Docker is responsive.
 
 **Manual health check:**
 
@@ -203,7 +203,7 @@ This connects via SSH (or socket), runs Docker commands to verify the daemon is 
 
 **Automated health checks:**
 
-When monitoring is enabled for the environment, BridgePort runs server health checks on a configurable interval (default: 60 seconds). Configure the interval in **Environment Settings > Monitoring > Server Health Interval**.
+When monitoring is enabled for the environment, BRIDGEPORT runs server health checks on a configurable interval (default: 60 seconds). Configure the interval in **Environment Settings > Monitoring > Server Health Interval**.
 
 ### Metrics Mode Selection
 
@@ -212,7 +212,7 @@ Each server can collect system metrics in one of three modes. Use this decision 
 ```mermaid
 flowchart TD
     A{Need server metrics?} -->|No| B[disabled]
-    A -->|Yes| C{BridgePort can SSH<br>into the server?}
+    A -->|Yes| C{BRIDGEPORT can SSH<br>into the server?}
     C -->|Yes| D{Need container-level<br>detail + processes?}
     C -->|No| B
     D -->|Basic is fine| E[ssh]
@@ -226,8 +226,8 @@ flowchart TD
 | Mode | Metrics collected | How | Requirements |
 |------|-------------------|-----|--------------|
 | **disabled** | None | -- | -- |
-| **ssh** | CPU, memory, disk, load, swap, TCP, FDs | BridgePort polls via SSH on a schedule | SSH key configured |
-| **agent** | SSH metrics + container stats, top processes, TCP/cert checks | Agent binary pushes to BridgePort | Agent auto-deployed via SSH |
+| **ssh** | CPU, memory, disk, load, swap, TCP, FDs | BRIDGEPORT polls via SSH on a schedule | SSH key configured |
+| **agent** | SSH metrics + container stats, top processes, TCP/cert checks | Agent binary pushes to BRIDGEPORT | Agent auto-deployed via SSH |
 
 **Changing metrics mode:**
 
@@ -241,10 +241,10 @@ Content-Type: application/json
 }
 ```
 
-When switching to `agent` mode, BridgePort automatically deploys the monitoring agent binary to the server via SSH. When switching away from `agent`, the agent is removed.
+When switching to `agent` mode, BRIDGEPORT automatically deploys the monitoring agent binary to the server via SSH. When switching away from `agent`, the agent is removed.
 
 > [!NOTE]
-> Agent deployment requires SSH access. The agent runs as a background service on the server and pushes metrics to BridgePort at a regular interval. See [Agent Reference](../reference/agent.md) for details.
+> Agent deployment requires SSH access. The agent runs as a background service on the server and pushes metrics to BRIDGEPORT at a regular interval. See [Agent Reference](../reference/agent.md) for details.
 
 ### Container Discovery
 
@@ -304,7 +304,7 @@ See [Services](services.md) for the full guide on managing services after creati
 
 ## Host Server Mode
 
-When BridgePort runs as a Docker container, it can manage the host machine directly. BridgePort detects the Docker gateway IP and can register the host as a special server with `serverType: "host"` and `dockerMode: "socket"`.
+When BRIDGEPORT runs as a Docker container, it can manage the host machine directly. BRIDGEPORT detects the Docker gateway IP and can register the host as a special server with `serverType: "host"` and `dockerMode: "socket"`.
 
 **Check host info:**
 ```http
@@ -360,19 +360,19 @@ Host servers connect via Docker socket and do not require SSH keys. They support
 **Health check fails with "Docker daemon not responding"**
 - Verify Docker is running on the server: `systemctl status docker`
 - Confirm the SSH user can run Docker: `docker ps`
-- For socket mode, ensure BridgePort's container has the Docker socket mounted
+- For socket mode, ensure BRIDGEPORT's container has the Docker socket mounted
 
 **Container discovery returns empty results**
 - Verify Docker is running and has containers: `docker ps` on the server
 - Check that the SSH user has permission to list containers
-- For socket mode, ensure `/var/run/docker.sock` is mounted in BridgePort's container
+- For socket mode, ensure `/var/run/docker.sock` is mounted in BRIDGEPORT's container
 
 **"Server already exists" (409)**
 Server names must be unique within an environment. Choose a different name or delete the existing server first.
 
 **Agent deploy fails**
 - SSH must be working (test with a health check first)
-- The server needs internet access to download the agent binary, or BridgePort serves it
+- The server needs internet access to download the agent binary, or BRIDGEPORT serves it
 - Check agent deploy logs: **Monitoring > Agents & SSH**
 
 **Metrics not appearing after enabling SSH mode**

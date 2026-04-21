@@ -1,5 +1,5 @@
 [Unit]
-Description=BridgePort Monitoring Agent
+Description=BRIDGEPORT Monitoring Agent
 After=network.target docker.service
 Wants=docker.service
 

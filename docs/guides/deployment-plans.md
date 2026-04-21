@@ -1,6 +1,6 @@
 # Deployment Plans & Orchestration
 
-Deploy multiple services in the correct order, with automatic health checks between steps and full rollback if anything goes wrong -- BridgePort's deployment orchestration turns complex multi-service releases into a single, trackable operation.
+Deploy multiple services in the correct order, with automatic health checks between steps and full rollback if anything goes wrong -- BRIDGEPORT's deployment orchestration turns complex multi-service releases into a single, trackable operation.
 
 ## Table of Contents
 
@@ -101,7 +101,7 @@ flowchart TD
 
 ### Dependency Resolution (Kahn's Algorithm)
 
-BridgePort uses Kahn's algorithm for topological sorting to determine deployment order. Services are grouped into **levels** -- all services at level 0 have no dependencies, level 1 services depend only on level 0, and so on.
+BRIDGEPORT uses Kahn's algorithm for topological sorting to determine deployment order. Services are grouped into **levels** -- all services at level 0 have no dependencies, level 1 services depend only on level 0, and so on.
 
 ```
 Level 0: [database-migrator]     -- no dependencies, deploys first
@@ -109,7 +109,7 @@ Level 1: [api-server, worker]    -- both depend on database-migrator
 Level 2: [web-frontend]          -- depends on api-server
 ```
 
-Before creating a plan, BridgePort checks for circular dependencies using depth-first search. If a cycle is found (A depends on B, B depends on C, C depends on A), the plan creation fails with a clear error message naming the cycle.
+Before creating a plan, BRIDGEPORT checks for circular dependencies using depth-first search. If a cycle is found (A depends on B, B depends on C, C depends on A), the plan creation fails with a clear error message naming the cycle.
 
 ---
 
@@ -117,13 +117,13 @@ Before creating a plan, BridgePort checks for circular dependencies using depth-
 
 ### Container Images
 
-Every service in BridgePort is linked to a **ContainerImage** -- a central entity that tracks the image name, current tag, and registry connection. Before you can include a service in a deployment plan, it must have a container image assigned.
+Every service in BRIDGEPORT is linked to a **ContainerImage** -- a central entity that tracks the image name, current tag, and registry connection. Before you can include a service in a deployment plan, it must have a container image assigned.
 
 See [Container Images](container-images.md) for setup instructions.
 
 ### Service Dependencies
 
-Dependencies are optional but are what make orchestration powerful. Without dependencies, all services deploy at the same level (effectively in parallel or arbitrary order). With dependencies, BridgePort knows exactly which services must be healthy before others can deploy.
+Dependencies are optional but are what make orchestration powerful. Without dependencies, all services deploy at the same level (effectively in parallel or arbitrary order). With dependencies, BRIDGEPORT knows exactly which services must be healthy before others can deploy.
 
 ---
 
@@ -432,7 +432,7 @@ data: {"status":"completed"}
 ```
 
 > [!TIP]
-> The BridgePort UI uses this SSE endpoint to power the real-time deployment progress tracker on the Deployment Plan Detail page. You can use the same endpoint to build custom dashboards or Slack bots.
+> The BRIDGEPORT UI uses this SSE endpoint to power the real-time deployment progress tracker on the Deployment Plan Detail page. You can use the same endpoint to build custom dashboards or Slack bots.
 
 ---
 
@@ -508,7 +508,7 @@ curl -X POST "https://bp.example.com/api/environments/env_prod/deployment-plans?
 
 **Step 3: What happens**
 
-BridgePort resolves the dependency graph and creates these steps:
+BRIDGEPORT resolves the dependency graph and creates these steps:
 
 | Order | Action | Service | Why |
 |-------|--------|---------|-----|
@@ -524,7 +524,7 @@ Execution proceeds:
 3. API health check runs -- waits for the API to respond healthy (retries with configurable interval).
 4. Web frontend deploys to `v2.1.0` -- picks up the new API.
 
-If the API health check fails after all retries, BridgePort automatically rolls back both the API and the worker to their previous tags. The web frontend never deployed, so it stays on its current version.
+If the API health check fails after all retries, BRIDGEPORT automatically rolls back both the API and the worker to their previous tags. The web frontend never deployed, so it stays on its current version.
 
 ---
 
@@ -571,7 +571,7 @@ The service IDs you provided either do not exist or are not in the specified env
 ### Health check step keeps failing
 
 1. Check that the service's container is actually running: go to the service detail page and check container status.
-2. If the service has a `healthCheckUrl`, verify the URL is reachable from the server (BridgePort checks via SSH/curl on the server, not from the BridgePort host).
+2. If the service has a `healthCheckUrl`, verify the URL is reachable from the server (BRIDGEPORT checks via SSH/curl on the server, not from the BRIDGEPORT host).
 3. Increase `healthWaitMs` if the service needs more startup time.
 4. Increase `healthRetries` and `healthIntervalMs` for slow-starting services.
 

@@ -1,4 +1,4 @@
-# BridgePort Caddy Configuration
+# BRIDGEPORT Caddy Configuration
 {
 	# Global options
 	email infra@bridgein.com
@@ -7,7 +7,7 @@
 	auto_https on
 }
 
-# BridgePort application
+# BRIDGEPORT application
 deploy.bridgein.com {
 	reverse_proxy bridgeport:3000
 

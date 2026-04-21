@@ -1,11 +1,11 @@
 ---
 allowed-tools: Bash, Read
-description: Build BridgePort Docker image
+description: Build BRIDGEPORT Docker image
 ---
 
 # Build Docker Image
 
-Build the BridgePort Docker image for deployment.
+Build the BRIDGEPORT Docker image for deployment.
 
 ## Steps
 

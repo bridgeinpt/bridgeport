@@ -1,6 +1,6 @@
 # Building
 
-How to build BridgePort's Docker image, the Go monitoring agent, and the CLI tool, including the git-based versioning system.
+How to build BRIDGEPORT's Docker image, the Go monitoring agent, and the CLI tool, including the git-based versioning system.
 
 ---
 
@@ -17,7 +17,7 @@ How to build BridgePort's Docker image, the Go monitoring agent, and the CLI too
 
 ## Version Derivation
 
-BridgePort uses **git-based versioning** derived at build time. There are no version files to maintain in the repository.
+BRIDGEPORT uses **git-based versioning** derived at build time. There are no version files to maintain in the repository.
 
 | Component | Version Format | Derived From |
 |-----------|---------------|--------------|
@@ -195,7 +195,7 @@ Produces two binaries:
 make build VERSION=20260225-a1b2c3d
 ```
 
-The version is injected via Go linker flags (`-ldflags="-X main.Version=..."`) and reported by the agent to BridgePort.
+The version is injected via Go linker flags (`-ldflags="-X main.Version=..."`) and reported by the agent to BRIDGEPORT.
 
 ### How It Is Built in the Docker Image
 

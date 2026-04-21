@@ -1,5 +1,5 @@
 /**
- * Global test setup for BridgePort backend tests.
+ * Global test setup for BRIDGEPORT backend tests.
  *
  * Sets required environment variables BEFORE any application code loads.
  * This file is referenced in vitest.config.ts setupFiles.

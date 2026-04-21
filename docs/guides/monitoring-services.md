@@ -1,6 +1,6 @@
 # Service Monitoring
 
-BridgePort collects container-level metrics (CPU, memory, network I/O, and block I/O) for every discovered Docker service, visualizes them in time-series charts, and tracks restart counts to help you spot unstable containers.
+BRIDGEPORT collects container-level metrics (CPU, memory, network I/O, and block I/O) for every discovered Docker service, visualizes them in time-series charts, and tracks restart counts to help you spot unstable containers.
 
 ## Quick Start
 
@@ -9,7 +9,7 @@ BridgePort collects container-level metrics (CPU, memory, network I/O, and block
 3. Navigate to **Monitoring > Services** to see container metrics.
 
 > [!NOTE]
-> Container-level metrics require the **agent** mode for the richest data. In SSH mode, BridgePort collects server metrics and container health status, but per-container CPU/memory/network metrics come from the agent's Docker stats collection.
+> Container-level metrics require the **agent** mode for the richest data. In SSH mode, BRIDGEPORT collects server metrics and container health status, but per-container CPU/memory/network metrics come from the agent's Docker stats collection.
 
 ## How It Works
 
@@ -17,7 +17,7 @@ BridgePort collects container-level metrics (CPU, memory, network I/O, and block
 sequenceDiagram
     participant A as Agent
     participant D as Docker Daemon
-    participant BP as BridgePort
+    participant BP as BRIDGEPORT
     participant DB as SQLite
 
     A->>D: docker stats (API)
@@ -28,7 +28,7 @@ sequenceDiagram
     BP->>DB: Update Service status
 ```
 
-The agent runs `docker stats` via the Docker API, collects per-container metrics, and includes them in its periodic push to `/api/metrics/ingest`. BridgePort matches each entry by `containerName` to its corresponding `Service` record.
+The agent runs `docker stats` via the Docker API, collects per-container metrics, and includes them in its periodic push to `/api/metrics/ingest`. BRIDGEPORT matches each entry by `containerName` to its corresponding `Service` record.
 
 ## Collected Metrics
 
@@ -44,7 +44,7 @@ The agent runs `docker stats` via the Docker API, collects per-container metrics
 | Restart Count | `restartCount` | count | Total container restarts |
 
 > [!TIP]
-> A steadily climbing `restartCount` is a strong signal of a crash-looping container. BridgePort sends a `system.container_crash` notification when a container enters the `exited` or `dead` state.
+> A steadily climbing `restartCount` is a strong signal of a crash-looping container. BRIDGEPORT sends a `system.container_crash` notification when a container enters the `exited` or `dead` state.
 
 ## Container Health Status
 
@@ -58,7 +58,7 @@ In addition to metrics, the agent reports each container's state and Docker heal
 | `exited` / `dead` | -- | `stopped` |
 | other | -- | `unknown` |
 
-BridgePort updates each service's `containerStatus`, `healthStatus`, and `status` fields based on this data.
+BRIDGEPORT updates each service's `containerStatus`, `healthStatus`, and `status` fields based on this data.
 
 ## Viewing Charts
 
@@ -103,7 +103,7 @@ The services metrics history endpoint filters to services with `discoveryStatus:
 
 ### Option 2: SSH Mode (limited)
 
-In SSH mode, BridgePort collects:
+In SSH mode, BRIDGEPORT collects:
 - Container health status (running/stopped, Docker health)
 - Container state transitions (crash detection)
 - URL health check results (if configured)
@@ -143,7 +143,7 @@ Configure a URL health check per service to get richer health data:
 ### No container metrics (agent mode)
 
 1. **Check agent status**: Go to **Monitoring > Agents & SSH**. Status should be `active`.
-2. **Verify container names match**: The agent matches metrics by `containerName`. If the service's `containerName` in BridgePort does not match the Docker container name, metrics will not be linked.
+2. **Verify container names match**: The agent matches metrics by `containerName`. If the service's `containerName` in BRIDGEPORT does not match the Docker container name, metrics will not be linked.
 3. **Check discovery status**: The service must have `discoveryStatus: found`. Run container discovery from the server detail page if needed.
 
 ### Metrics show but charts are empty
@@ -161,7 +161,7 @@ This means Docker is restarting the container. Check:
 
 ### Container shows `unknown` status
 
-This happens when BridgePort cannot determine the container state:
+This happens when BRIDGEPORT cannot determine the container state:
 
 - The server may be unreachable (check server health first).
 - The container may have been removed but the service record still exists. Run container discovery to update statuses.

@@ -1,6 +1,6 @@
 # Users & Roles
 
-BridgePort uses a three-tier role system (admin, operator, viewer) with JWT sessions and API tokens to control who can view, operate, and administer the platform.
+BRIDGEPORT uses a three-tier role system (admin, operator, viewer) with JWT sessions and API tokens to control who can view, operate, and administer the platform.
 
 ## Table of Contents
 
@@ -33,29 +33,29 @@ The new user can log in immediately and receives a welcome notification.
 
 ## How It Works
 
-BridgePort supports two authentication methods: **JWT sessions** for interactive browser use and **API tokens** for programmatic access. Both carry the user's role and grant the same permissions.
+BRIDGEPORT supports two authentication methods: **JWT sessions** for interactive browser use and **API tokens** for programmatic access. Both carry the user's role and grant the same permissions.
 
 ```mermaid
 sequenceDiagram
     participant Client
-    participant BridgePort
+    participant BRIDGEPORT
     participant DB
 
     alt Browser login
-        Client->>BridgePort: POST /api/auth/login {email, password}
-        BridgePort->>DB: Validate credentials (bcrypt)
-        BridgePort-->>Client: JWT token (7-day expiry)
-        Client->>BridgePort: GET /api/... (Authorization: Bearer <JWT>)
-        BridgePort->>DB: Verify JWT, load user role
-        Note over BridgePort,DB: lastActiveAt updated in background
+        Client->>BRIDGEPORT: POST /api/auth/login {email, password}
+        BRIDGEPORT->>DB: Validate credentials (bcrypt)
+        BRIDGEPORT-->>Client: JWT token (7-day expiry)
+        Client->>BRIDGEPORT: GET /api/... (Authorization: Bearer <JWT>)
+        BRIDGEPORT->>DB: Verify JWT, load user role
+        Note over BRIDGEPORT,DB: lastActiveAt updated in background
     else API token
-        Client->>BridgePort: GET /api/... (Authorization: Bearer <api-token>)
-        BridgePort->>DB: Hash token, look up ApiToken record
-        BridgePort->>DB: Check expiry, load user role
-        Note over BridgePort,DB: lastUsedAt updated on token record
+        Client->>BRIDGEPORT: GET /api/... (Authorization: Bearer <api-token>)
+        BRIDGEPORT->>DB: Hash token, look up ApiToken record
+        BRIDGEPORT->>DB: Check expiry, load user role
+        Note over BRIDGEPORT,DB: lastUsedAt updated on token record
     end
-    BridgePort->>BridgePort: Check role against route requirement
-    BridgePort-->>Client: 200 OK / 403 Forbidden
+    BRIDGEPORT->>BRIDGEPORT: Check role against route requirement
+    BRIDGEPORT-->>Client: 200 OK / 403 Forbidden
 ```
 
 **Authentication flow details:**
@@ -71,7 +71,7 @@ JWTs expire after **7 days**. API tokens have optional expiry set at creation ti
 
 ## Roles & Permissions
 
-BridgePort has three roles in strict hierarchy: **admin > operator > viewer**. Higher roles inherit all permissions of lower roles.
+BRIDGEPORT has three roles in strict hierarchy: **admin > operator > viewer**. Higher roles inherit all permissions of lower roles.
 
 ### Role Descriptions
 
@@ -271,7 +271,7 @@ Content-Type: application/json
 ```
 
 > [!WARNING]
-> The full token value is returned **only once** at creation time. BridgePort stores only a SHA-256 hash. Copy it immediately and store it in your secrets manager. If lost, delete the token and create a new one.
+> The full token value is returned **only once** at creation time. BRIDGEPORT stores only a SHA-256 hash. Copy it immediately and store it in your secrets manager. If lost, delete the token and create a new one.
 
 `expiresInDays` is optional. Omitting it creates a non-expiring token.
 
@@ -324,7 +324,7 @@ The SSE query parameter approach exists because `EventSource` clients cannot set
 
 ## Initial Admin Setup
 
-On first boot, if no users exist, BridgePort creates an admin account from environment variables:
+On first boot, if no users exist, BRIDGEPORT creates an admin account from environment variables:
 
 ```bash
 ADMIN_EMAIL=admin@example.com
@@ -355,7 +355,7 @@ This creates the user with the `admin` role and returns a JWT. It returns `403 F
 
 ## Active User Tracking
 
-BridgePort tracks when users are actively using the application. On every **JWT-authenticated** request, the `lastActiveAt` field is updated in the background (fire-and-forget, no added latency).
+BRIDGEPORT tracks when users are actively using the application. On every **JWT-authenticated** request, the `lastActiveAt` field is updated in the background (fire-and-forget, no added latency).
 
 ### Viewing Active Users
 

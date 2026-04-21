@@ -1,6 +1,6 @@
-# Contributing to BridgePort
+# Contributing to BRIDGEPORT
 
-Thank you for your interest in contributing to BridgePort! Whether you're fixing a bug, adding a feature, improving documentation, or creating a plugin, we appreciate the help.
+Thank you for your interest in contributing to BRIDGEPORT! Whether you're fixing a bug, adding a feature, improving documentation, or creating a plugin, we appreciate the help.
 
 ## Table of Contents
 
@@ -16,7 +16,7 @@ Thank you for your interest in contributing to BridgePort! Whether you're fixing
 
 ## Welcome
 
-BridgePort is a lightweight, self-hosted deployment management tool for Docker-based infrastructure. We welcome contributions of all kinds:
+BRIDGEPORT is a lightweight, self-hosted deployment management tool for Docker-based infrastructure. We welcome contributions of all kinds:
 
 - **Bug fixes** -- found something broken? We'd love a fix (and a test!)
 - **Features** -- have an idea? Open an issue first so we can discuss the approach
@@ -33,7 +33,7 @@ BridgePort is a lightweight, self-hosted deployment management tool for Docker-b
 | Node.js | 20+ | Backend and frontend |
 | npm | 9+ | Package management |
 | Go | 1.21+ | Monitoring agent and CLI (optional) |
-| Docker | 20+ | Running BridgePort in containers (optional) |
+| Docker | 20+ | Running BRIDGEPORT in containers (optional) |
 
 ### Clone and Install
 
@@ -163,7 +163,7 @@ npx vitest run --config config/vitest.unit.config.ts
 
 ## Database Migration Guide
 
-BridgePort uses Prisma with SQLite. Schema changes must include migrations so that deployed containers automatically update their database on restart.
+BRIDGEPORT uses Prisma with SQLite. Schema changes must include migrations so that deployed containers automatically update their database on restart.
 
 > [!WARNING]
 > Never use `npx prisma db push` for schema changes. It bypasses the migration system and will break production deployments. Always use `npx prisma migrate dev`.
@@ -220,7 +220,7 @@ export default async function (fastify: FastifyInstance) {
 
 ## Testing
 
-BridgePort has two separate test configurations that must not be mixed:
+BRIDGEPORT has two separate test configurations that must not be mixed:
 
 | Config | Scope | Command |
 |--------|-------|---------|

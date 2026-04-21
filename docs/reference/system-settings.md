@@ -58,7 +58,7 @@ POST /api/settings/system/reset
 
 ## SSH Timeouts
 
-Control how long BridgePort waits when executing commands over SSH.
+Control how long BRIDGEPORT waits when executing commands over SSH.
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
@@ -82,7 +82,7 @@ Control outgoing webhook delivery behavior (for notifications sent to external w
 
 **How retries work:**
 
-When a webhook delivery fails, BridgePort retries using the delays specified in `webhookRetryDelaysMs`. With the defaults:
+When a webhook delivery fails, BRIDGEPORT retries using the delays specified in `webhookRetryDelaysMs`. With the defaults:
 
 1. First retry after 1 second
 2. Second retry after 5 seconds
@@ -124,11 +124,11 @@ External URLs for notifications and agent communication.
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `publicUrl` | `string \| null` | `null` | Public URL where BridgePort is accessible (e.g., `https://deploy.example.com`). Used in notification emails and webhook payloads to generate clickable links. |
-| `agentCallbackUrl` | `string \| null` | `null` | Internal URL for agents to reach BridgePort (e.g., `http://10.30.10.5:3000`). When set, agents use this URL instead of the public URL. Useful when agents are on a private network. |
+| `publicUrl` | `string \| null` | `null` | Public URL where BRIDGEPORT is accessible (e.g., `https://deploy.example.com`). Used in notification emails and webhook payloads to generate clickable links. |
+| `agentCallbackUrl` | `string \| null` | `null` | Internal URL for agents to reach BRIDGEPORT (e.g., `http://10.30.10.5:3000`). When set, agents use this URL instead of the public URL. Useful when agents are on a private network. |
 
 > [!TIP]
-> If your BridgePort instance is behind a reverse proxy, set `publicUrl` to the external HTTPS URL. Set `agentCallbackUrl` to the internal HTTP address that agents can reach directly, avoiding unnecessary proxy hops.
+> If your BRIDGEPORT instance is behind a reverse proxy, set `publicUrl` to the external HTTPS URL. Set `agentCallbackUrl` to the internal HTTP address that agents can reach directly, avoiding unnecessary proxy hops.
 
 ---
 

@@ -1,4 +1,4 @@
-# BridgePort
+# BRIDGEPORT
 
 A lightweight, self-hosted deployment management tool for Docker-based infrastructure.
 
@@ -6,7 +6,7 @@ A lightweight, self-hosted deployment management tool for Docker-based infrastru
 
 ## ⛔ CRITICAL: DATABASE SCHEMA CHANGES ⛔
 
-**BridgePort is a product used by multiple deployments. Schema changes MUST be automatic and safe.**
+**BRIDGEPORT is a product used by multiple deployments. Schema changes MUST be automatic and safe.**
 
 ### THE GOLDEN RULE
 
@@ -184,7 +184,7 @@ npx vitest run src/routes/auth.test.ts                 # Single file
 
 ## Versioning
 
-BridgePort uses git-based versioning derived at build time:
+BRIDGEPORT uses git-based versioning derived at build time:
 
 - **App version**: `YYYYMMDDHH-{7-char SHA}` from current commit (passed as `APP_VERSION` build arg)
 - **Agent version**: Derived from last commit touching `bridgeport-agent/` directory
@@ -234,7 +234,7 @@ Use these instead of reimplementing:
 
 ## Important Notes
 
-- BridgePort is a **generic, vendor-neutral tool** - do not add code tied to any specific company or hosting provider
+- BRIDGEPORT is a **generic, vendor-neutral tool** - do not add code tied to any specific company or hosting provider
 - All secrets must be encrypted at rest
 - SSH keys are stored encrypted per-environment
 - Audit logging is required for sensitive operations

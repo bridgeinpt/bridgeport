@@ -38,7 +38,7 @@ export interface SSHClientOptions {
 
 /**
  * Docker host gateway IPs that should be treated as remote SSH targets, not localhost.
- * When BridgePort runs in a container and needs to manage its host, it connects
+ * When BRIDGEPORT runs in a container and needs to manage its host, it connects
  * via the Docker bridge gateway IP.
  */
 const HOST_GATEWAY_IPS = [

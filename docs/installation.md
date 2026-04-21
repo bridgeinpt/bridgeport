@@ -1,6 +1,6 @@
 # Installation Guide
 
-Three ways to run BridgePort -- pick the path that fits your situation.
+Three ways to run BRIDGEPORT -- pick the path that fits your situation.
 
 ---
 
@@ -15,7 +15,7 @@ Three ways to run BridgePort -- pick the path that fits your situation.
 
 ## Path 1: Quick Start (Docker Run)
 
-For trying BridgePort out. One command, no files to create.
+For trying BRIDGEPORT out. One command, no files to create.
 
 ```bash
 docker run -d \
@@ -38,12 +38,12 @@ docker logs bridgeport
 Expected output:
 
 ```
-=== BridgePort Startup ===
+=== BRIDGEPORT Startup ===
 Database path: /data/bridgeport.db
 No database found, will create fresh
 Applying migrations...
 ...
-=== Starting BridgePort ===
+=== Starting BRIDGEPORT ===
 Server listening on 0.0.0.0:3000
 ```
 
@@ -72,7 +72,7 @@ echo "JWT_SECRET=$(openssl rand -base64 32)" >> .env
 ```
 
 > [!WARNING]
-> **Back up your `MASTER_KEY` now** (e.g., in a password manager). It is the encryption key for all secrets and SSH keys stored in BridgePort. If you lose it, encrypted data cannot be recovered.
+> **Back up your `MASTER_KEY` now** (e.g., in a password manager). It is the encryption key for all secrets and SSH keys stored in BRIDGEPORT. If you lose it, encrypted data cannot be recovered.
 
 ### 3. Add the remaining configuration
 
@@ -128,7 +128,7 @@ services:
       start_period: 10s
 ```
 
-### 5. Start BridgePort
+### 5. Start BRIDGEPORT
 
 ```bash
 docker compose up -d
@@ -143,18 +143,18 @@ docker compose logs -f bridgeport
 Expected output:
 
 ```
-=== BridgePort Startup ===
+=== BRIDGEPORT Startup ===
 Database path: /data/bridgeport.db
 No database found, will create fresh
 Applying migrations...
 ...
-=== Starting BridgePort ===
+=== Starting BRIDGEPORT ===
 Server listening on 0.0.0.0:3000
 ```
 
 ### 6. Set up HTTPS (recommended)
 
-BridgePort serves HTTP on port 3000. For production, put it behind a reverse proxy with TLS. Here's a minimal example using Caddy:
+BRIDGEPORT serves HTTP on port 3000. For production, put it behind a reverse proxy with TLS. Here's a minimal example using Caddy:
 
 ```yaml
 services:
@@ -217,7 +217,7 @@ After your first login:
 
 ## Path 3: Development
 
-For contributors who want to run BridgePort from source with hot reload.
+For contributors who want to run BRIDGEPORT from source with hot reload.
 
 ```bash
 git clone https://github.com/bridgeinpt/bridgeport.git
@@ -257,18 +257,18 @@ For full contributor guidelines, see [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Docker Socket vs SSH
 
-BridgePort supports two modes for communicating with Docker on a server. This decision applies to every server you manage.
+BRIDGEPORT supports two modes for communicating with Docker on a server. This decision applies to every server you manage.
 
 ### Decision Flowchart
 
 ```mermaid
 flowchart TD
-    Q{"Is BridgePort on the<br/>same machine as your containers?"}
+    Q{"Is BRIDGEPORT on the<br/>same machine as your containers?"}
     Q -->|Yes| Socket["Use Docker Socket<br/>(simplest setup)"]
     Q -->|No| SSH["Use SSH mode<br/>(works across any network)"]
     SSH --> Agent{"Want real-time metrics<br/>and process snapshots?"}
     Agent -->|Yes| SSHAgent["SSH + Agent<br/>(deploy the agent via UI)"]
-    Agent -->|No| SSHOnly["SSH only<br/>(BridgePort polls over SSH)"]
+    Agent -->|No| SSHOnly["SSH only<br/>(BRIDGEPORT polls over SSH)"]
 ```
 
 ### Comparison
@@ -294,10 +294,10 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 ```
 
-BridgePort automatically detects the mounted socket and creates a "localhost" server in each environment.
+BRIDGEPORT automatically detects the mounted socket and creates a "localhost" server in each environment.
 
 > [!NOTE]
-> **Security consideration**: Mounting the Docker socket gives BridgePort full access to the Docker daemon, which is effectively root access on the host machine. If this is a concern, use SSH mode instead.
+> **Security consideration**: Mounting the Docker socket gives BRIDGEPORT full access to the Docker daemon, which is effectively root access on the host machine. If this is a concern, use SSH mode instead.
 
 ### Enabling SSH Mode
 
@@ -305,7 +305,7 @@ No special Docker configuration needed. Just:
 
 1. Upload an SSH private key in **Configuration > Environment Settings**
 2. Add a server with its hostname or IP
-3. BridgePort connects via SSH to run Docker commands
+3. BRIDGEPORT connects via SSH to run Docker commands
 
 > [!TIP]
 > The SSH key is encrypted and stored per-environment. Different environments can use different keys for security isolation.

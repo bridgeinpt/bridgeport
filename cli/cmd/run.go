@@ -95,7 +95,7 @@ func listCommands(service *api.Service) error {
 	if service.ServiceType == nil || len(service.ServiceType.Commands) == 0 {
 		fmt.Printf("No predefined commands available for %s\n", service.Name)
 		if service.ServiceType == nil {
-			fmt.Println("Tip: Assign a service type in BridgePort to enable predefined commands")
+			fmt.Println("Tip: Assign a service type in BRIDGEPORT to enable predefined commands")
 		}
 		return nil
 	}

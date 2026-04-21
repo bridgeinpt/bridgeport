@@ -286,7 +286,7 @@ export default function Servers() {
             Are you sure you want to delete <span className="font-semibold text-white">{serverToDelete?.name}</span>?
           </p>
           <p className="text-sm text-slate-400">
-            This will remove the server and all its associated services from BridgePort. This action cannot be undone.
+            This will remove the server and all its associated services from BRIDGEPORT. This action cannot be undone.
           </p>
           <div className="flex gap-2 justify-end">
             <button

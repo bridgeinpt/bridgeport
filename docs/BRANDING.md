@@ -1,12 +1,12 @@
-# BridgePort Branding Plan
+# BRIDGEPORT Branding Plan
 
-> This document captures the branding decisions and implementation plan for renaming BridgePort to BridgePort.
+> This document captures the branding decisions and implementation plan for renaming BRIDGEPORT to BRIDGEPORT.
 
 ## Final Decisions
 
 | Aspect | Value |
 |--------|-------|
-| **Name** | BridgePort |
+| **Name** | BRIDGEPORT |
 | **Tagline** | Dock. Run. Ship. Repeat. |
 | **License** | Closed source / Proprietary |
 | **Created by** | Engineering Team at BridgeIn (bridgein.pt) |
@@ -23,7 +23,7 @@ You need **2 images per option**: a main logo (header) and a favicon (browser ta
 
 **Main Logo** (header/login, ~40-60px height):
 ```
-Minimalist shipping port crane logo for "BridgePort" deployment tool,
+Minimalist shipping port crane logo for "BRIDGEPORT" deployment tool,
 geometric gantry crane silhouette lifting a container, sky blue
 (#0ea5e9) accent on dark slate (#0f172a), modern tech aesthetic,
 flat vector, clean angular lines, evokes Docker/containers,
@@ -44,7 +44,7 @@ bold simple form, flat vector
 
 **Main Logo** (header/login, ~40-60px height):
 ```
-Minimalist logo for "BridgePort" deployment tool, stylized anchor
+Minimalist logo for "BRIDGEPORT" deployment tool, stylized anchor
 integrated with a shipping port crane, geometric design, sky blue
 accent color (#0ea5e9) on dark slate background (#0f172a), modern
 tech startup aesthetic, flat vector style, clean lines, horizontal
@@ -65,7 +65,7 @@ bold simple form, flat vector
 
 **Main Logo** (header/login, ~40-60px height):
 ```
-Minimalist logo for "BridgePort", abstract container ship passing
+Minimalist logo for "BRIDGEPORT", abstract container ship passing
 under a bridge arch, single continuous line art style, sky blue
 (#0ea5e9) on dark background, geometric and modern, tech company
 logo, flat design, horizontal composition for header placement
@@ -85,7 +85,7 @@ bold simple form, flat vector
 
 **Main Logo** (header/login, ~40-60px height):
 ```
-Letter "B" logo for "BridgePort", stylized with wave elements at
+Letter "B" logo for "BRIDGEPORT", stylized with wave elements at
 the bottom suggesting water/port, geometric construction, sky blue
 (#0ea5e9) on dark background, modern monogram style, professional
 tech branding, horizontal layout for header
@@ -112,9 +112,9 @@ no fine details, flat vector
 
 ```
 +-------------------------------------------+
-|           [BridgePort Logo]               |
+|           [BRIDGEPORT Logo]               |
 |                                           |
-|            BridgePort                     |
+|            BRIDGEPORT                     |
 |      Dock. Run. Ship. Repeat.             |
 |               v1.0.0                      |
 +-------------------------------------------+
@@ -150,7 +150,7 @@ no fine details, flat vector
 
 | File | Changes |
 |------|---------|
-| `ui/index.html` | Title -> "BridgePort", add favicon link |
+| `ui/index.html` | Title -> "BRIDGEPORT", add favicon link |
 | `ui/src/pages/Login.tsx` | Replace rocket emoji with logo, update name/tagline |
 | `ui/src/components/Layout.tsx` | Update sidebar header, add About link |
 | `ui/src/pages/About.tsx` | **NEW** - About page component |
@@ -170,17 +170,17 @@ no fine details, flat vector
 - Save as `ui/public/logo.png` and `ui/public/favicon.png`
 
 ### Step 2: Update index.html
-- Change `<title>BridgePort</title>` -> `<title>BridgePort</title>`
+- Change `<title>BRIDGEPORT</title>` -> `<title>BRIDGEPORT</title>`
 - Add favicon: `<link rel="icon" type="image/svg+xml" href="/favicon.png" />`
 
 ### Step 3: Update Login.tsx
 - Replace rocket emoji with `<img src="/logo.png" />`
-- Change "BridgePort" -> "BridgePort"
+- Change "BRIDGEPORT" -> "BRIDGEPORT"
 - Change tagline to "Dock. Run. Ship. Repeat."
 
 ### Step 4: Update Layout.tsx
 - Replace rocket emoji with small logo
-- Change sidebar title to "BridgePort"
+- Change sidebar title to "BRIDGEPORT"
 - Add About link (info icon) in sidebar footer
 
 ### Step 5: Create About.tsx
@@ -195,17 +195,17 @@ no fine details, flat vector
 - Frontend: name -> "bridgeport-ui"
 
 ### Step 8: Update README.md
-- Replace all "BridgePort" references with "BridgePort"
+- Replace all "BRIDGEPORT" references with "BRIDGEPORT"
 
 ---
 
 ## 5. Verification
 
 1. `cd bridgeport/ui && npm run dev`
-2. Check Login page: new logo, "BridgePort", new tagline
+2. Check Login page: new logo, "BRIDGEPORT", new tagline
 3. Check sidebar: logo and name updated
 4. Click About link -> verify About page renders
-5. Check browser tab: favicon + "BridgePort" title
+5. Check browser tab: favicon + "BRIDGEPORT" title
 6. `npm run build` -> verify production build succeeds
 
 ---

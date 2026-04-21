@@ -1,6 +1,6 @@
 # Security & Hardening
 
-BridgePort secures your infrastructure with JWT authentication, role-based access control, AES-256-GCM encryption for secrets at rest, per-environment SSH keys, and per-server agent tokens.
+BRIDGEPORT secures your infrastructure with JWT authentication, role-based access control, AES-256-GCM encryption for secrets at rest, per-environment SSH keys, and per-server agent tokens.
 
 ---
 
@@ -20,7 +20,7 @@ BridgePort secures your infrastructure with JWT authentication, role-based acces
 
 ## Security Architecture
 
-BridgePort uses multiple security layers to protect your deployment infrastructure:
+BRIDGEPORT uses multiple security layers to protect your deployment infrastructure:
 
 | Layer | Mechanism | Purpose |
 |-------|-----------|---------|
@@ -39,33 +39,33 @@ BridgePort uses multiple security layers to protect your deployment infrastructu
 ```mermaid
 sequenceDiagram
     participant Client
-    participant BridgePort
+    participant BRIDGEPORT
     participant Database
 
-    Client->>BridgePort: POST /api/auth/login (email, password)
-    BridgePort->>Database: Verify credentials (bcrypt)
-    Database-->>BridgePort: User record
-    BridgePort-->>Client: JWT token (7-day expiry)
+    Client->>BRIDGEPORT: POST /api/auth/login (email, password)
+    BRIDGEPORT->>Database: Verify credentials (bcrypt)
+    Database-->>BRIDGEPORT: User record
+    BRIDGEPORT-->>Client: JWT token (7-day expiry)
 
-    Client->>BridgePort: GET /api/servers (Authorization: Bearer <token>)
-    BridgePort->>BridgePort: Verify JWT or API token
-    BridgePort->>BridgePort: Check RBAC role
-    BridgePort->>Database: Fetch data
-    BridgePort-->>Client: 200 OK (data)
+    Client->>BRIDGEPORT: GET /api/servers (Authorization: Bearer <token>)
+    BRIDGEPORT->>BRIDGEPORT: Verify JWT or API token
+    BRIDGEPORT->>BRIDGEPORT: Check RBAC role
+    BRIDGEPORT->>Database: Fetch data
+    BRIDGEPORT-->>Client: 200 OK (data)
 ```
 
-BridgePort supports two authentication methods:
+BRIDGEPORT supports two authentication methods:
 
 1. **JWT tokens** -- issued on login, expire after 7 days, used by the web UI
 2. **API tokens** -- long-lived tokens created by users for programmatic access (CI/CD, scripts). Tokens are stored as SHA-256 hashes and cannot be retrieved after creation.
 
-Both methods use the same `Authorization: Bearer <token>` header. BridgePort tries API token validation first, then falls back to JWT verification.
+Both methods use the same `Authorization: Bearer <token>` header. BRIDGEPORT tries API token validation first, then falls back to JWT verification.
 
 ---
 
 ## RBAC Model
 
-BridgePort has three roles arranged in a strict hierarchy: **admin** > **operator** > **viewer**.
+BRIDGEPORT has three roles arranged in a strict hierarchy: **admin** > **operator** > **viewer**.
 
 | Action | Admin | Operator | Viewer |
 |--------|:-----:|:--------:|:------:|
@@ -117,17 +117,17 @@ All sensitive data stored in the database is encrypted using **AES-256-GCM** (Au
 - To rotate the `MASTER_KEY`, you would need to decrypt all values with the old key and re-encrypt with the new one. There is currently no automated rotation command.
 
 > [!WARNING]
-> The `MASTER_KEY` is the single most critical secret in your BridgePort deployment. Back it up separately from the database. Without it, encrypted secrets, SSH keys, and registry credentials cannot be recovered.
+> The `MASTER_KEY` is the single most critical secret in your BRIDGEPORT deployment. Back it up separately from the database. Without it, encrypted secrets, SSH keys, and registry credentials cannot be recovered.
 
 ---
 
 ## SSH Key Management
 
-BridgePort uses **per-environment SSH keys** for secure server access:
+BRIDGEPORT uses **per-environment SSH keys** for secure server access:
 
 - Each environment has its own SSH private key, configured in **Settings > SSH**
 - Keys are encrypted with AES-256-GCM before being stored in the database
-- When BridgePort needs to connect to a server, it decrypts the key in memory
+- When BRIDGEPORT needs to connect to a server, it decrypts the key in memory
 - Keys are never written to disk in plaintext
 
 This design provides:
@@ -139,36 +139,36 @@ This design provides:
 
 ## Agent Token Security
 
-Each server running the BridgePort monitoring agent has a unique authentication token:
+Each server running the BRIDGEPORT monitoring agent has a unique authentication token:
 
 - Tokens are generated as 32-byte random values (base64url-encoded)
 - Only the **SHA-256 hash** of the token is stored in the database
 - The plaintext token is shown once when the agent is deployed, then discarded
 - Tokens can be regenerated from the server detail page if compromised
 
-The agent includes the token in every metrics push to authenticate itself. BridgePort verifies the hash on each request.
+The agent includes the token in every metrics push to authenticate itself. BRIDGEPORT verifies the hash on each request.
 
 ---
 
 ## Production Hardening Checklist
 
-Use this checklist to secure your BridgePort deployment:
+Use this checklist to secure your BRIDGEPORT deployment:
 
-- [ ] **Run behind a reverse proxy with HTTPS** -- BridgePort itself serves HTTP. Use Caddy, nginx, or Traefik to terminate TLS. The included `docker-compose.yml` ships with a Caddy configuration.
+- [ ] **Run behind a reverse proxy with HTTPS** -- BRIDGEPORT itself serves HTTP. Use Caddy, nginx, or Traefik to terminate TLS. The included `docker-compose.yml` ships with a Caddy configuration.
 
 - [ ] **Set strong `MASTER_KEY` and `JWT_SECRET`** -- Generate with `openssl rand -base64 32`. Never reuse these values across deployments.
 
 - [ ] **Change default admin credentials** -- Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` in your `.env` before first boot, then change the password via the UI.
 
-- [ ] **Configure `CORS_ORIGIN`** -- Set this to your specific domain (e.g., `https://deploy.example.com`). In production, BridgePort defaults to rejecting cross-origin requests from unknown domains.
+- [ ] **Configure `CORS_ORIGIN`** -- Set this to your specific domain (e.g., `https://deploy.example.com`). In production, BRIDGEPORT defaults to rejecting cross-origin requests from unknown domains.
 
 - [ ] **Run as non-root** -- The Docker image already runs as the `node` user (UID 1000). The `docker-compose.yml` sets `user: "1000:1000"`.
 
-- [ ] **Restrict network access** -- Limit access to port 3000 (or your reverse proxy port) to trusted networks. BridgePort is an internal tool, not a public-facing service.
+- [ ] **Restrict network access** -- Limit access to port 3000 (or your reverse proxy port) to trusted networks. BRIDGEPORT is an internal tool, not a public-facing service.
 
-- [ ] **Set up firewall rules for SSH** -- BridgePort connects to your servers via SSH. Ensure only BridgePort's IP (or network) can reach port 22 on managed servers.
+- [ ] **Set up firewall rules for SSH** -- BRIDGEPORT connects to your servers via SSH. Ensure only BRIDGEPORT's IP (or network) can reach port 22 on managed servers.
 
-- [ ] **Protect the Docker socket** -- If using socket mode for host container management, understand that mounting `/var/run/docker.sock` gives BridgePort full Docker daemon access.
+- [ ] **Protect the Docker socket** -- If using socket mode for host container management, understand that mounting `/var/run/docker.sock` gives BRIDGEPORT full Docker daemon access.
 
 - [ ] **Enable Sentry for error monitoring** -- Set `SENTRY_BACKEND_DSN` and `SENTRY_FRONTEND_DSN` to catch errors before your users do.
 
@@ -176,13 +176,13 @@ Use this checklist to secure your BridgePort deployment:
 
 - [ ] **Review audit logs periodically** -- Check **Admin > Audit** for unexpected activity. Configure retention via System Settings.
 
-- [ ] **Keep BridgePort updated** -- Pull the latest image regularly to get security patches. See [Upgrades](upgrades.md).
+- [ ] **Keep BRIDGEPORT updated** -- Pull the latest image regularly to get security patches. See [Upgrades](upgrades.md).
 
 ---
 
 ## Audit Logging
 
-BridgePort maintains a comprehensive audit trail of all significant actions.
+BRIDGEPORT maintains a comprehensive audit trail of all significant actions.
 
 ### What Gets Audited
 
@@ -227,13 +227,13 @@ Audit log retention is configurable via **Admin > System Settings** (`auditLogRe
 
 ## Vulnerability Reporting
 
-If you discover a security vulnerability in BridgePort, please report it responsibly. See [SECURITY.md](../SECURITY.md) for reporting instructions, response timeline expectations, and the scope of what constitutes a security issue.
+If you discover a security vulnerability in BRIDGEPORT, please report it responsibly. See [SECURITY.md](../SECURITY.md) for reporting instructions, response timeline expectations, and the scope of what constitutes a security issue.
 
 ---
 
 ## Related Documentation
 
 - [Backup & Restore](backup-restore.md) -- protect your data
-- [Upgrades](upgrades.md) -- keep BridgePort patched
+- [Upgrades](upgrades.md) -- keep BRIDGEPORT patched
 - [Troubleshooting](troubleshooting.md) -- debug authentication and access issues
 - [Configuration Reference](../configuration.md) -- environment variable details

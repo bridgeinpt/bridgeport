@@ -1,11 +1,11 @@
 ---
 allowed-tools: Bash, Read, Write, Edit
-description: Setup BridgePort development environment
+description: Setup BRIDGEPORT development environment
 ---
 
 # Development Setup
 
-Set up the BridgePort development environment by installing all dependencies and initializing the database.
+Set up the BRIDGEPORT development environment by installing all dependencies and initializing the database.
 
 ## Steps
 

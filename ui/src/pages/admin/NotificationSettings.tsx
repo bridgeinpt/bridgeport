@@ -74,7 +74,7 @@ export default function NotificationSettings() {
     username: '',
     password: '',
     fromAddress: '',
-    fromName: 'BridgePort',
+    fromName: 'BRIDGEPORT',
     enabled: true,
   });
   const [smtpSaving, setSmtpSaving] = useState(false);
@@ -526,7 +526,7 @@ export default function NotificationSettings() {
                   type="text"
                   value={smtpForm.fromName}
                   onChange={(e) => setSmtpForm({ ...smtpForm, fromName: e.target.value })}
-                  placeholder="BridgePort"
+                  placeholder="BRIDGEPORT"
                   className="input"
                 />
               </div>

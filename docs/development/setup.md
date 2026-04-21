@@ -1,6 +1,6 @@
 # Development Setup
 
-Get BridgePort running locally for development in under 10 minutes.
+Get BRIDGEPORT running locally for development in under 10 minutes.
 
 ---
 
@@ -123,7 +123,7 @@ This creates the SQLite database file at `./data/bridgeport.db` with all tables 
 
 ## Start the Development Servers
 
-BridgePort has two development servers that run simultaneously: the backend (Fastify) and the frontend (Vite).
+BRIDGEPORT has two development servers that run simultaneously: the backend (Fastify) and the frontend (Vite).
 
 ### Terminal 1: Backend
 
@@ -134,7 +134,7 @@ npm run dev
 Expected output:
 
 ```
-[12:00:00] INFO: BridgePort running at http://0.0.0.0:3000
+[12:00:00] INFO: BRIDGEPORT running at http://0.0.0.0:3000
 [12:00:00] INFO: [Scheduler] Starting with intervals:
   - Server health: 60s
   - Service health: 60s

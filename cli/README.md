@@ -1,12 +1,12 @@
-# BridgePort CLI
+# BRIDGEPORT CLI
 
-Command-line interface for managing BridgePort infrastructure.
+Command-line interface for managing BRIDGEPORT infrastructure.
 
 ## Installation
 
-### From BridgePort UI (Recommended)
+### From BRIDGEPORT UI (Recommended)
 
-1. Open your BridgePort instance and go to the **About** page
+1. Open your BRIDGEPORT instance and go to the **About** page
 2. Download the appropriate binary for your platform:
    - **macOS (Intel)**: `bridgeport-darwin-amd64`
    - **macOS (Apple Silicon)**: `bridgeport-darwin-arm64`
@@ -170,7 +170,7 @@ default_environment: staging
 
 | Flag | Description |
 |------|-------------|
-| `--url` | BridgePort server URL |
+| `--url` | BRIDGEPORT server URL |
 | `--token` | API token (overrides config) |
 | `--config` | Config file path (default: `~/.bridgeport/config.yaml`) |
 | `--no-color` | Disable colored output |

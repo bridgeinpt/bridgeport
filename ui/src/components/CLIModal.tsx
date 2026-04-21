@@ -77,7 +77,7 @@ function platformInstructions(platform: Platform, filename: string | null) {
           code: `sudo mv ~/Downloads/${binary} /usr/local/bin/bridgeport`,
         },
         {
-          label: 'Log in to BridgePort',
+          label: 'Log in to BRIDGEPORT',
           code: 'bridgeport login',
         },
       ],
@@ -95,7 +95,7 @@ function platformInstructions(platform: Platform, filename: string | null) {
         hint: 'Use ~/.local/bin instead if /usr/local/bin is not writable on your distribution.',
       },
       {
-        label: 'Log in to BridgePort',
+        label: 'Log in to BRIDGEPORT',
         code: 'bridgeport login',
       },
     ],
@@ -132,7 +132,7 @@ export function CLIModal({ isOpen, onClose }: CLIModalProps) {
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="BridgePort CLI"
+      title="BRIDGEPORT CLI"
       subtitle={cliVersion ? `Version ${cliVersion}` : undefined}
       size="lg"
     >

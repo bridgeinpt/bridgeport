@@ -13,8 +13,8 @@ import (
 
 var configCmd = &cobra.Command{
 	Use:   "config",
-	Short: "Configure BridgePort CLI settings",
-	Long: `Interactively configure BridgePort CLI settings.
+	Short: "Configure BRIDGEPORT CLI settings",
+	Long: `Interactively configure BRIDGEPORT CLI settings.
 
 For each setting, enter a new value or press Enter to keep the current value.
 Settings are saved to ~/.bridgeport/config.yaml
@@ -73,7 +73,7 @@ func runConfig(cmd *cobra.Command, args []string) error {
 	// Interactive configuration
 	reader := bufio.NewReader(os.Stdin)
 
-	fmt.Println("BridgePort CLI Configuration")
+	fmt.Println("BRIDGEPORT CLI Configuration")
 	fmt.Println("Press Enter to keep current value, or type a new value.")
 	fmt.Println()
 

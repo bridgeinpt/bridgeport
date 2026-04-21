@@ -1,6 +1,6 @@
 # Health Checks
 
-BridgePort performs four types of health checks -- container health, URL, TCP port, and TLS certificate -- to continuously verify that your services are running correctly, and integrates with bounce logic and deployment orchestration to prevent alert storms and gate rollouts.
+BRIDGEPORT performs four types of health checks -- container health, URL, TCP port, and TLS certificate -- to continuously verify that your services are running correctly, and integrates with bounce logic and deployment orchestration to prevent alert storms and gate rollouts.
 
 ## Quick Start
 
@@ -41,7 +41,7 @@ flowchart TD
 
 ### Container Health
 
-BridgePort inspects the Docker container's native health status using the Docker API.
+BRIDGEPORT inspects the Docker container's native health status using the Docker API.
 
 | Status | Meaning |
 |---|---|
@@ -54,7 +54,7 @@ This check runs automatically during both SSH and agent metrics collection. No c
 
 ### URL Health Check
 
-BridgePort (or the agent) performs an HTTP request to a user-configured URL and checks the response.
+BRIDGEPORT (or the agent) performs an HTTP request to a user-configured URL and checks the response.
 
 **How to configure:**
 
@@ -72,7 +72,7 @@ BridgePort (or the agent) performs an HTTP request to a user-configured URL and 
 | `errorMessage` | Error details on failure (timeout, connection refused, etc.) |
 
 > [!TIP]
-> In SSH mode, BridgePort runs `curl` on the server via SSH. In agent mode, the agent performs the HTTP request directly. Agent mode is faster and does not require a separate SSH connection.
+> In SSH mode, BRIDGEPORT runs `curl` on the server via SSH. In agent mode, the agent performs the HTTP request directly. Agent mode is faster and does not require a separate SSH connection.
 
 ### TCP Port Check (Agent Only)
 
@@ -229,7 +229,7 @@ The scheduler runs daily cleanup.
 
 ## Bounce Logic
 
-Bounce logic prevents alert storms when a resource repeatedly fails. Instead of sending a notification on every failure, BridgePort tracks consecutive failures and only sends an alert when a threshold is reached.
+Bounce logic prevents alert storms when a resource repeatedly fails. Instead of sending a notification on every failure, BRIDGEPORT tracks consecutive failures and only sends an alert when a threshold is reached.
 
 ### How It Works
 
@@ -293,7 +293,7 @@ The `BounceTracker` table tracks state per resource:
 | `lastSuccessAt` | Timestamp of last success |
 | `alertSentAt` | When the last alert was sent (for cooldown calculation) |
 
-When a resource **recovers** (success after alert was sent), BridgePort sends a recovery notification and resets the tracker.
+When a resource **recovers** (success after alert was sent), BRIDGEPORT sends a recovery notification and resets the tracker.
 
 ## Deployment Orchestration Integration
 
@@ -332,7 +332,7 @@ flowchart LR
 
 This can happen if:
 - The **Docker HEALTHCHECK** in the Dockerfile is failing even though the URL check passes.
-- BridgePort uses both container health and URL health to determine overall status. Both must pass for `healthy`.
+- BRIDGEPORT uses both container health and URL health to determine overall status. Both must pass for `healthy`.
 - Check `docker inspect <container>` on the server to see the Docker health status.
 
 ### TCP/cert checks not working

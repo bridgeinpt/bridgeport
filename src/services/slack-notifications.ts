@@ -331,7 +331,7 @@ export function buildSlackMessage(
     });
   }
 
-  // Action buttons (if BridgePort URL is configured)
+  // Action buttons (if BRIDGEPORT URL is configured)
   if (bridgeportUrl) {
     const buttons: SlackBlock['elements'] = [];
 
@@ -379,7 +379,7 @@ export function buildSlackMessage(
     // Always add a dashboard link
     buttons.push({
       type: 'button',
-      text: { type: 'plain_text', text: 'Open BridgePort', emoji: true },
+      text: { type: 'plain_text', text: 'Open BRIDGEPORT', emoji: true },
       url: bridgeportUrl,
     });
 
@@ -480,7 +480,7 @@ export async function dispatchSlackNotification(
     new Map(channelsToNotify.map((c) => [c.id, c])).values()
   );
 
-  // Get BridgePort URL for action buttons (prefer publicUrl over agentCallbackUrl)
+  // Get BRIDGEPORT URL for action buttons (prefer publicUrl over agentCallbackUrl)
   const settings = await getSystemSettings();
   const bridgeportUrl = settings.publicUrl || undefined;
 
@@ -524,14 +524,14 @@ export async function testSlackChannel(
 
   const webhookUrl = decrypt(channel.webhookUrl, channel.webhookUrlNonce);
 
-  // Get BridgePort URL for action buttons (prefer publicUrl over agentCallbackUrl)
+  // Get BRIDGEPORT URL for action buttons (prefer publicUrl over agentCallbackUrl)
   const settings = await getSystemSettings();
   const bridgeportUrl = settings.publicUrl || undefined;
 
   const testMessage = buildSlackMessage(
     {
       title: 'Test Notification',
-      message: 'This is a test message from BridgePort to verify your Slack integration is working correctly.',
+      message: 'This is a test message from BRIDGEPORT to verify your Slack integration is working correctly.',
       data: { isTest: true },
       notificationType: {
         id: 'test',

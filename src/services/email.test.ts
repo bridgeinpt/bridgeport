@@ -63,7 +63,7 @@ describe('email', () => {
         encryptedPassword: 'enc',
         passwordNonce: 'nonce',
         fromAddress: 'noreply@example.com',
-        fromName: 'BridgePort',
+        fromName: 'BRIDGEPORT',
         enabled: true,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -88,7 +88,7 @@ describe('email', () => {
         encryptedPassword: null,
         passwordNonce: null,
         fromAddress: 'noreply@example.com',
-        fromName: 'BridgePort',
+        fromName: 'BRIDGEPORT',
         enabled: true,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -111,7 +111,7 @@ describe('email', () => {
         encryptedPassword: 'enc-pass',
         passwordNonce: 'nonce-1',
         fromAddress: 'noreply@example.com',
-        fromName: 'BridgePort',
+        fromName: 'BRIDGEPORT',
         enabled: true,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -124,7 +124,7 @@ describe('email', () => {
         username: 'user',
         password: 'plain-password',
         fromAddress: 'noreply@example.com',
-        fromName: 'BridgePort',
+        fromName: 'BRIDGEPORT',
       });
 
       expect(encrypt).toHaveBeenCalledWith('plain-password');
@@ -141,7 +141,7 @@ describe('email', () => {
         encryptedPassword: null,
         passwordNonce: null,
         fromAddress: 'admin@example.com',
-        fromName: 'BridgePort',
+        fromName: 'BRIDGEPORT',
         enabled: true,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -169,7 +169,7 @@ describe('email', () => {
         encryptedPassword: null,
         passwordNonce: null,
         fromAddress: 'noreply@example.com',
-        fromName: 'BridgePort',
+        fromName: 'BRIDGEPORT',
         enabled: true,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -196,7 +196,7 @@ describe('email', () => {
         encryptedPassword: null,
         passwordNonce: null,
         fromAddress: 'noreply@example.com',
-        fromName: 'BridgePort',
+        fromName: 'BRIDGEPORT',
         enabled: true,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -263,7 +263,7 @@ describe('email', () => {
           encryptedPassword: 'enc',
           passwordNonce: 'nonce',
           fromAddress: 'noreply@example.com',
-          fromName: 'BridgePort',
+          fromName: 'BRIDGEPORT',
           enabled: true,
         })
         .mockResolvedValueOnce({
@@ -275,7 +275,7 @@ describe('email', () => {
           encryptedPassword: 'enc',
           passwordNonce: 'nonce',
           fromAddress: 'noreply@example.com',
-          fromName: 'BridgePort',
+          fromName: 'BRIDGEPORT',
           enabled: true,
         });
 
@@ -288,7 +288,7 @@ describe('email', () => {
 
       expect(result.success).toBe(true);
       expect(mockSendMail).toHaveBeenCalledWith({
-        from: '"BridgePort" <noreply@example.com>',
+        from: '"BRIDGEPORT" <noreply@example.com>',
         to: 'user@example.com',
         subject: 'Test Subject',
         html: '<p>Hello</p>',
@@ -317,7 +317,7 @@ describe('email', () => {
         encryptedPassword: null,
         passwordNonce: null,
         fromAddress: 'noreply@example.com',
-        fromName: 'BridgePort',
+        fromName: 'BRIDGEPORT',
         enabled: true,
       });
 
@@ -340,13 +340,13 @@ describe('email', () => {
           encryptedPassword: null,
           passwordNonce: null,
           fromAddress: 'noreply@example.com',
-          fromName: 'BridgePort',
+          fromName: 'BRIDGEPORT',
           enabled: true,
         })
         .mockResolvedValueOnce({
           id: 'smtp-1',
           fromAddress: 'noreply@example.com',
-          fromName: 'BridgePort',
+          fromName: 'BRIDGEPORT',
         });
 
       const result = await sendTestEmail('test@example.com');
@@ -355,7 +355,7 @@ describe('email', () => {
       expect(mockSendMail).toHaveBeenCalledWith(
         expect.objectContaining({
           to: 'test@example.com',
-          subject: 'BridgePort Test Email',
+          subject: 'BRIDGEPORT Test Email',
         })
       );
     });
@@ -420,15 +420,15 @@ describe('email', () => {
       expect(html).toContain('#2563eb');
     });
 
-    it('should include BridgePort branding', () => {
+    it('should include BRIDGEPORT branding', () => {
       const { html, text } = generateNotificationEmail(
         'Test',
         'Test message',
         'info'
       );
 
-      expect(html).toContain('BridgePort');
-      expect(text).toContain('BridgePort');
+      expect(html).toContain('BRIDGEPORT');
+      expect(text).toContain('BRIDGEPORT');
     });
   });
 });

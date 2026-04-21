@@ -1,17 +1,17 @@
-# BridgePort Documentation
+# BRIDGEPORT Documentation
 
-Everything you need to deploy, manage, and monitor your Docker infrastructure with BridgePort.
+Everything you need to deploy, manage, and monitor your Docker infrastructure with BRIDGEPORT.
 
 ---
 
 ## Start Here
 
-New to BridgePort? Start from the top and work down.
+New to BRIDGEPORT? Start from the top and work down.
 
 | Doc | Description |
 |-----|-------------|
-| [Getting Started](getting-started.md) | Deploy BridgePort and manage your first server in 5 minutes |
-| [Core Concepts](concepts.md) | How BridgePort thinks: environments, servers, services, images |
+| [Getting Started](getting-started.md) | Deploy BRIDGEPORT and manage your first server in 5 minutes |
+| [Core Concepts](concepts.md) | How BRIDGEPORT thinks: environments, servers, services, images |
 | [Installation Guide](installation.md) | Docker run, Docker Compose, reverse proxy, and development setup |
 | [Configuration Reference](configuration.md) | Every environment variable, with recipes for common setups |
 
@@ -90,13 +90,13 @@ Detailed technical reference for APIs, CLI, agent, plugins, and settings.
 
 ## Operations
 
-Run BridgePort reliably in production.
+Run BRIDGEPORT reliably in production.
 
 | Doc | Description |
 |-----|-------------|
 | [Upgrades](operations/upgrades.md) | How upgrades work, upgrade procedure, rollback, and agent updates |
 | [Security and Hardening](operations/security.md) | Security architecture, RBAC model, hardening checklist, audit logging |
-| [Backup and Restore](operations/backup-restore.md) | Back up BridgePort's own database and manage database backups |
+| [Backup and Restore](operations/backup-restore.md) | Back up BRIDGEPORT's own database and manage database backups |
 | [Troubleshooting](operations/troubleshooting.md) | Common issues, debug steps, and quick fix table |
 | [Architecture Patterns](operations/patterns.md) | Single-server, multi-server, staging+production, and real-world stack examples |
 
@@ -104,7 +104,7 @@ Run BridgePort reliably in production.
 
 ## Contributing
 
-Help build BridgePort.
+Help build BRIDGEPORT.
 
 | Doc | Description |
 |-----|-------------|
@@ -120,7 +120,7 @@ Help build BridgePort.
 
 | I want to... | Go here |
 |---|---|
-| Get BridgePort running in 5 minutes | [Getting Started](getting-started.md) |
+| Get BRIDGEPORT running in 5 minutes | [Getting Started](getting-started.md) |
 | Deploy to production | [Installation Guide](installation.md) |
 | Add my first server | [Servers](guides/servers.md) |
 | Deploy a service | [Services](guides/services.md) |
@@ -128,7 +128,7 @@ Help build BridgePort.
 | Back up my databases | [Databases](guides/databases.md) |
 | Use the CLI | [CLI Reference](reference/cli.md) |
 | Write a plugin | [Plugin Authoring](reference/plugins.md) |
-| Upgrade BridgePort | [Upgrade Guide](operations/upgrades.md) |
+| Upgrade BRIDGEPORT | [Upgrade Guide](operations/upgrades.md) |
 | Fix a problem | [Troubleshooting](operations/troubleshooting.md) |
 | Contribute code | [Contributing Guide](../CONTRIBUTING.md) |
 | Report a vulnerability | [Security Policy](./SECURITY.md) |

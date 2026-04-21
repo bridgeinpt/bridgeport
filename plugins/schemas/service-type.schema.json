@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "BridgePort Service Type Plugin",
+  "title": "BRIDGEPORT Service Type Plugin",
   "type": "object",
   "required": ["name", "displayName", "commands"],
   "properties": {

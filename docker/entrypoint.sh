@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-echo "=== BridgePort Startup ==="
+echo "=== BRIDGEPORT Startup ==="
 
 # Get database path from DATABASE_URL
 DB_PATH="${DATABASE_URL#file:}"
@@ -56,5 +56,5 @@ fi
 echo "Applying migrations..."
 npx prisma migrate deploy
 
-echo "=== Starting BridgePort ==="
+echo "=== Starting BRIDGEPORT ==="
 exec node dist/server.js

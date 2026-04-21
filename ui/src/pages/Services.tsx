@@ -257,7 +257,7 @@ export default function Services() {
             Are you sure you want to delete <span className="font-semibold text-white">{serviceToDelete?.name}</span>?
           </p>
           <p className="text-sm text-slate-400">
-            This will remove the service from BridgePort. The container will not be stopped or removed. This action cannot be undone.
+            This will remove the service from BRIDGEPORT. The container will not be stopped or removed. This action cannot be undone.
           </p>
           <div className="flex gap-2 justify-end">
             <button

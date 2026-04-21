@@ -1,4 +1,4 @@
-# BridgePort CLI Makefile
+# BRIDGEPORT CLI Makefile
 
 BINARY_NAME=bridgeport
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")

@@ -15,8 +15,8 @@ import (
 
 var loginCmd = &cobra.Command{
 	Use:   "login",
-	Short: "Authenticate with BridgePort",
-	Long: `Authenticate with your BridgePort server.
+	Short: "Authenticate with BRIDGEPORT",
+	Long: `Authenticate with your BRIDGEPORT server.
 
 You can provide credentials interactively or via flags:
   bridgeport login

@@ -79,7 +79,7 @@ export async function saveSmtpConfig(input: SmtpConfigInput): Promise<SmtpConfig
     secure: input.secure,
     username: input.username || null,
     fromAddress: input.fromAddress,
-    fromName: input.fromName || 'BridgePort',
+    fromName: input.fromName || 'BRIDGEPORT',
     enabled: input.enabled ?? true,
   };
 
@@ -199,17 +199,17 @@ export async function testSmtpConnection(): Promise<{ success: boolean; error?: 
 export async function sendTestEmail(to: string): Promise<{ success: boolean; error?: string }> {
   return sendEmail({
     to,
-    subject: 'BridgePort Test Email',
+    subject: 'BRIDGEPORT Test Email',
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2 style="color: #1e40af;">BridgePort Email Test</h2>
-        <p>This is a test email from BridgePort to verify your SMTP configuration is working correctly.</p>
+        <h2 style="color: #1e40af;">BRIDGEPORT Email Test</h2>
+        <p>This is a test email from BRIDGEPORT to verify your SMTP configuration is working correctly.</p>
         <p style="color: #64748b; font-size: 12px; margin-top: 20px;">
           Sent at ${new Date().toISOString()}
         </p>
       </div>
     `,
-    text: `BridgePort Email Test\n\nThis is a test email from BridgePort to verify your SMTP configuration is working correctly.\n\nSent at ${new Date().toISOString()}`,
+    text: `BRIDGEPORT Email Test\n\nThis is a test email from BRIDGEPORT to verify your SMTP configuration is working correctly.\n\nSent at ${new Date().toISOString()}`,
   });
 }
 
@@ -233,7 +233,7 @@ export function generateNotificationEmail(
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
       <div style="background: #0f172a; padding: 20px; border-radius: 8px 8px 0 0;">
-        <h1 style="color: white; margin: 0; font-size: 24px;">BridgePort</h1>
+        <h1 style="color: white; margin: 0; font-size: 24px;">BRIDGEPORT</h1>
       </div>
       <div style="background: ${colors.bg}; padding: 20px; border-left: 4px solid ${colors.text};">
         <h2 style="color: ${colors.text}; margin: 0 0 10px 0; font-size: 18px;">${title}</h2>
@@ -242,13 +242,13 @@ export function generateNotificationEmail(
       </div>
       <div style="background: #f8fafc; padding: 15px 20px; border-radius: 0 0 8px 8px;">
         <p style="color: #64748b; font-size: 12px; margin: 0;">
-          This is an automated notification from BridgePort.
+          This is an automated notification from BRIDGEPORT.
         </p>
       </div>
     </div>
   `;
 
-  const text = `${title}\n\n${environmentName ? `Environment: ${environmentName}\n\n` : ''}${message}\n\n---\nThis is an automated notification from BridgePort.`;
+  const text = `${title}\n\n${environmentName ? `Environment: ${environmentName}\n\n` : ''}${message}\n\n---\nThis is an automated notification from BRIDGEPORT.`;
 
   return { html, text };
 }

@@ -1,6 +1,6 @@
 # Environment Settings Reference
 
-Every environment in BridgePort has per-environment settings organized into five modules: General, Monitoring, Operations, Data, and Configuration. Settings are created with defaults when an environment is created and can be adjusted in **Environment Settings** (admin only).
+Every environment in BRIDGEPORT has per-environment settings organized into five modules: General, Monitoring, Operations, Data, and Configuration. Settings are created with defaults when an environment is created and can be adjusted in **Environment Settings** (admin only).
 
 ## Table of Contents
 
@@ -130,7 +130,7 @@ Health checks, metrics collection, retention, and alert configuration.
 | `bounceCooldownMs` | `integer` | `900000` (15 min) | 10,000 -- 86,400,000 | Cooldown period after an alert before re-alerting for the same resource |
 
 > [!TIP]
-> Bounce logic prevents alert storms. If a server goes down, BridgePort sends one alert after `bounceThreshold` consecutive failures, then waits `bounceCooldownMs` before sending another -- even if the server stays down. When the resource recovers, the bounce counter resets.
+> Bounce logic prevents alert storms. If a server goes down, BRIDGEPORT sends one alert after `bounceThreshold` consecutive failures, then waits `bounceCooldownMs` before sending another -- even if the server stays down. When the resource recovers, the bounce counter resets.
 
 ---
 

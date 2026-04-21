@@ -1,7 +1,7 @@
 /**
  * Authentication helpers for tests.
  *
- * Generates JWT tokens compatible with BridgePort's authenticate plugin.
+ * Generates JWT tokens compatible with BRIDGEPORT's authenticate plugin.
  */
 import jwt from '@fastify/jwt';
 import Fastify from 'fastify';

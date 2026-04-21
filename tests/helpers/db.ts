@@ -1,5 +1,5 @@
 /**
- * Test database helpers for BridgePort.
+ * Test database helpers for BRIDGEPORT.
  *
  * Uses a file-based SQLite database (not in-memory, because Prisma's
  * `db push` needs a file URL). The database is created at the same path

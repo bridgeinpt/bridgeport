@@ -1,6 +1,6 @@
 # Databases
 
-BridgePort manages backups, monitoring, and service connections for your databases -- with a backup-first approach, because protecting your data comes before everything else.
+BRIDGEPORT manages backups, monitoring, and service connections for your databases -- with a backup-first approach, because protecting your data comes before everything else.
 
 ## Table of Contents
 
@@ -45,13 +45,13 @@ Register a database and set up daily backups in under two minutes:
 
 ## How It Works
 
-BridgePort treats databases as registered resources that you manage through three capabilities: backups, monitoring, and service linking.
+BRIDGEPORT treats databases as registered resources that you manage through three capabilities: backups, monitoring, and service linking.
 
 ```mermaid
 flowchart TB
     DB[(Your Database<br/>PostgreSQL / MySQL / SQLite)]
 
-    subgraph BridgePort
+    subgraph BRIDGEPORT
         Reg[Register Database<br/>connection details + credentials]
         Bkp[Backup System<br/>scheduled + manual<br/>local + S3 storage]
         Mon[Monitoring System<br/>plugin-driven queries<br/>SQL or SSH mode]
@@ -165,7 +165,7 @@ Content-Type: application/json
 | `retentionDays` | No | 7 | How many days to keep backups (1-365) |
 | `enabled` | No | true | Toggle the schedule on/off without deleting it |
 
-BridgePort's scheduler checks for due backups at the interval configured by `SCHEDULER_BACKUP_CHECK_INTERVAL` (default: 60 seconds). When a backup is due, it runs asynchronously.
+BRIDGEPORT's scheduler checks for due backups at the interval configured by `SCHEDULER_BACKUP_CHECK_INTERVAL` (default: 60 seconds). When a backup is due, it runs asynchronously.
 
 > [!TIP]
 > Schedule backups during low-traffic periods to minimize impact on database performance. For PostgreSQL, `pg_dump` takes a consistent snapshot without blocking writes, but it does increase I/O.
@@ -212,7 +212,7 @@ Set `backupStorageType: "local"` and provide a `backupLocalPath`:
 }
 ```
 
-The path must be writable by the SSH user. BridgePort creates the directory if it does not exist.
+The path must be writable by the SSH user. BRIDGEPORT creates the directory if it does not exist.
 
 #### S3-Compatible Storage
 
@@ -267,11 +267,11 @@ For PostgreSQL backups, additional options control what is included:
 
 #### Timeout
 
-The `pgDumpTimeoutMs` setting controls how long BridgePort waits for `pg_dump` to complete. Range: 30 seconds to 1 hour. Default: 5 minutes (300000 ms). Increase this for large databases.
+The `pgDumpTimeoutMs` setting controls how long BRIDGEPORT waits for `pg_dump` to complete. Range: 30 seconds to 1 hour. Default: 5 minutes (300000 ms). Increase this for large databases.
 
 ### Retention
 
-When a backup schedule has `retentionDays` set, BridgePort automatically deletes backups older than the specified number of days after each successful scheduled backup.
+When a backup schedule has `retentionDays` set, BRIDGEPORT automatically deletes backups older than the specified number of days after each successful scheduled backup.
 
 - Retention only applies to scheduled backups. Manual backups are not automatically deleted.
 - For S3 storage, the object is deleted from the bucket. For local storage, the file is deleted from the server.
@@ -284,7 +284,7 @@ Backup downloads are controlled by an environment setting that is **disabled by 
 To enable: **Settings > Data > Allow Backup Download** (admin only).
 
 Once enabled:
-- **Local backups:** Streamed through the BridgePort server.
+- **Local backups:** Streamed through the BRIDGEPORT server.
 - **S3 backups:** A presigned URL is generated (valid for 1 hour).
 
 ```http
@@ -341,7 +341,7 @@ cp /var/backups/appdb/backup-20260225.db /opt/app/data/app.db
 
 ## 2. Monitor Your Databases
 
-BridgePort can continuously monitor your databases by running plugin-defined monitoring queries and displaying the results as time-series charts.
+BRIDGEPORT can continuously monitor your databases by running plugin-defined monitoring queries and displaying the results as time-series charts.
 
 ### Enabling Monitoring
 
@@ -439,7 +439,7 @@ Returns all collected metrics within the time window, along with the monitoring 
 
 ## 3. Link Databases to Services
 
-The `ServiceDatabase` model connects databases to services with a connection environment variable name. This is informational -- BridgePort does not inject these values automatically, but it provides visibility into which services depend on which databases.
+The `ServiceDatabase` model connects databases to services with a connection environment variable name. This is informational -- BRIDGEPORT does not inject these values automatically, but it provides visibility into which services depend on which databases.
 
 **Creating a link:**
 
@@ -515,7 +515,7 @@ This information appears in:
 Delete all backups first (or let retention clean them up), then delete the database. This prevents accidental data loss.
 
 **Backup fails at the "connect" step**
-BridgePort cannot SSH to the server. Verify:
+BRIDGEPORT cannot SSH to the server. Verify:
 - The server is reachable and the SSH key is configured for the environment.
 - The SSH user has permissions to run `pg_dump` / `mysqldump`.
 

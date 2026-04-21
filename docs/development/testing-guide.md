@@ -1,6 +1,6 @@
 # Testing Guide
 
-BridgePort uses Vitest with **two separate configs** that must never be mixed:
+BRIDGEPORT uses Vitest with **two separate configs** that must never be mixed:
 
 | Config | Scope | Isolation | Database |
 |--------|-------|-----------|----------|

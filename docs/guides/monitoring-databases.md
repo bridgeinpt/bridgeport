@@ -1,12 +1,12 @@
 # Database Monitoring
 
-BridgePort uses plugin-driven monitoring queries to collect database-specific metrics from PostgreSQL, MySQL, SQLite, and Redis, connecting via direct SQL, SSH commands, or the Redis protocol depending on the database type.
+BRIDGEPORT uses plugin-driven monitoring queries to collect database-specific metrics from PostgreSQL, MySQL, SQLite, and Redis, connecting via direct SQL, SSH commands, or the Redis protocol depending on the database type.
 
 ## Quick Start
 
 1. Go to **Databases** and select (or create) a database.
 2. Toggle **Enable Monitoring** on.
-3. Click **Test Connection** to verify BridgePort can reach the database.
+3. Click **Test Connection** to verify BRIDGEPORT can reach the database.
 4. Metrics appear after the first collection interval (default: 60 seconds).
 5. View charts at **Monitoring > Databases**.
 
@@ -31,7 +31,7 @@ sequenceDiagram
 
 ### Connection Modes
 
-BridgePort supports three connection modes, determined by the database type's plugin definition:
+BRIDGEPORT supports three connection modes, determined by the database type's plugin definition:
 
 | Mode | Used By | How It Works |
 |---|---|---|
@@ -110,7 +110,7 @@ Redis queries use a DSL rather than raw SQL:
 
 ### 1. Register the Database
 
-If you have not already registered the database in BridgePort:
+If you have not already registered the database in BRIDGEPORT:
 
 1. Go to **Databases** and click **Add Database**.
 2. Select the database type (PostgreSQL, MySQL, SQLite, or Redis).
@@ -135,7 +135,7 @@ Server version: PostgreSQL 16.2
 
 If the test fails, check:
 - Credentials are correct
-- Host/port is reachable from BridgePort
+- Host/port is reachable from BRIDGEPORT
 - For SQLite: SSH key is configured for the environment and `sqlite3` is installed on the server
 
 ### 4. View Metrics
@@ -224,7 +224,7 @@ Example -- adding a connections count query for PostgreSQL:
 ```
 
 > [!WARNING]
-> Changes made in the admin UI set `isCustomized: true` on the database type, which prevents BridgePort from overwriting your changes on plugin sync. If you want to revert to the default plugin queries, use the **Reset** button in admin.
+> Changes made in the admin UI set `isCustomized: true` on the database type, which prevents BRIDGEPORT from overwriting your changes on plugin sync. If you want to revert to the default plugin queries, use the **Reset** button in admin.
 
 ## Troubleshooting
 
@@ -232,8 +232,8 @@ Example -- adding a connections count query for PostgreSQL:
 
 | Database | Common Causes |
 |---|---|
-| PostgreSQL | Wrong credentials, `pg_hba.conf` does not allow connections from BridgePort's IP, SSL mismatch |
-| MySQL | Wrong credentials, user not granted access from BridgePort's IP |
+| PostgreSQL | Wrong credentials, `pg_hba.conf` does not allow connections from BRIDGEPORT's IP, SSL mismatch |
+| MySQL | Wrong credentials, user not granted access from BRIDGEPORT's IP |
 | SQLite | SSH key not configured, `sqlite3` not installed on server, wrong file path |
 | Redis | Wrong password, `requirepass` set but no password provided, TLS required but `useSsl` not enabled |
 
@@ -248,7 +248,7 @@ Example -- adding a connections count query for PostgreSQL:
 
 - Verify `monitoringEnabled` is `true` for the database.
 - Verify the database type has a `monitoringConfig` defined. Check **Admin > Database Types** -- if the monitoring config is empty, no queries will run.
-- Verify the scheduler is running (look for `[Scheduler] Collecting metrics from N database(s)` in the BridgePort logs).
+- Verify the scheduler is running (look for `[Scheduler] Collecting metrics from N database(s)` in the BRIDGEPORT logs).
 
 ### Queries returning errors
 
