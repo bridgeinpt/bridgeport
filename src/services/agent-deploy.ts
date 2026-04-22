@@ -160,11 +160,14 @@ RestartSec=10
 WantedBy=multi-user.target
 `;
 
-    const serviceResult = await client.exec(
-      `cat > ${SYSTEMD_SERVICE_PATH} << 'SERVICEEOF'\n${serviceContent}SERVICEEOF`
-    );
-    if (serviceResult.code !== 0) {
-      throw new Error(`Failed to create service file: ${serviceResult.stderr}`);
+    // Write via SFTP rather than a heredoc so the (user-provided) serverUrl
+    // can't reach a shell parser. A pathological URL with a newline + a line
+    // exactly matching the heredoc delimiter would close the heredoc early and
+    // the rest would be interpreted as shell commands.
+    try {
+      await client.writeFile(SYSTEMD_SERVICE_PATH, Buffer.from(serviceContent, 'utf-8'));
+    } catch (err) {
+      throw new Error(`Failed to create service file: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     // Reload systemd, enable and start the service
