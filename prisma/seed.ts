@@ -1,6 +1,11 @@
 import { PrismaClient } from '@prisma/client';
+import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
 
-const prisma = new PrismaClient();
+const adapter = new PrismaBetterSqlite3({
+  url: process.env.DATABASE_URL ?? 'file:./bridgeport.db',
+});
+
+const prisma = new PrismaClient({ adapter });
 
 async function main() {
   console.log('Seeding default service types...');

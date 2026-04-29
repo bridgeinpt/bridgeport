@@ -999,7 +999,7 @@ describe('database migrations', () => {
 
       // Verify no drift
       const result = execSync(
-        `DATABASE_URL=file:${dbPath} npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma`,
+        `DATABASE_URL=file:${dbPath} npx prisma migrate diff --from-migrations prisma/migrations --to-schema prisma/schema.prisma`,
         { encoding: 'utf8' }
       );
 
@@ -1131,7 +1131,7 @@ export async function setupTestDb() {
   process.env.DATABASE_URL = 'file::memory:?cache=shared';
 
   // Apply schema (not migrations — faster for non-migration tests)
-  execSync('npx prisma db push --skip-generate', {
+  execSync('npx prisma db push', {
     env: { ...process.env, DATABASE_URL: process.env.DATABASE_URL },
   });
 

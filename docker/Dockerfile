@@ -41,7 +41,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci --ignore-scripts
 
-COPY tsconfig.json ./
+COPY tsconfig.json prisma.config.ts ./
 COPY prisma/ ./prisma/
 
 # Generate Prisma types
@@ -59,17 +59,24 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci --ignore-scripts
 
+COPY prisma.config.ts ./
 COPY prisma/ ./prisma/
 
 # Generate client (outputs to node_modules/@prisma/client)
 RUN npx prisma generate
 
-# Production dependencies stage (no native modules needed anymore)
+# Production dependencies stage
 FROM node:22-alpine AS deps-prod
 WORKDIR /app
 
+# python3/make/g++ are needed only if better-sqlite3's prebuilt binary is unavailable
+# for this platform; npm rebuild will fall back to compiling from source.
+RUN apk add --no-cache python3 make g++
+
 COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev --ignore-scripts
+RUN npm ci --omit=dev --ignore-scripts && \
+    npm rebuild better-sqlite3 && \
+    apk del python3 make g++
 
 # Copy all prisma-related packages from prisma-build (for both client and CLI)
 COPY --from=prisma-build /app/node_modules/.prisma ./node_modules/.prisma
@@ -117,8 +124,9 @@ COPY --from=deps-prod /app/node_modules ./node_modules
 # Copy built API
 COPY --from=api-build /app/dist ./dist
 
-# Copy Prisma migrations (needed for migrate deploy)
+# Copy Prisma migrations and config (needed for migrate deploy)
 COPY --from=api-build /app/prisma ./prisma
+COPY --from=api-build /app/prisma.config.ts ./prisma.config.ts
 
 # Copy built UI
 COPY --from=ui-build /app/ui/dist ./ui/dist
