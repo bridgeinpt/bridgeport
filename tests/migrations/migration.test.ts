@@ -33,7 +33,7 @@ describe('database migrations', () => {
 
       // Verify no drift
       const result = execSync(
-        `DATABASE_URL=file:${dbPath} npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma`,
+        `DATABASE_URL=file:${dbPath} npx prisma migrate diff --from-migrations prisma/migrations --to-schema prisma/schema.prisma`,
         { encoding: 'utf8' }
       );
 

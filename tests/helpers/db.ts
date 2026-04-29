@@ -25,6 +25,7 @@
  *   });
  */
 import { PrismaClient } from '@prisma/client';
+import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
 import { execSync } from 'child_process';
 import { existsSync, rmSync } from 'fs';
 import { resolve } from 'path';
@@ -62,7 +63,7 @@ export async function setupTestDb(): Promise<PrismaClient> {
       }
     }
 
-    execSync('npx prisma db push --skip-generate --accept-data-loss', {
+    execSync('npx prisma db push --accept-data-loss', {
       env: { ...process.env, DATABASE_URL: dbUrl },
       stdio: 'pipe',
       timeout: 30_000,
@@ -73,10 +74,9 @@ export async function setupTestDb(): Promise<PrismaClient> {
 
   // Create or reuse PrismaClient connected to the test database
   if (!testPrisma) {
+    const adapter = new PrismaBetterSqlite3({ url: dbUrl });
     testPrisma = new PrismaClient({
-      datasources: {
-        db: { url: dbUrl },
-      },
+      adapter,
       log: [], // Quiet in tests
     });
     await testPrisma.$connect();
