@@ -11,7 +11,7 @@ import {
   importFromTerraform,
   pruneServerImages,
 } from '../services/servers.js';
-import { logAudit } from '../services/audit.js';
+import { logAudit, actorFrom } from '../services/audit.js';
 import { deployAgent, removeAgent, checkAgentStatus } from '../services/agent-deploy.js';
 import { getHostInfo, registerHostServer } from '../services/host-detection.js';
 import { prisma } from '../lib/db.js';
@@ -107,7 +107,7 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
           resourceId: server.id,
           resourceName: server.name,
           details: { hostname: server.hostname, tags: body.tags },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: envId,
         });
 
@@ -138,7 +138,7 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
           resourceId: server.id,
           resourceName: server.name,
           details: { changes: body },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: existing?.environmentId,
         });
 
@@ -166,7 +166,7 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
             resourceType: 'server',
             resourceId: id,
             resourceName: server.name,
-            userId: request.authUser!.id,
+            ...actorFrom(request),
             environmentId: server.environmentId,
           });
         }
@@ -215,7 +215,7 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
             discoveredServices: services.length,
             missingServices: missing,
           },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: server?.environmentId,
         });
 
@@ -244,7 +244,7 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
           resourceType: 'server',
           resourceName: 'terraform-import',
           details: { importedServers: servers.map(s => s.name) },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: envId,
         });
 
@@ -278,7 +278,7 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
         resourceName: server.name,
         details: { success: result.success, error: result.error },
         success: result.success,
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId: server.environmentId,
       });
 
@@ -312,7 +312,7 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
         resourceName: server.name,
         details: { success: result.success, error: result.error },
         success: result.success,
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId: server.environmentId,
       });
 
@@ -390,7 +390,7 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
         resourceId: server.id,
         resourceName: server.name,
         details: { oldMode: server.metricsMode, newMode: body.mode },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId: server.environmentId,
       });
 
@@ -444,7 +444,7 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
         resourceId: result.serverId!,
         resourceName: body.data.name,
         details: { type: 'host', hostname: server?.hostname },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId: envId,
       });
 
@@ -509,7 +509,7 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
           resourceId: server.id,
           resourceName: server.name,
           details: { mode, spaceReclaimedBytes },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: server.environmentId,
         });
 

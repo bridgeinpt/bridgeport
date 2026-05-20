@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/db.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
-import { logAudit } from '../services/audit.js';
+import { logAudit, actorFrom } from '../services/audit.js';
 import { requireAdmin } from '../plugins/authorize.js';
 import { createDefaultSettings } from '../services/environment-settings.js';
 import { safeJsonParse, validateBody, findOrNotFound, getErrorMessage } from '../lib/helpers.js';
@@ -18,12 +18,19 @@ const updateSshSchema = z.object({
 });
 
 export async function environmentRoutes(fastify: FastifyInstance): Promise<void> {
-  // List environments
+  // List environments. Env-scoped tokens see only their allowed environments.
   fastify.get(
     '/api/environments',
     { preHandler: [fastify.authenticate] },
-    async () => {
+    async (request) => {
+      const scope = request.authUser?.scope;
+      const where =
+        scope && !scope.allEnvironments
+          ? { id: { in: scope.environmentIds } }
+          : undefined;
+
       const environments = await prisma.environment.findMany({
+        where,
         include: {
           _count: {
             select: { servers: true, secrets: true },
@@ -98,7 +105,7 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
         resourceType: 'environment',
         resourceId: environment.id,
         resourceName: environment.name,
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId: environment.id,
       });
 
@@ -125,7 +132,7 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
             resourceType: 'environment',
             resourceId: id,
             resourceName: environment.name,
-            userId: request.authUser!.id,
+            ...actorFrom(request),
           });
         }
 
@@ -175,7 +182,7 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
         resourceId: id,
         resourceName: environment.name,
         details: { sshUser: body.sshUser, sshKeyUpdated: true },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId: id,
       });
 
@@ -244,7 +251,7 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
         resourceId: id,
         resourceName: environment.name,
         details: { sshKeyDeleted: true },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId: id,
       });
 
@@ -282,7 +289,7 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
         resourceId: id,
         resourceName: environment.name,
         details: { method: 'cli' },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId: id,
       });
 

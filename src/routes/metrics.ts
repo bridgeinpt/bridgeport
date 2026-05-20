@@ -9,7 +9,7 @@ import {
   getServiceMetrics,
   getEnvironmentMetricsSummary,
 } from '../services/metrics.js';
-import { logAudit } from '../services/audit.js';
+import { logAudit, actorFrom } from '../services/audit.js';
 import { getSchedulerConfig } from '../services/health-checks.js';
 import { deployAgent } from '../services/agent-deploy.js';
 import { logAgentEvent } from '../services/agent-events.js';
@@ -576,7 +576,7 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
         resourceId: id,
         resourceName: server.name,
         details: { agentTokenRegenerated: true },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId: server.environmentId,
       });
 

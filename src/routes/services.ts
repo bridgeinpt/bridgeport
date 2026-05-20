@@ -10,7 +10,7 @@ import {
 } from '../services/deploy.js';
 import { DockerSSH, createClientForServer, shellEscape } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from './environments.js';
-import { logAudit } from '../services/audit.js';
+import { logAudit, actorFrom } from '../services/audit.js';
 import { logHealthCheck } from '../services/health-checks.js';
 import { checkServiceUpdate } from '../lib/scheduler.js';
 import { determineHealthStatus, determineOverallStatus } from '../services/servers.js';
@@ -169,7 +169,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           resourceId: service.id,
           resourceName: service.name,
           details: { containerName: service.containerName, containerImageId: service.containerImageId },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: server?.environmentId,
         });
 
@@ -206,7 +206,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           resourceId: service.id,
           resourceName: service.name,
           details: { changes: body },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: existing?.server.environmentId,
         });
 
@@ -240,7 +240,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
             resourceType: 'service',
             resourceId: id,
             resourceName: service.name,
-            userId: request.authUser!.id,
+            ...actorFrom(request),
             environmentId: service.server.environmentId,
           });
         }
@@ -283,7 +283,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           resourceId: id,
           resourceName: service?.name,
           details: { imageTag: body.imageTag || service?.imageTag, deploymentId: result.deployment?.id },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: service?.server.environmentId,
         });
 
@@ -299,7 +299,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           details: { imageTag: body.imageTag },
           success: false,
           error: message,
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: service?.server.environmentId,
         });
 
@@ -470,7 +470,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           resourceId: id,
           resourceName: service.name,
           details: { containerName: service.containerName, serverName: service.server.name },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: service.server.environmentId,
         });
 
@@ -485,7 +485,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           resourceName: service.name,
           success: false,
           error: message,
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: service.server.environmentId,
         });
 
@@ -610,7 +610,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           resourceId: id,
           resourceName: service.name,
           details: { status, containerStatus, healthStatus, containerHealth, urlHealth, exposedPorts, updateInfo },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: service.server.environmentId,
         });
 
@@ -659,7 +659,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           resourceName: service.name,
           success: false,
           error: message,
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: service.server.environmentId,
         });
 
@@ -823,7 +823,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         resourceId: id,
         resourceName: service.name,
         details: { commandName: body.commandName, command: command.command },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId: service.server.environmentId,
       });
 

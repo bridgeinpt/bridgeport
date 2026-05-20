@@ -49,6 +49,8 @@ import { downloadRoutes } from '../../src/routes/downloads.js';
 import { topologyRoutes } from '../../src/routes/topology.js';
 import { environmentSettingsRoutes } from '../../src/routes/environment-settings.js';
 import { eventRoutes } from '../../src/routes/events.js';
+import { serviceAccountRoutes } from '../../src/routes/service-accounts.js';
+import { apiTokenRoutes } from '../../src/routes/api-tokens.js';
 
 export interface TestApp extends FastifyInstance {
   prisma: PrismaClient;
@@ -133,6 +135,8 @@ export async function buildTestApp(options: BuildTestAppOptions = {}): Promise<T
   await fastify.register(topologyRoutes);
   await fastify.register(environmentSettingsRoutes);
   await fastify.register(eventRoutes);
+  await fastify.register(serviceAccountRoutes);
+  await fastify.register(apiTokenRoutes);
 
   // Health check endpoint
   fastify.get('/health', async () => ({

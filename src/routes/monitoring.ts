@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/db.js';
 import { checkServerHealth } from '../services/servers.js';
 import { checkServiceHealth } from '../services/services.js';
-import { logAudit } from '../services/audit.js';
+import { logAudit, actorFrom } from '../services/audit.js';
 import { bundledAgentVersion } from '../lib/version.js';
 import { getAgentEvents } from '../services/agent-events.js';
 import { logHealthCheck } from '../services/health-checks.js';
@@ -264,7 +264,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
           serverCount: results.servers.length,
           serviceCount: results.services.length,
         },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId: envId,
       });
 

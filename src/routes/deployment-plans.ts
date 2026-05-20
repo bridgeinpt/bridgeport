@@ -9,7 +9,7 @@ import {
   getDeploymentPlan,
   listDeploymentPlans,
 } from '../services/orchestration.js';
-import { logAudit } from '../services/audit.js';
+import { logAudit, actorFrom } from '../services/audit.js';
 import { PLAN_STATUS, STEP_STATUS } from '../lib/constants.js';
 import { validateBody, findOrNotFound, getErrorMessage } from '../lib/helpers.js';
 
@@ -50,7 +50,7 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
           imageTag: body.imageTag,
           triggerType: 'manual',
           triggeredBy: request.authUser!.email,
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           autoRollback: body.autoRollback,
         });
 
@@ -64,7 +64,7 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
             serviceCount: body.serviceIds.length,
             autoRollback: body.autoRollback,
           },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: envId,
         });
 
@@ -117,7 +117,7 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
         resourceId: id,
         resourceName: plan.name,
         details: { action: 'execute' },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId: plan.environmentId,
       });
 
@@ -149,7 +149,7 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
           resourceId: id,
           resourceName: plan.name,
           details: { action: 'cancel' },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: plan.environmentId,
         });
 
@@ -200,7 +200,7 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
         resourceId: id,
         resourceName: plan.name,
         details: { action: 'rollback', stepsToRollback: deployedSteps.length },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId: plan.environmentId,
       });
 

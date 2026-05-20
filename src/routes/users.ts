@@ -3,7 +3,7 @@ import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/db.js';
 import { requireAdmin, requireAdminOrSelf } from '../plugins/authorize.js';
-import { logAudit } from '../services/audit.js';
+import { logAudit, actorFrom } from '../services/audit.js';
 import type { UserRole } from '../services/auth.js';
 import { send, NOTIFICATION_TYPES } from '../services/notifications.js';
 import { getSystemSettings } from '../services/system-settings.js';
@@ -143,7 +143,7 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
         resourceId: user.id,
         resourceName: user.email,
         details: { role: user.role },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       // Send notification to the new user
@@ -200,7 +200,7 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
         resourceId: user.id,
         resourceName: user.email,
         details: updateData,
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       // Notify user if role changed
@@ -242,7 +242,7 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
         resourceType: 'user',
         resourceId: id,
         resourceName: user.email,
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       return { success: true };
@@ -291,7 +291,7 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
         resourceId: id,
         resourceName: user.email,
         details: { passwordChanged: true, changedBy: isAdmin && !isSelf ? 'admin' : 'self' },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       // Notify user that password was changed

@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/db.js';
 import { requireAdmin } from '../plugins/authorize.js';
-import { logAudit } from '../services/audit.js';
+import { logAudit, actorFrom } from '../services/audit.js';
 import { safeJsonParse, validateBody, findOrNotFound } from '../lib/helpers.js';
 import { resetTypeToDefaults, exportTypeAsJson, getLastSyncResult } from '../services/plugin-loader.js';
 
@@ -164,7 +164,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         resourceType: 'service_type',
         resourceId: serviceType.id,
         resourceName: serviceType.name,
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       return { serviceType };
@@ -201,7 +201,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         resourceId: serviceType.id,
         resourceName: serviceType.name,
         details: body,
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       return { serviceType };
@@ -235,7 +235,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         resourceType: 'service_type',
         resourceId: id,
         resourceName: existing.name,
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       return { success: true };
@@ -263,7 +263,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         resourceId: id,
         resourceName: existing.name,
         details: { action: 'reset_to_defaults' },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       const serviceType = await prisma.serviceType.findUnique({
@@ -343,7 +343,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         resourceId: command.id,
         resourceName: `${serviceType.name}/${command.name}`,
         details: { serviceTypeId: id, command: body.command },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       return { command };
@@ -378,7 +378,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         resourceId: command.id,
         resourceName: `${existing.serviceType.name}/${command.name}`,
         details: body,
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       return { command };
@@ -407,7 +407,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         resourceType: 'service_type_command',
         resourceId: commandId,
         resourceName: `${existing.serviceType.name}/${existing.name}`,
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       return { success: true };
@@ -541,7 +541,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         resourceType: 'database_type',
         resourceId: databaseType.id,
         resourceName: databaseType.name,
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       return {
@@ -590,7 +590,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         resourceId: databaseType.id,
         resourceName: databaseType.name,
         details: body,
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       return {
@@ -629,7 +629,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         resourceType: 'database_type',
         resourceId: id,
         resourceName: existing.name,
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       return { success: true };
@@ -657,7 +657,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         resourceId: id,
         resourceName: existing.name,
         details: { action: 'reset_to_defaults' },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       const databaseType = await prisma.databaseType.findUnique({
@@ -740,7 +740,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         resourceId: command.id,
         resourceName: `${databaseType.name}/${command.name}`,
         details: { databaseTypeId: id, command: body.command },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       return { command };
@@ -775,7 +775,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         resourceId: command.id,
         resourceName: `${existing.databaseType.name}/${command.name}`,
         details: body,
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       return { command };
@@ -804,7 +804,7 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
         resourceType: 'database_type_command',
         resourceId: commandId,
         resourceName: `${existing.databaseType.name}/${existing.name}`,
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       return { success: true };

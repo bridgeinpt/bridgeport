@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/db.js';
-import { generateToken, hashToken } from '../lib/crypto.js';
+import { generateApiToken, hashToken } from '../lib/crypto.js';
+import { hasMinimumRole } from '../plugins/authorize.js';
 import type { User, ApiToken } from '@prisma/client';
 
 const SALT_ROUNDS = 12;
@@ -12,6 +13,18 @@ export interface AuthUser {
   email: string;
   name: string | null;
   role: UserRole;
+  // Set when the request was authenticated via an API token (vs. JWT session).
+  // Subsequent authz middleware uses this to enforce environment scoping
+  // and to attribute audit logs to the originating token.
+  apiTokenId?: string;
+  // Set when the actor is a service account (not a real user).
+  serviceAccountId?: string;
+  // Token-level environment scope. When allEnvironments is false, only the
+  // listed environment IDs are accessible. Undefined for JWT sessions.
+  scope?: {
+    allEnvironments: boolean;
+    environmentIds: string[];
+  };
 }
 
 export async function createUser(
@@ -83,20 +96,80 @@ export async function getUserById(id: string): Promise<AuthUser | null> {
   return user as AuthUser;
 }
 
+export interface TokenScopeInput {
+  role: UserRole;
+  allEnvironments: boolean;
+  environmentIds?: string[];
+  expiresAt?: Date | null;
+}
+
+export interface CreateTokenInput extends TokenScopeInput {
+  name: string;
+  ownerUserId?: string;
+  ownerServiceAccountId?: string;
+}
+
+async function resolveOwnerRole(input: {
+  ownerUserId?: string;
+  ownerServiceAccountId?: string;
+}): Promise<UserRole | null> {
+  if (input.ownerUserId) {
+    const user = await prisma.user.findUnique({
+      where: { id: input.ownerUserId },
+      select: { role: true },
+    });
+    return (user?.role as UserRole) ?? null;
+  }
+  if (input.ownerServiceAccountId) {
+    const sa = await prisma.serviceAccount.findUnique({
+      where: { id: input.ownerServiceAccountId },
+      select: { role: true, disabled: true },
+    });
+    if (!sa || sa.disabled) return null;
+    return sa.role as UserRole;
+  }
+  return null;
+}
+
 export async function createApiToken(
-  userId: string,
-  name: string,
-  expiresAt?: Date
+  input: CreateTokenInput
 ): Promise<{ token: string; tokenRecord: ApiToken }> {
-  const token = generateToken();
+  if (!input.ownerUserId && !input.ownerServiceAccountId) {
+    throw new Error('Token must have an owner (user or service account)');
+  }
+  if (input.ownerUserId && input.ownerServiceAccountId) {
+    throw new Error('Token cannot have both a user and a service account owner');
+  }
+
+  const ownerRole = await resolveOwnerRole(input);
+  if (!ownerRole) {
+    throw new Error('Owner not found or disabled');
+  }
+  if (!hasMinimumRole(ownerRole, input.role)) {
+    throw new Error(`Token role (${input.role}) exceeds owner role (${ownerRole})`);
+  }
+
+  const envIds = input.allEnvironments ? [] : input.environmentIds ?? [];
+  if (!input.allEnvironments && envIds.length === 0) {
+    throw new Error('Specific-environments scope requires at least one environment ID');
+  }
+
+  const { token, displayPrefix } = generateApiToken();
   const tokenHashValue = hashToken(token);
 
   const tokenRecord = await prisma.apiToken.create({
     data: {
-      name,
+      name: input.name,
       tokenHash: tokenHashValue,
-      expiresAt,
-      userId,
+      tokenPrefix: displayPrefix,
+      role: input.role,
+      allEnvironments: input.allEnvironments,
+      expiresAt: input.expiresAt ?? null,
+      userId: input.ownerUserId ?? null,
+      serviceAccountId: input.ownerServiceAccountId ?? null,
+      environments: envIds.length
+        ? { create: envIds.map((environmentId) => ({ environmentId })) }
+        : undefined,
     },
   });
 
@@ -108,7 +181,11 @@ export async function validateApiToken(token: string): Promise<AuthUser | null> 
 
   const tokenRecord = await prisma.apiToken.findUnique({
     where: { tokenHash: tokenHashValue },
-    include: { user: true },
+    include: {
+      user: true,
+      serviceAccount: true,
+      environments: { select: { environmentId: true } },
+    },
   });
 
   if (!tokenRecord) {
@@ -119,44 +196,90 @@ export async function validateApiToken(token: string): Promise<AuthUser | null> 
     return null;
   }
 
-  // Update last used
-  await prisma.apiToken.update({
-    where: { id: tokenRecord.id },
-    data: { lastUsedAt: new Date() },
-  });
+  // Service-account tokens are inert if the SA is disabled.
+  if (tokenRecord.serviceAccount?.disabled) {
+    return null;
+  }
 
+  // Effective role = min(token role, owner role) — guards against role drift after token mint.
+  const ownerRole = (tokenRecord.user?.role ?? tokenRecord.serviceAccount?.role) as UserRole | undefined;
+  const tokenRole = tokenRecord.role as UserRole;
+  if (!ownerRole) return null;
+  const effectiveRole: UserRole = hasMinimumRole(ownerRole, tokenRole) ? tokenRole : ownerRole;
+
+  // Update last used (fire-and-forget; don't block auth)
+  prisma.apiToken
+    .update({
+      where: { id: tokenRecord.id },
+      data: { lastUsedAt: new Date() },
+    })
+    .catch(() => {});
+
+  const scope = {
+    allEnvironments: tokenRecord.allEnvironments,
+    environmentIds: tokenRecord.environments.map((e) => e.environmentId),
+  };
+
+  if (tokenRecord.user) {
+    return {
+      id: tokenRecord.user.id,
+      email: tokenRecord.user.email,
+      name: tokenRecord.user.name,
+      role: effectiveRole,
+      apiTokenId: tokenRecord.id,
+      scope,
+    };
+  }
+
+  // Service-account-owned token: synthesize an AuthUser for downstream code.
+  // Use a sentinel id so anything that compares against User.id can't accidentally match.
   return {
-    id: tokenRecord.user.id,
-    email: tokenRecord.user.email,
-    name: tokenRecord.user.name,
-    role: tokenRecord.user.role as UserRole,
+    id: `sa:${tokenRecord.serviceAccount!.id}`,
+    email: `${tokenRecord.serviceAccount!.name}@service-account.local`,
+    name: tokenRecord.serviceAccount!.name,
+    role: effectiveRole,
+    apiTokenId: tokenRecord.id,
+    serviceAccountId: tokenRecord.serviceAccount!.id,
+    scope,
   };
 }
 
-export async function listApiTokens(userId: string): Promise<Omit<ApiToken, 'tokenHash'>[]> {
-  const tokens = await prisma.apiToken.findMany({
-    where: { userId },
+export interface ListTokensFilters {
+  userId?: string;
+  serviceAccountId?: string;
+}
+
+export async function listApiTokens(filters: ListTokensFilters = {}) {
+  return prisma.apiToken.findMany({
+    where: {
+      userId: filters.userId,
+      serviceAccountId: filters.serviceAccountId,
+    },
     select: {
       id: true,
       name: true,
+      tokenPrefix: true,
+      role: true,
+      allEnvironments: true,
       lastUsedAt: true,
       expiresAt: true,
       createdAt: true,
       userId: true,
+      serviceAccountId: true,
+      user: { select: { id: true, email: true, name: true } },
+      serviceAccount: { select: { id: true, name: true, disabled: true } },
+      environments: {
+        select: {
+          environment: { select: { id: true, name: true } },
+        },
+      },
     },
+    orderBy: { createdAt: 'desc' },
   });
-
-  return tokens;
 }
 
-export async function deleteApiToken(tokenId: string, userId: string): Promise<boolean> {
-  const result = await prisma.apiToken.deleteMany({
-    where: {
-      id: tokenId,
-      userId,
-    },
-  });
-
+export async function deleteApiToken(tokenId: string): Promise<boolean> {
+  const result = await prisma.apiToken.deleteMany({ where: { id: tokenId } });
   return result.count > 0;
 }
 

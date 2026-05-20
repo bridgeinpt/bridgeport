@@ -13,7 +13,7 @@ import {
   deleteSlackRouting,
   testSlackChannel,
 } from '../../services/slack-notifications.js';
-import { logAudit } from '../../services/audit.js';
+import { logAudit, actorFrom } from '../../services/audit.js';
 
 // Match hooks.slack.com exactly (not a substring of the URL) so that URLs
 // like https://evil.com/?x=hooks.slack.com or https://hooks.slack.com.evil.com
@@ -100,7 +100,7 @@ export async function slackAdminRoutes(fastify: FastifyInstance): Promise<void> 
         resourceId: channel.id,
         resourceName: channel.name,
         details: { slackChannelName: channel.slackChannelName },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       return { channel };
@@ -125,7 +125,7 @@ export async function slackAdminRoutes(fastify: FastifyInstance): Promise<void> 
           resourceId: channel.id,
           resourceName: channel.name,
           details: body,
-          userId: request.authUser!.id,
+          ...actorFrom(request),
         });
 
         return { channel };
@@ -152,7 +152,7 @@ export async function slackAdminRoutes(fastify: FastifyInstance): Promise<void> 
         resourceType: 'slack_channel',
         resourceId: id,
         resourceName: channel.name,
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       return { success: true };
@@ -206,7 +206,7 @@ export async function slackAdminRoutes(fastify: FastifyInstance): Promise<void> 
         resourceType: 'slack_routing',
         resourceId: body.typeId,
         details: { routingCount: routings.length },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       return { routings };
@@ -227,7 +227,7 @@ export async function slackAdminRoutes(fastify: FastifyInstance): Promise<void> 
           action: 'delete',
           resourceType: 'slack_routing',
           resourceId: `${typeId}:${channelId}`,
-          userId: request.authUser!.id,
+          ...actorFrom(request),
         });
 
         return { success: true };

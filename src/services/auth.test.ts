@@ -7,6 +7,9 @@ const { mockPrisma } = vi.hoisted(() => ({
       findUnique: vi.fn(),
       count: vi.fn(),
     },
+    serviceAccount: {
+      findUnique: vi.fn(),
+    },
     apiToken: {
       create: vi.fn(),
       findUnique: vi.fn(),
@@ -22,7 +25,10 @@ vi.mock('../lib/db.js', () => ({
 }));
 
 vi.mock('../lib/crypto.js', () => ({
-  generateToken: vi.fn().mockReturnValue('mock-token-value'),
+  generateApiToken: vi.fn().mockReturnValue({
+    token: 'bport_pat_mock-token-value',
+    displayPrefix: 'bport_pat_mock',
+  }),
   hashToken: vi.fn().mockReturnValue('hashed-token-value'),
 }));
 
@@ -162,44 +168,86 @@ describe('auth', () => {
   describe('API tokens', () => {
     describe('createApiToken', () => {
       it('creates a token and returns raw token + record', async () => {
+        mockPrisma.user.findUnique.mockResolvedValue({ role: 'admin' });
         const tokenRecord = {
           id: 'tok-1',
           name: 'My Token',
-          tokenHash: 'hashed',
+          tokenHash: 'hashed-token-value',
+          tokenPrefix: 'bport_pat_mock',
+          role: 'viewer',
+          allEnvironments: true,
           userId: 'user-1',
+          serviceAccountId: null,
           expiresAt: null,
           lastUsedAt: null,
           createdAt: new Date(),
         };
         mockPrisma.apiToken.create.mockResolvedValue(tokenRecord);
 
-        const result = await createApiToken('user-1', 'My Token');
+        const result = await createApiToken({
+          name: 'My Token',
+          ownerUserId: 'user-1',
+          role: 'viewer',
+          allEnvironments: true,
+        });
 
-        expect(result.token).toBe('mock-token-value');
+        expect(result.token).toBe('bport_pat_mock-token-value');
         expect(result.tokenRecord.name).toBe('My Token');
         expect(result.tokenRecord.userId).toBe('user-1');
       });
 
-      it('creates token with expiry date', async () => {
-        const expiresAt = new Date(Date.now() + 86400000);
-        mockPrisma.apiToken.create.mockResolvedValue({
-          id: 'tok-1',
-          name: 'Expiring Token',
-          expiresAt,
-          userId: 'user-1',
-        });
+      it('rejects token role above owner role', async () => {
+        mockPrisma.user.findUnique.mockResolvedValue({ role: 'viewer' });
 
-        const { tokenRecord } = await createApiToken('user-1', 'Expiring Token', expiresAt);
-        expect(tokenRecord.expiresAt).toBeDefined();
+        await expect(
+          createApiToken({
+            name: 'overreach',
+            ownerUserId: 'user-1',
+            role: 'admin',
+            allEnvironments: true,
+          })
+        ).rejects.toThrow(/exceeds owner role/);
+      });
+
+      it('rejects empty environment allowlist when scoping', async () => {
+        mockPrisma.user.findUnique.mockResolvedValue({ role: 'admin' });
+
+        await expect(
+          createApiToken({
+            name: 'bad-scope',
+            ownerUserId: 'user-1',
+            role: 'viewer',
+            allEnvironments: false,
+            environmentIds: [],
+          })
+        ).rejects.toThrow(/at least one environment/);
+      });
+
+      it('rejects when no owner provided', async () => {
+        await expect(
+          createApiToken({
+            name: 'noowner',
+            role: 'viewer',
+            allEnvironments: true,
+          })
+        ).rejects.toThrow(/owner/);
       });
     });
 
     describe('validateApiToken', () => {
+      const baseTokenRecord = {
+        id: 'tok-1',
+        tokenHash: 'hashed-token-value',
+        role: 'operator',
+        allEnvironments: true,
+        expiresAt: null,
+        serviceAccount: null,
+        environments: [],
+      };
+
       it('validates a valid token', async () => {
         mockPrisma.apiToken.findUnique.mockResolvedValue({
-          id: 'tok-1',
-          tokenHash: 'hashed',
-          expiresAt: null,
+          ...baseTokenRecord,
           user: { id: 'user-1', email: 'user@example.com', name: 'User', role: 'operator' },
         });
         mockPrisma.apiToken.update.mockResolvedValue({});
@@ -209,6 +257,21 @@ describe('auth', () => {
         expect(user).not.toBeNull();
         expect(user!.id).toBe('user-1');
         expect(user!.role).toBe('operator');
+        expect(user!.apiTokenId).toBe('tok-1');
+        expect(user!.scope?.allEnvironments).toBe(true);
+      });
+
+      it('downgrades effective role when token role exceeds owner role', async () => {
+        // Owner was demoted from operator to viewer after token was minted.
+        mockPrisma.apiToken.findUnique.mockResolvedValue({
+          ...baseTokenRecord,
+          role: 'operator',
+          user: { id: 'user-1', email: 'user@example.com', name: 'User', role: 'viewer' },
+        });
+        mockPrisma.apiToken.update.mockResolvedValue({});
+
+        const user = await validateApiToken('mock-token');
+        expect(user!.role).toBe('viewer');
       });
 
       it('returns null for invalid token', async () => {
@@ -220,8 +283,8 @@ describe('auth', () => {
 
       it('returns null for expired token', async () => {
         mockPrisma.apiToken.findUnique.mockResolvedValue({
-          id: 'tok-1',
-          expiresAt: new Date(Date.now() - 1000), // Already expired
+          ...baseTokenRecord,
+          expiresAt: new Date(Date.now() - 1000),
           user: { id: 'user-1', email: 'user@example.com', name: 'User', role: 'operator' },
         });
 
@@ -229,15 +292,28 @@ describe('auth', () => {
         expect(user).toBeNull();
       });
 
+      it('returns null when service-account owner is disabled', async () => {
+        mockPrisma.apiToken.findUnique.mockResolvedValue({
+          ...baseTokenRecord,
+          user: null,
+          serviceAccount: { id: 'sa-1', name: 'ci-bot', role: 'operator', disabled: true },
+        });
+
+        const user = await validateApiToken('sa-token');
+        expect(user).toBeNull();
+      });
+
       it('updates lastUsedAt on validation', async () => {
         mockPrisma.apiToken.findUnique.mockResolvedValue({
-          id: 'tok-1',
-          expiresAt: null,
+          ...baseTokenRecord,
           user: { id: 'user-1', email: 'user@example.com', name: 'User', role: 'operator' },
         });
         mockPrisma.apiToken.update.mockResolvedValue({});
 
         await validateApiToken('valid-token');
+
+        // lastUsedAt update is fire-and-forget; allow microtask to flush.
+        await new Promise((r) => setImmediate(r));
 
         expect(mockPrisma.apiToken.update).toHaveBeenCalledWith({
           where: { id: 'tok-1' },
@@ -247,45 +323,38 @@ describe('auth', () => {
     });
 
     describe('listApiTokens', () => {
-      it('lists tokens for a user', async () => {
+      it('lists tokens (optionally filtered by owner)', async () => {
         mockPrisma.apiToken.findMany.mockResolvedValue([
           { id: 'tok-1', name: 'Token 1', userId: 'user-1' },
           { id: 'tok-2', name: 'Token 2', userId: 'user-1' },
         ]);
 
-        const tokens = await listApiTokens('user-1');
+        const tokens = await listApiTokens({ userId: 'user-1' });
 
         expect(tokens).toHaveLength(2);
         expect(tokens[0]).not.toHaveProperty('tokenHash');
       });
 
-      it('returns empty array for user with no tokens', async () => {
+      it('returns empty array when no tokens match', async () => {
         mockPrisma.apiToken.findMany.mockResolvedValue([]);
 
-        const tokens = await listApiTokens('user-1');
+        const tokens = await listApiTokens({ userId: 'user-1' });
         expect(tokens).toEqual([]);
       });
     });
 
     describe('deleteApiToken', () => {
-      it('deletes a token belonging to the user', async () => {
+      it('returns true when a token is deleted', async () => {
         mockPrisma.apiToken.deleteMany.mockResolvedValue({ count: 1 });
 
-        const deleted = await deleteApiToken('tok-1', 'user-1');
+        const deleted = await deleteApiToken('tok-1');
         expect(deleted).toBe(true);
       });
 
-      it('returns false for non-existent token', async () => {
+      it('returns false when nothing is deleted', async () => {
         mockPrisma.apiToken.deleteMany.mockResolvedValue({ count: 0 });
 
-        const deleted = await deleteApiToken('nonexistent', 'user-1');
-        expect(deleted).toBe(false);
-      });
-
-      it('returns false when userId does not match', async () => {
-        mockPrisma.apiToken.deleteMany.mockResolvedValue({ count: 0 });
-
-        const deleted = await deleteApiToken('tok-1', 'wrong-user');
+        const deleted = await deleteApiToken('nonexistent');
         expect(deleted).toBe(false);
       });
     });

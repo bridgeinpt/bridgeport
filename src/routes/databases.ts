@@ -15,7 +15,7 @@ import {
   deleteBackupSchedule,
   getBackupDownload,
 } from '../services/database-backup.js';
-import { logAudit } from '../services/audit.js';
+import { logAudit, actorFrom } from '../services/audit.js';
 import { prisma } from '../lib/db.js';
 import { requireOperator } from '../plugins/authorize.js';
 import { collectDatabaseMetrics } from '../services/database-monitoring-collector.js';
@@ -114,7 +114,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
           resourceId: database.id,
           resourceName: database.name,
           details: { type: database.type },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: envId,
         });
 
@@ -158,7 +158,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
           resourceId: database.id,
           resourceName: database.name,
           details: { changes: Object.keys(body) },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: existing?.environmentId,
         });
 
@@ -195,7 +195,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
         resourceType: 'database',
         resourceId: id,
         resourceName: existing.name,
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId: existing.environmentId,
       });
 
@@ -222,7 +222,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
           resourceId: id,
           resourceName: database.name,
           details: { backupId },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: database.environmentId,
         });
 
@@ -333,7 +333,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
         resourceType: 'backup',
         resourceId: id,
         resourceName: backup.filename,
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId: backup.database.environmentId,
       });
 
@@ -381,7 +381,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
         resourceId: schedule.id,
         resourceName: database.name,
         details: { ...body },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId: database.environmentId,
       });
 
@@ -405,7 +405,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
         action: 'delete',
         resourceType: 'backup_schedule',
         resourceName: database.name,
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId: database.environmentId,
       });
 
@@ -657,7 +657,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
         resourceId: id,
         resourceName: database.name,
         details: { monitoringConfigUpdated: body },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId: database.environmentId,
       });
 

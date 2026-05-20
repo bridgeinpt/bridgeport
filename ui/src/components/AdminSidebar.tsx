@@ -59,6 +59,19 @@ function DatabaseIcon({ className }: { className?: string }) {
   );
 }
 
+function PlugIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M13 10V3L4 14h7v7l9-11h-7z"
+      />
+    </svg>
+  );
+}
+
 function ArrowLeftIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -85,6 +98,7 @@ const navigationItems: NavItem[] = [
   { name: 'Database Types', href: '/admin/database-types', icon: DatabaseIcon },
   { name: 'Storage', href: '/admin/storage', icon: CloudIcon },
   { name: 'Users', href: '/admin/users', icon: UsersIcon },
+  { name: 'Integrations', href: '/admin/integrations', icon: PlugIcon },
   { name: 'Audit', href: '/admin/audit', icon: ActivityIcon },
   { name: 'Notifications', href: '/admin/notifications', icon: BellIcon },
 ];

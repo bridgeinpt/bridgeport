@@ -8,6 +8,8 @@ BRIDGEPORT exposes a JSON REST API for all operations -- deployments, server man
 - [Authentication](#authentication)
   - [JWT Authentication](#jwt-authentication)
   - [API Tokens](#api-tokens)
+  - [Service Accounts](#service-accounts)
+  - [Token Scope Enforcement](#token-scope-enforcement)
   - [Using Tokens](#using-tokens)
 - [Error Format](#error-format)
 - [Endpoint Categories](#endpoint-categories)
@@ -85,35 +87,54 @@ Once at least one user exists, this endpoint returns `403 Registration disabled`
 
 ### API Tokens
 
-API tokens are designed for CI/CD pipelines, scripts, and long-running integrations. Unlike JWTs, they do not expire by default (though you can set an expiry).
+API tokens are designed for CI/CD pipelines, scripts, and long-running integrations. They are **admin-managed** — token CRUD lives under `/api/admin/tokens`, gated by `requireAdmin`. Tokens are scoped along three dimensions: **role** (≤ owner's role), **environment allowlist** (all, or specific envs), and **expiry** (mandatory, max 365 days).
+
+Tokens carry a `bport_pat_` prefix so they are trivially detectable in logs and secret scanners.
 
 > [!WARNING]
-> The full token value is returned **only once** at creation time. BRIDGEPORT stores a hash of the token -- it cannot be retrieved later. Copy it immediately and store it securely.
+> The full token value is returned **only once** at creation time. BRIDGEPORT stores only a SHA-256 hash. Copy it immediately and store it securely; if lost, revoke and re-mint.
 
 **Create a token**
 
 ```bash
-curl -X POST https://deploy.example.com/api/auth/tokens \
-  -H "Authorization: Bearer <jwt>" \
+curl -X POST https://deploy.example.com/api/admin/tokens \
+  -H "Authorization: Bearer <admin-jwt>" \
   -H "Content-Type: application/json" \
-  -d '{"name": "github-actions", "expiresInDays": 90}'
+  -d '{
+    "name": "github-actions-staging",
+    "ownerServiceAccountId": "clxyz...",
+    "role": "operator",
+    "allEnvironments": false,
+    "environmentIds": ["clenv-staging..."],
+    "expiresInDays": 90
+  }'
 ```
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | `string` | Yes | A descriptive name (e.g., `"github-actions"`, `"deploy-script"`) |
-| `expiresInDays` | `number` | No | Days until expiry. Omit for a non-expiring token |
+| `name` | `string` | Yes | Display name (e.g., `"github-actions-staging"`) |
+| `ownerUserId` | `string` | One of | Mint a user-owned token |
+| `ownerServiceAccountId` | `string` | One of | Mint a service-account-owned token (preferred for tools) |
+| `role` | `string` | Yes | `admin` / `operator` / `viewer`; ≤ owner role |
+| `allEnvironments` | `boolean` | Yes | If `false`, `environmentIds` must be non-empty |
+| `environmentIds` | `string[]` | If `!allEnvironments` | Environment IDs the token may act on |
+| `expiresInDays` | `number` | Yes | 1–365 |
 
 **Response**
 
 ```json
 {
-  "token": "bp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "token": "bport_pat_xxxxxxxxxxxxxxxxxxxxxxxx",
   "tokenRecord": {
-    "id": "clx...",
-    "name": "github-actions",
-    "expiresAt": "2026-05-25T12:00:00.000Z",
-    "createdAt": "2026-02-25T12:00:00.000Z"
+    "id": "cltok...",
+    "name": "github-actions-staging",
+    "tokenPrefix": "bport_pat_xxxx",
+    "role": "operator",
+    "allEnvironments": false,
+    "expiresAt": "2026-08-18T12:00:00.000Z",
+    "createdAt": "2026-05-20T12:00:00.000Z",
+    "userId": null,
+    "serviceAccountId": "clxyz..."
   }
 }
 ```
@@ -121,34 +142,59 @@ curl -X POST https://deploy.example.com/api/auth/tokens \
 **List tokens**
 
 ```bash
-curl https://deploy.example.com/api/auth/tokens \
-  -H "Authorization: Bearer <jwt>"
+curl https://deploy.example.com/api/admin/tokens \
+  -H "Authorization: Bearer <admin-jwt>"
 ```
 
-Returns metadata for all your tokens (name, expiry, last used). The actual token values are never returned.
-
-```json
-{
-  "tokens": [
-    {
-      "id": "clx...",
-      "name": "github-actions",
-      "expiresAt": "2026-05-25T12:00:00.000Z",
-      "lastUsedAt": "2026-02-24T15:30:00.000Z",
-      "createdAt": "2026-02-25T12:00:00.000Z"
-    }
-  ]
-}
-```
+Optional query: `?ownerUserId=<id>` or `?ownerServiceAccountId=<id>`. Records include owner info and environment scope. Token hashes are never returned.
 
 **Revoke a token**
 
 ```bash
-curl -X DELETE https://deploy.example.com/api/auth/tokens/<tokenId> \
-  -H "Authorization: Bearer <jwt>"
+curl -X DELETE https://deploy.example.com/api/admin/tokens/<tokenId> \
+  -H "Authorization: Bearer <admin-jwt>"
 ```
 
-Returns `{"success": true}` on success, or `404` if the token does not exist or belongs to another user.
+Returns `{"success": true}` and any subsequent request using the token gets `401`.
+
+### Service Accounts
+
+Machine identities — own tokens, never log in. Use for any tool talking to BRIDGEPORT so the credential outlives any one admin.
+
+**Create**
+
+```bash
+curl -X POST https://deploy.example.com/api/admin/service-accounts \
+  -H "Authorization: Bearer <admin-jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "ci-deploy-staging", "role": "operator", "description": "GitHub Actions"}'
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | `string` | Yes | `[a-z0-9][a-z0-9_-]*`, max 64 chars |
+| `role` | `string` | No | Default `viewer`; caps the role of any token minted against this SA |
+| `description` | `string` | No | Free-form, max 500 chars |
+
+**List / Update / Delete**
+
+- `GET /api/admin/service-accounts`
+- `PATCH /api/admin/service-accounts/:id` — body may include `description`, `role`, `disabled`
+- `DELETE /api/admin/service-accounts/:id` — cascades to all owned tokens; audit log links go to NULL
+
+Setting `disabled: true` invalidates every token owned by the SA immediately without revoking them individually.
+
+### Token Scope Enforcement
+
+When a token authenticates a request:
+
+1. **Effective role** = `min(token.role, owner.role)`. Owner demotions take effect immediately.
+2. If the SA owner is `disabled`, the token returns `401`.
+3. If the token is env-scoped:
+   - Requests under `/api/environments/:envId/...` check `envId` ∈ allowlist; otherwise `403`.
+   - Requests to global routes (admin, users, system settings, etc.) get `403`.
+   - `GET /api/environments` returns only the allowed environments.
+   - `GET /api/auth/me` is always allowed (introspection).
 
 ### Using Tokens
 

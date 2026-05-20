@@ -15,7 +15,7 @@ import {
   listImageTags,
 } from '../services/image-management.js';
 import { buildDeploymentPlan, executePlan } from '../services/orchestration.js';
-import { logAudit } from '../services/audit.js';
+import { logAudit, actorFrom } from '../services/audit.js';
 import { RegistryFactory } from '../lib/registry.js';
 import { getRegistryCredentials } from '../services/registries.js';
 import { extractRepoName, stripRegistryPrefix, parseTagFilter, getBestTag, getDefaultTag } from '../lib/image-utils.js';
@@ -105,7 +105,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
           resourceId: image.id,
           resourceName: image.name,
           details: { imageName: image.imageName, tagFilter: image.tagFilter },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: envId,
         });
 
@@ -175,7 +175,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
           resourceId: image.id,
           resourceName: image.name,
           details: { changes: body },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: existing?.environmentId,
         });
 
@@ -206,7 +206,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
             resourceType: 'container_image',
             resourceId: id,
             resourceName: image.name,
-            userId: request.authUser!.id,
+            ...actorFrom(request),
             environmentId: image.environmentId,
           });
         }
@@ -264,7 +264,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
           imageTag: imageTag!,
           triggerType: 'manual',
           triggeredBy: request.authUser!.email,
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           autoRollback: body.autoRollback,
         });
 
@@ -279,7 +279,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
             planId: plan.id,
             serviceCount: image.services.length,
           },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: image.environmentId,
         });
 
@@ -472,7 +472,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
         resourceId: id,
         resourceName: image.name,
         details: { linkedService: service.name, serviceId },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId: image.environmentId,
       });
 
