@@ -55,6 +55,26 @@ export function getSentryConfig(appVersion: string): {
   };
 }
 
+export function isBackendSentryConfigured(): boolean {
+  return config.SENTRY_ENABLED && !!config.SENTRY_BACKEND_DSN;
+}
+
+export function isFrontendSentryConfigured(): boolean {
+  return config.SENTRY_ENABLED && !!config.SENTRY_FRONTEND_DSN;
+}
+
+export function getSentryStatus(): {
+  backendConfigured: boolean;
+  frontendConfigured: boolean;
+  environment: string;
+} {
+  return {
+    backendConfigured: isBackendSentryConfigured(),
+    frontendConfigured: isFrontendSentryConfigured(),
+    environment: config.SENTRY_ENVIRONMENT || config.NODE_ENV,
+  };
+}
+
 export async function flushSentry(timeoutMs = 2000): Promise<void> {
   if (!initialized) return;
 

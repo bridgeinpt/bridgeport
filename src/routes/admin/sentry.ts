@@ -1,49 +1,43 @@
 import type { FastifyInstance } from 'fastify';
 import { requireAdmin } from '../../plugins/authorize.js';
 import { logAudit, actorFrom } from '../../services/audit.js';
-import { captureException, flushSentry } from '../../lib/sentry.js';
-import { config } from '../../lib/config.js';
+import {
+  captureException,
+  flushSentry,
+  getSentryStatus,
+  isBackendSentryConfigured,
+} from '../../lib/sentry.js';
 
 export async function sentryAdminRoutes(fastify: FastifyInstance): Promise<void> {
-  // Report which Sentry DSNs are configured so the UI can show the right
-  // setup/test affordances. Admin-only because it discloses configuration.
+  // Admin-only because the response discloses which DSNs are configured.
   fastify.get(
     '/api/admin/sentry/status',
     { preHandler: [fastify.authenticate, requireAdmin] },
-    async () => {
-      const enabled = config.SENTRY_ENABLED;
-      return {
-        enabled,
-        backendConfigured: enabled && !!config.SENTRY_BACKEND_DSN,
-        frontendConfigured: enabled && !!config.SENTRY_FRONTEND_DSN,
-        environment: config.SENTRY_ENVIRONMENT || config.NODE_ENV,
-      };
-    }
+    async () => getSentryStatus()
   );
 
-  // Capture a synthetic exception so the admin can confirm backend Sentry
-  // delivery end-to-end. Flushes before responding so the response reflects
-  // whether the event actually left the process.
+  // Flush before responding so the response reflects whether the event
+  // actually left the process.
   fastify.post(
     '/api/admin/sentry/test/backend',
     { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
-      if (!config.SENTRY_ENABLED || !config.SENTRY_BACKEND_DSN) {
+      if (!isBackendSentryConfigured()) {
         return reply.code(400).send({
           error: 'Backend Sentry is not configured. Set SENTRY_BACKEND_DSN and restart.',
         });
       }
 
-      const testError = new Error('BRIDGEPORT backend Sentry test');
-      captureException(testError, {
+      captureException(new Error('BRIDGEPORT backend Sentry test'), {
         triggeredBy: request.authUser?.email,
         source: 'admin_test_button',
       });
-      await flushSentry(5000);
+      await flushSentry(2000);
 
       await logAudit({
         action: 'test',
-        resourceType: 'sentry_backend',
+        resourceType: 'sentry_config',
+        resourceId: 'backend',
         ...actorFrom(request),
       });
 

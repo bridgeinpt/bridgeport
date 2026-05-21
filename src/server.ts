@@ -8,7 +8,7 @@ import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { mkdir, readFile } from 'fs/promises';
+import { mkdir } from 'fs/promises';
 import { config } from './lib/config.js';
 import { initializeCrypto } from './lib/crypto.js';
 import { initializeDatabase, disconnectDatabase } from './lib/db.js';
@@ -55,22 +55,8 @@ import { sshPool } from './lib/ssh.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Read app version at startup. In production the Docker build passes
-// APP_VERSION=YYYYMMDDHH-{sha} so the backend stamps /health and the Sentry
-// release with the real build version. The package.json fallback is only
-// hit in dev / unbuilt environments.
-let appVersion: string = process.env.APP_VERSION ?? '';
-if (!appVersion || appVersion === 'dev') {
-  try {
-    const packageJson = JSON.parse(await readFile(join(__dirname, '../package.json'), 'utf-8'));
-    appVersion = packageJson.version ?? 'unknown';
-  } catch {
-    appVersion = 'unknown';
-  }
-}
-
 // Re-export from lib/version for backwards compat (routes import from lib/version directly)
-import { bundledAgentVersion, cliVersion } from './lib/version.js';
+import { appVersion, bundledAgentVersion, cliVersion } from './lib/version.js';
 export { bundledAgentVersion, cliVersion };
 
 // Initialize Sentry error monitoring (no-op if SENTRY_DSN is not set)

@@ -37,7 +37,7 @@ import {
 import { useToast } from '../../components/Toast';
 import { PlusIcon, TrashIcon } from '../../components/Icons';
 import { safeJsonParse } from '../../lib/helpers';
-import { isSentryInitialized } from '../../lib/sentry';
+import { useSentryInitialized } from '../../lib/sentry';
 
 type TabType = 'smtp' | 'webhooks' | 'slack' | 'sentry' | 'types';
 
@@ -66,6 +66,7 @@ function formatDelaysMs(delaysSec: string): string {
 export default function NotificationSettings() {
   const { user } = useAuthStore();
   const toast = useToast();
+  const sentryReady = useSentryInitialized();
   const [activeTab, setActiveTab] = useState<TabType>('smtp');
   const [loading, setLoading] = useState(true);
 
@@ -152,6 +153,7 @@ export default function NotificationSettings() {
         getSystemSettings(),
         listSlackChannels(),
         listSlackRoutings(),
+        // Sentry is non-critical; don't block the page if status fails.
         getSentryStatus().catch(() => null),
       ]);
 
@@ -417,20 +419,20 @@ export default function NotificationSettings() {
     }
   };
 
-  // Throws an uncaught error on the next tick so React's render path isn't
-  // interrupted; the global error handler reports it to Sentry as a real-world
-  // error would be reported. We show the confirmation toast first.
+  // Throw asynchronously so the error escapes React's event-handler boundary
+  // and reaches window.onerror — which is the integration Sentry's global
+  // handler instruments. Capturing programmatically would only exercise the
+  // manual capture path, not the real-world uncaught-error path.
   const handleTestFrontendSentry = () => {
-    if (!isSentryInitialized()) {
-      toast.error('Frontend Sentry SDK is not initialized in this page load. Reload after setting the DSN.');
+    if (!sentryReady) {
+      toast.error('Frontend Sentry SDK is not initialized yet. Try again in a moment.');
       return;
     }
     setSentryTestingFrontend(true);
     toast.success('Throwing a test error... check Sentry Issues in ~30s.');
     setTimeout(() => {
-      setSentryTestingFrontend(false);
       throw new Error('BRIDGEPORT frontend Sentry test');
-    }, 100);
+    }, 0);
   };
 
   // Webhook delivery settings handlers
@@ -1001,9 +1003,9 @@ export default function NotificationSettings() {
                     >
                       {sentryStatus?.frontendConfigured ? 'Configured' : 'Not configured'}
                     </span>
-                    {sentryStatus?.frontendConfigured && !isSentryInitialized() && (
+                    {sentryStatus?.frontendConfigured && !sentryReady && (
                       <span className="text-xs px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-400">
-                        SDK not initialized — reload page
+                        Initializing…
                       </span>
                     )}
                   </div>
@@ -1020,7 +1022,7 @@ export default function NotificationSettings() {
                 {sentryStatus?.frontendConfigured && (
                   <button
                     onClick={handleTestFrontendSentry}
-                    disabled={sentryTestingFrontend || !isSentryInitialized()}
+                    disabled={sentryTestingFrontend || !sentryReady}
                     className="btn btn-secondary text-xs"
                     title="Throw an uncaught error so the global handler reports it"
                   >

@@ -1571,7 +1571,6 @@ export const testSmtpConnection = (to?: string) =>
 
 // Sentry error monitoring
 export interface SentryStatus {
-  enabled: boolean;
   backendConfigured: boolean;
   frontendConfigured: boolean;
   environment: string;

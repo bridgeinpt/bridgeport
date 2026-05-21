@@ -1,6 +1,12 @@
 import * as Sentry from '@sentry/react';
+import { useEffect, useState } from 'react';
 
 let initialized = false;
+const subscribers = new Set<() => void>();
+
+function notify(): void {
+  for (const cb of subscribers) cb();
+}
 
 export function initSentry(): void {
   fetch('/api/client-config')
@@ -27,6 +33,7 @@ export function initSentry(): void {
         });
 
         initialized = true;
+        notify();
       },
     )
     .catch(() => {
@@ -42,6 +49,22 @@ export function captureException(error: unknown, context?: Record<string, unknow
 
 export function isSentryInitialized(): boolean {
   return initialized;
+}
+
+// React hook that re-renders when the async Sentry init flips `initialized`
+// from false to true, so admin UI that gates on init state doesn't stay stale
+// after a fresh page load.
+export function useSentryInitialized(): boolean {
+  const [ready, setReady] = useState(initialized);
+  useEffect(() => {
+    if (initialized) return;
+    const cb = () => setReady(true);
+    subscribers.add(cb);
+    return () => {
+      subscribers.delete(cb);
+    };
+  }, []);
+  return ready;
 }
 
 export function setSentryUser(user: { id: string } | null): void {

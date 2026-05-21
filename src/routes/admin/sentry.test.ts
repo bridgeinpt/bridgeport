@@ -30,7 +30,6 @@ describe('admin sentry routes', () => {
 
       expect(res.statusCode).toBe(200);
       const body = res.json();
-      expect(body).toHaveProperty('enabled');
       expect(body).toHaveProperty('backendConfigured');
       expect(body).toHaveProperty('frontendConfigured');
       expect(body).toHaveProperty('environment');
@@ -57,8 +56,8 @@ describe('admin sentry routes', () => {
   });
 
   describe('POST /api/admin/sentry/test/backend', () => {
-    // Tests run without SENTRY_BACKEND_DSN set, so the route should reject
-    // with 400. The "DSN is set" path is exercised manually via the admin UI.
+    // Tests run without SENTRY_BACKEND_DSN set, so the route 400s here. The
+    // "DSN is set" path is exercised manually via the admin UI test button.
     it('returns 400 when backend DSN is not configured', async () => {
       const res = await app.inject({
         method: 'POST',
