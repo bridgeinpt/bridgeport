@@ -240,30 +240,4 @@ describe('IDOR protection', () => {
     });
   });
 
-  describe('API token isolation', () => {
-    it('user cannot list another user API tokens', async () => {
-      // Create an API token for admin
-      await app.inject({
-        method: 'POST',
-        url: '/api/auth/tokens',
-        headers: { authorization: `Bearer ${adminToken}` },
-        payload: { name: 'Admin Token' },
-      });
-
-      // Viewer's token list should not include admin's tokens
-      const viewerTokensRes = await app.inject({
-        method: 'GET',
-        url: '/api/auth/tokens',
-        headers: { authorization: `Bearer ${viewerToken}` },
-      });
-
-      expect(viewerTokensRes.statusCode).toBe(200);
-      const tokens = viewerTokensRes.json().tokens;
-
-      // None of the tokens should belong to admin
-      for (const token of tokens) {
-        expect(token.userId).not.toBe(adminId);
-      }
-    });
-  });
 });

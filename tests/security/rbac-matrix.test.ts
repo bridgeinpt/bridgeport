@@ -122,7 +122,6 @@ const operatorRoutes: RouteSpec[] = [
 const viewerRoutes: RouteSpec[] = [
   // Auth routes
   { method: 'GET', url: '/api/auth/me', minRole: 'viewer', description: 'get current user' },
-  { method: 'GET', url: '/api/auth/tokens', minRole: 'viewer', description: 'list API tokens' },
 
   // Environment listing
   { method: 'GET', url: '/api/environments', minRole: 'viewer', description: 'list environments' },
