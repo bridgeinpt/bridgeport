@@ -36,14 +36,23 @@ export function ScanSuggestionsPanel({ environmentId, onApplied }: ScanSuggestio
   const [editedKey, setEditedKey] = useState('');
   const [editedType, setEditedType] = useState<'secret' | 'var'>('var');
   const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
-  // We need the actual plaintext value for apply - user enters it in the review modal
+  // Prefilled from suggestion.value for hardcoded_value; user enters it for missing_reference.
   const [plaintextValue, setPlaintextValue] = useState('');
   const [diffs, setDiffs] = useState<ConfigScanPreviewDiff[]>([]);
+  const [expandedFiles, setExpandedFiles] = useState<Record<string, boolean>>({});
   const [previewLoading, setPreviewLoading] = useState(false);
   const [applying, setApplying] = useState(false);
   const [applyResults, setApplyResults] = useState<Array<{
     fileId: string; fileName: string; success: boolean; replacements: number; error?: string;
   }>>([]);
+
+  const isMissingRef = reviewSuggestion?.kind === 'missing_reference';
+
+  const modalTitle = () => {
+    if (reviewStep === 1) return isMissingRef ? 'Define Missing Variable' : 'Confirm Details';
+    if (reviewStep === 2) return 'Preview Changes';
+    return isMissingRef ? 'Created' : 'Applied';
+  };
 
   const handleScan = async () => {
     setScanning(true);
@@ -64,9 +73,13 @@ export function ScanSuggestionsPanel({ environmentId, onApplied }: ScanSuggestio
     setReviewSuggestion(suggestion);
     setEditedKey(suggestion.proposedKey);
     setEditedType(suggestion.proposedType);
-    setSelectedFileIds(suggestion.affectedFiles.map((f) => f.id));
-    setPlaintextValue('');
+    // Missing references don't touch files; everything else preselects all affected files
+    setSelectedFileIds(
+      suggestion.kind === 'missing_reference' ? [] : suggestion.affectedFiles.map((f) => f.id)
+    );
+    setPlaintextValue(suggestion.value);
     setDiffs([]);
+    setExpandedFiles({});
     setApplyResults([]);
     setReviewStep(1);
   };
@@ -81,6 +94,7 @@ export function ScanSuggestionsPanel({ environmentId, onApplied }: ScanSuggestio
     setPreviewLoading(true);
     try {
       const result = await previewConfigScan(environmentId, {
+        kind: reviewSuggestion.kind,
         value: plaintextValue,
         key: editedKey,
         type: editedType,
@@ -88,10 +102,19 @@ export function ScanSuggestionsPanel({ environmentId, onApplied }: ScanSuggestio
         existingSecretId: reviewSuggestion.existingSecretId,
       });
       setDiffs(result.diffs);
+      // Default-expand when there are few files; collapse when many to keep the dialog manageable
+      const initialExpanded: Record<string, boolean> = {};
+      const expandByDefault = result.diffs.length <= 3;
+      for (const d of result.diffs) initialExpanded[d.fileId] = expandByDefault;
+      setExpandedFiles(initialExpanded);
       setReviewStep(2);
     } finally {
       setPreviewLoading(false);
     }
+  };
+
+  const toggleFileExpanded = (fileId: string) => {
+    setExpandedFiles((prev) => ({ ...prev, [fileId]: !prev[fileId] }));
   };
 
   const handleApply = async () => {
@@ -99,6 +122,7 @@ export function ScanSuggestionsPanel({ environmentId, onApplied }: ScanSuggestio
     setApplying(true);
     try {
       const result = await applyConfigScan(environmentId, {
+        kind: reviewSuggestion.kind,
         value: plaintextValue,
         key: editedKey,
         type: editedType,
@@ -190,18 +214,25 @@ export function ScanSuggestionsPanel({ environmentId, onApplied }: ScanSuggestio
                         {s.proposedType}
                       </span>
                       <span className="font-mono text-sm text-white">{s.proposedKey}</span>
-                      <span className="text-xs text-slate-500">
-                        {s.existingSecretKey
-                          ? `Replace with existing ${s.existingSecretKey}`
-                          : `${s.occurrenceCount}× in ${s.affectedFiles.length} file${s.affectedFiles.length > 1 ? 's' : ''}`}
-                      </span>
+                      {s.kind === 'missing_reference' ? (
+                        <span className="text-xs text-amber-400 flex items-center gap-1">
+                          <WarningIcon className="w-3 h-3" />
+                          Referenced but not defined ({s.occurrenceCount}× in {s.affectedFiles.length} file{s.affectedFiles.length > 1 ? 's' : ''})
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-500">
+                          {s.existingSecretKey
+                            ? `Replace with existing ${s.existingSecretKey}`
+                            : `${s.occurrenceCount}× in ${s.affectedFiles.length} file${s.affectedFiles.length > 1 ? 's' : ''}`}
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-1">
                       <button
                         onClick={() => openReview(s)}
                         className="btn btn-ghost text-xs"
                       >
-                        Review
+                        {s.kind === 'missing_reference' ? 'Define' : 'Review'}
                       </button>
                       <button
                         onClick={() => dismissSuggestion(s)}
@@ -223,13 +254,7 @@ export function ScanSuggestionsPanel({ environmentId, onApplied }: ScanSuggestio
       <Modal
         isOpen={!!reviewSuggestion}
         onClose={closeReview}
-        title={
-          reviewStep === 1
-            ? 'Confirm Details'
-            : reviewStep === 2
-            ? 'Preview Changes'
-            : 'Applied'
-        }
+        title={modalTitle()}
         size="2xl"
       >
         {reviewSuggestion && (
@@ -272,36 +297,40 @@ export function ScanSuggestionsPanel({ environmentId, onApplied }: ScanSuggestio
                     </button>
                   </div>
                 </div>
-                <div>
-                  <label className="block text-sm text-slate-400 mb-1">
-                    Masked Value: <span className="font-mono text-slate-300">{reviewSuggestion.value}</span>
-                  </label>
-                </div>
                 {!reviewSuggestion.existingSecretId && (
                   <div>
                     <label className="block text-sm text-slate-400 mb-1">
-                      Enter the full plaintext value to substitute
+                      {isMissingRef
+                        ? `Value for ${editedType === 'secret' ? 'this secret' : 'this variable'}`
+                        : 'Value'}
                     </label>
                     <textarea
                       value={plaintextValue}
                       onChange={(e) => setPlaintextValue(e.target.value)}
-                      placeholder="Paste the actual value here..."
+                      placeholder={isMissingRef ? 'Enter the value...' : 'Paste the actual value here...'}
                       rows={3}
                       className="input font-mono text-sm"
                     />
                   </div>
                 )}
                 <div>
-                  <label className="block text-sm text-slate-400 mb-1">Affected Files</label>
+                  <label className="block text-sm text-slate-400 mb-1">
+                    {isMissingRef ? 'Referenced in' : 'Affected Files'}
+                  </label>
                   <div className="space-y-1">
                     {reviewSuggestion.affectedFiles.map((f) => (
-                      <label key={f.id} className="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={selectedFileIds.includes(f.id)}
-                          onChange={() => toggleFileId(f.id)}
-                          className="w-4 h-4 rounded border-slate-600 bg-slate-800"
-                        />
+                      <label
+                        key={f.id}
+                        className={`flex items-center gap-2 text-sm ${isMissingRef ? 'pl-1' : ''}`}
+                      >
+                        {!isMissingRef && (
+                          <input
+                            type="checkbox"
+                            checked={selectedFileIds.includes(f.id)}
+                            onChange={() => toggleFileId(f.id)}
+                            className="w-4 h-4 rounded border-slate-600 bg-slate-800"
+                          />
+                        )}
                         <span className="text-white">{f.name}</span>
                         <span className="text-slate-500">({f.occurrences} occurrence{f.occurrences > 1 ? 's' : ''})</span>
                       </label>
@@ -310,13 +339,27 @@ export function ScanSuggestionsPanel({ environmentId, onApplied }: ScanSuggestio
                 </div>
                 <div className="flex justify-end gap-2">
                   <button onClick={closeReview} className="btn btn-ghost">Cancel</button>
-                  <button
-                    onClick={handlePreview}
-                    disabled={previewLoading || (!plaintextValue && !reviewSuggestion.existingSecretId) || selectedFileIds.length === 0}
-                    className="btn btn-primary"
-                  >
-                    {previewLoading ? 'Loading...' : 'Preview Changes'}
-                  </button>
+                  {isMissingRef ? (
+                    <button
+                      onClick={handleApply}
+                      disabled={applying || !plaintextValue.trim()}
+                      className="btn btn-primary"
+                    >
+                      {applying ? 'Creating...' : `Create ${editedType}`}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handlePreview}
+                      disabled={
+                        previewLoading ||
+                        (!plaintextValue.trim() && !reviewSuggestion.existingSecretId) ||
+                        selectedFileIds.length === 0
+                      }
+                      className="btn btn-primary"
+                    >
+                      {previewLoading ? 'Loading...' : 'Preview Changes'}
+                    </button>
+                  )}
                 </div>
               </>
             )}
@@ -324,23 +367,51 @@ export function ScanSuggestionsPanel({ environmentId, onApplied }: ScanSuggestio
             {/* Step 2: Preview diffs */}
             {reviewStep === 2 && (
               <>
-                <div className="space-y-3 max-h-96 overflow-y-auto">
-                  {diffs.map((diff) => (
-                    <div key={diff.fileId} className="rounded border border-slate-700 overflow-hidden">
-                      <div className="bg-slate-800 px-3 py-1.5 text-sm font-medium text-slate-300">
-                        {diff.fileName}
-                        <span className="text-slate-500 ml-2">({diff.replacements} replacement{diff.replacements > 1 ? 's' : ''})</span>
+                <div className="space-y-2 max-h-[28rem] overflow-y-auto">
+                  {diffs.map((diff) => {
+                    const isOpen = !!expandedFiles[diff.fileId];
+                    return (
+                      <div key={diff.fileId} className="rounded border border-slate-700 overflow-hidden">
+                        <button
+                          onClick={() => toggleFileExpanded(diff.fileId)}
+                          className="w-full flex items-center justify-between bg-slate-800 hover:bg-slate-700/70 px-3 py-1.5 text-sm text-left"
+                        >
+                          <span className="flex items-center gap-1.5 font-medium text-slate-300 min-w-0">
+                            {isOpen ? (
+                              <ChevronDownIcon className="w-3.5 h-3.5 flex-shrink-0" />
+                            ) : (
+                              <ChevronRightIcon className="w-3.5 h-3.5 flex-shrink-0" />
+                            )}
+                            <span className="truncate">{diff.fileName}</span>
+                          </span>
+                          <span className="text-xs text-slate-500 flex-shrink-0 ml-2">
+                            {diff.replacements} replacement{diff.replacements > 1 ? 's' : ''}
+                          </span>
+                        </button>
+                        {isOpen && (
+                          <div className="text-xs font-mono divide-y divide-slate-800">
+                            {diff.hunks.map((h, idx) => (
+                              <div key={idx} className="flex">
+                                <span className="bg-slate-900 text-slate-600 px-2 py-1 text-right select-none w-12 flex-shrink-0">
+                                  {h.lineNumber}
+                                </span>
+                                <div className="flex-1 min-w-0">
+                                  <div className="bg-red-500/10 text-red-300 px-2 py-1 whitespace-pre-wrap break-all">
+                                    <span className="text-red-500 select-none">- </span>
+                                    {h.before || <span className="text-slate-600 italic">(empty)</span>}
+                                  </div>
+                                  <div className="bg-green-500/10 text-green-300 px-2 py-1 whitespace-pre-wrap break-all">
+                                    <span className="text-green-500 select-none">+ </span>
+                                    {h.after || <span className="text-slate-600 italic">(empty)</span>}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      <div className="p-3 space-y-2 text-xs font-mono">
-                        <div className="bg-red-500/10 border border-red-500/20 rounded p-2 text-red-300 whitespace-pre-wrap break-all max-h-32 overflow-y-auto">
-                          {diff.before}
-                        </div>
-                        <div className="bg-green-500/10 border border-green-500/20 rounded p-2 text-green-300 whitespace-pre-wrap break-all max-h-32 overflow-y-auto">
-                          {diff.after}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
                 <div className="flex justify-between">
                   <button onClick={() => setReviewStep(1)} className="btn btn-ghost">Back</button>
@@ -359,19 +430,28 @@ export function ScanSuggestionsPanel({ environmentId, onApplied }: ScanSuggestio
             {reviewStep === 3 && (
               <>
                 <div className="space-y-2">
-                  {applyResults.map((r) => (
-                    <div key={r.fileId} className="flex items-center gap-2 text-sm">
-                      {r.success ? (
-                        <CheckIcon className="w-4 h-4 text-green-400" />
-                      ) : (
-                        <WarningIcon className="w-4 h-4 text-red-400" />
-                      )}
-                      <span className={r.success ? 'text-slate-300' : 'text-red-400'}>
-                        {r.fileName}
-                        {r.success ? ` — ${r.replacements} replacement${r.replacements > 1 ? 's' : ''}` : ` — ${r.error}`}
+                  {isMissingRef ? (
+                    <div className="flex items-center gap-2 text-sm">
+                      <CheckIcon className="w-4 h-4 text-green-400" />
+                      <span className="text-slate-300">
+                        Created {editedType} <span className="font-mono text-white">{editedKey}</span>
                       </span>
                     </div>
-                  ))}
+                  ) : (
+                    applyResults.map((r) => (
+                      <div key={r.fileId} className="flex items-center gap-2 text-sm">
+                        {r.success ? (
+                          <CheckIcon className="w-4 h-4 text-green-400" />
+                        ) : (
+                          <WarningIcon className="w-4 h-4 text-red-400" />
+                        )}
+                        <span className={r.success ? 'text-slate-300' : 'text-red-400'}>
+                          {r.fileName}
+                          {r.success ? ` — ${r.replacements} replacement${r.replacements > 1 ? 's' : ''}` : ` — ${r.error}`}
+                        </span>
+                      </div>
+                    ))
+                  )}
                 </div>
                 <div className="flex justify-end">
                   <button onClick={closeReview} className="btn btn-primary">Done</button>

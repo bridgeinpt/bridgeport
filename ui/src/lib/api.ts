@@ -728,13 +728,21 @@ export interface ConfigScanAffectedFile {
 }
 
 export interface ConfigScanSuggestion {
-  value: string; // masked
+  /** 'hardcoded_value' = literal in files to extract; 'missing_reference' = ${KEY} used but undefined */
+  kind: 'hardcoded_value' | 'missing_reference';
+  value: string;
   proposedKey: string;
   proposedType: 'secret' | 'var';
   occurrenceCount: number;
   affectedFiles: ConfigScanAffectedFile[];
   existingSecretId: string | null;
   existingSecretKey: string | null;
+}
+
+export interface ConfigScanDiffHunk {
+  lineNumber: number;
+  before: string;
+  after: string;
 }
 
 export interface ConfigScanResult {
@@ -744,6 +752,7 @@ export interface ConfigScanResult {
 }
 
 export interface ConfigScanApplyInput {
+  kind: 'hardcoded_value' | 'missing_reference';
   value: string;
   key: string;
   type: 'secret' | 'var';
@@ -754,9 +763,8 @@ export interface ConfigScanApplyInput {
 export interface ConfigScanPreviewDiff {
   fileId: string;
   fileName: string;
-  before: string;
-  after: string;
   replacements: number;
+  hunks: ConfigScanDiffHunk[];
 }
 
 export interface ConfigScanPreviewResult {
