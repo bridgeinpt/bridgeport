@@ -60,39 +60,115 @@ Read PR bodies to understand *why* each change was made — that's what release 
 
 ## Step 4 — Draft release notes
 
-Group changes by category. Omit empty sections. Order them like this:
+GitHub renders the annotated tag message as markdown on the Release page. Write notes that are **human-readable and easy to skim**, not a flat dump of bullets. Operators read this when deciding whether to upgrade in production — they should be able to find what they need in seconds.
 
-```markdown
-### Breaking changes
-- ...
+### Format recipe
 
-### Migrations
-- Describe each new `prisma/migrations/*` directory and what it changes for operators
+Use this structure. Omit any section that's empty. Scale it down for tiny patch releases (a single-fix patch release doesn't need every section — a short "What's new" paragraph + one Fixes section is fine).
 
-### Features
-- New capability — what it enables (#PR)
+````markdown
+## What's new
 
-### Improvements
-- Behavioral change worth knowing about (#PR)
+<2-3 sentence summary naming the headline changes — what's the elevator pitch of this release? Mention if migrations apply automatically.>
 
-### Fixes
-- Bug fixed and the user-visible symptom (#PR)
+---
 
-### Security
-- CVE patched / hardening applied (#PR)
+## Action required before upgrading
 
-### Docs
-- Notable doc additions (#PR)
+Skip this section if you don't use these features.
 
-### Internal
-- Refactors, dependency bumps, CI-only changes (#PR)
+### 1. <Short title of the breaking change>
+
+<What changed, who it affects, what they need to do. Use prose + bullets, not just bullets.>
+
+```yaml
+# Before / After config snippet if helpful
 ```
 
-Guidelines for entries:
-- One line each. Lead with the user-visible effect, not the implementation detail.
-- Always link the PR as `(#N)` — GitHub renders these as links in the release page.
-- Skip pure noise (formatting-only commits, dependabot bumps with no functional change) from the top-level list. Group dependabot under "Internal" as a single line.
-- Migrations get their own section because BridgePort's upgrade story (CLAUDE.md golden rule) makes them user-visible.
+(#PR)
+
+### 2. <Next breaking change…>
+
+---
+
+## Database migrations
+
+<Lead sentence: how many migrations, automatic vs manual.>
+
+- **`<migration_directory_name>`** — what it changes for operators (schema additions, data transformations, etc.) (#PR)
+
+---
+
+## Features
+
+### <Feature name> (#PR)
+
+<Prose paragraph explaining what it enables and why operators care.>
+
+- Bullet for concrete capability / behavior
+- Bullet for UI surface or API endpoint added
+- Bullet for important caveat
+
+### <Next feature…>
+
+---
+
+## Improvements
+
+<Group related improvements under H3 subheadings when there are several from the same area (e.g. "Config scan" with three sub-items). Use a flat bullet list only when items are independent.>
+
+### <Improvement area> (#PR)
+
+Prose + bullets.
+
+---
+
+## Fixes
+
+### <Short title> (#PR)
+
+What was broken, what's fixed, user-visible symptom.
+
+---
+
+## Security
+
+- **CVE / advisory ID** — one-paragraph explanation of the issue, the fix, and the scope (dev-only vs prod). (#PR)
+- **<Other hardening>** — what changed and why it matters. (#PR)
+
+---
+
+## Under the hood
+
+<Use this section for refactors, dep bumps, CI changes — anything that's not directly user-visible but worth mentioning. Group dependabot bumps as one paragraph + PR refs, don't enumerate each one.>
+
+### <Notable internal change> (#PR)
+
+Short paragraph.
+
+### Other notable bumps
+
+- **<thing>** — old → new version (#PR)
+- Dependency-group bumps: #N, #N, #N
+
+---
+
+## Documentation
+
+<Only if there are notable doc additions. Otherwise fold doc updates into the related feature/fix.>
+````
+
+### Authoring guidelines
+
+- **Lead with the user-visible effect**, not the implementation detail. "External scripts that minted tokens need updating" beats "removed `POST /api/auth/tokens` endpoint".
+- **Front-load action-required items.** Put "Action required before upgrading" right after "What's new" so operators see breaking changes before deciding to upgrade.
+- **Group related items under named H3 subheadings.** Three improvements to the config scanner should be one `### Config scanner` block, not three parallel bullets.
+- **Use fenced code blocks** for before/after config, migration commands, or anything copy-pasteable. Indent inside `yaml`, `bash`, `ts`, etc. for syntax highlighting.
+- **Use horizontal rules (`---`)** between top-level `##` sections for visual rhythm.
+- **Always link PRs as `(#N)`** at the end of the relevant paragraph/heading. GitHub auto-links them.
+- **Skip noise** from top-level sections (formatting-only commits, dependabot bumps with no functional change). Group dependabot in "Under the hood" as one line + PR refs.
+- **Migrations get their own top-level section** because BridgePort's upgrade story (CLAUDE.md golden rule) makes them user-visible — call out what each migration changes for operators.
+- **No emojis** unless the user explicitly asks for them.
 
 ## Step 5 — Iterate with the user
 
@@ -102,9 +178,9 @@ Show the draft. Ask if they want changes. Apply edits. Re-show. Stop when they s
 
 Compute `LAST_VERSION=${LAST_TAG#v}` and propose a default bump:
 
-- **major** — anything in `### Breaking changes`
-- **minor** — anything in `### Features` or `### Migrations`
-- **patch** — only `### Fixes`, `### Security`, `### Docs`, `### Internal`
+- **major** — anything in `## Action required before upgrading`
+- **minor** — anything in `## Features` or `## Database migrations`
+- **patch** — only `## Fixes`, `## Security`, `## Documentation`, `## Under the hood`
 
 Use AskUserQuestion to confirm (patch / minor / major / prerelease). For prerelease, ask for the suffix (e.g. `rc.1`, `beta.2`) and append to the next minor: `1.2.0-rc.1`.
 
