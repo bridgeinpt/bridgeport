@@ -38,6 +38,7 @@ import { notificationRoutes } from '../../src/routes/notifications.js';
 import { smtpRoutes } from '../../src/routes/admin/smtp.js';
 import { webhookAdminRoutes } from '../../src/routes/admin/webhooks.js';
 import { slackAdminRoutes } from '../../src/routes/admin/slack.js';
+import { sentryAdminRoutes } from '../../src/routes/admin/sentry.js';
 import { containerImageRoutes } from '../../src/routes/container-images.js';
 import { serviceDependencyRoutes } from '../../src/routes/service-dependencies.js';
 import { deploymentPlanRoutes } from '../../src/routes/deployment-plans.js';
@@ -124,6 +125,7 @@ export async function buildTestApp(options: BuildTestAppOptions = {}): Promise<T
   await fastify.register(smtpRoutes);
   await fastify.register(webhookAdminRoutes);
   await fastify.register(slackAdminRoutes);
+  await fastify.register(sentryAdminRoutes);
   await fastify.register(containerImageRoutes);
   await fastify.register(serviceDependencyRoutes);
   await fastify.register(deploymentPlanRoutes);

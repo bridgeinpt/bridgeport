@@ -1569,6 +1569,20 @@ export const saveSmtpConfig = (data: SmtpConfigInput) =>
 export const testSmtpConnection = (to?: string) =>
   api.post<{ success: boolean; message: string }>('/admin/smtp/test', to ? { to } : {});
 
+// Sentry error monitoring
+export interface SentryStatus {
+  enabled: boolean;
+  backendConfigured: boolean;
+  frontendConfigured: boolean;
+  environment: string;
+}
+
+export const getSentryStatus = () =>
+  api.get<SentryStatus>('/admin/sentry/status');
+
+export const testBackendSentry = () =>
+  api.post<{ ok: boolean; message: string }>('/admin/sentry/test/backend');
+
 // Outgoing Webhooks
 export interface WebhookConfig {
   id: string;

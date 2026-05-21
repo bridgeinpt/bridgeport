@@ -40,6 +40,10 @@ export function captureException(error: unknown, context?: Record<string, unknow
   Sentry.captureException(error, context ? { extra: context } : undefined);
 }
 
+export function isSentryInitialized(): boolean {
+  return initialized;
+}
+
 export function setSentryUser(user: { id: string } | null): void {
   if (!initialized) return;
 
