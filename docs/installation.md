@@ -99,6 +99,9 @@ EOF
 ```yaml
 services:
   bridgeport:
+    # :latest tracks the most recent stable release. Pin to a major (:1),
+    # minor (:1.2), or patch (:v1.2.0) for more control. See
+    # docs/operations/upgrades.md#channels for all options.
     image: ghcr.io/bridgeinpt/bridgeport:latest
     container_name: bridgeport
     restart: unless-stopped

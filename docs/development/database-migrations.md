@@ -303,11 +303,11 @@ Before merging any schema change, verify:
    docker compose up -d
    ```
 
-4. **If the migration SQL is wrong**: This is a bug in the release. Pin the previous version:
+4. **If the migration SQL is wrong**: This is a bug in the release. Pin the previous version (see [Upgrades — Channels](../operations/upgrades.md#channels) for which tag to use):
    ```yaml
    services:
      bridgeport:
-       image: ghcr.io/bridgeinpt/bridgeport:previous-tag
+       image: ghcr.io/bridgeinpt/bridgeport:v1.1.0
    ```
 
 5. Report the issue so the migration can be fixed in the codebase.

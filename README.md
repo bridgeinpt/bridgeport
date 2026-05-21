@@ -76,6 +76,22 @@ Open [http://localhost:3000](http://localhost:3000) and log in with your `ADMIN_
 > [!WARNING]
 > This quick start is for trying BRIDGEPORT out. For production, use Docker Compose with persistent volumes, HTTPS, and strong credentials. See the [Installation Guide](docs/installation.md).
 
+## Release Channels
+
+The image is published to `ghcr.io/bridgeinpt/bridgeport` under several tags so you can choose how aggressively you want updates:
+
+| Tag | Tracks | Use case |
+|---|---|---|
+| `:latest` | Most recent stable release | Default for production |
+| `:stable` | Alias for `:latest` | Explicit intent |
+| `:v1.2.0`, `:1.2.0` | Pinned patch | Reproducible deploys |
+| `:1.2` | Latest patch on the 1.2.x line | Auto-receive patches |
+| `:1` | Latest release in major 1 | Auto-receive minor + patch |
+| `:edge` | Current `master` HEAD | Testing / preview only |
+| `:YYYYMMDDHH-sha` | Immutable master build | Bisecting edge bugs |
+
+See [Upgrades — Channels](docs/operations/upgrades.md#channels) for details.
+
 ## Feature Highlights
 
 ### Deploy and Monitor Flow
