@@ -238,8 +238,9 @@ The **Config File Scanner** inspects every non-binary config file in the environ
 **Hardcoded values to extract:**
 
 - **Cross-file repetition** -- the same literal value appears in two or more files (classic duplication -- rotate one, forget the other).
-- **Cross-key repetition** -- the same literal value appears under two or more different keys (often a sign the value has drifted from its canonical name).
 - **Plaintext leaks** -- the literal value matches an existing secret or var, meaning the plaintext is sitting in a config file it shouldn't be.
+
+The scanner only inspects values from env-style `KEY=value` lines and UPPER_SNAKE_CASE YAML entries (`KEY: value`). Docker-compose attribute keys like `restart`, `image`, or `command` are skipped so their values (e.g. `unless-stopped`) aren't mistaken for config variables. Same value under different keys (e.g. three `CADDY_*_BACKEND` settings pointing at the same host) is treated as three separate settings, not one shared variable -- the scanner won't merge them.
 
 **Missing references:**
 
@@ -269,7 +270,7 @@ The apply flow depends on the suggestion kind.
 **Hardcoded values** walk through a 3-step modal:
 
 1. **Confirm** -- review the proposed key, type, and affected files. The value is prefilled (editable). Edit the key/type before proceeding.
-2. **Preview** -- see a per-file diff showing only the changed lines (`literal-value` → `${KEY}`). Each file is a collapsible section so multi-file changes stay manageable. Nothing is written yet.
+2. **Preview** -- see a per-file diff showing only the changed lines (`literal-value` → `${KEY}`). Each file is a collapsible section so multi-file changes stay manageable. Substitution only replaces lines where the value is the entire right-hand side of a `KEY=value` (or `KEY: value`) pair -- substring occurrences inside other values (e.g. `staging` inside `app-staging.bridgein.com`) are intentionally left alone. Nothing is written yet.
 3. **Apply** -- BRIDGEPORT creates the secret or var (if not already present), substitutes the value in every selected file, saves the previous content to [file history](config-files.md#file-history) for rollback, and writes an audit log entry per mutation with `source: config_scan`.
 
 **Missing references** skip the preview step (no file modifications happen):

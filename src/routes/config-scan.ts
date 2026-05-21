@@ -6,6 +6,7 @@ import { logAudit, actorFrom } from '../services/audit.js';
 import { userIdForFk } from '../services/auth.js';
 import { validateBody, getErrorMessage } from '../lib/helpers.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
+import { extractKeyValues, substituteFullValue } from '../lib/config-scan-parsing.js';
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -94,49 +95,6 @@ function computeHunks(
     }
   }
   return hunks;
-}
-
-/**
- * Extract key=value pairs from config file content.
- * Handles env-style (KEY=value) and YAML-style (key: value).
- */
-function extractKeyValues(content: string): Array<{ key: string; value: string }> {
-  const results: Array<{ key: string; value: string }> = [];
-  const lines = content.split('\n');
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    // Skip comments and blank lines
-    if (!line || line.startsWith('#') || line.startsWith('//')) continue;
-
-    // Env-style: KEY=value (optionally quoted)
-    const envMatch = line.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.+)$/);
-    if (envMatch) {
-      let value = envMatch[2].trim();
-      // Strip surrounding quotes
-      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-        value = value.slice(1, -1);
-      }
-      if (value) {
-        results.push({ key: envMatch[1], value });
-      }
-      continue;
-    }
-
-    // YAML-style: key: value (optionally quoted)
-    const yamlMatch = line.match(/^([A-Za-z_][A-Za-z0-9_.-]*):\s+(.+)$/);
-    if (yamlMatch) {
-      let value = yamlMatch[2].trim();
-      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-        value = value.slice(1, -1);
-      }
-      if (value) {
-        results.push({ key: yamlMatch[1], value });
-      }
-    }
-  }
-
-  return results;
 }
 
 // ---------------------------------------------------------------------------
@@ -265,13 +223,16 @@ export async function configScanRoutes(fastify: FastifyInstance): Promise<void> 
         const affectedFiles: AffectedFile[] = Array.from(entry.files.entries()).map(
           ([id, { name, count }]) => ({ id, name, occurrences: count })
         );
-        const uniqueKeys = [...new Set(entry.keys)];
         const isPlaintextLeak = existingValues.has(value);
 
-        // Detection signals: cross-file, cross-key, or plaintext leak
+        // Detection signals: same value in 2+ files, or plaintext leak of an
+        // existing secret/var. Cross-key (same value under different keys) is
+        // intentionally NOT a signal — coincidental matches (e.g. three CADDY_*
+        // backends all pointing at the same host:port) are different settings,
+        // not a shared variable, and merging them produces noisy/recursive
+        // suggestions like `CADDY_OS_CONSOLE_BACKEND=${CADDY_OS_CONSOLE_BACKEND}`.
         const crossFile = affectedFiles.length >= 2;
-        const crossKey = uniqueKeys.length >= 2;
-        if (!crossFile && !crossKey && !isPlaintextLeak) continue;
+        if (!crossFile && !isPlaintextLeak) continue;
 
         // Pick the best key name: most common, tie-break longest
         const keyFreq = new Map<string, number>();
@@ -393,9 +354,7 @@ export async function configScanRoutes(fastify: FastifyInstance): Promise<void> 
 
       for (const file of configFiles) {
         const before = file.content;
-        const parts = before.split(value);
-        const replacements = parts.length - 1;
-        const after = replacements === 0 ? before : parts.join(placeholder);
+        const { newContent: after, replacements } = substituteFullValue(before, value, placeholder);
 
         diffs.push({
           fileId: file.id,
@@ -500,9 +459,7 @@ export async function configScanRoutes(fastify: FastifyInstance): Promise<void> 
       for (const file of configFiles) {
         try {
           const oldContent = file.content;
-          const parts = oldContent.split(value);
-          const replacements = parts.length - 1;
-          const newContent = replacements === 0 ? oldContent : parts.join(placeholder);
+          const { newContent, replacements } = substituteFullValue(oldContent, value, placeholder);
 
           if (replacements === 0) {
             results.push({
