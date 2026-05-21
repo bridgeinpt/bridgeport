@@ -8,7 +8,7 @@ import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { mkdir, readFile } from 'fs/promises';
+import { mkdir } from 'fs/promises';
 import { config } from './lib/config.js';
 import { initializeCrypto } from './lib/crypto.js';
 import { initializeDatabase, disconnectDatabase } from './lib/db.js';
@@ -33,6 +33,7 @@ import { notificationRoutes } from './routes/notifications.js';
 import { smtpRoutes } from './routes/admin/smtp.js';
 import { webhookAdminRoutes } from './routes/admin/webhooks.js';
 import { slackAdminRoutes } from './routes/admin/slack.js';
+import { sentryAdminRoutes } from './routes/admin/sentry.js';
 import { initializeNotificationTypes } from './services/notifications.js';
 import { syncPlugins } from './services/plugin-loader.js';
 import { containerImageRoutes } from './routes/container-images.js';
@@ -54,15 +55,8 @@ import { sshPool } from './lib/ssh.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Read app version at startup
-let appVersion = 'unknown';
-try {
-  const packageJson = JSON.parse(await readFile(join(__dirname, '../package.json'), 'utf-8'));
-  appVersion = packageJson.version;
-} catch { /* dev mode fallback */ }
-
 // Re-export from lib/version for backwards compat (routes import from lib/version directly)
-import { bundledAgentVersion, cliVersion } from './lib/version.js';
+import { appVersion, bundledAgentVersion, cliVersion } from './lib/version.js';
 export { bundledAgentVersion, cliVersion };
 
 // Initialize Sentry error monitoring (no-op if SENTRY_DSN is not set)
@@ -183,6 +177,7 @@ async function buildServer() {
   await fastify.register(smtpRoutes);
   await fastify.register(webhookAdminRoutes);
   await fastify.register(slackAdminRoutes);
+  await fastify.register(sentryAdminRoutes);
   await fastify.register(containerImageRoutes);
   await fastify.register(serviceDependencyRoutes);
   await fastify.register(deploymentPlanRoutes);

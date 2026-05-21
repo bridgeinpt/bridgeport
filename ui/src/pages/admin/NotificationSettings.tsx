@@ -21,6 +21,8 @@ import {
   testSlackChannel,
   listSlackRoutings,
   updateSlackRoutings,
+  getSentryStatus,
+  testBackendSentry,
   type SmtpConfig,
   type SmtpConfigInput,
   type WebhookConfig,
@@ -30,12 +32,14 @@ import {
   type SlackChannel,
   type SlackChannelInput,
   type SlackRouting,
+  type SentryStatus,
 } from '../../lib/api';
 import { useToast } from '../../components/Toast';
 import { PlusIcon, TrashIcon } from '../../components/Icons';
 import { safeJsonParse } from '../../lib/helpers';
+import { useSentryInitialized } from '../../lib/sentry';
 
-type TabType = 'smtp' | 'webhooks' | 'slack' | 'types';
+type TabType = 'smtp' | 'webhooks' | 'slack' | 'sentry' | 'types';
 
 function msToSec(ms: number): number {
   return Math.round(ms / 1000);
@@ -62,6 +66,7 @@ function formatDelaysMs(delaysSec: string): string {
 export default function NotificationSettings() {
   const { user } = useAuthStore();
   const toast = useToast();
+  const sentryReady = useSentryInitialized();
   const [activeTab, setActiveTab] = useState<TabType>('smtp');
   const [loading, setLoading] = useState(true);
 
@@ -114,6 +119,11 @@ export default function NotificationSettings() {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [_environments, setEnvironments] = useState<Environment[]>([]);
 
+  // Sentry state
+  const [sentryStatus, setSentryStatus] = useState<SentryStatus | null>(null);
+  const [sentryTestingBackend, setSentryTestingBackend] = useState(false);
+  const [sentryTestingFrontend, setSentryTestingFrontend] = useState(false);
+
   // Webhook delivery settings state
   const [deliverySettings, setDeliverySettings] = useState({
     webhookMaxRetries: 3,
@@ -135,7 +145,7 @@ export default function NotificationSettings() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [smtpRes, webhooksRes, typesRes, envsRes, systemRes, slackChannelsRes, slackRoutingsRes] = await Promise.all([
+      const [smtpRes, webhooksRes, typesRes, envsRes, systemRes, slackChannelsRes, slackRoutingsRes, sentryRes] = await Promise.all([
         getSmtpConfig(),
         listWebhooks(),
         getAdminNotificationTypes(),
@@ -143,6 +153,8 @@ export default function NotificationSettings() {
         getSystemSettings(),
         listSlackChannels(),
         listSlackRoutings(),
+        // Sentry is non-critical; don't block the page if status fails.
+        getSentryStatus().catch(() => null),
       ]);
 
       setSmtpConfig(smtpRes.config);
@@ -164,6 +176,7 @@ export default function NotificationSettings() {
       setEnvironments(envsRes.environments);
       setSlackChannels(slackChannelsRes.channels);
       setSlackRoutings(slackRoutingsRes.routings);
+      setSentryStatus(sentryRes);
 
       // Load webhook delivery settings
       setDeliverySettings({
@@ -393,6 +406,35 @@ export default function NotificationSettings() {
     }
   };
 
+  // Sentry test handlers
+  const handleTestBackendSentry = async () => {
+    setSentryTestingBackend(true);
+    try {
+      const result = await testBackendSentry();
+      toast.success(result.message);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Backend Sentry test failed');
+    } finally {
+      setSentryTestingBackend(false);
+    }
+  };
+
+  // Throw asynchronously so the error escapes React's event-handler boundary
+  // and reaches window.onerror — which is the integration Sentry's global
+  // handler instruments. Capturing programmatically would only exercise the
+  // manual capture path, not the real-world uncaught-error path.
+  const handleTestFrontendSentry = () => {
+    if (!sentryReady) {
+      toast.error('Frontend Sentry SDK is not initialized yet. Try again in a moment.');
+      return;
+    }
+    setSentryTestingFrontend(true);
+    toast.success('Throwing a test error... check Sentry Issues in ~30s.');
+    setTimeout(() => {
+      throw new Error('BRIDGEPORT frontend Sentry test');
+    }, 0);
+  };
+
   // Webhook delivery settings handlers
   const handleSaveDeliverySettings = async () => {
     setDeliverySaving(true);
@@ -442,6 +484,7 @@ export default function NotificationSettings() {
           { id: 'smtp', label: 'Email (SMTP)' },
           { id: 'webhooks', label: 'Webhooks' },
           { id: 'slack', label: 'Slack' },
+          { id: 'sentry', label: 'Sentry' },
           { id: 'types', label: 'Notification Types' },
         ].map((tab) => (
           <button
@@ -892,6 +935,122 @@ export default function NotificationSettings() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Sentry Tab */}
+      {activeTab === 'sentry' && (
+        <div className="card">
+          <div className="mb-6">
+            <h3 className="text-lg font-semibold text-white">Error Monitoring (Sentry)</h3>
+            <p className="text-sm text-slate-400 mt-1">
+              Sentry captures unhandled errors from the backend (Node) and frontend (React). Configure DSNs as environment variables and restart the container; values are picked up at runtime.
+            </p>
+          </div>
+
+          <div className="space-y-4">
+            {/* Backend status */}
+            <div className="p-4 bg-slate-800 rounded-lg">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-medium text-white">Backend (Node)</h4>
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded ${
+                        sentryStatus?.backendConfigured
+                          ? 'bg-green-500/20 text-green-400'
+                          : 'bg-slate-700 text-slate-400'
+                      }`}
+                    >
+                      {sentryStatus?.backendConfigured ? 'Configured' : 'Not configured'}
+                    </span>
+                  </div>
+                  {sentryStatus?.backendConfigured ? (
+                    <p className="text-sm text-slate-400 mt-1">
+                      Environment: <span className="text-slate-300">{sentryStatus.environment}</span>
+                    </p>
+                  ) : (
+                    <p className="text-sm text-slate-400 mt-1">
+                      Set <code className="text-xs px-1 py-0.5 bg-slate-900 rounded text-slate-300">SENTRY_BACKEND_DSN</code> and restart the container.
+                    </p>
+                  )}
+                </div>
+                {sentryStatus?.backendConfigured && (
+                  <button
+                    onClick={handleTestBackendSentry}
+                    disabled={sentryTestingBackend}
+                    className="btn btn-secondary text-xs"
+                    title="Capture a synthetic exception via the backend SDK"
+                  >
+                    {sentryTestingBackend ? 'Sending...' : 'Send test error'}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Frontend status */}
+            <div className="p-4 bg-slate-800 rounded-lg">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-medium text-white">Frontend (React)</h4>
+                    <span
+                      className={`text-xs px-2 py-0.5 rounded ${
+                        sentryStatus?.frontendConfigured
+                          ? 'bg-green-500/20 text-green-400'
+                          : 'bg-slate-700 text-slate-400'
+                      }`}
+                    >
+                      {sentryStatus?.frontendConfigured ? 'Configured' : 'Not configured'}
+                    </span>
+                    {sentryStatus?.frontendConfigured && !sentryReady && (
+                      <span className="text-xs px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-400">
+                        Initializing…
+                      </span>
+                    )}
+                  </div>
+                  {sentryStatus?.frontendConfigured ? (
+                    <p className="text-sm text-slate-400 mt-1">
+                      The DSN is served at runtime via <code className="text-xs px-1 py-0.5 bg-slate-900 rounded text-slate-300">GET /api/client-config</code>; the SDK initializes on app load.
+                    </p>
+                  ) : (
+                    <p className="text-sm text-slate-400 mt-1">
+                      Set <code className="text-xs px-1 py-0.5 bg-slate-900 rounded text-slate-300">SENTRY_FRONTEND_DSN</code> and restart the container.
+                    </p>
+                  )}
+                </div>
+                {sentryStatus?.frontendConfigured && (
+                  <button
+                    onClick={handleTestFrontendSentry}
+                    disabled={sentryTestingFrontend || !sentryReady}
+                    className="btn btn-secondary text-xs"
+                    title="Throw an uncaught error so the global handler reports it"
+                  >
+                    {sentryTestingFrontend ? 'Throwing...' : 'Send test error'}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Setup help (only shown when neither DSN is set) */}
+            {sentryStatus && !sentryStatus.backendConfigured && !sentryStatus.frontendConfigured && (
+              <div className="p-4 border border-slate-700 rounded-lg bg-slate-900/50">
+                <h4 className="text-sm font-medium text-white mb-2">How to set up</h4>
+                <ol className="text-sm text-slate-400 space-y-2 list-decimal list-inside">
+                  <li>Create a Sentry project for the backend (platform: Node.js, framework: Vanilla) and copy the DSN.</li>
+                  <li>Create a second Sentry project for the frontend (platform: React) and copy that DSN.</li>
+                  <li>
+                    Add both to <code className="text-xs px-1 py-0.5 bg-slate-900 rounded text-slate-300">.env</code> (or <code className="text-xs px-1 py-0.5 bg-slate-900 rounded text-slate-300">docker/.env</code> in Docker deployments):
+                    <pre className="mt-2 p-2 bg-slate-950 rounded text-xs text-slate-300 overflow-x-auto">{`SENTRY_BACKEND_DSN=https://<key>@<org>.ingest.sentry.io/<project1>
+SENTRY_FRONTEND_DSN=https://<key>@<org>.ingest.sentry.io/<project2>
+SENTRY_ENVIRONMENT=production`}</pre>
+                  </li>
+                  <li>Restart the BRIDGEPORT container. The values are picked up at startup; no rebuild needed.</li>
+                  <li>Come back here and use the test buttons to confirm events reach Sentry.</li>
+                </ol>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

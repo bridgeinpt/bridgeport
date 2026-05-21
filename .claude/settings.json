@@ -11,9 +11,12 @@
     ],
     "deny": [
       "Bash(rm -rf /)",
-      "Bash(*password*)",
-      "Bash(*secret*)",
-      "Bash(*token*)"
+      "Bash(*PASSWORD=*)",
+      "Bash(*SECRET=*)",
+      "Bash(*TOKEN=*)",
+      "Bash(echo *password*)",
+      "Bash(echo *secret*)",
+      "Bash(echo *token*)"
     ]
   },
   "enabledPlugins": {
