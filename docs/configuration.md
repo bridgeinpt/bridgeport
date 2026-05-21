@@ -137,6 +137,8 @@ All Sentry configuration is optional. BRIDGEPORT works fine without it.
 | `SENTRY_TRACES_SAMPLE_RATE` | number | `0` | Performance tracing sample rate, from `0.0` (off) to `1.0` (100%). |
 | `SENTRY_ENABLED` | boolean | `true` | Kill switch. Set to `false` to disable Sentry even when DSNs are configured. |
 
+After setting either DSN and restarting the container, admins can verify delivery from **Admin → Notifications → Sentry**: each side (Backend / Frontend) shows a "Configured" badge and a **Send test error** button. The button captures a synthetic exception via the SDK; the issue should appear in your Sentry project's Issues tab within ~30 seconds. If neither DSN is set, the tab inlines the env-var setup instructions.
+
 ---
 
 ## Configuration Recipes

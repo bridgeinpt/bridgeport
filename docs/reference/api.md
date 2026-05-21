@@ -283,7 +283,7 @@ BRIDGEPORT's API is organized into the following categories. Each category corre
 | **Events** | `/api/events` | Real-time SSE stream |
 | **Audit** | `/api/audit-logs` | Audit log viewer |
 | **Settings** | `/api/settings/*` | Service types, system settings |
-| **Admin** | `/api/admin/*` | SMTP, outgoing webhooks, Slack configuration |
+| **Admin** | `/api/admin/*` | SMTP, outgoing webhooks, Slack channels, Sentry status + test |
 | **Users** | `/api/users/*` | User management (admin only) |
 | **Downloads** | `/api/downloads/*` | CLI binary downloads |
 | **Spaces** | `/api/spaces/*` | Global S3/Spaces storage configuration |

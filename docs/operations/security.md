@@ -170,7 +170,7 @@ Use this checklist to secure your BRIDGEPORT deployment:
 
 - [ ] **Protect the Docker socket** -- If using socket mode for host container management, understand that mounting `/var/run/docker.sock` gives BRIDGEPORT full Docker daemon access.
 
-- [ ] **Enable Sentry for error monitoring** -- Set `SENTRY_BACKEND_DSN` and `SENTRY_FRONTEND_DSN` to catch errors before your users do.
+- [ ] **Enable Sentry for error monitoring** -- Set `SENTRY_BACKEND_DSN` and `SENTRY_FRONTEND_DSN` to catch errors before your users do. Verify end-to-end delivery from **Admin > Notifications > Sentry** using the per-side test buttons.
 
 - [ ] **Back up the SQLite database regularly** -- See [Backup & Restore](backup-restore.md) for automated backup strategies.
 
