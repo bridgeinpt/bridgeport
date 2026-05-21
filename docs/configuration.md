@@ -132,7 +132,7 @@ All Sentry configuration is optional. BRIDGEPORT works fine without it.
 | Variable | Type | Default | Description |
 |---|---|---|---|
 | `SENTRY_BACKEND_DSN` | string | _(none)_ | Sentry DSN for backend (Node.js) error tracking. |
-| `SENTRY_FRONTEND_DSN` | string | _(none)_ | Sentry DSN for frontend (React) error tracking. Baked into the UI at build time. |
+| `SENTRY_FRONTEND_DSN` | string | _(none)_ | Sentry DSN for frontend (React) error tracking. Served to the UI at runtime via `GET /api/client-config`, so rotating it only needs a backend restart. |
 | `SENTRY_ENVIRONMENT` | string | _(none)_ | Environment tag sent to Sentry (e.g., `production`, `staging`). |
 | `SENTRY_TRACES_SAMPLE_RATE` | number | `0` | Performance tracing sample rate, from `0.0` (off) to `1.0` (100%). |
 | `SENTRY_ENABLED` | boolean | `true` | Kill switch. Set to `false` to disable Sentry even when DSNs are configured. |
