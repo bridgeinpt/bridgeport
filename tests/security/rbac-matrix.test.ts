@@ -104,6 +104,9 @@ const adminRoutes: RouteSpec[] = [
   // Spaces config
   { method: 'PUT', url: '/api/settings/spaces', minRole: 'admin', body: { accessKey: 'test', secretKey: 'test', region: 'us-east-1', bucket: 'test', endpoint: 'https://test.com' }, description: 'update spaces config' },
   { method: 'DELETE', url: '/api/settings/spaces', minRole: 'admin', description: 'delete spaces config' },
+
+  // API tokens (admin-only management)
+  { method: 'GET', url: '/api/admin/tokens', minRole: 'admin', description: 'list API tokens' },
 ];
 
 // Operator-only routes (admin + operator allowed, viewer denied)
@@ -116,13 +119,19 @@ const operatorRoutes: RouteSpec[] = [
 
   // Topology mutations
   { method: 'POST', url: `/api/connections`, minRole: 'operator', body: { environmentId: '__ENV__', sourceType: 'service', sourceId: 'test', targetType: 'service', targetId: 'test2' }, description: 'create topology connection' },
+
+  // Generic role enforcement: mutating routes without an explicit per-route
+  // requireOperator/requireAdmin guard should still block viewers via the
+  // central enforceRoleForMethod check in the authenticate plugin.
+  { method: 'POST', url: '/api/services/__PLACEHOLDER__/restart', minRole: 'operator', description: 'restart service' },
+  { method: 'POST', url: '/api/services/__PLACEHOLDER__/deploy', minRole: 'operator', description: 'deploy service' },
+  { method: 'DELETE', url: '/api/secrets/__PLACEHOLDER__', minRole: 'operator', description: 'delete secret' },
+  { method: 'POST', url: '/api/servers/__PLACEHOLDER__/test-ssh', minRole: 'operator', description: 'test server SSH' },
 ];
 
 // Viewer routes (any authenticated user can access)
 const viewerRoutes: RouteSpec[] = [
-  // Auth routes
   { method: 'GET', url: '/api/auth/me', minRole: 'viewer', description: 'get current user' },
-  { method: 'GET', url: '/api/auth/tokens', minRole: 'viewer', description: 'list API tokens' },
 
   // Environment listing
   { method: 'GET', url: '/api/environments', minRole: 'viewer', description: 'list environments' },

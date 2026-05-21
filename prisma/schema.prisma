@@ -24,17 +24,60 @@ model User {
   notifications           Notification[]
   notificationPreferences NotificationPreference[]
   deploymentPlans         DeploymentPlan[]
+  createdServiceAccounts  ServiceAccount[]         @relation("ServiceAccountCreator")
+}
+
+// Machine identities for API access (not real humans, no login).
+// Tokens minted against a service account survive admin turnover.
+model ServiceAccount {
+  id          String   @id @default(cuid())
+  name        String   @unique // machine-readable identifier (e.g., "ci-deploy-staging")
+  description String?
+  role        String   @default("viewer") // "admin" | "operator" | "viewer"
+  disabled    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdByUserId String?
+  createdBy       User?   @relation("ServiceAccountCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  apiTokens ApiToken[]
+  auditLogs AuditLog[]
 }
 
 model ApiToken {
-  id         String    @id @default(cuid())
-  name       String
-  tokenHash  String    @unique
+  id          String  @id @default(cuid())
+  name        String
+  tokenHash   String  @unique
+  tokenPrefix String? // First chars of the raw token for display (e.g., "bport_pat_a1b2")
+
+  // Scope
+  role            String                @default("viewer") // Effective cap; ≤ owner's role
+  allEnvironments Boolean               @default(true)
+  environments    ApiTokenEnvironment[]
+
   lastUsedAt DateTime?
   expiresAt  DateTime?
   createdAt  DateTime  @default(now())
-  userId     String
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Owner: exactly one of userId or serviceAccountId must be set
+  userId           String?
+  user             User?           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  serviceAccountId String?
+  serviceAccount   ServiceAccount? @relation(fields: [serviceAccountId], references: [id], onDelete: Cascade)
+
+  auditLogs AuditLog[]
+}
+
+// Many-to-many: which environments a token is allowed to act on (when allEnvironments = false)
+model ApiTokenEnvironment {
+  apiTokenId    String
+  apiToken      ApiToken    @relation(fields: [apiTokenId], references: [id], onDelete: Cascade)
+  environmentId String
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+
+  @@id([apiTokenId, environmentId])
+  @@index([environmentId])
 }
 
 model Environment {
@@ -45,19 +88,20 @@ model Environment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  servers              Server[]
-  secrets              Secret[]
-  vars                 Var[]
-  configFiles          ConfigFile[]
-  auditLogs            AuditLog[]
-  registryConnections  RegistryConnection[]
-  databases            Database[]
-  notifications        Notification[]
-  containerImages      ContainerImage[]
-  deploymentPlans      DeploymentPlan[]
-  healthCheckLogs      HealthCheckLog[]
-  serviceConnections   ServiceConnection[]
-  diagramLayout        DiagramLayout?
+  servers             Server[]
+  secrets             Secret[]
+  vars                Var[]
+  configFiles         ConfigFile[]
+  auditLogs           AuditLog[]
+  registryConnections RegistryConnection[]
+  databases           Database[]
+  notifications       Notification[]
+  containerImages     ContainerImage[]
+  deploymentPlans     DeploymentPlan[]
+  healthCheckLogs     HealthCheckLog[]
+  serviceConnections  ServiceConnection[]
+  diagramLayout       DiagramLayout?
+  apiTokenScopes      ApiTokenEnvironment[]
 
   // Per-module settings (one row per environment, created eagerly)
   generalSettings       GeneralSettings?
@@ -70,70 +114,70 @@ model Environment {
 // ==================== Per-Environment Module Settings ====================
 
 model GeneralSettings {
-  id            String @id @default(cuid())
-  environmentId String @unique
+  id            String      @id @default(cuid())
+  environmentId String      @unique
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
 
   sshUser String @default("root") // SSH username
 }
 
 model MonitoringSettings {
-  id            String @id @default(cuid())
-  environmentId String @unique
+  id            String      @id @default(cuid())
+  environmentId String      @unique
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
 
-  enabled                Boolean @default(false) // Master toggle for monitoring
-  serverHealthIntervalMs Int     @default(60000)
-  serviceHealthIntervalMs Int    @default(60000)
-  discoveryIntervalMs    Int     @default(300000)
-  metricsIntervalMs      Int     @default(300000)
-  updateCheckIntervalMs  Int     @default(1800000)
-  backupCheckIntervalMs  Int     @default(60000)
-  metricsRetentionDays   Int     @default(7)
-  healthLogRetentionDays Int     @default(30)
-  bounceThreshold        Int     @default(3)
-  bounceCooldownMs       Int     @default(900000)
-  collectCpu             Boolean @default(true)
-  collectMemory          Boolean @default(true)
-  collectSwap            Boolean @default(true)
-  collectDisk            Boolean @default(true)
-  collectLoad            Boolean @default(true)
-  collectFds             Boolean @default(true)
-  collectTcp             Boolean @default(true)
-  collectProcesses       Boolean @default(true)
-  collectTcpChecks       Boolean @default(true)
-  collectCertChecks      Boolean @default(true)
+  enabled                 Boolean @default(false) // Master toggle for monitoring
+  serverHealthIntervalMs  Int     @default(60000)
+  serviceHealthIntervalMs Int     @default(60000)
+  discoveryIntervalMs     Int     @default(300000)
+  metricsIntervalMs       Int     @default(300000)
+  updateCheckIntervalMs   Int     @default(1800000)
+  backupCheckIntervalMs   Int     @default(60000)
+  metricsRetentionDays    Int     @default(7)
+  healthLogRetentionDays  Int     @default(30)
+  bounceThreshold         Int     @default(3)
+  bounceCooldownMs        Int     @default(900000)
+  collectCpu              Boolean @default(true)
+  collectMemory           Boolean @default(true)
+  collectSwap             Boolean @default(true)
+  collectDisk             Boolean @default(true)
+  collectLoad             Boolean @default(true)
+  collectFds              Boolean @default(true)
+  collectTcp              Boolean @default(true)
+  collectProcesses        Boolean @default(true)
+  collectTcpChecks        Boolean @default(true)
+  collectCertChecks       Boolean @default(true)
 }
 
 model OperationsSettings {
-  id            String @id @default(cuid())
-  environmentId String @unique
+  id            String      @id @default(cuid())
+  environmentId String      @unique
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
 
-  defaultDockerMode  String @default("ssh")      // "ssh" | "socket"
-  defaultMetricsMode String @default("disabled")  // "disabled" | "ssh" | "agent"
-  autoPruneImages    Boolean @default(false)       // auto-prune after deploy and weekly
-  pruneImagesMode    String  @default("dangling")  // "dangling" | "all"
+  defaultDockerMode  String  @default("ssh") // "ssh" | "socket"
+  defaultMetricsMode String  @default("disabled") // "disabled" | "ssh" | "agent"
+  autoPruneImages    Boolean @default(false) // auto-prune after deploy and weekly
+  pruneImagesMode    String  @default("dangling") // "dangling" | "all"
 }
 
 model DataSettings {
-  id            String @id @default(cuid())
-  environmentId String @unique
+  id            String      @id @default(cuid())
+  environmentId String      @unique
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
 
-  allowBackupDownload        Boolean @default(false)
-  defaultMonitoringEnabled   Boolean @default(false)
-  defaultCollectionIntervalSec Int   @default(300)
+  allowBackupDownload          Boolean @default(false)
+  defaultMonitoringEnabled     Boolean @default(false)
+  defaultCollectionIntervalSec Int     @default(300)
 }
 
 model ConfigurationSettings {
-  id            String @id @default(cuid())
-  environmentId String @unique
+  id            String      @id @default(cuid())
+  environmentId String      @unique
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
 
   allowSecretReveal    Boolean @default(true)
-  scanMinLength        Int @default(6)
-  scanEntropyThreshold Int @default(25) // ×10 scale: 25 = 2.5 bits/char
+  scanMinLength        Int     @default(6)
+  scanEntropyThreshold Int     @default(25) // ×10 scale: 25 = 2.5 bits/char
 }
 
 model Server {
@@ -162,39 +206,39 @@ model Server {
   environmentId String
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
 
-  services           Service[]
-  metrics            ServerMetrics[]
-  databases          Database[]
-  containerSnapshot  AgentContainerSnapshot?
-  processSnapshot    AgentProcessSnapshot?
-  agentEvents        AgentEvent[]
+  services          Service[]
+  metrics           ServerMetrics[]
+  databases         Database[]
+  containerSnapshot AgentContainerSnapshot?
+  processSnapshot   AgentProcessSnapshot?
+  agentEvents       AgentEvent[]
 
   @@unique([environmentId, name])
 }
 
 // Server-level metrics (CPU, memory, disk, load)
 model ServerMetrics {
-  id            String   @id @default(cuid())
-  cpuPercent    Float?
-  memoryUsedMb  Float?
-  memoryTotalMb Float?
-  swapUsedMb    Float?
-  swapTotalMb   Float?
-  diskUsedGb    Float?
-  diskTotalGb   Float?
-  loadAvg1      Float?
-  loadAvg5      Float?
-  loadAvg15     Float?
-  uptime        Int? // seconds
-  openFds       Int? // open file descriptors
-  maxFds        Int? // max file descriptors
+  id             String   @id @default(cuid())
+  cpuPercent     Float?
+  memoryUsedMb   Float?
+  memoryTotalMb  Float?
+  swapUsedMb     Float?
+  swapTotalMb    Float?
+  diskUsedGb     Float?
+  diskTotalGb    Float?
+  loadAvg1       Float?
+  loadAvg5       Float?
+  loadAvg15      Float?
+  uptime         Int? // seconds
+  openFds        Int? // open file descriptors
+  maxFds         Int? // max file descriptors
   tcpEstablished Int? // TCP connections in ESTABLISHED state
   tcpListen      Int? // TCP connections in LISTEN state
   tcpTimeWait    Int? // TCP connections in TIME_WAIT state
   tcpCloseWait   Int? // TCP connections in CLOSE_WAIT state
   tcpTotal       Int? // Total TCP connections
-  source        String // "ssh" | "agent"
-  collectedAt   DateTime @default(now())
+  source         String // "ssh" | "agent"
+  collectedAt    DateTime @default(now())
 
   serverId String
   server   Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
@@ -334,14 +378,14 @@ model Secret {
 }
 
 model Var {
-  id            String   @id @default(cuid())
+  id            String      @id @default(cuid())
   key           String
   value         String
   description   String?
   environmentId String
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
 
   @@unique([environmentId, key])
 }
@@ -411,10 +455,19 @@ model AuditLog {
   environmentId String?
   environment   Environment? @relation(fields: [environmentId], references: [id], onDelete: SetNull)
 
+  // When the actor was an API token (vs. a session). Null = session/JWT or system.
+  apiTokenId       String?
+  apiToken         ApiToken?       @relation(fields: [apiTokenId], references: [id], onDelete: SetNull)
+  // When the actor was a service account (token's owner). Mutually informative with userId.
+  serviceAccountId String?
+  serviceAccount   ServiceAccount? @relation(fields: [serviceAccountId], references: [id], onDelete: SetNull)
+
   @@index([createdAt(sort: Desc)])
   @@index([resourceType, resourceId])
   @@index([userId])
   @@index([environmentId])
+  @@index([apiTokenId])
+  @@index([serviceAccountId])
 }
 
 // Edit history for config files
@@ -585,9 +638,9 @@ model NotificationType {
 
   createdAt DateTime @default(now())
 
-  notifications    Notification[]
-  preferences      NotificationPreference[]
-  slackRoutings    SlackTypeRouting[]
+  notifications Notification[]
+  preferences   NotificationPreference[]
+  slackRoutings SlackTypeRouting[]
 }
 
 // Individual notifications sent to users
@@ -712,20 +765,20 @@ model ContainerImage {
 
 // Discovered image SHAs from registry syncs
 model ImageDigest {
-  id               String    @id @default(cuid())
+  id               String         @id @default(cuid())
   containerImageId String
   containerImage   ContainerImage @relation(fields: [containerImageId], references: [id], onDelete: Cascade)
   manifestDigest   String // Manifest list digest (sha256:...) — used for pulling
   configDigest     String? // Config digest (image ID) — stable across registries
-  tags             String    @default("[]") // JSON array of tags pointing to this digest
+  tags             String         @default("[]") // JSON array of tags pointing to this digest
   size             BigInt? // Compressed image size in bytes
   pushedAt         DateTime? // When this digest was pushed to the registry
-  discoveredAt     DateTime  @default(now()) // When BRIDGEPORT first ingested this digest
-  updatedAt        DateTime  @updatedAt
+  discoveredAt     DateTime       @default(now()) // When BRIDGEPORT first ingested this digest
+  updatedAt        DateTime       @updatedAt
 
   services         Service[]
   historyEntries   ContainerImageHistory[]
-  deployedByImages ContainerImage[] @relation("DeployedDigest")
+  deployedByImages ContainerImage[]        @relation("DeployedDigest")
 
   @@unique([containerImageId, manifestDigest])
   @@index([containerImageId, discoveredAt(sort: Desc)])
@@ -945,7 +998,7 @@ model SpacesConfig {
   secretKeyNonce     String
   region             String // "fra1"
   endpoint           String // "fra1.digitaloceanspaces.com"
-  buckets            String?  // JSON array of bucket names (for scoped keys that can't list buckets)
+  buckets            String? // JSON array of bucket names (for scoped keys that can't list buckets)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
@@ -974,7 +1027,7 @@ model AgentContainerSnapshot {
   id        String   @id @default(cuid())
   serverId  String   @unique // One snapshot per server
   server    Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
-  data      String   // JSON array of ContainerInfo
+  data      String // JSON array of ContainerInfo
   updatedAt DateTime @updatedAt
 }
 
@@ -983,7 +1036,7 @@ model AgentProcessSnapshot {
   id        String   @id @default(cuid())
   serverId  String   @unique // One snapshot per server
   server    Server   @relation(fields: [serverId], references: [id], onDelete: Cascade)
-  data      String   // JSON with byCpu, byMemory, stats
+  data      String // JSON with byCpu, byMemory, stats
   updatedAt DateTime @updatedAt
 }
 
@@ -1007,7 +1060,7 @@ model SlackChannel {
 
 // Routes notification types to Slack channels
 model SlackTypeRouting {
-  id             String          @id @default(cuid())
+  id             String           @id @default(cuid())
   typeId         String
   type           NotificationType @relation(fields: [typeId], references: [id], onDelete: Cascade)
   channelId      String
@@ -1081,26 +1134,26 @@ model DatabaseMetrics {
 
 // User-defined connections between services and/or databases
 model ServiceConnection {
-  id            String   @id @default(cuid())
+  id            String      @id @default(cuid())
   environmentId String
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
 
   // Source node
-  sourceType    String   // "service" | "database"
-  sourceId      String   // Service.id or Database.id
+  sourceType String // "service" | "database"
+  sourceId   String // Service.id or Database.id
 
   // Target node
-  targetType    String   // "service" | "database"
-  targetId      String   // Service.id or Database.id
+  targetType String // "service" | "database"
+  targetId   String // Service.id or Database.id
 
   // Connection metadata
-  port          Int?     // Port number (e.g., 5432, 6379)
-  protocol      String?  // "tcp" | "http" | "grpc" | etc.
-  label         String?  // Optional description (e.g., "Primary DB", "Redis cache")
-  direction     String   @default("none") // "forward" (source→target) | "none" (undirected)
+  port      Int? // Port number (e.g., 5432, 6379)
+  protocol  String? // "tcp" | "http" | "grpc" | etc.
+  label     String? // Optional description (e.g., "Primary DB", "Redis cache")
+  direction String  @default("none") // "forward" (source→target) | "none" (undirected)
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([environmentId, sourceType, sourceId, targetType, targetId, port])
   @@index([environmentId, sourceType, sourceId])
@@ -1109,11 +1162,11 @@ model ServiceConnection {
 
 // Persisted node positions per environment for the topology diagram
 model DiagramLayout {
-  id            String   @id @default(cuid())
-  environmentId String   @unique
+  id            String      @id @default(cuid())
+  environmentId String      @unique
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
 
-  positions     String   // JSON: { "service:<id>": {"x": 100, "y": 200}, ... }
+  positions String // JSON: { "service:<id>": {"x": 100, "y": 200}, ... }
 
-  updatedAt     DateTime @updatedAt
+  updatedAt DateTime @updatedAt
 }

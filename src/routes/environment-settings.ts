@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { requireAdmin } from '../plugins/authorize.js';
-import { logAudit } from '../services/audit.js';
+import { logAudit, actorFrom } from '../services/audit.js';
 import { prisma } from '../lib/db.js';
 import {
   getModuleSettings,
@@ -72,7 +72,7 @@ export async function environmentSettingsRoutes(fastify: FastifyInstance): Promi
             resourceId: id,
             resourceName: env.name,
             details: { module, changes },
-            userId: request.authUser!.id,
+            ...actorFrom(request),
             environmentId: id,
           });
         }
@@ -107,7 +107,7 @@ export async function environmentSettingsRoutes(fastify: FastifyInstance): Promi
         resourceId: id,
         resourceName: env.name,
         details: { module, reset: true },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId: id,
       });
 

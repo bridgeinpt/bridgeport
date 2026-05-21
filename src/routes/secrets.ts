@@ -8,7 +8,7 @@ import {
   listSecrets,
   deleteSecret,
 } from '../services/secrets.js';
-import { logAudit } from '../services/audit.js';
+import { logAudit, actorFrom } from '../services/audit.js';
 import { validateBody, findOrNotFound, handleUniqueConstraint } from '../lib/helpers.js';
 import { requireOperator } from '../plugins/authorize.js';
 
@@ -151,7 +151,7 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
           resourceType: 'secret',
           resourceId: secret.id,
           resourceName: secret.key,
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: envId,
         });
 
@@ -187,7 +187,7 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
             details: { blocked: true, reason: 'environment_disabled' },
             success: false,
             error: 'Secret reveal disabled for this environment',
-            userId: request.authUser!.id,
+            ...actorFrom(request),
             environmentId: secret.environmentId,
           });
           return reply.code(403).send({ error: 'Secret reveal is disabled for this environment' });
@@ -203,7 +203,7 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
             details: { blocked: true, reason: 'write_only' },
             success: false,
             error: 'This secret is write-only',
-            userId: request.authUser!.id,
+            ...actorFrom(request),
             environmentId: secret.environmentId,
           });
           return reply.code(403).send({ error: 'This secret is write-only and cannot be revealed' });
@@ -216,7 +216,7 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
           resourceType: 'secret',
           resourceId: id,
           resourceName: secret.key,
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: secret.environmentId,
         });
 
@@ -246,7 +246,7 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
           resourceId: secret.id,
           resourceName: secret.key,
           details: { valueChanged: !!body.value, descriptionChanged: !!body.description },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: existing?.environmentId,
         });
 
@@ -274,7 +274,7 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
             resourceType: 'secret',
             resourceId: id,
             resourceName: secret.key,
-            userId: request.authUser!.id,
+            ...actorFrom(request),
             environmentId: secret.environmentId,
           });
         }
@@ -426,7 +426,7 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
           resourceType: 'var',
           resourceId: v.id,
           resourceName: v.key,
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: envId,
         });
 
@@ -474,7 +474,7 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
           resourceId: v.id,
           resourceName: v.key,
           details: { valueChanged: !!body.value, descriptionChanged: !!body.description },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: existing.environmentId,
         });
 
@@ -503,7 +503,7 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
           resourceType: 'var',
           resourceId: id,
           resourceName: v.key,
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: v.environmentId,
         });
 

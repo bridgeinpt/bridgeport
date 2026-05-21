@@ -10,7 +10,7 @@ import {
   deleteWebhook,
   testWebhook,
 } from '../../services/outgoing-webhooks.js';
-import { logAudit } from '../../services/audit.js';
+import { logAudit, actorFrom } from '../../services/audit.js';
 
 const createWebhookSchema = z.object({
   name: z.string().min(1).max(100),
@@ -72,7 +72,7 @@ export async function webhookAdminRoutes(fastify: FastifyInstance): Promise<void
         resourceId: webhook.id,
         resourceName: webhook.name,
         details: { url: webhook.url },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       return { webhook };
@@ -97,7 +97,7 @@ export async function webhookAdminRoutes(fastify: FastifyInstance): Promise<void
           resourceId: webhook.id,
           resourceName: webhook.name,
           details: body,
-          userId: request.authUser!.id,
+          ...actorFrom(request),
         });
 
         return { webhook };
@@ -124,7 +124,7 @@ export async function webhookAdminRoutes(fastify: FastifyInstance): Promise<void
         resourceType: 'webhook_config',
         resourceId: id,
         resourceName: webhook.name,
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       return { success: true };

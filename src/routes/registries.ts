@@ -10,7 +10,7 @@ import {
   getRegistryCredentials,
 } from '../services/registries.js';
 import { RegistryFactory } from '../lib/registry.js';
-import { logAudit } from '../services/audit.js';
+import { logAudit, actorFrom } from '../services/audit.js';
 import { DISCOVERY_STATUS } from '../lib/constants.js';
 import { validateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage } from '../lib/helpers.js';
 
@@ -72,7 +72,7 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
           resourceId: registry.id,
           resourceName: registry.name,
           details: { type: registry.type, registryUrl: registry.registryUrl },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: envId,
         });
 
@@ -116,7 +116,7 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
           resourceId: registry.id,
           resourceName: registry.name,
           details: { changes: Object.keys(body) },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: existing?.environmentId,
         });
 
@@ -153,7 +153,7 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
         resourceType: 'registry_connection',
         resourceId: id,
         resourceName: existing.name,
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId: existing.environmentId,
       });
 
@@ -312,7 +312,7 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
         resourceId: id,
         resourceName: registry.name,
         details: { servicesChecked: services.length, updatesFound: results.filter(r => r.hasUpdate).length },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       return {

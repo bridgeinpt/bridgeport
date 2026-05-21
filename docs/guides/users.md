@@ -10,11 +10,12 @@ BRIDGEPORT uses a three-tier role system (admin, operator, viewer) with JWT sess
 4. [Managing Users (Admin)](#managing-users-admin)
 5. [Self-Service Account](#self-service-account)
 6. [API Tokens](#api-tokens)
-7. [Initial Admin Setup](#initial-admin-setup)
-8. [Active User Tracking](#active-user-tracking)
-9. [Configuration Options](#configuration-options)
-10. [Troubleshooting](#troubleshooting)
-11. [Related](#related)
+7. [Service Accounts](#service-accounts)
+8. [Initial Admin Setup](#initial-admin-setup)
+9. [Active User Tracking](#active-user-tracking)
+10. [Configuration Options](#configuration-options)
+11. [Troubleshooting](#troubleshooting)
+12. [Related](#related)
 
 ---
 
@@ -242,83 +243,145 @@ Content-Type: application/json
 
 ## API Tokens
 
-API tokens let scripts, CI/CD pipelines, and external tools authenticate as a specific user without exposing login credentials. Tokens carry the same role permissions as their owner.
+API tokens let scripts, CI/CD pipelines, and external tools authenticate without exposing user passwords. Tokens are admin-managed and live under **Admin > Integrations** (`/admin/integrations`).
+
+### Token Anatomy
+
+Every token has four properties beyond its name:
+
+- **Owner** — either a user or a [service account](#service-accounts). Service-account ownership is preferred for tools, since SA tokens survive when individual admins leave.
+- **Role** — `admin`, `operator`, or `viewer`. The token's role is capped at the owner's role: a viewer-owned token cannot be operator-grade.
+- **Environment scope** — either "all environments" or a specific allowlist. Env-scoped tokens cannot reach environments outside their allowlist and are **denied on global routes** (users, system settings, audit log, etc.).
+- **Expiry** — mandatory, max 365 days. Forces rotation.
+
+Tokens are prefixed `bport_pat_` so they're trivially detectable in logs and secret scanners.
 
 ### Creating a Token
 
+UI: **Admin > Integrations > New Token**. Fill in the owner, role, scope, and expiry.
+
+API:
 ```http
-POST /api/auth/tokens
-Authorization: Bearer <jwt-or-existing-token>
+POST /api/admin/tokens
+Authorization: Bearer <admin-token-or-jwt>
 Content-Type: application/json
 
 {
-  "name": "GitHub Actions deploy",
+  "name": "github-actions-staging",
+  "ownerServiceAccountId": "clxyz...",
+  "role": "operator",
+  "allEnvironments": false,
+  "environmentIds": ["clenv-staging..."],
   "expiresInDays": 90
 }
 ```
 
+Either `ownerUserId` or `ownerServiceAccountId` is required (exactly one). When `allEnvironments` is `false`, `environmentIds` must contain at least one ID.
+
 **Response:**
 ```json
 {
-  "token": "bp_abc123...",
+  "token": "bport_pat_abc123...",
   "tokenRecord": {
-    "id": "clxyz...",
-    "name": "GitHub Actions deploy",
-    "expiresAt": "2026-05-26T10:00:00.000Z",
-    "createdAt": "2026-02-25T10:00:00.000Z"
+    "id": "cltok...",
+    "name": "github-actions-staging",
+    "tokenPrefix": "bport_pat_abc1",
+    "role": "operator",
+    "allEnvironments": false,
+    "expiresAt": "2026-08-18T10:00:00.000Z",
+    "createdAt": "2026-05-20T10:00:00.000Z",
+    "userId": null,
+    "serviceAccountId": "clxyz..."
   }
 }
 ```
 
 > [!WARNING]
-> The full token value is returned **only once** at creation time. BRIDGEPORT stores only a SHA-256 hash. Copy it immediately and store it in your secrets manager. If lost, delete the token and create a new one.
+> The full token value is returned **only once** at creation time. BRIDGEPORT stores only a SHA-256 hash. Copy it immediately and store it in your secrets manager. If lost, revoke the token and mint a new one.
 
-`expiresInDays` is optional. Omitting it creates a non-expiring token.
-
-### Listing Your Tokens
+### Listing Tokens
 
 ```http
-GET /api/auth/tokens
-Authorization: Bearer <token>
+GET /api/admin/tokens
+Authorization: Bearer <admin-token>
 ```
 
-Returns all tokens belonging to the authenticated user. Each record includes `id`, `name`, `lastUsedAt`, `expiresAt`, and `createdAt`. The token hash is never returned.
+Optional query: `?ownerUserId=<id>` or `?ownerServiceAccountId=<id>` to filter. Records include scope and ownership but never the token hash.
 
 ### Revoking a Token
 
 ```http
-DELETE /api/auth/tokens/:tokenId
-Authorization: Bearer <token>
+DELETE /api/admin/tokens/:tokenId
+Authorization: Bearer <admin-token>
 ```
 
-You can only delete your own tokens. Returns `404` if the token does not exist or belongs to another user.
+Revocation is immediate. Any request using the token will get `401 Unauthorized` after this call returns.
 
 ### Using a Token
 
 **HTTP header (most requests):**
 ```http
-Authorization: Bearer bp_abc123...
+Authorization: Bearer bport_pat_abc123...
 ```
 
 **Query parameter (SSE connections):**
 ```
-GET /api/events?token=bp_abc123...
+GET /api/events?token=bport_pat_abc123...
 ```
 
 The SSE query parameter approach exists because `EventSource` clients cannot set custom headers.
+
+### Effective Role at Use Time
+
+When the token authenticates a request, BRIDGEPORT computes `effective role = min(token role, owner role)`. If an owner gets demoted after a token was minted, the token's permissions drop automatically — no need to re-issue.
 
 ### Token Use Cases
 
 | Use Case | Recommended Setup |
 |----------|-------------------|
-| CI/CD pipeline deploys | `operator`-role token with `expiresInDays: 90` |
-| Read-only monitoring | `viewer`-role token, non-expiring |
-| SSE event streams | Any role, pass via `?token=` query param |
-| Infrastructure-as-code | Store in secrets manager, rotate on schedule |
-| Webhook integrations | Dedicated `operator` token per integration |
+| CI/CD deploy to staging | Service account, operator, env-scoped to staging, 90-day expiry |
+| Read-only dashboards | Service account, viewer, all environments |
+| Personal CLI | User-owned, role matches the user, all environments |
+| Webhook integrations | Service account, role matches the action, env-scoped |
 
 > [!TIP]
-> Name tokens descriptively (e.g., `"github-actions-staging"`, `"grafana-readonly"`) so they are easy to identify and revoke. The `lastUsedAt` field helps find stale tokens that can be cleaned up.
+> Name tokens descriptively (`"github-actions-staging"`, `"grafana-readonly"`). `lastUsedAt` helps find stale tokens that can be revoked.
+
+---
+
+## Service Accounts
+
+Service accounts are machine identities — they own tokens but never log in. Use them for any tool that talks to BRIDGEPORT (CI/CD, monitoring scrapers, deploy bots) so the credential is decoupled from any one person's user account.
+
+### Why Service Accounts
+
+If a CI pipeline uses a token owned by `alice@company.com` and Alice leaves, her account is deactivated and the pipeline breaks. With a service account, the credential is attached to a named identity (`ci-deploy-staging`) that outlives any admin.
+
+### Managing Service Accounts
+
+UI: **Admin > Integrations > New Service Account**.
+
+```http
+POST /api/admin/service-accounts
+Authorization: Bearer <admin-token>
+Content-Type: application/json
+
+{
+  "name": "ci-deploy-staging",
+  "description": "GitHub Actions deployer for staging",
+  "role": "operator"
+}
+```
+
+Names follow the pattern `[a-z0-9][a-z0-9_-]*` (lowercase, max 64 chars). Each SA has a role that caps all tokens minted against it.
+
+### Disabling
+
+Set `disabled: true` via `PATCH /api/admin/service-accounts/:id` to immediately invalidate every token belonging to that SA without revoking them individually. Re-enable later to restore.
+
+### Deletion
+
+`DELETE /api/admin/service-accounts/:id` cascades to all of the SA's tokens. Audit log entries created by the SA are preserved (the `serviceAccountId` link nulls out via `ON DELETE SET NULL`).
 
 ---
 

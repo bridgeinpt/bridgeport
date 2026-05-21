@@ -7,7 +7,7 @@ import {
   SYSTEM_SETTINGS_DEFAULTS,
 } from '../services/system-settings.js';
 import { requireAdmin } from '../plugins/authorize.js';
-import { logAudit } from '../services/audit.js';
+import { logAudit, actorFrom } from '../services/audit.js';
 import { validateBody } from '../lib/helpers.js';
 
 const updateSettingsSchema = z.object({
@@ -110,7 +110,7 @@ export async function systemSettingsRoutes(fastify: FastifyInstance): Promise<vo
         resourceId: 'singleton',
         resourceName: 'System Settings',
         details: { changes: auditDetails },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       return { settings: maskSensitiveFields(settings) };
@@ -130,7 +130,7 @@ export async function systemSettingsRoutes(fastify: FastifyInstance): Promise<vo
         resourceId: 'singleton',
         resourceName: 'System Settings',
         details: { action: 'reset_to_defaults' },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       return { settings: maskSensitiveFields(settings), message: 'Settings reset to defaults' };

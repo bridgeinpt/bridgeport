@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma, isPrismaNotFoundError } from '../lib/db.js';
-import { logAudit } from '../services/audit.js';
+import { logAudit, actorFrom } from '../services/audit.js';
 import { resolveDependencyOrder } from '../services/orchestration.js';
 import { validateBody, findOrNotFound, handleUniqueConstraint } from '../lib/helpers.js';
 
@@ -160,7 +160,7 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
             dependsOnName: dependsOn.name,
             type: body.type,
           },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: dependent.server.environmentId,
         });
 
@@ -208,7 +208,7 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
             dependsOnId: dependency.dependsOnId,
             dependsOnName: dependency.dependsOn.name,
           },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: dependency.dependent.server.environmentId,
         });
 

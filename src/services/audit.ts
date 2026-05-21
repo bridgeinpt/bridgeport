@@ -1,3 +1,4 @@
+import type { FastifyRequest } from 'fastify';
 import { prisma } from '../lib/db.js';
 
 export interface AuditLogParams {
@@ -10,6 +11,35 @@ export interface AuditLogParams {
   error?: string;
   userId?: string;
   environmentId?: string;
+  apiTokenId?: string;
+  serviceAccountId?: string;
+}
+
+// Sentinel prefix for service-account-owned tokens; see auth.ts validateApiToken.
+const SERVICE_ACCOUNT_USER_ID_PREFIX = 'sa:';
+
+/**
+ * Extract actor identity from a Fastify request. Spread into logAudit params
+ * to record who (user or service account) performed the action and which token
+ * authenticated them.
+ */
+export function actorFrom(request: FastifyRequest): {
+  userId?: string;
+  apiTokenId?: string;
+  serviceAccountId?: string;
+} {
+  const u = request.authUser;
+  if (!u) return {};
+  if (u.serviceAccountId) {
+    return {
+      apiTokenId: u.apiTokenId,
+      serviceAccountId: u.serviceAccountId,
+    };
+  }
+  return {
+    userId: u.id,
+    apiTokenId: u.apiTokenId,
+  };
 }
 
 export interface AuditLogFilters {
@@ -23,6 +53,15 @@ export interface AuditLogFilters {
 }
 
 export async function logAudit(params: AuditLogParams): Promise<void> {
+  // Tolerate callers that pass a service-account sentinel as userId
+  // (e.g. legacy call sites that used request.authUser!.id directly).
+  let userId = params.userId;
+  let serviceAccountId = params.serviceAccountId;
+  if (userId?.startsWith(SERVICE_ACCOUNT_USER_ID_PREFIX)) {
+    serviceAccountId = serviceAccountId ?? userId.slice(SERVICE_ACCOUNT_USER_ID_PREFIX.length);
+    userId = undefined;
+  }
+
   try {
     await prisma.auditLog.create({
       data: {
@@ -33,8 +72,10 @@ export async function logAudit(params: AuditLogParams): Promise<void> {
         details: params.details ? JSON.stringify(params.details) : null,
         success: params.success ?? true,
         error: params.error,
-        userId: params.userId,
+        userId,
         environmentId: params.environmentId,
+        apiTokenId: params.apiTokenId,
+        serviceAccountId,
       },
     });
   } catch (error) {

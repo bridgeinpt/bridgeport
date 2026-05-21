@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/db.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
 import { requireAdmin } from '../plugins/authorize.js';
-import { logAudit } from '../services/audit.js';
+import { logAudit, actorFrom } from '../services/audit.js';
 import { safeJsonParse, validateBody, findOrNotFound, getErrorMessage } from '../lib/helpers.js';
 import { S3Client, ListBucketsCommand, HeadBucketCommand } from '@aws-sdk/client-s3';
 
@@ -99,7 +99,7 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
           resourceType: 'spaces_config',
           resourceId: config.id,
           details: { region: body.region },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
         });
       } else {
         // For new config, secretKey is guaranteed to be present (validated above)
@@ -120,7 +120,7 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
           resourceType: 'spaces_config',
           resourceId: config.id,
           details: { region: body.region },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
         });
       }
 
@@ -149,7 +149,7 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
         action: 'delete',
         resourceType: 'spaces_config',
         resourceId: existing.id,
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       return { success: true };
@@ -364,7 +364,7 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
         resourceId: environmentId,
         resourceName: environment.name,
         details: { spacesEnabled: body.enabled },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId,
       });
 

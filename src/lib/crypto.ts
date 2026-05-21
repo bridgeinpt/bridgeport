@@ -80,6 +80,17 @@ export function generateToken(): string {
   return randomBytes(32).toString('base64url');
 }
 
+// Personal access token prefix. Lets secret scanners detect leaked tokens
+// and makes it easy to identify a BRIDGEPORT credential in logs.
+export const API_TOKEN_PREFIX = 'bport_pat_';
+
+export function generateApiToken(): { token: string; displayPrefix: string } {
+  const token = `${API_TOKEN_PREFIX}${randomBytes(32).toString('base64url')}`;
+  // Show prefix + first 4 chars of random material so users can distinguish tokens after creation.
+  const displayPrefix = token.slice(0, API_TOKEN_PREFIX.length + 4);
+  return { token, displayPrefix };
+}
+
 export function generateMasterKey(): string {
   return randomBytes(KEY_BYTES).toString('base64');
 }

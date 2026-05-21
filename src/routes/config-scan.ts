@@ -2,7 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { prisma } from '../lib/db.js';
 import { requireOperator } from '../plugins/authorize.js';
-import { logAudit } from '../services/audit.js';
+import { logAudit, actorFrom } from '../services/audit.js';
+import { userIdForFk } from '../services/auth.js';
 import { validateBody, getErrorMessage } from '../lib/helpers.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
 
@@ -348,7 +349,8 @@ export async function configScanRoutes(fastify: FastifyInstance): Promise<void> 
       if (!body) return;
 
       const { value, key, type, fileIds, existingSecretId } = body;
-      const userId = request.authUser!.id;
+      const actor = actorFrom(request);
+      const editedById = userIdForFk(request.authUser!);
       const placeholder = '${' + key + '}';
 
       // Step 1: Create secret/var if needed
@@ -374,7 +376,7 @@ export async function configScanRoutes(fastify: FastifyInstance): Promise<void> 
               resourceId: secret.id,
               resourceName: key,
               details: { source: 'config_scan' },
-              userId,
+              ...actor,
               environmentId: envId,
             });
           } else {
@@ -393,7 +395,7 @@ export async function configScanRoutes(fastify: FastifyInstance): Promise<void> 
               resourceId: envVar.id,
               resourceName: key,
               details: { source: 'config_scan' },
-              userId,
+              ...actor,
               environmentId: envId,
             });
           }
@@ -443,7 +445,7 @@ export async function configScanRoutes(fastify: FastifyInstance): Promise<void> 
             data: {
               content: oldContent,
               configFileId: file.id,
-              editedById: userId,
+              editedById,
             },
           });
 
@@ -463,7 +465,7 @@ export async function configScanRoutes(fastify: FastifyInstance): Promise<void> 
               key,
               replacements,
             },
-            userId,
+            ...actor,
             environmentId: envId,
           });
 

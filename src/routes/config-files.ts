@@ -4,7 +4,8 @@ import { prisma, isPrismaNotFoundError } from '../lib/db.js';
 import { createClientForServer, shellEscape, type CommandClient } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from './environments.js';
 import { requireOperator } from '../plugins/authorize.js';
-import { logAudit } from '../services/audit.js';
+import { logAudit, actorFrom } from '../services/audit.js';
+import { userIdForFk } from '../services/auth.js';
 import { resolveSecretPlaceholders } from '../services/secrets.js';
 import { validateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery } from '../lib/helpers.js';
 
@@ -191,7 +192,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           resourceType: 'config_file',
           resourceId: configFile.id,
           resourceName: configFile.name,
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: envId,
         });
 
@@ -230,7 +231,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
             data: {
               content: existing.content,
               configFileId: id,
-              editedById: request.authUser!.id,
+              editedById: userIdForFk(request.authUser!),
             },
           });
         }
@@ -245,7 +246,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           resourceType: 'config_file',
           resourceId: configFile.id,
           resourceName: configFile.name,
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: existing.environmentId,
         });
 
@@ -317,7 +318,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         data: {
           content: configFile.content,
           configFileId: id,
-          editedById: request.authUser!.id,
+          editedById: userIdForFk(request.authUser!),
         },
       });
 
@@ -333,7 +334,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         resourceId: configFile.id,
         resourceName: configFile.name,
         details: { restoredFrom: historyId, restoredAt: historyEntry.editedAt },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId: configFile.environmentId,
       });
 
@@ -362,7 +363,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
             resourceType: 'config_file',
             resourceId: id,
             resourceName: configFile.name,
-            userId: request.authUser!.id,
+            ...actorFrom(request),
             environmentId: configFile.environmentId,
           });
         }
@@ -456,7 +457,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           resourceId: serviceFile.id,
           resourceName: `${serviceFile.configFile.name} -> ${service?.name}`,
           details: { targetPath: body.targetPath },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: service?.server.environmentId,
         });
 
@@ -496,7 +497,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           resourceType: 'service_file',
           resourceId: serviceFile.id,
           resourceName: `${serviceFile.configFile.name} -> ${serviceFile.service.name}`,
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: serviceFile.service.server.environmentId,
         });
 
@@ -557,7 +558,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           resourceId: serviceFile.id,
           resourceName: `${serviceFile.configFile.name} -> ${serviceFile.service.name}`,
           details: { oldTargetPath: serviceFile.targetPath, newTargetPath: body.targetPath },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: serviceFile.service.server.environmentId,
         });
 
@@ -698,7 +699,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         resourceName: service.name,
         details: { results, allSuccess },
         success: allSuccess,
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId: service.server.environmentId,
       });
 
@@ -968,7 +969,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         resourceName: server.name,
         details: { results, allSuccess, totalFiles: results.length },
         success: allSuccess,
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId: server.environmentId,
       });
 
@@ -1152,7 +1153,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         resourceName: configFile.name,
         details: { results, allSuccess, syncedTo: results.length },
         success: allSuccess,
-        userId: request.authUser!.id,
+        ...actorFrom(request),
         environmentId: configFile.environmentId,
       });
 
@@ -1233,7 +1234,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           resourceId: configFile.id,
           resourceName: configFile.name,
           details: { isBinary: true, mimeType, fileSize },
-          userId: request.authUser!.id,
+          ...actorFrom(request),
           environmentId: envId,
         });
 

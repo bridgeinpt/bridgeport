@@ -2637,3 +2637,95 @@ export const saveDiagramLayout = (environmentId: string, positions: DiagramLayou
 export const exportDiagramMermaid = (environmentId: string) =>
   api.get<{ mermaid: string }>(`/diagram-export?environmentId=${environmentId}&format=mermaid`);
 
+// ============================================================
+// Service Accounts (admin only)
+// ============================================================
+export interface ServiceAccount {
+  id: string;
+  name: string;
+  description: string | null;
+  role: UserRole;
+  disabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: { id: string; email: string; name: string | null } | null;
+  _count?: { apiTokens: number };
+}
+
+export interface CreateServiceAccountInput {
+  name: string;
+  description?: string;
+  role: UserRole;
+}
+
+export interface UpdateServiceAccountInput {
+  description?: string;
+  role?: UserRole;
+  disabled?: boolean;
+}
+
+export const listServiceAccounts = () =>
+  api.get<{ serviceAccounts: ServiceAccount[] }>('/admin/service-accounts');
+
+export const createServiceAccount = (data: CreateServiceAccountInput) =>
+  api.post<{ serviceAccount: ServiceAccount }>('/admin/service-accounts', data);
+
+export const updateServiceAccount = (id: string, data: UpdateServiceAccountInput) =>
+  api.patch<{ serviceAccount: ServiceAccount }>(`/admin/service-accounts/${id}`, data);
+
+export const deleteServiceAccount = (id: string) =>
+  api.delete<{ success: boolean }>(`/admin/service-accounts/${id}`);
+
+// ============================================================
+// API Tokens (admin only)
+// ============================================================
+export interface ApiTokenRecord {
+  id: string;
+  name: string;
+  tokenPrefix: string | null;
+  role: UserRole;
+  allEnvironments: boolean;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  createdAt: string;
+  userId: string | null;
+  serviceAccountId: string | null;
+  user: { id: string; email: string; name: string | null } | null;
+  serviceAccount: { id: string; name: string; disabled: boolean } | null;
+  environments: { environment: { id: string; name: string } }[];
+}
+
+export interface CreateApiTokenInput {
+  name: string;
+  ownerUserId?: string;
+  ownerServiceAccountId?: string;
+  role: UserRole;
+  allEnvironments: boolean;
+  environmentIds?: string[];
+  expiresInDays: number;
+}
+
+export interface CreateApiTokenResponse {
+  token: string;
+  tokenRecord: {
+    id: string;
+    name: string;
+    tokenPrefix: string | null;
+    role: UserRole;
+    allEnvironments: boolean;
+    expiresAt: string | null;
+    createdAt: string;
+    userId: string | null;
+    serviceAccountId: string | null;
+  };
+}
+
+export const listApiTokens = () =>
+  api.get<{ tokens: ApiTokenRecord[] }>('/admin/tokens');
+
+export const createApiToken = (data: CreateApiTokenInput) =>
+  api.post<CreateApiTokenResponse>('/admin/tokens', data);
+
+export const deleteApiToken = (id: string) =>
+  api.delete<{ success: boolean }>(`/admin/tokens/${id}`);
+

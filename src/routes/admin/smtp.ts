@@ -8,7 +8,7 @@ import {
   testSmtpConnection,
   sendTestEmail,
 } from '../../services/email.js';
-import { logAudit } from '../../services/audit.js';
+import { logAudit, actorFrom } from '../../services/audit.js';
 
 const smtpConfigSchema = z.object({
   host: z.string().min(1),
@@ -52,7 +52,7 @@ export async function smtpRoutes(fastify: FastifyInstance): Promise<void> {
         resourceId: config.id,
         resourceName: 'SMTP Configuration',
         details: { host: config.host, enabled: config.enabled },
-        userId: request.authUser!.id,
+        ...actorFrom(request),
       });
 
       return { config };

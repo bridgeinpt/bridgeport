@@ -17,7 +17,6 @@ let app: TestApp;
 
 // User A (admin) — owns env1
 let adminToken: string;
-let adminId: string;
 let env1Id: string;
 let server1Id: string;
 let service1Id: string;
@@ -38,11 +37,10 @@ beforeAll(async () => {
   const operator = await createTestUser(app.prisma, { role: 'operator', email: 'operator@idor.test' });
   const viewer = await createTestUser(app.prisma, { role: 'viewer', email: 'viewer@idor.test' });
 
-  adminId = admin.id;
   operatorId = operator.id;
   viewerId = viewer.id;
 
-  adminToken = await generateTestToken({ id: adminId, email: admin.email });
+  adminToken = await generateTestToken({ id: admin.id, email: admin.email });
   operatorToken = await generateTestToken({ id: operatorId, email: operator.email });
   viewerToken = await generateTestToken({ id: viewerId, email: viewer.email });
 
@@ -240,30 +238,4 @@ describe('IDOR protection', () => {
     });
   });
 
-  describe('API token isolation', () => {
-    it('user cannot list another user API tokens', async () => {
-      // Create an API token for admin
-      await app.inject({
-        method: 'POST',
-        url: '/api/auth/tokens',
-        headers: { authorization: `Bearer ${adminToken}` },
-        payload: { name: 'Admin Token' },
-      });
-
-      // Viewer's token list should not include admin's tokens
-      const viewerTokensRes = await app.inject({
-        method: 'GET',
-        url: '/api/auth/tokens',
-        headers: { authorization: `Bearer ${viewerToken}` },
-      });
-
-      expect(viewerTokensRes.statusCode).toBe(200);
-      const tokens = viewerTokensRes.json().tokens;
-
-      // None of the tokens should belong to admin
-      for (const token of tokens) {
-        expect(token.userId).not.toBe(adminId);
-      }
-    });
-  });
 });
