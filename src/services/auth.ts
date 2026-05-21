@@ -27,6 +27,15 @@ export interface AuthUser {
   };
 }
 
+// For service-account-owned tokens, AuthUser.id is the `sa:<id>` sentinel and
+// is NOT a valid User.id — writing it into a User foreign-key column would
+// trigger an FK violation. Use this helper for any Prisma write into a User FK
+// so SA-owned tokens fall through to a null actor (the audit log keeps the
+// real attribution via apiTokenId/serviceAccountId).
+export function userIdForFk(authUser: AuthUser): string | null {
+  return authUser.serviceAccountId ? null : authUser.id;
+}
+
 export async function createUser(
   email: string,
   password: string,

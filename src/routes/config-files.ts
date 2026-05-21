@@ -5,6 +5,7 @@ import { createClientForServer, shellEscape, type CommandClient } from '../lib/s
 import { getEnvironmentSshKey } from './environments.js';
 import { requireOperator } from '../plugins/authorize.js';
 import { logAudit, actorFrom } from '../services/audit.js';
+import { userIdForFk } from '../services/auth.js';
 import { resolveSecretPlaceholders } from '../services/secrets.js';
 import { validateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery } from '../lib/helpers.js';
 
@@ -230,7 +231,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
             data: {
               content: existing.content,
               configFileId: id,
-              editedById: request.authUser!.id,
+              editedById: userIdForFk(request.authUser!),
             },
           });
         }
@@ -317,7 +318,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         data: {
           content: configFile.content,
           configFileId: id,
-          editedById: request.authUser!.id,
+          editedById: userIdForFk(request.authUser!),
         },
       });
 

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/db.js';
 import { requireAdmin } from '../plugins/authorize.js';
 import { logAudit, actorFrom } from '../services/audit.js';
+import { userIdForFk } from '../services/auth.js';
 import { validateBody, findOrNotFound } from '../lib/helpers.js';
 
 const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
@@ -82,7 +83,7 @@ export async function serviceAccountRoutes(fastify: FastifyInstance): Promise<vo
           name: body.name,
           description: body.description,
           role: body.role,
-          createdByUserId: request.authUser!.id,
+          createdByUserId: userIdForFk(request.authUser!),
         },
         include: {
           createdBy: { select: { id: true, email: true, name: true } },

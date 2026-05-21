@@ -16,6 +16,7 @@ import {
   getBackupDownload,
 } from '../services/database-backup.js';
 import { logAudit, actorFrom } from '../services/audit.js';
+import { userIdForFk } from '../services/auth.js';
 import { prisma } from '../lib/db.js';
 import { requireOperator } from '../plugins/authorize.js';
 import { collectDatabaseMetrics } from '../services/database-monitoring-collector.js';
@@ -214,7 +215,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
       if (!database) return;
 
       try {
-        const { backupId } = await createBackup(id, request.authUser!.id);
+        const { backupId } = await createBackup(id, userIdForFk(request.authUser!));
 
         await logAudit({
           action: 'backup',

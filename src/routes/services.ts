@@ -11,6 +11,7 @@ import {
 import { DockerSSH, createClientForServer, shellEscape } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from './environments.js';
 import { logAudit, actorFrom } from '../services/audit.js';
+import { userIdForFk } from '../services/auth.js';
 import { logHealthCheck } from '../services/health-checks.js';
 import { checkServiceUpdate } from '../lib/scheduler.js';
 import { determineHealthStatus, determineOverallStatus } from '../services/servers.js';
@@ -273,7 +274,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         const result = await deployService(
           id,
           request.authUser!.email,
-          request.authUser!.id,
+          userIdForFk(request.authUser!),
           body
         );
 
