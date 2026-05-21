@@ -882,6 +882,35 @@ export class DockerSSH {
     }
   }
 
+  /**
+   * Run `docker login` against a registry. Writes the password to a 0600 temp
+   * file and pipes it into --password-stdin so the secret never appears in argv
+   * (no exposure via ps / shell history). Temp file is always removed.
+   *
+   * Persists auth into the SSH user's ~/.docker/config.json — subsequent pulls
+   * for the same registry need no extra arguments. Pass an empty registry host
+   * to log into Docker Hub.
+   */
+  async login(registryHost: string, username: string, password: string): Promise<void> {
+    const tmpPath = `/tmp/bp-login-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    await this.client.writeFile(tmpPath, Buffer.from(password, 'utf8'));
+    try {
+      await this.client.exec(`chmod 600 ${shellEscape(tmpPath)}`);
+      const hostArg = registryHost ? ` ${shellEscape(registryHost)}` : '';
+      const cmd =
+        this.pathPrefix +
+        `cat ${shellEscape(tmpPath)} | docker login -u ${shellEscape(username)} --password-stdin${hostArg}`;
+      const { code, stderr, stdout } = await this.client.exec(cmd);
+      if (code !== 0) {
+        // stderr may legitimately contain "Login Succeeded" on some versions; check stdout too
+        const combined = `${stderr}${stdout}`.trim();
+        throw new Error(`docker login failed: ${combined || `exit ${code}`}`);
+      }
+    } finally {
+      await this.client.exec(`rm -f ${shellEscape(tmpPath)}`).catch(() => {});
+    }
+  }
+
   async containerLogs(
     containerName: string,
     options: { tail?: number; follow?: boolean } = {}

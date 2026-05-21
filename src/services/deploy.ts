@@ -6,6 +6,7 @@ import { RegistryFactory } from '../lib/registry.js';
 import { getRegistryCredentials } from './registries.js';
 import { extractRepoName, stripRegistryPrefix } from '../lib/image-utils.js';
 import { generateDeploymentArtifacts, saveDeploymentArtifacts } from './compose.js';
+import { ensureRegistryLogin, getSocketAuthConfig } from './registry-login.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 import { checkServiceUpdate } from '../lib/scheduler.js';
 import { pruneServerImages } from './servers.js';
@@ -170,12 +171,32 @@ export async function deployService(
       }
     }
 
+    // Ensure registry auth is in place before any pull. SSH-mode persists auth
+    // via `docker login` on the remote box (covers both `docker pull` and the
+    // later `docker compose pull`). Socket-mode passes auth in-process to dockerode.
+    const registryConnectionId = service.containerImage.registryConnectionId;
+    let socketAuth: Awaited<ReturnType<typeof getSocketAuthConfig>> = null;
+    if (registryConnectionId) {
+      if (dockerSSH) {
+        const result = await ensureRegistryLogin(
+          service.server.id,
+          registryConnectionId,
+          dockerSSH
+        );
+        if (result.loggedIn) {
+          log(`Logged in to registry ${result.registryHost || 'docker.io'}`);
+        }
+      } else {
+        socketAuth = await getSocketAuthConfig(registryConnectionId);
+      }
+    }
+
     // Pull new image (get imageName from containerImage)
     if (options.pullImage !== false) {
       const imageName = service.containerImage.imageName;
       const fullImage = `${imageName}:${imageTag}`;
       log(`Pulling image: ${fullImage}`);
-      await dockerClient.pullImage(fullImage);
+      await dockerClient.pullImage(fullImage, socketAuth ?? undefined);
       log('Image pulled successfully');
     }
 

@@ -47,6 +47,17 @@ export interface UrlCheckResult {
 }
 
 /**
+ * Auth credentials for a private registry pull. Mirrors dockerode's authconfig shape.
+ * For socket-mode pulls, these are passed in-process per call; for SSH-mode, auth
+ * persists on the remote server's ~/.docker/config.json via `docker login`.
+ */
+export interface RegistryAuthConfig {
+  username: string;
+  password: string;
+  serveraddress: string; // registry host, e.g. "registry.digitalocean.com"
+}
+
+/**
  * Abstract interface for Docker operations.
  * Implemented by both socket-based and SSH-based clients.
  */
@@ -56,7 +67,7 @@ export interface DockerClient {
   getContainerHealth(containerName: string): Promise<ContainerHealth>;
   getContainerStats(containerName: string): Promise<ContainerStats>;
   restartContainer(containerName: string): Promise<void>;
-  pullImage(image: string): Promise<void>;
+  pullImage(image: string, auth?: RegistryAuthConfig): Promise<void>;
   getContainerLogs(containerName: string, options?: { tail?: number }): Promise<string>;
   pruneImages(mode: 'dangling' | 'all'): Promise<{ spaceReclaimedBytes: number }>;
 }
@@ -237,11 +248,15 @@ export class DockerSocketClient implements DockerClient {
     await container.restart();
   }
 
-  async pullImage(image: string): Promise<void> {
+  async pullImage(image: string, auth?: RegistryAuthConfig): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.docker.pull(image, (err: Error | null, stream: NodeJS.ReadableStream) => {
+      const callback = (err: Error | null, stream: NodeJS.ReadableStream | undefined) => {
         if (err) {
           reject(err);
+          return;
+        }
+        if (!stream) {
+          reject(new Error('docker pull returned no stream'));
           return;
         }
 
@@ -253,7 +268,13 @@ export class DockerSocketClient implements DockerClient {
             resolve();
           }
         });
-      });
+      };
+
+      if (auth) {
+        this.docker.pull(image, { authconfig: auth }, callback);
+      } else {
+        this.docker.pull(image, callback);
+      }
     });
   }
 
@@ -461,7 +482,10 @@ export class DockerSSHClient implements DockerClient {
     }
   }
 
-  async pullImage(image: string): Promise<void> {
+  async pullImage(image: string, _auth?: RegistryAuthConfig): Promise<void> {
+    // SSH-mode pulls rely on the persistent `docker login` performed by
+    // ensureRegistryLogin (see src/services/registry-login.ts). The auth arg
+    // is accepted for interface parity with the socket client but unused here.
     const { code, stderr } = await this.client.exec(this.pathPrefix + `docker pull ${image}`);
     if (code !== 0) {
       throw new Error(`Failed to pull image: ${stderr}`);

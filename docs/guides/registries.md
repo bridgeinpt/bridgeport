@@ -9,6 +9,7 @@ Registry connections link BRIDGEPORT to your container registries, enabling upda
 - [How It Works](#how-it-works)
 - [Adding a Registry Connection](#adding-a-registry-connection)
 - [Authentication](#authentication)
+- [Server-Side Registry Login](#server-side-registry-login)
 - [Refresh Intervals](#refresh-intervals)
 - [Auto-Link Patterns](#auto-link-patterns)
 - [Tag Browser](#tag-browser)
@@ -196,6 +197,23 @@ Registry URL: https://registry.gitlab.com
 Username:     gitlab-ci-token  (or your username for personal tokens)
 Password:     glpat-abc123...  (GitLab personal access token with read_registry scope)
 ```
+
+---
+
+## Server-Side Registry Login
+
+Stored credentials are also used at deploy time to authenticate the target server against the registry, so `docker pull` and `docker compose pull` succeed for private images without any manual `docker login` on the box.
+
+How it works:
+
+- **SSH-mode servers.** Before the first pull from a given registry, BRIDGEPORT runs `docker login` over SSH. The password is written to a 0600 temp file and piped into `--password-stdin` — it is never passed as a CLI argument and never appears in `ps` or shell history. The temp file is removed in a `finally`, even if login fails. The resulting auth lives in the SSH user's `~/.docker/config.json` on the server and is reused for subsequent pulls.
+- **Socket-mode servers.** When BRIDGEPORT talks directly to a local Docker daemon, no persistent state is written. Credentials are passed in-process to dockerode's `pull()` via the `authconfig` option for each pull.
+
+Login state is tracked per `(server, registry)` in the `ServerRegistryLogin` table. BRIDGEPORT skips the login step when an existing row is at least as fresh as the registry's `updatedAt`. Editing any auth-relevant field on a registry connection (`token`, `username`, `password`, `registryUrl`, `type`) deletes all of that registry's login rows, forcing a re-login on the next deploy with the new credentials. Metadata-only edits (name, auto-link pattern, refresh interval, default flag) leave the cache intact.
+
+DigitalOcean uses the API token as both the username and the password for `docker login registry.digitalocean.com`. Docker Hub omits the host argument so `docker login` uses its `index.docker.io` default. Generic registries use the registry hostname (scheme and any trailing `/v2` are stripped).
+
+If login fails — for example, a revoked token — the deploy fails fast with `docker login failed: <reason>` instead of falling through to a confusing "image not found" later.
 
 ---
 

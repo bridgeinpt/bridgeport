@@ -212,6 +212,7 @@ model Server {
   containerSnapshot AgentContainerSnapshot?
   processSnapshot   AgentProcessSnapshot?
   agentEvents       AgentEvent[]
+  registryLogins    ServerRegistryLogin[]
 
   @@unique([environmentId, name])
 }
@@ -505,10 +506,28 @@ model RegistryConnection {
   updatedAt              DateTime  @updatedAt
 
   environmentId   String
-  environment     Environment      @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  environment     Environment           @relation(fields: [environmentId], references: [id], onDelete: Cascade)
   containerImages ContainerImage[]
+  serverLogins    ServerRegistryLogin[]
 
   @@unique([environmentId, name])
+}
+
+// Tracks which servers have been `docker login`-ed against which registries.
+// A row is upserted after a successful login; deploys skip the login step when
+// a fresh row exists (loggedInAt >= RegistryConnection.updatedAt). Rows are
+// deleted when registry credentials change, forcing a re-login next deploy.
+model ServerRegistryLogin {
+  id                   String   @id @default(cuid())
+  serverId             String
+  registryConnectionId String
+  loggedInAt           DateTime @default(now())
+
+  server             Server             @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  registryConnection RegistryConnection @relation(fields: [registryConnectionId], references: [id], onDelete: Cascade)
+
+  @@unique([serverId, registryConnectionId])
+  @@index([registryConnectionId])
 }
 
 // Database for backup management
