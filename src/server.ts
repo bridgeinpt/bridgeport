@@ -54,12 +54,19 @@ import { sshPool } from './lib/ssh.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Read app version at startup
-let appVersion = 'unknown';
-try {
-  const packageJson = JSON.parse(await readFile(join(__dirname, '../package.json'), 'utf-8'));
-  appVersion = packageJson.version;
-} catch { /* dev mode fallback */ }
+// Read app version at startup. In production the Docker build passes
+// APP_VERSION=YYYYMMDDHH-{sha} so the backend stamps /health and the Sentry
+// release with the real build version. The package.json fallback is only
+// hit in dev / unbuilt environments.
+let appVersion: string = process.env.APP_VERSION ?? '';
+if (!appVersion || appVersion === 'dev') {
+  try {
+    const packageJson = JSON.parse(await readFile(join(__dirname, '../package.json'), 'utf-8'));
+    appVersion = packageJson.version ?? 'unknown';
+  } catch {
+    appVersion = 'unknown';
+  }
+}
 
 // Re-export from lib/version for backwards compat (routes import from lib/version directly)
 import { bundledAgentVersion, cliVersion } from './lib/version.js';

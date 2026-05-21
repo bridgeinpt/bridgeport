@@ -111,6 +111,11 @@ RUN find node_modules -type f \( -name "libquery*" -o -name "schema-engine*" \) 
 FROM node:26-alpine AS production
 WORKDIR /app
 
+# Carried through from the top-level build arg so the backend can stamp
+# /health and the Sentry release with the real version at runtime.
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
+
 # Install runtime dependencies (openssh-client for SSH, docker-cli + compose for localhost, db clients for backups)
 RUN apk add --no-cache openssl openssh-client docker-cli docker-cli-compose sqlite postgresql16-client
 
