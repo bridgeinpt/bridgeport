@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { isLocalhost, isHostGateway, createClient, LocalClient, SSHClient } from './ssh.js';
+import { isLocalhost, isHostGateway, createClient, LocalClient, SSHClient, DockerSSH, type CommandClient } from './ssh.js';
 
 // Mock external dependencies
 vi.mock('ssh2', () => {
@@ -164,6 +164,75 @@ describe('ssh', () => {
     it('should be idempotent on disconnect when not connected', () => {
       const client = new SSHClient({ hostname: 'example.com' });
       expect(() => client.disconnect()).not.toThrow();
+    });
+  });
+
+  describe('DockerSSH.login', () => {
+    function makeMockClient(): CommandClient & { exec: ReturnType<typeof vi.fn>; writeFile: ReturnType<typeof vi.fn> } {
+      return {
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+        execStream: vi.fn(),
+        exec: vi.fn().mockResolvedValue({ stdout: 'Login Succeeded', stderr: '', code: 0 }),
+        writeFile: vi.fn().mockResolvedValue(undefined),
+      } as never;
+    }
+
+    it('writes the password to a temp file, never as a CLI arg, then cleans up', async () => {
+      const client = makeMockClient();
+      const docker = new DockerSSH(client);
+
+      await docker.login('registry.example.com', 'alice', 'p@ss with spaces');
+
+      // writeFile carries the secret — confirm it's a Buffer of the password content.
+      expect(client.writeFile).toHaveBeenCalledTimes(1);
+      const [tmpPath, content] = client.writeFile.mock.calls[0];
+      expect(typeof tmpPath).toBe('string');
+      expect(tmpPath).toMatch(/^\/tmp\/bp-login-/);
+      expect(Buffer.isBuffer(content)).toBe(true);
+      expect((content as Buffer).toString('utf8')).toBe('p@ss with spaces');
+
+      // The password must never appear as a docker login argument.
+      const execCalls = client.exec.mock.calls.map((c) => c[0] as string);
+      for (const cmd of execCalls) {
+        expect(cmd).not.toContain('p@ss with spaces');
+      }
+
+      // Expect: chmod, then cat | docker login --password-stdin, then rm.
+      expect(execCalls[0]).toContain('chmod 600');
+      expect(execCalls[1]).toContain('docker login');
+      expect(execCalls[1]).toContain('--password-stdin');
+      expect(execCalls[1]).toContain("'registry.example.com'");
+      expect(execCalls[1]).toContain("'alice'");
+      expect(execCalls[2]).toMatch(/^rm -f /);
+    });
+
+    it('omits the host argument when registryHost is empty (Docker Hub default)', async () => {
+      const client = makeMockClient();
+      const docker = new DockerSSH(client);
+
+      await docker.login('', 'alice', 'hunter2');
+
+      const loginCmd = client.exec.mock.calls[1][0] as string;
+      // Docker Hub: the command should end with --password-stdin, no host arg.
+      expect(loginCmd).toMatch(/--password-stdin$/);
+    });
+
+    it('removes the temp file even when docker login fails', async () => {
+      const client = makeMockClient();
+      // chmod ok, docker login fails, rm ok.
+      client.exec
+        .mockResolvedValueOnce({ stdout: '', stderr: '', code: 0 })
+        .mockResolvedValueOnce({ stdout: '', stderr: 'unauthorized', code: 1 })
+        .mockResolvedValueOnce({ stdout: '', stderr: '', code: 0 });
+      const docker = new DockerSSH(client);
+
+      await expect(docker.login('registry.example.com', 'alice', 'wrong')).rejects.toThrow(
+        /docker login failed/
+      );
+
+      const lastCall = client.exec.mock.calls[client.exec.mock.calls.length - 1][0] as string;
+      expect(lastCall).toMatch(/^rm -f /);
     });
   });
 });

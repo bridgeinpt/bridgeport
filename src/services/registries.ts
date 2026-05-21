@@ -207,6 +207,19 @@ export async function updateRegistryConnection(
     include: { _count: { select: { containerImages: true } } },
   });
 
+  // If any auth-relevant field changed, drop all cached server logins so the
+  // next deploy re-runs `docker login` with the new credentials. We ignore
+  // metadata-only edits (name, autoLinkPattern, refreshInterval, isDefault).
+  const credsChanged =
+    input.token !== undefined ||
+    input.password !== undefined ||
+    input.username !== undefined ||
+    input.registryUrl !== undefined ||
+    input.type !== undefined;
+  if (credsChanged) {
+    await prisma.serverRegistryLogin.deleteMany({ where: { registryConnectionId: id } });
+  }
+
   return toOutput(conn);
 }
 

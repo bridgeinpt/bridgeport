@@ -11,6 +11,9 @@ const { mockPrisma } = vi.hoisted(() => ({
       findFirst: vi.fn(),
       delete: vi.fn(),
     },
+    serverRegistryLogin: {
+      deleteMany: vi.fn(),
+    },
   },
 }));
 
@@ -271,6 +274,40 @@ describe('registries', () => {
         },
         data: { isDefault: false },
       });
+    });
+
+    it('should drop server login cache when token changes', async () => {
+      mockPrisma.registryConnection.findUnique.mockResolvedValue(baseRegistryRecord);
+      mockPrisma.registryConnection.update.mockResolvedValue(baseRegistryRecord);
+
+      await updateRegistryConnection('reg-1', { token: 'new-token' });
+
+      expect(mockPrisma.serverRegistryLogin.deleteMany).toHaveBeenCalledWith({
+        where: { registryConnectionId: 'reg-1' },
+      });
+    });
+
+    it('should drop server login cache when password or username changes', async () => {
+      mockPrisma.registryConnection.findUnique.mockResolvedValue(baseRegistryRecord);
+      mockPrisma.registryConnection.update.mockResolvedValue(baseRegistryRecord);
+
+      await updateRegistryConnection('reg-1', { password: 'pw', username: 'user' });
+
+      expect(mockPrisma.serverRegistryLogin.deleteMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('should NOT drop server login cache when only metadata changes', async () => {
+      mockPrisma.registryConnection.findUnique.mockResolvedValue(baseRegistryRecord);
+      mockPrisma.registryConnection.update.mockResolvedValue(baseRegistryRecord);
+
+      await updateRegistryConnection('reg-1', {
+        name: 'renamed',
+        autoLinkPattern: 'app-*',
+        refreshIntervalMinutes: 60,
+        isDefault: true,
+      });
+
+      expect(mockPrisma.serverRegistryLogin.deleteMany).not.toHaveBeenCalled();
     });
   });
 
