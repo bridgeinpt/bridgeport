@@ -233,11 +233,17 @@ flowchart TD
 
 ## Config File Scanner
 
-The **Config File Scanner** inspects every non-binary config file in the environment and flags hardcoded values that should probably be promoted to a secret or a var. It catches three kinds of issues:
+The **Config File Scanner** inspects every non-binary config file in the environment and flags two categories of issues:
+
+**Hardcoded values to extract:**
 
 - **Cross-file repetition** -- the same literal value appears in two or more files (classic duplication -- rotate one, forget the other).
 - **Cross-key repetition** -- the same literal value appears under two or more different keys (often a sign the value has drifted from its canonical name).
 - **Plaintext leaks** -- the literal value matches an existing secret or var, meaning the plaintext is sitting in a config file it shouldn't be.
+
+**Missing references:**
+
+- **Undefined `${KEY}` references** -- a file uses `${SOMETHING}` (including `${SOMETHING:-default}`) but no matching secret or var is defined in the environment. These are listed first in the results so they're easy to spot.
 
 Binary files are skipped. The scan runs on demand; nothing is scanned or stored automatically.
 
@@ -249,19 +255,27 @@ Binary files are skipped. The scan runs on demand; nothing is scanned or stored 
 
 Each suggestion includes:
 
-- A **masked preview** of the value (first 3 + `...` + last 3 chars, or dots for short values) so the raw value never appears on screen.
-- A **proposed key** derived from the most common key name seen, normalized to `UPPER_SNAKE_CASE`.
+- A `kind` of either `hardcoded_value` (extract this literal) or `missing_reference` (referenced but undefined).
+- A **proposed key** derived from the most common key name seen (or the referenced key, for missing references), normalized to `UPPER_SNAKE_CASE`.
 - A **proposed type** (`secret` or `var`). Keys containing `password`, `secret`, `key`, `token`, `api`, `auth`, `credential`, `cert`, or `private` are classified as secrets; everything else as vars.
 - The **affected files** and per-file occurrence counts.
-- If the value matches an existing secret/var, a pointer to it so you can reuse the existing key rather than creating a duplicate.
+- For `hardcoded_value`, the actual literal value, prefilled into the Confirm dialog so you don't have to retype it. For `missing_reference`, the value is empty and you provide it.
+- If a hardcoded value matches an existing secret/var, a pointer to it so you can reuse the existing key rather than creating a duplicate.
 
 ### Review and Apply
 
-Applying a suggestion walks through a 3-step modal:
+The apply flow depends on the suggestion kind.
 
-1. **Confirm** -- review the proposed key, type, and affected files. Edit the key or type before proceeding.
-2. **Preview** -- see a diff for every affected file showing `literal-value` → `${KEY}` with a replacement count. Nothing is written yet.
+**Hardcoded values** walk through a 3-step modal:
+
+1. **Confirm** -- review the proposed key, type, and affected files. The value is prefilled (editable). Edit the key/type before proceeding.
+2. **Preview** -- see a per-file diff showing only the changed lines (`literal-value` → `${KEY}`). Each file is a collapsible section so multi-file changes stay manageable. Nothing is written yet.
 3. **Apply** -- BRIDGEPORT creates the secret or var (if not already present), substitutes the value in every selected file, saves the previous content to [file history](config-files.md#file-history) for rollback, and writes an audit log entry per mutation with `source: config_scan`.
+
+**Missing references** skip the preview step (no file modifications happen):
+
+1. **Define** -- review the key/type and enter the value.
+2. **Create** -- BRIDGEPORT creates the secret or var. The referencing files are unchanged; they already use `${KEY}`.
 
 The scan itself is read-only and always safe to run. Only the apply step mutates data.
 
@@ -285,7 +299,7 @@ POST /api/environments/:envId/config-scan
 Authorization: Bearer <token>
 ```
 
-Returns `{ suggestions, scannedFileCount, skippedBinaryCount }`. Values in `suggestions[].value` are masked, not raw.
+Returns `{ suggestions, scannedFileCount, skippedBinaryCount }`. Each suggestion includes `kind` (`hardcoded_value` or `missing_reference`), `value` (raw plaintext for hardcoded values; empty string for missing references), `proposedKey`, `proposedType`, `affectedFiles`, `occurrenceCount`, and optional `existingSecretId`/`existingSecretKey`.
 
 ```http
 POST /api/environments/:envId/config-scan/preview
@@ -302,7 +316,9 @@ Content-Type: application/json
 }
 ```
 
-Set `existingSecretId` to reuse an existing secret or var instead of creating a new one.
+The `preview` response is `{ diffs: [{ fileId, fileName, replacements, hunks: [{ lineNumber, before, after }] }] }` -- only the lines that actually changed.
+
+Set `existingSecretId` to reuse an existing secret or var instead of creating a new one. For `missing_reference` applies, pass an empty `fileIds` array -- no files are modified.
 
 ---
 

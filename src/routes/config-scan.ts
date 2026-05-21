@@ -11,13 +11,23 @@ import { encrypt, decrypt } from '../lib/crypto.js';
 // Schemas
 // ---------------------------------------------------------------------------
 
-const applySchema = z.object({
-  value: z.string().min(1),
-  key: z.string().min(1).regex(/^[A-Z][A-Z0-9_]*$/, 'Key must be uppercase with underscores'),
-  type: z.enum(['secret', 'var']),
-  fileIds: z.array(z.string()).min(1),
-  existingSecretId: z.string().nullable(),
-});
+const applySchema = z
+  .object({
+    kind: z.enum(['hardcoded_value', 'missing_reference']),
+    value: z.string().min(1),
+    key: z.string().min(1).regex(/^[A-Z][A-Z0-9_]*$/, 'Key must be uppercase with underscores'),
+    type: z.enum(['secret', 'var']),
+    fileIds: z.array(z.string()),
+    existingSecretId: z.string().nullable(),
+  })
+  .refine((d) => d.kind === 'missing_reference' || d.fileIds.length > 0, {
+    message: 'fileIds must contain at least one file when extracting a hardcoded value',
+    path: ['fileIds'],
+  })
+  .refine((d) => d.kind === 'hardcoded_value' || (d.fileIds.length === 0 && d.existingSecretId === null), {
+    message: 'missing_reference applies create a new secret/var only — no files or existing match',
+    path: ['kind'],
+  });
 
 // Preview uses the same schema as apply
 const previewSchema = applySchema;
@@ -61,12 +71,29 @@ function toUpperSnakeCase(name: string): string {
     .toUpperCase();
 }
 
-/** Mask a value for safe display: first 3 + "..." + last 3 (or dots if short). */
-function maskValue(value: string): string {
-  if (value.length > 8) {
-    return value.slice(0, 3) + '...' + value.slice(-3);
+/** Regex to extract ${KEY} references — supports ${KEY} and ${KEY:-default}. */
+const REFERENCE_REGEX = /\$\{([A-Z][A-Z0-9_]*)(?::-[^}]*)?\}/g;
+
+/**
+ * Compute per-line diff hunks. Substitution preserves line structure
+ * (value is replaced with ${KEY} within a line), so a positional pass is sufficient.
+ */
+function computeHunks(
+  before: string,
+  after: string
+): Array<{ lineNumber: number; before: string; after: string }> {
+  const beforeLines = before.split('\n');
+  const afterLines = after.split('\n');
+  const hunks: Array<{ lineNumber: number; before: string; after: string }> = [];
+  const len = Math.max(beforeLines.length, afterLines.length);
+  for (let i = 0; i < len; i++) {
+    const b = beforeLines[i] ?? '';
+    const a = afterLines[i] ?? '';
+    if (b !== a) {
+      hunks.push({ lineNumber: i + 1, before: b, after: a });
+    }
   }
-  return '.'.repeat(value.length);
+  return hunks;
 }
 
 /**
@@ -123,6 +150,8 @@ interface AffectedFile {
 }
 
 interface Suggestion {
+  /** 'hardcoded_value' = literal in files to extract; 'missing_reference' = ${KEY} used but undefined */
+  kind: 'hardcoded_value' | 'missing_reference';
   value: string;
   proposedKey: string;
   proposedType: 'secret' | 'var';
@@ -260,7 +289,8 @@ export async function configScanRoutes(fastify: FastifyInstance): Promise<void> 
         const occurrenceCount = entry.keys.length;
 
         suggestions.push({
-          value: maskValue(value),
+          kind: 'hardcoded_value',
+          value,
           proposedKey: existing ? existing.key : proposedKey,
           proposedType: existing ? existing.type : proposedType,
           occurrenceCount,
@@ -270,8 +300,52 @@ export async function configScanRoutes(fastify: FastifyInstance): Promise<void> 
         });
       }
 
-      // Sort: highest occurrence first, then secret-looking values first on tie
+      const existingKeys = new Set<string>([
+        ...decryptedSecrets.map((s) => s.key),
+        ...existingVars.map((v) => v.key),
+      ]);
+      const referenceMap = new Map<string, Map<string, { name: string; count: number }>>();
+
+      for (const file of configFiles) {
+        for (const match of file.content.matchAll(REFERENCE_REGEX)) {
+          const refKey = match[1];
+          if (existingKeys.has(refKey)) continue;
+
+          let fileMap = referenceMap.get(refKey);
+          if (!fileMap) {
+            fileMap = new Map();
+            referenceMap.set(refKey, fileMap);
+          }
+          const entry = fileMap.get(file.id);
+          if (entry) {
+            entry.count++;
+          } else {
+            fileMap.set(file.id, { name: file.name, count: 1 });
+          }
+        }
+      }
+
+      for (const [refKey, fileMap] of referenceMap) {
+        const refAffectedFiles: AffectedFile[] = Array.from(fileMap.entries()).map(
+          ([id, { name, count }]) => ({ id, name, occurrences: count })
+        );
+        const refOccurrenceCount = refAffectedFiles.reduce((sum, f) => sum + f.occurrences, 0);
+
+        suggestions.push({
+          kind: 'missing_reference',
+          value: '',
+          proposedKey: refKey,
+          proposedType: classifyType(refKey),
+          occurrenceCount: refOccurrenceCount,
+          affectedFiles: refAffectedFiles,
+          existingSecretId: null,
+          existingSecretKey: null,
+        });
+      }
+
+      // Sort: missing references first (more actionable), then by occurrence, secret-type tie-break
       suggestions.sort((a, b) => {
+        if (a.kind !== b.kind) return a.kind === 'missing_reference' ? -1 : 1;
         if (b.occurrenceCount !== a.occurrenceCount) return b.occurrenceCount - a.occurrenceCount;
         if (a.proposedType !== b.proposedType) return a.proposedType === 'secret' ? -1 : 1;
         return 0;
@@ -313,22 +387,21 @@ export async function configScanRoutes(fastify: FastifyInstance): Promise<void> 
       const diffs: Array<{
         fileId: string;
         fileName: string;
-        before: string;
-        after: string;
         replacements: number;
+        hunks: Array<{ lineNumber: number; before: string; after: string }>;
       }> = [];
 
       for (const file of configFiles) {
         const before = file.content;
-        const after = before.split(value).join(placeholder);
-        const replacements = (before.split(value).length - 1);
+        const parts = before.split(value);
+        const replacements = parts.length - 1;
+        const after = replacements === 0 ? before : parts.join(placeholder);
 
         diffs.push({
           fileId: file.id,
           fileName: file.name,
-          before,
-          after,
           replacements,
+          hunks: replacements === 0 ? [] : computeHunks(before, after),
         });
       }
 
@@ -427,8 +500,9 @@ export async function configScanRoutes(fastify: FastifyInstance): Promise<void> 
       for (const file of configFiles) {
         try {
           const oldContent = file.content;
-          const newContent = oldContent.split(value).join(placeholder);
-          const replacements = oldContent.split(value).length - 1;
+          const parts = oldContent.split(value);
+          const replacements = parts.length - 1;
+          const newContent = replacements === 0 ? oldContent : parts.join(placeholder);
 
           if (replacements === 0) {
             results.push({
