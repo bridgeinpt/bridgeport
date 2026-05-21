@@ -119,6 +119,14 @@ const operatorRoutes: RouteSpec[] = [
 
   // Topology mutations
   { method: 'POST', url: `/api/connections`, minRole: 'operator', body: { environmentId: '__ENV__', sourceType: 'service', sourceId: 'test', targetType: 'service', targetId: 'test2' }, description: 'create topology connection' },
+
+  // Generic role enforcement: mutating routes without an explicit per-route
+  // requireOperator/requireAdmin guard should still block viewers via the
+  // central enforceRoleForMethod check in the authenticate plugin.
+  { method: 'POST', url: '/api/services/__PLACEHOLDER__/restart', minRole: 'operator', description: 'restart service' },
+  { method: 'POST', url: '/api/services/__PLACEHOLDER__/deploy', minRole: 'operator', description: 'deploy service' },
+  { method: 'DELETE', url: '/api/secrets/__PLACEHOLDER__', minRole: 'operator', description: 'delete secret' },
+  { method: 'POST', url: '/api/servers/__PLACEHOLDER__/test-ssh', minRole: 'operator', description: 'test server SSH' },
 ];
 
 // Viewer routes (any authenticated user can access)
