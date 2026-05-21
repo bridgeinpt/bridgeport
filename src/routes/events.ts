@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { eventBus, type BRIDGEPORTEvent } from '../lib/event-bus.js';
-import { validateApiToken, getUserById } from '../services/auth.js';
+import { validateApiToken, getUserById, type AuthUser } from '../services/auth.js';
 
 export async function eventRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get(
@@ -14,26 +14,42 @@ export async function eventRoutes(fastify: FastifyInstance): Promise<void> {
 
       // Authenticate via query param token (EventSource cannot send headers)
       // Try API token first, then JWT
-      let userId: string | null = null;
+      let authUser: AuthUser | null = null;
 
       const apiUser = await validateApiToken(token);
       if (apiUser) {
-        userId = apiUser.id;
+        authUser = apiUser;
       } else {
-        // Try JWT verification
         try {
           const decoded = fastify.jwt.verify<{ id: string; email: string }>(token);
           const fullUser = await getUserById(decoded.id);
           if (fullUser) {
-            userId = fullUser.id;
+            authUser = fullUser;
           }
         } catch {
           // Invalid JWT
         }
       }
 
-      if (!userId) {
+      if (!authUser) {
         return reply.code(401).send({ error: 'Unauthorized' });
+      }
+
+      const userId = authUser.id;
+
+      // Env-scoped tokens may only subscribe to envs in their allowlist, and a
+      // subscription with no environmentId leaks events from every env, so an
+      // env-scoped token must always pin to one (in-scope) env.
+      const tokenScope = authUser.scope;
+      if (tokenScope && !tokenScope.allEnvironments) {
+        if (!environmentId) {
+          return reply.code(403).send({
+            error: 'Token is scoped to specific environments; environmentId query parameter is required',
+          });
+        }
+        if (!tokenScope.environmentIds.includes(environmentId)) {
+          return reply.code(403).send({ error: 'Token is not scoped to this environment' });
+        }
       }
 
       // Set SSE headers
