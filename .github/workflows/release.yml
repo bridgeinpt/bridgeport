@@ -1,0 +1,99 @@
+name: Release
+
+# Triggered by pushing an annotated tag `vX.Y.Z` (typically via the
+# `/release` slash command). The tag's annotated message becomes the
+# GitHub Release body verbatim — see .claude/commands/release.md.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write   # create GitHub Release
+  packages: write   # push to ghcr.io
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # full history for version derivation
+
+      - name: Extract tag message
+        id: notes
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          NOTES=$(git tag -l --format='%(contents)' "$TAG")
+          {
+            echo "body<<EOF_NOTES"
+            echo "$NOTES"
+            echo "EOF_NOTES"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Compute versions
+        run: |
+          # Strip leading "v" for APP_VERSION (e.g. v1.2.0 -> 1.2.0)
+          echo "VERSION_TAG=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
+
+          # Agent/CLI versions derived from last commit touching their dirs
+          AGENT_VER=$(git log -1 --format='%cd-%h' --date=format:'%Y%m%d%H' -- bridgeport-agent/)
+          echo "AGENT_VERSION=${AGENT_VER}" >> $GITHUB_ENV
+
+          CLI_VER=$(git log -1 --format='%cd-%h' --date=format:'%Y%m%d%H' -- cli/)
+          echo "CLI_VERSION=${CLI_VER}" >> $GITHUB_ENV
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # `latest` and `stable` are suppressed automatically when the ref
+          # is a prerelease (contains `-`, e.g. v1.2.0-rc.1).
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern=v{{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+            type=raw,value=stable,enable=${{ !contains(github.ref_name, '-') }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            APP_VERSION=${{ env.VERSION_TAG }}
+            AGENT_VERSION=${{ env.AGENT_VERSION }}
+            CLI_VERSION=${{ env.CLI_VERSION }}
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NOTES: ${{ steps.notes.outputs.body }}
+        run: |
+          PRERELEASE_FLAG=""
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+          # shellcheck disable=SC2086
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes "${NOTES}" \
+            $PRERELEASE_FLAG

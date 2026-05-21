@@ -6,12 +6,41 @@ BRIDGEPORT upgrades are zero-intervention: pull the new image, restart the conta
 
 ## Table of Contents
 
+- [Channels](#channels)
 - [How Upgrades Work](#how-upgrades-work)
 - [Upgrade Procedure](#upgrade-procedure)
 - [What to Expect](#what-to-expect)
 - [Verifying the Upgrade](#verifying-the-upgrade)
 - [Rollback](#rollback)
 - [Agent Upgrades](#agent-upgrades)
+
+---
+
+## Channels
+
+BRIDGEPORT is published to `ghcr.io/bridgeinpt/bridgeport` under several tags. Pick the one that matches how aggressively you want updates.
+
+| Tag | Tracks | Use case |
+|---|---|---|
+| `:latest` | Most recent stable release | Default for production |
+| `:stable` | Alias for `:latest` | Explicit intent — same image as `:latest` |
+| `:v1.2.0`, `:1.2.0` | A specific patch release | Reproducible deploys, locked at this version |
+| `:1.2` | Latest patch on the 1.2.x line | Auto-receive patch updates (1.2.0 → 1.2.1) |
+| `:1` | Latest release in major version 1 | Auto-receive minor + patch updates |
+| `:edge` | Current `master` HEAD | Testing / preview only — **not** for production |
+| `:YYYYMMDDHH-sha` | Immutable per-commit master build | Bisecting edge bugs |
+
+How they're produced:
+
+- **Stable tags** (`:latest`, `:stable`, `:vX.Y.Z`, `:X.Y`, `:X`) are published by `.github/workflows/release.yml`, triggered when an annotated `vX.Y.Z` git tag is pushed.
+- **Edge tags** (`:edge`, `:YYYYMMDDHH-sha`) are published by `.github/workflows/build.yml` on every code push to `master` (doc-only and CI-only pushes are skipped).
+
+Prereleases (e.g. `v1.2.0-rc.1`) are pushed only as their exact tags (`:v1.2.0-rc.1`, `:1.2.0-rc.1`) — they never become `:latest`, `:stable`, or the floating major/minor tags.
+
+> [!NOTE]
+> Releases `v1.0.0` and `v1.1.0` predate this flow and have no ghcr.io image tags. The first version with full multi-tag publishing is the next release cut via the new pipeline. If you currently run `:latest`, you're already on the right channel — it will be set when the next release publishes.
+
+---
 
 ---
 
@@ -166,11 +195,11 @@ Look for `BRIDGEPORT running at http://0.0.0.0:3000` as confirmation that startu
    cp ./data/bridgeport-backup-20260225.db ./data/bridgeport.db
    ```
 
-3. Update `docker-compose.yml` to pin the previous image tag:
+3. Update `docker-compose.yml` to pin the previous image tag. Use a specific version (e.g. `:v1.1.0`) or a floating minor (e.g. `:1.1`) so the next `docker compose pull` won't jump you forward again:
    ```yaml
    services:
      bridgeport:
-       image: ghcr.io/bridgeinpt/bridgeport:previous-tag
+       image: ghcr.io/bridgeinpt/bridgeport:v1.1.0
    ```
 
 4. Start the container:

@@ -298,11 +298,11 @@ For detailed setup, see the [Storage guide](../guides/storage.md).
    cp ./backups/bridgeport-pre-upgrade.db ./data/bridgeport.db
    ```
 
-4. Pin BRIDGEPORT to the previous working version until the issue is fixed:
+4. Pin BRIDGEPORT to the previous working version until the issue is fixed (use a specific version or floating minor — see [Upgrades — Channels](upgrades.md#channels)):
    ```yaml
    services:
      bridgeport:
-       image: ghcr.io/bridgeinpt/bridgeport:previous-tag
+       image: ghcr.io/bridgeinpt/bridgeport:v1.1.0
    ```
 
 5. Report the migration issue to the BRIDGEPORT maintainers.

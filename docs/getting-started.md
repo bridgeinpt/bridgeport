@@ -72,6 +72,9 @@ Open **http://localhost:3000** in your browser.
 > [!WARNING]
 > This quick-start command is for trying BRIDGEPORT out. The `MASTER_KEY` and `JWT_SECRET` are generated inline and not saved anywhere. For production, see the [Installation Guide](installation.md).
 
+> [!TIP]
+> `:latest` tracks the most recent stable release. To preview unreleased changes from `master`, use `:edge` instead. See [Upgrades — Channels](operations/upgrades.md#channels) for all available tags.
+
 ---
 
 ## Step 2: Log In
