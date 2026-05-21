@@ -38,7 +38,7 @@ Returns an unbounded `text/event-stream` response. Keep the connection open for 
 
 The browser `EventSource` API does not support custom request headers, so authentication is passed as a query parameter. BRIDGEPORT accepts two token formats and tries them in order:
 
-1. **API token** -- A long-lived token created under My Account or via `POST /api/auth/tokens`. Validated by hashing and looking up in the database. Recommended for scripts and server-side consumers.
+1. **API token** -- A long-lived token minted by an admin via `POST /api/admin/tokens` (or the Admin → Integrations UI). Validated by hashing and looking up in the database. Recommended for scripts and server-side consumers.
 2. **JWT** -- The short-lived session token returned by `POST /api/auth/login`. Suitable for browser sessions where the JWT is already in memory.
 
 If both checks fail, the connection is rejected with `401 Unauthorized` before any SSE headers are written.

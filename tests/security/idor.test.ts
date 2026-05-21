@@ -17,7 +17,6 @@ let app: TestApp;
 
 // User A (admin) — owns env1
 let adminToken: string;
-let adminId: string;
 let env1Id: string;
 let server1Id: string;
 let service1Id: string;
@@ -38,11 +37,10 @@ beforeAll(async () => {
   const operator = await createTestUser(app.prisma, { role: 'operator', email: 'operator@idor.test' });
   const viewer = await createTestUser(app.prisma, { role: 'viewer', email: 'viewer@idor.test' });
 
-  adminId = admin.id;
   operatorId = operator.id;
   viewerId = viewer.id;
 
-  adminToken = await generateTestToken({ id: adminId, email: admin.email });
+  adminToken = await generateTestToken({ id: admin.id, email: admin.email });
   operatorToken = await generateTestToken({ id: operatorId, email: operator.email });
   viewerToken = await generateTestToken({ id: viewerId, email: viewer.email });
 

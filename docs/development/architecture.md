@@ -381,9 +381,10 @@ flowchart TD
 
 ### API Tokens
 
-- Created via `POST /api/auth/tokens`
+- Created by an admin via `POST /api/admin/tokens` (Admin → Integrations in the UI)
 - Stored as SHA-256 hashes (plaintext shown once on creation)
-- Optional expiry date
+- Scoped to a role and to an environment allowlist (or all environments)
+- Optional expiry date (capped at 365 days)
 - Used for CI/CD pipelines and scripted access
 - Support query parameter auth (`?token=`) for SSE connections
 

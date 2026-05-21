@@ -104,6 +104,9 @@ const adminRoutes: RouteSpec[] = [
   // Spaces config
   { method: 'PUT', url: '/api/settings/spaces', minRole: 'admin', body: { accessKey: 'test', secretKey: 'test', region: 'us-east-1', bucket: 'test', endpoint: 'https://test.com' }, description: 'update spaces config' },
   { method: 'DELETE', url: '/api/settings/spaces', minRole: 'admin', description: 'delete spaces config' },
+
+  // API tokens (admin-only management)
+  { method: 'GET', url: '/api/admin/tokens', minRole: 'admin', description: 'list API tokens' },
 ];
 
 // Operator-only routes (admin + operator allowed, viewer denied)
@@ -120,7 +123,6 @@ const operatorRoutes: RouteSpec[] = [
 
 // Viewer routes (any authenticated user can access)
 const viewerRoutes: RouteSpec[] = [
-  // Auth routes
   { method: 'GET', url: '/api/auth/me', minRole: 'viewer', description: 'get current user' },
 
   // Environment listing
