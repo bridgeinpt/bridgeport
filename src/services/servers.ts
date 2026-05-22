@@ -341,12 +341,13 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
       // Get comprehensive container info including ports
       const containerInfo = await dockerClient.getContainerInfo(container.name);
 
-      // Check if service already exists
+      // Check if service already exists. Match on containerName — the user-facing
+      // `name` is editable, so it can drift from the Docker container name.
       const existing = await prisma.service.findUnique({
         where: {
-          serverId_name: {
+          serverId_containerName: {
             serverId,
-            name: container.name,
+            containerName: container.name,
           },
         },
       });
@@ -424,7 +425,7 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
     // Mark services as missing if they weren't found (instead of deleting)
     const missing: string[] = [];
     for (const existingService of server.services) {
-      if (!foundContainerNames.has(existingService.name)) {
+      if (!foundContainerNames.has(existingService.containerName)) {
         await prisma.service.update({
           where: { id: existingService.id },
           data: {

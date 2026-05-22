@@ -1792,6 +1792,9 @@ export default function ServiceDetail() {
                     placeholder="my-container"
                     className="input font-mono text-sm"
                   />
+                  <p className="text-xs text-slate-500 mt-1">
+                    Must match <code>container_name</code> in compose. Discovery matches this, not the display name.
+                  </p>
                 </div>
                 <div>
                   <label className="block text-sm text-slate-400 mb-1">

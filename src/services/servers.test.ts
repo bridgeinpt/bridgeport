@@ -58,6 +58,7 @@ vi.mock('./image-management.js', () => ({
   findOrCreateContainerImage: vi.fn().mockResolvedValue({ id: 'img-1' }),
 }));
 
+import { createDockerClientForServer } from '../lib/docker.js';
 import {
   createServer,
   updateServer,
@@ -66,6 +67,7 @@ import {
   deleteServer,
   determineHealthStatus,
   determineOverallStatus,
+  discoverContainers,
 } from './servers.js';
 
 describe('servers', () => {
@@ -315,6 +317,95 @@ describe('servers', () => {
 
     it('should return running when health is none', () => {
       expect(determineOverallStatus('running', true, 'none')).toBe('running');
+    });
+  });
+
+  describe('discoverContainers', () => {
+    const baseServer = {
+      id: 'srv-1',
+      environmentId: 'env-1',
+      hostname: 'host-1',
+      dockerMode: 'ssh',
+      serverType: 'linux',
+    };
+
+    function mockDockerClient(containers: Array<{ name: string; image: string; state: string }>) {
+      const containerInfo = {
+        state: 'running',
+        running: true,
+        health: 'healthy',
+        image: 'nginx:latest',
+        ports: [],
+      };
+      const dockerClient = {
+        listContainers: vi.fn().mockResolvedValue(containers),
+        getContainerInfo: vi.fn().mockResolvedValue(containerInfo),
+      };
+      vi.mocked(createDockerClientForServer).mockResolvedValue({
+        dockerClient: dockerClient as never,
+        sshClient: null,
+        needsConnect: false,
+        mode: 'ssh',
+      } as never);
+      return dockerClient;
+    }
+
+    it('matches an existing service by containerName even when display name has been renamed', async () => {
+      const existingService = {
+        id: 'svc-1',
+        name: 'keycloak-1-production', // user renamed for clarity
+        containerName: 'keycloak', // still the real docker container name
+        serverId: 'srv-1',
+      };
+
+      mockPrisma.server.findUniqueOrThrow.mockResolvedValue({
+        ...baseServer,
+        services: [existingService],
+      });
+      mockPrisma.registryConnection.findMany.mockResolvedValue([]);
+      mockDockerClient([{ name: 'keycloak', image: 'nginx:latest', state: 'running' }]);
+
+      mockPrisma.service.findUnique.mockResolvedValue(existingService);
+      mockPrisma.service.update.mockResolvedValue({ ...existingService, discoveryStatus: 'found' });
+
+      const result = await discoverContainers('srv-1');
+
+      expect(mockPrisma.service.findUnique).toHaveBeenCalledWith({
+        where: {
+          serverId_containerName: { serverId: 'srv-1', containerName: 'keycloak' },
+        },
+      });
+      expect(mockPrisma.service.create).not.toHaveBeenCalled();
+      expect(mockPrisma.service.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'svc-1' } })
+      );
+      expect(result.missing).toEqual([]);
+    });
+
+    it('marks a service as missing when its containerName is absent from the docker container list', async () => {
+      const orphan = {
+        id: 'svc-2',
+        name: 'old-display-name',
+        containerName: 'gone-container',
+        serverId: 'srv-1',
+      };
+
+      mockPrisma.server.findUniqueOrThrow.mockResolvedValue({
+        ...baseServer,
+        services: [orphan],
+      });
+      mockPrisma.registryConnection.findMany.mockResolvedValue([]);
+      mockDockerClient([]); // docker reports no containers
+
+      const result = await discoverContainers('srv-1');
+
+      expect(mockPrisma.service.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'svc-2' },
+          data: expect.objectContaining({ discoveryStatus: 'missing' }),
+        })
+      );
+      expect(result.missing).toEqual(['old-display-name']);
     });
   });
 });

@@ -313,6 +313,7 @@ model Service {
   deploymentSteps DeploymentPlanStep[]
 
   @@unique([serverId, name])
+  @@unique([serverId, containerName])
 }
 
 // Container-level metrics (per service)

@@ -103,8 +103,8 @@ Content-Type: application/json
 ```
 
 **Required fields:**
-- `name` -- service identifier (unique per server)
-- `containerName` -- Docker container name
+- `name` -- service display name (unique per server). Free-form — rename anytime without breaking discovery.
+- `containerName` -- Docker container name (unique per server). Discovery matches services to running containers via this field, so it must match the `container_name:` value in your compose file.
 - `containerImageId` -- ID of an existing `ContainerImage` in the same environment
 
 **Optional fields:**
