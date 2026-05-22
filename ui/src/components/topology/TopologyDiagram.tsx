@@ -9,6 +9,7 @@ import {
   useEdgesState,
   type Node,
   type Edge,
+  type EdgeChange,
   type NodeTypes,
   type EdgeTypes,
   ReactFlowProvider,
@@ -20,6 +21,8 @@ import {
   type EdgeProps,
   type OnNodeDrag,
   type OnConnect,
+  type OnConnectEnd,
+  type OnEdgesChange,
   type Connection,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -31,8 +34,9 @@ import type { ServerWithServices, Database, UserRole, ExposedPort, ServiceConnec
 import { listConnections, createConnection, deleteConnection, getDiagramLayout, saveDiagramLayout, exportDiagramMermaid } from '../../lib/api';
 import { inferConnections, mergeConnections, aggregateCollapsedEdges, type TopologyEdge } from '../../lib/topology';
 import { EmptyState } from '../EmptyState';
+import { useToast } from '../Toast';
 import { toPng } from 'html-to-image';
-import { safeJsonParse } from '../../lib/helpers';
+import { safeJsonParse, getErrorMessage } from '../../lib/helpers';
 
 function downloadFile(filename: string, content: string, mimeType: string) {
   const blob = new Blob([content], { type: mimeType });
@@ -71,6 +75,7 @@ interface TopologyEdgeData {
   protocol?: string | null;
   manualId?: string;
   onDelete?: (connectionId: string) => void;
+  aggregated?: boolean;
   [key: string]: unknown;
 }
 
@@ -315,11 +320,16 @@ function topologyEdgesToReactFlow(
   return topologyEdges.map((te) => {
     // Extract manual connection ID from edge ID (format: "manual:<connectionId>")
     const manualId = te.type === 'manual' && te.id.startsWith('manual:') ? te.id.replace('manual:', '') : undefined;
+    // Suppress inline delete for aggregated edges — the user can't tell which
+    // underlying connection the X would destroy.
+    const canDelete = manualId && onDelete && !te.aggregated;
 
     return {
       id: te.id,
       source: te.source,
+      sourceHandle: te.sourceHandle ?? undefined,
       target: te.target,
+      targetHandle: te.targetHandle ?? undefined,
       type: 'topology',
       markerEnd: te.directed
         ? { type: MarkerType.ArrowClosed, color: te.type === 'auto' ? '#60a5fa' : '#4ade80', width: 16, height: 16 }
@@ -329,8 +339,9 @@ function topologyEdgesToReactFlow(
         label: te.label,
         port: te.port,
         protocol: te.protocol,
-        manualId,
-        onDelete: manualId && onDelete ? onDelete : undefined,
+        manualId: canDelete ? manualId : undefined,
+        onDelete: canDelete ? onDelete : undefined,
+        aggregated: te.aggregated,
       },
     };
   });
@@ -359,7 +370,9 @@ const reactFlowDarkStyles = `
 .topology-handle-db {
   background: #a78bfa !important;
 }
-.react-flow__node:hover .topology-handle,
+.react-flow__node-serviceNode:hover .topology-handle,
+.react-flow__node-databaseNode:hover .topology-handle,
+.react-flow__node-serverGroup:hover > div > .topology-handle,
 .react-flow__handle-connecting,
 .react-flow__handle-valid {
   background: #3b82f6 !important;
@@ -392,37 +405,66 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
   const containerRef = useRef<HTMLDivElement>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const connectStartNodeRef = useRef<string | null>(null);
+  // Incremented on every environment change and on every local mutation so
+  // late-arriving fetch responses for stale environments / pre-mutation snapshots
+  // can be discarded.
+  const fetchGenRef = useRef(0);
+  const isDraggingRef = useRef(false);
+  const toast = useToast();
 
   const canInteract = userRole === 'admin' || userRole === 'operator';
 
   const handleDeleteConnection = useCallback(async (connectionId: string) => {
-    setManualConnections((prev) => prev.filter((c) => c.id !== connectionId));
+    let removed: ServiceConnection | undefined;
+    setManualConnections((prev) => {
+      removed = prev.find((c) => c.id === connectionId);
+      return prev.filter((c) => c.id !== connectionId);
+    });
+    fetchGenRef.current++;
     try {
       await deleteConnection(connectionId);
-    } catch {
-      // Silently swallow — the connection may already be gone. The optimistic
-      // removal is what users see; a refetch on next mount will correct any drift.
+    } catch (err) {
+      // Roll back the optimistic removal and surface the error.
+      if (removed) {
+        setManualConnections((prev) => (prev.some((c) => c.id === connectionId) ? prev : [...prev, removed!]));
+      }
+      toast.error(`Failed to delete connection: ${getErrorMessage(err, 'Unknown error')}`);
     }
-  }, []);
+  }, [toast]);
 
   // Fetch manual connections
   useEffect(() => {
     if (!environmentId) return;
+    // Reset immediately on environment change so we don't briefly render
+    // env-A connections in env-B.
+    setManualConnections([]);
+    fetchGenRef.current++;
+    const myGen = fetchGenRef.current;
     listConnections(environmentId)
-      .then((res) => setManualConnections(res.connections || []))
-      .catch(() => setManualConnections([]));
+      .then((res) => {
+        if (myGen !== fetchGenRef.current) return;
+        setManualConnections(res.connections || []);
+      })
+      .catch(() => {
+        if (myGen !== fetchGenRef.current) return;
+        setManualConnections([]);
+      });
   }, [environmentId]);
 
   // Fetch saved layout
   useEffect(() => {
     if (!environmentId) return;
+    setSavedPositions(null);
+    let cancelled = false;
     getDiagramLayout(environmentId)
       .then((res) => {
+        if (cancelled) return;
         if (res.layout?.positions) {
           setSavedPositions(res.layout.positions);
         }
       })
       .catch(() => {});
+    return () => { cancelled = true; };
   }, [environmentId]);
 
   const handleToggleCollapse = useCallback((serverId: string) => {
@@ -449,14 +491,23 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     reactFlowInstance.fitView({ padding: 0.2, duration: 300 });
   }, [reactFlowInstance]);
 
+  // Track active drag so the nodes-sync effect doesn't clobber in-progress positions.
+  const handleNodeDragStart: OnNodeDrag = useCallback(() => {
+    isDraggingRef.current = true;
+  }, []);
+
   // Layout persistence: debounced save on drag end
   const handleNodeDragStop: OnNodeDrag = useCallback((_event, _node) => {
+    isDraggingRef.current = false;
     if (!canInteract || !environmentId) return;
 
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
     }
 
+    // Capture environmentId in the closure so a late timer fires against the
+    // correct env even if the user has since navigated away.
+    const targetEnv = environmentId;
     saveTimeoutRef.current = setTimeout(() => {
       const currentNodes = reactFlowInstance.getNodes();
       const positions: DiagramLayoutPositions = {};
@@ -466,27 +517,39 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
           positions[n.id] = { x: n.position.x, y: n.position.y };
         }
       }
-      saveDiagramLayout(environmentId, positions).catch(() => {});
+      saveDiagramLayout(targetEnv, positions).catch(() => {});
     }, 1000);
   }, [canInteract, environmentId, reactFlowInstance]);
 
-  // Cleanup timeout on unmount
+  // Cancel any pending layout save when the environment changes or on unmount —
+  // otherwise the timer fires against the now-current env and overwrites its
+  // saved layout with the previous env's coordinates.
   useEffect(() => {
     return () => {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
       }
     };
-  }, []);
+  }, [environmentId]);
 
   // Track which node the user started dragging from
   const handleConnectStart = useCallback((_event: MouseEvent | TouchEvent, params: { nodeId: string | null }) => {
     connectStartNodeRef.current = params.nodeId;
   }, []);
 
+  // Always clear the start ref when the drag ends — successful drops clear it
+  // inside handleConnect, but cancelled drags (drop on empty canvas) need this.
+  const handleConnectEnd: OnConnectEnd = useCallback(() => {
+    connectStartNodeRef.current = null;
+  }, []);
+
   // Handle on-diagram edge creation
   const handleConnect: OnConnect = useCallback(async (connection: Connection) => {
-    if (!canInteract || !connection.source || !connection.target) return;
+    if (!canInteract || !connection.source || !connection.target) {
+      connectStartNodeRef.current = null;
+      return;
+    }
 
     // Parse node IDs (format: "service:<id>" or "database:<id>")
     const parseNodeId = (nodeId: string) => {
@@ -499,44 +562,54 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     // the user's intended direction.
     let sourceNodeId = connection.source;
     let targetNodeId = connection.target;
+    let sourceHandle = connection.sourceHandle ?? null;
+    let targetHandle = connection.targetHandle ?? null;
     if (connectStartNodeRef.current && connectStartNodeRef.current !== connection.source) {
       sourceNodeId = connection.target;
       targetNodeId = connection.source;
+      sourceHandle = connection.targetHandle ?? null;
+      targetHandle = connection.sourceHandle ?? null;
     }
+    connectStartNodeRef.current = null;
 
     const source = parseNodeId(sourceNodeId);
     const target = parseNodeId(targetNodeId);
 
-    // Skip server-to-server connections
+    // Skip server-to-server connections (shouldn't reach here normally,
+    // since ServerGroupNode no longer renders handles when expanded).
     if (source.type !== 'service' && source.type !== 'database') return;
     if (target.type !== 'service' && target.type !== 'database') return;
 
     try {
-      const res = await createConnection({
+      const conn = await createConnection({
         environmentId,
         sourceType: source.type,
         sourceId: source.id,
+        sourceHandle,
         targetType: target.type,
         targetId: target.id,
+        targetHandle,
         direction: 'forward',
       });
-      // Backend returns connection directly (not wrapped)
-      const conn = (res as unknown as ServiceConnection).id ? (res as unknown as ServiceConnection) : (res as { connection: ServiceConnection }).connection;
-      setManualConnections((prev) => [...prev, conn]);
-    } catch {
-      // Connection creation failed (duplicate, invalid, etc.)
+      fetchGenRef.current++;
+      setManualConnections((prev) => (prev.some((c) => c.id === conn.id) ? prev : [...prev, conn]));
+    } catch (err) {
+      toast.error(`Failed to create connection: ${getErrorMessage(err, 'Unknown error')}`);
     }
-  }, [canInteract, environmentId]);
+  }, [canInteract, environmentId, toast]);
 
-  // ESC to exit fullscreen
+  // ESC to exit fullscreen — but only when no modal is open, otherwise the
+  // same keypress would close the modal AND drop out of fullscreen.
   useEffect(() => {
     if (mode !== 'fullscreen') return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMode('expanded');
+      if (e.key !== 'Escape') return;
+      if (showAddConnectionModal) return;
+      setMode('expanded');
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [mode]);
+  }, [mode, showAddConnectionModal]);
 
   // Export
   const [showExportMenu, setShowExportMenu] = useState(false);
@@ -622,8 +695,49 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
   const [flowNodes, setFlowNodes, onNodesChange] = useNodesState(nodes);
   const [flowEdges, setFlowEdges, onEdgesChange] = useEdgesState(edges);
 
-  useEffect(() => { setFlowNodes(nodes); }, [nodes, setFlowNodes]);
-  useEffect(() => { setFlowEdges(edges); }, [edges, setFlowEdges]);
+  // Sync nodes — but skip while the user is mid-drag, otherwise an unrelated
+  // re-render (collapse toggle, savedPositions arrival, etc.) snaps the
+  // dragged node back to its memo position.
+  useEffect(() => {
+    if (isDraggingRef.current) return;
+    setFlowNodes(nodes);
+  }, [nodes, setFlowNodes]);
+
+  // Sync edges, preserving ReactFlow's per-edge `selected` flag so the user's
+  // current edge selection survives unrelated state changes (adding/deleting
+  // other connections, collapsing servers, etc.).
+  useEffect(() => {
+    setFlowEdges((prev) => {
+      if (prev.length === 0) return edges;
+      const selectedIds = new Set(prev.filter((e) => e.selected).map((e) => e.id));
+      if (selectedIds.size === 0) return edges;
+      return edges.map((e) => (selectedIds.has(e.id) ? { ...e, selected: true } : e));
+    });
+  }, [edges, setFlowEdges]);
+
+  // Wrap onEdgesChange: ReactFlow fires `remove` changes when the user presses
+  // Backspace/Delete on a selected edge. Without this wrap the change is
+  // applied only to flowEdges (not manualConnections), so the next edges-memo
+  // rebuild restores the edge — visible flicker. Route manual-edge removes
+  // through the API and drop everything else so auto-inferred edges aren't
+  // even momentarily removable via keyboard.
+  const handleEdgesChange: OnEdgesChange = useCallback((changes) => {
+    const passthrough: EdgeChange[] = [];
+    for (const change of changes) {
+      if (change.type === 'remove') {
+        const removed = flowEdges.find((e) => e.id === change.id);
+        const data = removed?.data as TopologyEdgeData | undefined;
+        if (canInteract && data?.manualId && !data.aggregated) {
+          handleDeleteConnection(data.manualId);
+        }
+        continue;
+      }
+      passthrough.push(change);
+    }
+    if (passthrough.length > 0) {
+      onEdgesChange(passthrough);
+    }
+  }, [flowEdges, canInteract, handleDeleteConnection, onEdgesChange]);
 
   const heightClass = mode === 'compact' ? 'h-[350px]' : mode === 'expanded' ? 'h-[700px]' : '';
   const totalServices = servers.reduce((acc, s) => acc + s.services.length, 0);
@@ -648,7 +762,8 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     nodes: flowNodes,
     edges: flowEdges,
     onNodesChange: canInteract ? onNodesChange : undefined,
-    onEdgesChange,
+    onEdgesChange: handleEdgesChange,
+    onNodeDragStart: canInteract ? handleNodeDragStart : undefined,
     onNodeDragStop: canInteract ? handleNodeDragStop : undefined,
     nodeTypes,
     edgeTypes,
@@ -656,11 +771,14 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     fitViewOptions: { padding: 0.2 },
     onConnect: canInteract ? handleConnect : undefined,
     onConnectStart: canInteract ? handleConnectStart : undefined,
+    onConnectEnd: canInteract ? handleConnectEnd : undefined,
     connectionMode: ConnectionMode.Loose,
     connectionRadius: 28,
     nodesDraggable: canInteract,
     nodesConnectable: canInteract,
     edgesFocusable: canInteract,
+    edgesSelectable: canInteract,
+    elementsSelectable: canInteract,
     proOptions: { hideAttribution: true },
   };
 

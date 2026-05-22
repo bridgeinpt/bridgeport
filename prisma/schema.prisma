@@ -1159,12 +1159,14 @@ model ServiceConnection {
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
 
   // Source node
-  sourceType String // "service" | "database"
-  sourceId   String // Service.id or Database.id
+  sourceType   String // "service" | "database"
+  sourceId     String // Service.id or Database.id
+  sourceHandle String? // Optional handle id on the source node (e.g., "top", "bottom")
 
   // Target node
-  targetType String // "service" | "database"
-  targetId   String // Service.id or Database.id
+  targetType   String // "service" | "database"
+  targetId     String // Service.id or Database.id
+  targetHandle String? // Optional handle id on the target node
 
   // Connection metadata
   port      Int? // Port number (e.g., 5432, 6379)

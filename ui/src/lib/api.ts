@@ -2612,8 +2612,10 @@ export interface ServiceConnection {
   environmentId: string;
   sourceType: 'service' | 'database';
   sourceId: string;
+  sourceHandle: string | null;
   targetType: 'service' | 'database';
   targetId: string;
+  targetHandle: string | null;
   port: number | null;
   protocol: string | null;
   label: string | null;
@@ -2626,8 +2628,10 @@ export interface ServiceConnectionInput {
   environmentId: string;
   sourceType: 'service' | 'database';
   sourceId: string;
+  sourceHandle?: string | null;
   targetType: 'service' | 'database';
   targetId: string;
+  targetHandle?: string | null;
   port?: number | null;
   protocol?: string | null;
   label?: string | null;
@@ -2638,7 +2642,7 @@ export const listConnections = (environmentId: string) =>
   api.get<{ connections: ServiceConnection[] }>(`/connections?environmentId=${environmentId}`);
 
 export const createConnection = (data: ServiceConnectionInput) =>
-  api.post<{ connection: ServiceConnection }>('/connections', data);
+  api.post<ServiceConnection>('/connections', data);
 
 export const deleteConnection = (id: string) =>
   api.delete<{ success: boolean }>(`/connections/${id}`);

@@ -115,12 +115,18 @@ export function inferConnections(
 export interface TopologyEdge {
   id: string;
   source: string; // "service:<id>" or "database:<id>"
+  sourceHandle?: string | null;
   target: string; // "service:<id>" or "database:<id>"
+  targetHandle?: string | null;
   type: 'auto' | 'manual';
   directed: boolean;
   port?: number | null;
   protocol?: string | null;
   label?: string | null;
+  // True when this edge's source/target were rewritten by collapse-aggregation
+  // (so the inline X delete button should be suppressed even if the original
+  // edge was a single manual connection).
+  aggregated?: boolean;
 }
 
 export function mergeConnections(
@@ -148,7 +154,9 @@ export function mergeConnections(
     edges.push({
       id: `manual:${conn.id}`,
       source: `${conn.sourceType}:${conn.sourceId}`,
+      sourceHandle: conn.sourceHandle ?? undefined,
       target: `${conn.targetType}:${conn.targetId}`,
+      targetHandle: conn.targetHandle ?? undefined,
       type: 'manual',
       directed: conn.direction === 'forward',
       port: conn.port,
@@ -216,12 +224,21 @@ export function aggregateCollapsedEdges(
     const [source, target] = key.split('->');
 
     // When only one edge is aggregated, preserve the original edge data
-    // (including its manual: ID prefix needed for delete functionality)
+    // (id keeps its `manual:<connId>` prefix so we don't lose the link to the
+    // underlying connection), but flag it as aggregated so the inline X
+    // delete button is hidden — the visible edge now reads as
+    // server-to-X, and clicking X would delete an underlying connection the
+    // user can no longer disambiguate.
     if (info.count === 1) {
       result.push({
         ...info.firstEdge,
         source,
         target,
+        // Drop sourceHandle/targetHandle since they refer to the original
+        // child node, not the rewritten endpoint.
+        sourceHandle: undefined,
+        targetHandle: undefined,
+        aggregated: true,
       });
       continue;
     }
@@ -234,6 +251,7 @@ export function aggregateCollapsedEdges(
       type: isMultiType ? 'auto' : (info.types.values().next().value as 'auto' | 'manual'),
       directed: info.hasDirected,
       label: `${info.count} connections`,
+      aggregated: true,
     });
   }
 

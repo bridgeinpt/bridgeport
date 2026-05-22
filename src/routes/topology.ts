@@ -8,8 +8,10 @@ const createConnectionSchema = z.object({
   environmentId: z.string().min(1),
   sourceType: z.enum(['service', 'database']),
   sourceId: z.string().min(1),
+  sourceHandle: z.string().optional().nullable(),
   targetType: z.enum(['service', 'database']),
   targetId: z.string().min(1),
+  targetHandle: z.string().optional().nullable(),
   port: z.number().int().positive().optional().nullable(),
   protocol: z.string().optional().nullable(),
   label: z.string().optional().nullable(),
@@ -106,14 +108,34 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
         if (!database) return;
       }
 
+      // SQLite's unique index treats NULL as distinct, so the @@unique constraint
+      // doesn't catch duplicates when port is null. Check explicitly first.
+      if (data.port == null) {
+        const existing = await prisma.serviceConnection.findFirst({
+          where: {
+            environmentId: data.environmentId,
+            sourceType: data.sourceType,
+            sourceId: data.sourceId,
+            targetType: data.targetType,
+            targetId: data.targetId,
+            port: null,
+          },
+        });
+        if (existing) {
+          return reply.code(409).send({ error: 'A connection between these endpoints already exists' });
+        }
+      }
+
       try {
         const connection = await prisma.serviceConnection.create({
           data: {
             environmentId: data.environmentId,
             sourceType: data.sourceType,
             sourceId: data.sourceId,
+            sourceHandle: data.sourceHandle ?? undefined,
             targetType: data.targetType,
             targetId: data.targetId,
+            targetHandle: data.targetHandle ?? undefined,
             port: data.port ?? undefined,
             protocol: data.protocol ?? undefined,
             label: data.label ?? undefined,
