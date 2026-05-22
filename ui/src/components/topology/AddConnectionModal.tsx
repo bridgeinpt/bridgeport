@@ -88,22 +88,34 @@ export function AddConnectionModal({
     const [sourceType, sourceId] = sourceKey.split(':') as ['service' | 'database', string];
     const [targetType, targetId] = targetKey.split(':') as ['service' | 'database', string];
 
+    // Parse port and reject NaN explicitly — JSON.stringify(NaN) is "null",
+    // which would silently drop the user's input.
+    let parsedPort: number | null = null;
+    if (port) {
+      const n = parseInt(port, 10);
+      if (!Number.isFinite(n) || n <= 0 || n > 65535) {
+        setError('Port must be a number between 1 and 65535');
+        return;
+      }
+      parsedPort = n;
+    }
+
     setSubmitting(true);
     setError(null);
 
     try {
-      const result = await createConnection({
+      const created = await createConnection({
         environmentId,
         sourceType,
         sourceId,
         targetType,
         targetId,
-        port: port ? parseInt(port, 10) : null,
+        port: parsedPort,
         protocol: protocol || null,
         label: label || null,
         direction,
       });
-      onConnectionCreated(result.connection);
+      onConnectionCreated(created);
       handleClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create connection');

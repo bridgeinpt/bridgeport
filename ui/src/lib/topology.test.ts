@@ -414,5 +414,35 @@ describe('aggregateCollapsedEdges', () => {
     expect(result[0].port).toBe(5432);
     expect(result[0].source).toBe('server:server-1');
     expect(result[0].target).toBe('database:db1');
+    // But should be marked aggregated so the inline delete-X is suppressed —
+    // the visible edge now reads as server→db, and a click would destroy a
+    // connection the user can no longer disambiguate.
+    expect(result[0].aggregated).toBe(true);
+  });
+
+  it('should mark count>1 aggregated edges as aggregated', () => {
+    const edges: TopologyEdge[] = [
+      { id: 'manual:1', source: 'service:svc1', target: 'database:db1', type: 'manual', directed: true },
+      { id: 'manual:2', source: 'service:svc2', target: 'database:db1', type: 'manual', directed: true },
+    ];
+    const serviceToServer = new Map([['svc1', 'server-1'], ['svc2', 'server-1']]);
+
+    const result = aggregateCollapsedEdges(edges, new Set(['server-1']), serviceToServer, new Map());
+
+    expect(result).toHaveLength(1);
+    expect(result[0].aggregated).toBe(true);
+    expect(result[0].label).toBe('2 connections');
+  });
+
+  it('should NOT mark pass-through edges as aggregated', () => {
+    const edges: TopologyEdge[] = [
+      { id: 'auto:1', source: 'service:svc1', target: 'database:db1', type: 'auto', directed: true },
+    ];
+    const serviceToServer = new Map([['svc1', 'server-2']]);
+
+    const result = aggregateCollapsedEdges(edges, new Set(['server-1']), serviceToServer, new Map());
+
+    expect(result).toHaveLength(1);
+    expect(result[0].aggregated).toBeUndefined();
   });
 });

@@ -83,17 +83,32 @@ The diagram is composed of two data sources:
 
 ### From the UI
 
-1. On the Dashboard, click **Add Connection** (or the + button on the topology toolbar).
-2. In the modal that appears, fill in:
-   - **Source**: Pick a service or database
-   - **Target**: Pick a different service or database
-   - **Port** (optional): e.g., `5432`, `6379`, `8080`
-   - **Protocol** (optional): e.g., `tcp`, `http`, `grpc`
-   - **Label** (optional): e.g., "Primary DB", "Cache", "Message Queue"
-   - **Direction**: `forward` (arrow from source to target) or `none` (undirected line)
-3. Click **Create**.
+You have two ways to create connections:
 
-The connection appears immediately on the diagram.
+**Drag-to-connect (fast path):**
+Hover any service or database node; the colored dots on each side are connection handles. Drag from a handle and release on another node. The connection is saved with the default direction (`forward`) and no port/protocol metadata. To delete, click the X that appears on the manual (green) edge, or use the Connections list dropdown.
+
+**Add Connection modal (full control):**
+Click the **+** button in the topology toolbar to open a form where you can pick source/target from dropdowns and fill in port, protocol, label, and direction. The connection appears immediately on the diagram.
+
+### Connection metadata
+
+| Property | Type | Required | Description |
+|----------|------|----------|-------------|
+| `environmentId` | string | Yes | The environment this connection belongs to |
+| `sourceType` | `"service"` or `"database"` | Yes | What kind of node the connection starts from |
+| `sourceId` | string | Yes | The ID of the source service or database |
+| `sourceHandle` | string | No | Which handle on the source the user dragged from (e.g. `"top"`, `"bottom"`). Used to preserve diagonal/vertical edge routing across reloads. |
+| `targetType` | `"service"` or `"database"` | Yes | What kind of node the connection goes to |
+| `targetId` | string | Yes | The ID of the target service or database |
+| `targetHandle` | string | No | Which handle on the target the user dropped onto |
+| `port` | integer | No | Port number (e.g., 5432, 6379, 443) |
+| `protocol` | string | No | Protocol label (e.g., `tcp`, `http`, `grpc`, `amqp`) |
+| `label` | string | No | Human-readable description shown on the edge |
+| `direction` | `"forward"` or `"none"` | No (default: `"none"`) | Whether the edge has an arrow |
+
+> [!NOTE]
+> A connection is uniquely identified by the combination of environment, source, target, and port. You can have multiple connections between the same two nodes if they use different ports. When port is omitted, the backend rejects duplicates between the same endpoints with `409 Conflict`.
 
 ### From the API
 
@@ -131,23 +146,6 @@ Expected response (201):
   "createdAt": "2026-02-25T10:00:00.000Z"
 }
 ```
-
-### Connection Properties
-
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `environmentId` | string | Yes | The environment this connection belongs to |
-| `sourceType` | `"service"` or `"database"` | Yes | What kind of node the connection starts from |
-| `sourceId` | string | Yes | The ID of the source service or database |
-| `targetType` | `"service"` or `"database"` | Yes | What kind of node the connection goes to |
-| `targetId` | string | Yes | The ID of the target service or database |
-| `port` | integer | No | Port number (e.g., 5432, 6379, 443) |
-| `protocol` | string | No | Protocol label (e.g., `tcp`, `http`, `grpc`, `amqp`) |
-| `label` | string | No | Human-readable description shown on the edge |
-| `direction` | `"forward"` or `"none"` | No (default: `"none"`) | Whether the edge has an arrow |
-
-> [!NOTE]
-> A connection is uniquely identified by the combination of environment, source, target, and port. You can have multiple connections between the same two nodes if they use different ports (e.g., a service connecting to PostgreSQL on both port 5432 and port 5433 for read replicas).
 
 ### Direction Explained
 

@@ -73,9 +73,18 @@ function ServerGroupNodeComponent({ data }: NodeProps) {
           {/* Child nodes are positioned by React Flow inside this parent */}
         </div>
       )}
-      {/* Handles for aggregated edges when collapsed */}
-      <Handle type="target" position={Position.Left} className="!bg-slate-500 !w-2 !h-2 !border-slate-700" style={{ opacity: nodeData.collapsed ? 1 : 0 }} />
-      <Handle type="source" position={Position.Right} className="!bg-slate-500 !w-2 !h-2 !border-slate-700" style={{ opacity: nodeData.collapsed ? 1 : 0 }} />
+      {/* Handles for aggregated edges only when collapsed. Don't render them
+          when expanded — ReactFlow's connectionRadius proximity-snap reads
+          handle DOM positions, ignoring CSS opacity/pointer-events, so an
+          invisible handle near a child node's edge would silently capture
+          drops and route them to a server:<id> source/target that handleConnect
+          then rejects. */}
+      {nodeData.collapsed && (
+        <>
+          <Handle type="target" position={Position.Left} className="topology-handle" />
+          <Handle type="source" position={Position.Right} className="topology-handle" />
+        </>
+      )}
     </div>
   );
 }

@@ -121,6 +121,70 @@ describe('topology routes', () => {
 
       expect(res.statusCode).toBe(403);
     });
+
+    it('should reject duplicate null-port connection with 409', async () => {
+      // SQLite treats NULL as distinct in unique indexes, so the @@unique
+      // constraint alone can't dedup connections without a port. The route
+      // adds a pre-create check for this case.
+      const server = await createTestServer(app.prisma, { environmentId: envId, name: 'dup-server' });
+      const image = await createTestContainerImage(app.prisma, { environmentId: envId, name: 'Dup Img' });
+      const svc = await createTestService(app.prisma, { serverId: server.id, containerImageId: image.id });
+
+      const first = await app.inject({
+        method: 'POST',
+        url: '/api/connections',
+        headers: { authorization: `Bearer ${operatorToken}` },
+        payload: {
+          environmentId: envId,
+          sourceType: 'service',
+          sourceId: serviceId,
+          targetType: 'service',
+          targetId: svc.id,
+        },
+      });
+      expect(first.statusCode).toBe(201);
+
+      const second = await app.inject({
+        method: 'POST',
+        url: '/api/connections',
+        headers: { authorization: `Bearer ${operatorToken}` },
+        payload: {
+          environmentId: envId,
+          sourceType: 'service',
+          sourceId: serviceId,
+          targetType: 'service',
+          targetId: svc.id,
+        },
+      });
+      expect(second.statusCode).toBe(409);
+    });
+
+    it('should persist sourceHandle and targetHandle', async () => {
+      const server = await createTestServer(app.prisma, { environmentId: envId, name: 'handle-server' });
+      const image = await createTestContainerImage(app.prisma, { environmentId: envId, name: 'Handle Img' });
+      const svc = await createTestService(app.prisma, { serverId: server.id, containerImageId: image.id });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/connections',
+        headers: { authorization: `Bearer ${operatorToken}` },
+        payload: {
+          environmentId: envId,
+          sourceType: 'service',
+          sourceId: serviceId,
+          sourceHandle: 'bottom',
+          targetType: 'service',
+          targetId: svc.id,
+          targetHandle: 'top',
+          port: 5555,
+        },
+      });
+
+      expect(res.statusCode).toBe(201);
+      const body = res.json();
+      expect(body.sourceHandle).toBe('bottom');
+      expect(body.targetHandle).toBe('top');
+    });
   });
 
   // ==================== DELETE /api/connections/:id ====================
