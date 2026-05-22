@@ -4,6 +4,7 @@ import {
   Background,
   Controls,
   MiniMap,
+  ConnectionMode,
   useNodesState,
   useEdgesState,
   type Node,
@@ -25,6 +26,7 @@ import '@xyflow/react/dist/style.css';
 import { ServerGroupNode } from './ServerGroupNode';
 import { ServiceNode, type ServiceNodeData } from './ServiceNode';
 import { DatabaseNode, type DatabaseNodeData } from './DatabaseNode';
+import { AddConnectionModal } from './AddConnectionModal';
 import type { ServerWithServices, Database, UserRole, ExposedPort, ServiceConnection, DiagramLayoutPositions } from '../../lib/api';
 import { listConnections, createConnection, deleteConnection, getDiagramLayout, saveDiagramLayout, exportDiagramMermaid } from '../../lib/api';
 import { inferConnections, mergeConnections, aggregateCollapsedEdges, type TopologyEdge } from '../../lib/topology';
@@ -62,9 +64,15 @@ const stopAllPropagation = (e: React.MouseEvent | React.PointerEvent) => {
   e.stopPropagation();
 };
 
-// Module-level ref for the delete callback. React Flow's internal edge state management
-// can lose function references in edge data, so we share the callback via a ref instead.
-let edgeDeleteHandlerRef: ((connectionId: string) => void) | null = null;
+interface TopologyEdgeData {
+  edgeType?: 'auto' | 'manual';
+  label?: string | null;
+  port?: number | null;
+  protocol?: string | null;
+  manualId?: string;
+  onDelete?: (connectionId: string) => void;
+  [key: string]: unknown;
+}
 
 // Custom edge component with colored rendering
 function TopologyEdgeComponent({
@@ -77,10 +85,12 @@ function TopologyEdgeComponent({
   targetPosition,
   data,
   markerEnd,
+  selected,
 }: EdgeProps) {
-  const edgeData = data as { edgeType?: string; label?: string | null; port?: number | null; protocol?: string | null; manualId?: string } | undefined;
+  const edgeData = data as TopologyEdgeData | undefined;
   const isAuto = edgeData?.edgeType === 'auto';
   const strokeColor = isAuto ? '#60a5fa' : '#4ade80';
+  const strokeWidth = selected ? 3 : 2;
 
   const [edgePath, labelX, labelY] = getSmoothStepPath({
     sourceX,
@@ -92,10 +102,12 @@ function TopologyEdgeComponent({
     borderRadius: 8,
   });
 
+  const showLabel = Boolean(edgeData?.label) || Boolean(edgeData?.manualId);
+
   return (
     <>
-      <BaseEdge id={id} path={edgePath} style={{ stroke: strokeColor, strokeWidth: 2 }} markerEnd={markerEnd} />
-      {(edgeData?.label || edgeData?.manualId) && (
+      <BaseEdge id={id} path={edgePath} style={{ stroke: strokeColor, strokeWidth }} markerEnd={markerEnd} />
+      {showLabel && (
         <EdgeLabelRenderer>
           <div
             className="absolute flex items-center gap-1 text-[10px] bg-slate-800 border border-slate-600 px-1.5 py-0.5 rounded text-slate-300 pointer-events-auto nopan nodrag"
@@ -107,18 +119,20 @@ function TopologyEdgeComponent({
             onMouseDown={stopAllPropagation}
           >
             {edgeData?.label && <span>{edgeData.label}</span>}
-            {edgeData?.manualId && edgeDeleteHandlerRef && (
+            {edgeData?.manualId && edgeData?.onDelete && (
               <button
+                type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  edgeDeleteHandlerRef?.(edgeData.manualId!);
+                  edgeData.onDelete?.(edgeData.manualId!);
                 }}
                 onPointerDown={stopAllPropagation}
                 onMouseDown={stopAllPropagation}
-                className="p-0.5 text-slate-500 hover:text-red-400 hover:bg-slate-700 rounded ml-0.5"
+                className="p-0.5 text-slate-400 hover:text-red-400 hover:bg-slate-700 rounded ml-0.5 cursor-pointer"
                 title="Delete connection"
+                aria-label="Delete connection"
               >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="w-3.5 h-3.5 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
@@ -294,7 +308,10 @@ function buildNodes(
   return { nodes, serviceToServer, databaseToServer };
 }
 
-function topologyEdgesToReactFlow(topologyEdges: TopologyEdge[]): Edge[] {
+function topologyEdgesToReactFlow(
+  topologyEdges: TopologyEdge[],
+  onDelete: ((connectionId: string) => void) | null,
+): Edge[] {
   return topologyEdges.map((te) => {
     // Extract manual connection ID from edge ID (format: "manual:<connectionId>")
     const manualId = te.type === 'manual' && te.id.startsWith('manual:') ? te.id.replace('manual:', '') : undefined;
@@ -313,6 +330,7 @@ function topologyEdgesToReactFlow(topologyEdges: TopologyEdge[]): Edge[] {
         port: te.port,
         protocol: te.protocol,
         manualId,
+        onDelete: manualId && onDelete ? onDelete : undefined,
       },
     };
   });
@@ -331,6 +349,35 @@ const reactFlowDarkStyles = `
 .react-flow__controls-button svg {
   fill: inherit !important;
 }
+.topology-handle {
+  width: 10px !important;
+  height: 10px !important;
+  background: #64748b !important;
+  border: 2px solid #0f172a !important;
+  transition: background-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+}
+.topology-handle-db {
+  background: #a78bfa !important;
+}
+.react-flow__node:hover .topology-handle,
+.react-flow__handle-connecting,
+.react-flow__handle-valid {
+  background: #3b82f6 !important;
+  transform: scale(1.4);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+}
+.react-flow__handle-valid {
+  background: #22c55e !important;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.3);
+}
+.react-flow__edge.selected .react-flow__edge-path {
+  filter: drop-shadow(0 0 4px rgba(74, 222, 128, 0.5));
+}
+.react-flow__connectionline path {
+  stroke: #60a5fa !important;
+  stroke-width: 2 !important;
+  stroke-dasharray: 5 5;
+}
 `;
 
 function DiagramInner({ servers, databases, environmentId, userRole }: TopologyDiagramProps) {
@@ -339,6 +386,7 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
   const [manualConnections, setManualConnections] = useState<ServiceConnection[]>([]);
   const [savedPositions, setSavedPositions] = useState<DiagramLayoutPositions | null>(null);
   const [showConnectionsList, setShowConnectionsList] = useState(false);
+  const [showAddConnectionModal, setShowAddConnectionModal] = useState(false);
   const connectionsListRef = useRef<HTMLDivElement>(null);
   const reactFlowInstance = useReactFlow();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -347,23 +395,15 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
 
   const canInteract = userRole === 'admin' || userRole === 'operator';
 
-  // Set module-level delete handler ref so edge components can access it
-  // (React Flow's internal state management can lose function refs in edge data)
-  useEffect(() => {
-    if (canInteract) {
-      edgeDeleteHandlerRef = async (connectionId: string) => {
-        try {
-          await deleteConnection(connectionId);
-          setManualConnections((prev) => prev.filter((c) => c.id !== connectionId));
-        } catch {
-          // Silently fail - the connection may have already been deleted
-        }
-      };
-    } else {
-      edgeDeleteHandlerRef = null;
+  const handleDeleteConnection = useCallback(async (connectionId: string) => {
+    setManualConnections((prev) => prev.filter((c) => c.id !== connectionId));
+    try {
+      await deleteConnection(connectionId);
+    } catch {
+      // Silently swallow — the connection may already be gone. The optimistic
+      // removal is what users see; a refetch on next mount will correct any drift.
     }
-    return () => { edgeDeleteHandlerRef = null; };
-  }, [canInteract]);
+  }, []);
 
   // Fetch manual connections
   useEffect(() => {
@@ -567,15 +607,6 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     return map;
   }, [servers, databases]);
 
-  const handleDeleteManualConnection = useCallback(async (connectionId: string) => {
-    try {
-      await deleteConnection(connectionId);
-      setManualConnections((prev) => prev.filter((c) => c.id !== connectionId));
-    } catch {
-      // Silently fail
-    }
-  }, []);
-
   const { nodes, serviceToServer, databaseToServer } = useMemo(
     () => buildNodes(servers, databases, collapsedServers, handleToggleCollapse, savedPositions),
     [servers, databases, collapsedServers, handleToggleCollapse, savedPositions]
@@ -585,8 +616,8 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     const inferred = inferConnections(servers, databases);
     const merged = mergeConnections(inferred, manualConnections);
     const aggregated = aggregateCollapsedEdges(merged, collapsedServers, serviceToServer, databaseToServer);
-    return topologyEdgesToReactFlow(aggregated);
-  }, [servers, databases, manualConnections, collapsedServers, serviceToServer, databaseToServer]);
+    return topologyEdgesToReactFlow(aggregated, canInteract ? handleDeleteConnection : null);
+  }, [servers, databases, manualConnections, collapsedServers, serviceToServer, databaseToServer, canInteract, handleDeleteConnection]);
 
   const [flowNodes, setFlowNodes, onNodesChange] = useNodesState(nodes);
   const [flowEdges, setFlowEdges, onEdgesChange] = useEdgesState(edges);
@@ -625,10 +656,24 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     fitViewOptions: { padding: 0.2 },
     onConnect: canInteract ? handleConnect : undefined,
     onConnectStart: canInteract ? handleConnectStart : undefined,
+    connectionMode: ConnectionMode.Loose,
+    connectionRadius: 28,
     nodesDraggable: canInteract,
     nodesConnectable: canInteract,
+    edgesFocusable: canInteract,
     proOptions: { hideAttribution: true },
   };
+
+  const addConnectionModal = canInteract ? (
+    <AddConnectionModal
+      isOpen={showAddConnectionModal}
+      onClose={() => setShowAddConnectionModal(false)}
+      environmentId={environmentId}
+      servers={servers}
+      databases={databases}
+      onConnectionCreated={(conn) => setManualConnections((prev) => [...prev, conn])}
+    />
+  ) : null;
 
   if (mode === 'fullscreen') {
     return (
@@ -649,14 +694,17 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
                 onFitView={handleFitView}
               />
               {canInteract && (
-                <ConnectionsListButton
-                  connections={manualConnections}
-                  nodeNameMap={nodeNameMap}
-                  onDelete={handleDeleteManualConnection}
-                  show={showConnectionsList}
-                  onToggle={() => setShowConnectionsList((v) => !v)}
-                  menuRef={connectionsListRef}
-                />
+                <>
+                  <AddConnectionButton onClick={() => setShowAddConnectionModal(true)} />
+                  <ConnectionsListButton
+                    connections={manualConnections}
+                    nodeNameMap={nodeNameMap}
+                    onDelete={handleDeleteConnection}
+                    show={showConnectionsList}
+                    onToggle={() => setShowConnectionsList((v) => !v)}
+                    menuRef={connectionsListRef}
+                  />
+                </>
               )}
               <div className="relative" ref={showExportMenu ? exportMenuRef : undefined}>
                 <button
@@ -711,8 +759,14 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
               <span className="w-4 h-0.5 bg-green-400 inline-block rounded" />
               Manual
             </div>
+            {canInteract && (
+              <div className="text-slate-500 ml-auto">
+                Drag from a node handle (the dots on each side) onto another node to connect.
+              </div>
+            )}
           </div>
         </div>
+        {addConnectionModal}
       </>
     );
   }
@@ -735,14 +789,17 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
               onFitView={handleFitView}
             />
             {canInteract && (
-              <ConnectionsListButton
-                connections={manualConnections}
-                nodeNameMap={nodeNameMap}
-                onDelete={handleDeleteManualConnection}
-                show={showConnectionsList}
-                onToggle={() => setShowConnectionsList((v) => !v)}
-                menuRef={connectionsListRef}
-              />
+              <>
+                <AddConnectionButton onClick={() => setShowAddConnectionModal(true)} />
+                <ConnectionsListButton
+                  connections={manualConnections}
+                  nodeNameMap={nodeNameMap}
+                  onDelete={handleDeleteConnection}
+                  show={showConnectionsList}
+                  onToggle={() => setShowConnectionsList((v) => !v)}
+                  menuRef={connectionsListRef}
+                />
+              </>
             )}
             <div className="relative" ref={showExportMenu ? exportMenuRef : undefined}>
               <button
@@ -807,10 +864,31 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
               <span className="w-4 h-0.5 bg-green-400 inline-block rounded" />
               Manual
             </div>
+            {canInteract && (
+              <div className="text-slate-500 ml-auto hidden md:block">
+                Hover a node, drag from a side dot to connect.
+              </div>
+            )}
           </div>
         )}
       </div>
+      {addConnectionModal}
     </>
+  );
+}
+
+function AddConnectionButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="p-1.5 text-slate-400 hover:text-white rounded"
+      title="Add connection"
+      aria-label="Add connection"
+    >
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+      </svg>
+    </button>
   );
 }
 

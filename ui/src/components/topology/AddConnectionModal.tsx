@@ -103,7 +103,11 @@ export function AddConnectionModal({
         label: label || null,
         direction,
       });
-      onConnectionCreated(result.connection);
+      // Backend returns the connection directly; older clients wrapped it as { connection }.
+      const created = (result as unknown as ServiceConnection).id
+        ? (result as unknown as ServiceConnection)
+        : (result as { connection: ServiceConnection }).connection;
+      onConnectionCreated(created);
       handleClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create connection');

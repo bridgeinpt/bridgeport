@@ -74,8 +74,18 @@ function ServerGroupNodeComponent({ data }: NodeProps) {
         </div>
       )}
       {/* Handles for aggregated edges when collapsed */}
-      <Handle type="target" position={Position.Left} className="!bg-slate-500 !w-2 !h-2 !border-slate-700" style={{ opacity: nodeData.collapsed ? 1 : 0 }} />
-      <Handle type="source" position={Position.Right} className="!bg-slate-500 !w-2 !h-2 !border-slate-700" style={{ opacity: nodeData.collapsed ? 1 : 0 }} />
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="topology-handle"
+        style={{ opacity: nodeData.collapsed ? 1 : 0, pointerEvents: nodeData.collapsed ? 'auto' : 'none' }}
+      />
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="topology-handle"
+        style={{ opacity: nodeData.collapsed ? 1 : 0, pointerEvents: nodeData.collapsed ? 'auto' : 'none' }}
+      />
     </div>
   );
 }
