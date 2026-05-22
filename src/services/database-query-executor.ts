@@ -390,6 +390,7 @@ export async function pingDatabase(
     const client = new Redis({
       host: database.host || 'localhost',
       port: database.port || 6379,
+      username: credentials?.username || undefined,
       password: credentials?.password || undefined,
       tls: database.useSsl ? { rejectUnauthorized: false } : undefined,
       connectTimeout: 10000,
@@ -399,15 +400,29 @@ export async function pingDatabase(
       enableOfflineQueue: false,
       lazyConnect: true,
     });
-    client.on('error', () => {}); // Prevent unhandled error events
+    let lastError: Error | undefined;
+    client.on('error', (err: Error) => {
+      lastError = err;
+    });
 
     try {
       await client.connect();
-      const info = await client.info('server');
+      await client.ping();
       const latencyMs = Date.now() - start;
-      const versionMatch = info.match(/redis_version:(\S+)/);
-      const serverVersion = versionMatch ? `Redis ${versionMatch[1]}` : 'Redis';
+      let serverVersion = 'Redis';
+      try {
+        const info = await client.info('server');
+        const versionMatch = info.match(/redis_version:(\S+)/);
+        if (versionMatch) serverVersion = `Redis ${versionMatch[1]}`;
+      } catch {
+        // INFO can be NOPERM-blocked on restricted ACLs (e.g. some managed
+        // Valkey 8 configs). Connection is verified via PING; treat version
+        // detection as best-effort.
+      }
       return { success: true, latencyMs, serverVersion };
+    } catch (err) {
+      const surfaced = lastError ?? (err instanceof Error ? err : new Error(String(err)));
+      throw surfaced;
     } finally {
       await client.quit().catch(() => {});
     }
