@@ -277,6 +277,9 @@ Authorization: Bearer <token>
 
 The `services` array contains newly discovered or updated services. The `missing` array lists previously tracked services whose containers were not found during this scan (their `discoveryStatus` is set to `missing`).
 
+> [!NOTE]
+> Discovery matches existing services by `containerName`, not by `name`. This means you can freely rename a service's display `name` (e.g. `keycloak` → `keycloak-eu-prod`) without breaking discovery — as long as `containerName` still matches the Docker `container_name` field in your compose file.
+
 **Automated discovery:**
 
 When monitoring is enabled, discovery runs on a configurable interval (default: 5 minutes). Adjust it in **Environment Settings > Monitoring > Discovery Interval**.
