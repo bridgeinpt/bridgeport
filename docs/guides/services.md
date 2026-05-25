@@ -407,9 +407,19 @@ services:
     restart: unless-stopped
     volumes:
       - "/opt/app-api/config/nginx.conf:/opt/app-api/config/nginx.conf:ro"
+    ports:
+      - "8080:80"
 ```
 
-The auto-generated template includes the image, container name, restart policy, and read-only volume mounts for any attached config files.
+The auto-generated template includes the image, container name, restart policy, read-only volume mounts for any attached config files, and `ports:` entries derived from the service's discovered `exposedPorts`.
+
+Port-mapping behavior:
+
+- An explicit binding (e.g., `8080:80`) round-trips as `"8080:80"`.
+- A binding restricted to a specific host IP (e.g., `127.0.0.1:8080:80`) preserves the IP, so loopback-only services are not silently widened to all interfaces on regenerate.
+- A port the container only `EXPOSE`s (no host binding) is published on the matching host port — `EXPOSE 80` becomes `"80:80"`. Without this, the regenerated compose would have no `ports:` section and the container would come up unreachable.
+
+To opt out of a port binding entirely (e.g., a service that should only be reached from inside the docker network), switch to a custom template.
 
 #### Custom Templates
 

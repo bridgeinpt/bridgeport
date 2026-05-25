@@ -797,7 +797,7 @@ export class DockerSSH {
     state: string;
     running: boolean;
     health?: string;
-    ports: Array<{ host: number | null; container: number; protocol: string }>;
+    ports: Array<{ host: number | null; container: number; protocol: string; hostIp?: string | null }>;
     image: string;
   }> {
     // Get comprehensive container info: state, health, ports, and image
@@ -820,7 +820,7 @@ export class DockerSSH {
     const portsJson = parts.slice(4).join('|'); // Rejoin in case image contains |
 
     // Parse ports from Docker's NetworkSettings.Ports format
-    const ports: Array<{ host: number | null; container: number; protocol: string }> = [];
+    const ports: Array<{ host: number | null; container: number; protocol: string; hostIp?: string | null }> = [];
     try {
       const portsData = safeJsonParse(portsJson, {});
       // portsData looks like: {"80/tcp":[{"HostIp":"0.0.0.0","HostPort":"8080"}], "443/tcp": null}
@@ -835,6 +835,7 @@ export class DockerSSH {
               host: binding.HostPort ? parseInt(binding.HostPort, 10) : null,
               container: containerPortNum,
               protocol: protocol || 'tcp',
+              hostIp: binding.HostIp || null,
             });
           }
         } else {
@@ -843,6 +844,7 @@ export class DockerSSH {
             host: null,
             container: containerPortNum,
             protocol: protocol || 'tcp',
+            hostIp: null,
           });
         }
       }

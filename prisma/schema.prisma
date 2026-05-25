@@ -258,7 +258,7 @@ model Service {
   status           String    @default("unknown") // running, stopped, unhealthy, healthy, unknown (kept for backwards compatibility)
   containerStatus  String    @default("unknown") // running, stopped, exited, created, restarting, paused, dead, not_found
   healthStatus     String    @default("unknown") // healthy, unhealthy, unknown, none
-  exposedPorts     String? // JSON array: [{"host": 8080, "container": 80, "protocol": "tcp"}]
+  exposedPorts     String? // JSON array: [{"host": 8080, "container": 80, "protocol": "tcp", "hostIp": "0.0.0.0"}]; hostIp preserves the original bind interface (e.g., 127.0.0.1 for loopback-only)
   discoveryStatus  String    @default("found") // found, missing (container not found during last discovery)
   lastCheckedAt    DateTime?
   lastDiscoveredAt DateTime? // When service was last seen during discovery

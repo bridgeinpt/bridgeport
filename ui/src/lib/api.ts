@@ -565,7 +565,8 @@ export interface ServerWithServices extends Server {
 export interface ExposedPort {
   host: number | null;
   container: number;
-  protocol: 'tcp' | 'udp';
+  protocol: 'tcp' | 'udp' | 'sctp';
+  hostIp?: string | null;
 }
 
 // Agent health check types
