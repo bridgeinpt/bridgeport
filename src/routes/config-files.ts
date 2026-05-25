@@ -17,6 +17,7 @@ const createConfigFileSchema = z.object({
   isBinary: z.boolean().optional(),
   mimeType: z.string().optional(),
   fileSize: z.number().int().positive().optional(),
+  autoResync: z.boolean().optional(),
 });
 
 const updateConfigFileSchema = z.object({
@@ -27,6 +28,7 @@ const updateConfigFileSchema = z.object({
   isBinary: z.boolean().optional(),
   mimeType: z.string().nullable().optional(),
   fileSize: z.number().int().positive().nullable().optional(),
+  autoResync: z.boolean().optional(),
 });
 
 const attachFileSchema = z.object({
@@ -55,6 +57,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
             isBinary: true,
             mimeType: true,
             fileSize: true,
+            autoResync: true,
             createdAt: true,
             updatedAt: true,
             _count: { select: { services: true } },

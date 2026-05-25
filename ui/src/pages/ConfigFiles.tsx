@@ -73,10 +73,12 @@ export default function ConfigFiles() {
   const [newFilename, setNewFilename] = useState('');
   const [newContent, setNewContent] = useState('');
   const [newDescription, setNewDescription] = useState('');
+  const [newAutoResync, setNewAutoResync] = useState(true);
   const [creating, setCreating] = useState(false);
   const [editingFile, setEditingFile] = useState<ConfigFile | null>(null);
   const [editContent, setEditContent] = useState('');
   const [editDescription, setEditDescription] = useState('');
+  const [editAutoResync, setEditAutoResync] = useState(true);
   const [viewingFile, setViewingFile] = useState<(ConfigFile & { services: Array<{ targetPath: string; service: { id: string; name: string; server: { id: string; name: string } } }> }) | null>(null);
   const [historyFile, setHistoryFile] = useState<ConfigFile | null>(null);
   const [history, setHistory] = useState<FileHistoryEntry[]>([]);
@@ -102,6 +104,7 @@ export default function ConfigFiles() {
         filename: newFilename,
         content: newContent,
         description: newDescription || undefined,
+        autoResync: newAutoResync,
       });
       reload();
       setShowCreate(false);
@@ -109,6 +112,7 @@ export default function ConfigFiles() {
       setNewFilename('');
       setNewContent('');
       setNewDescription('');
+      setNewAutoResync(true);
     } finally {
       setCreating(false);
     }
@@ -119,6 +123,7 @@ export default function ConfigFiles() {
     await updateConfigFile(editingFile.id, {
       content: editContent,
       description: editDescription || undefined,
+      autoResync: editAutoResync,
     });
     setEditingFile(null);
     setEditContent('');
@@ -169,6 +174,7 @@ export default function ConfigFiles() {
     setEditingFile(file);
     setEditContent(file.content || '');
     setEditDescription(file.description || '');
+    setEditAutoResync(file.autoResync ?? true);
   };
 
   const handleViewHistory = async (file: ConfigFile) => {
@@ -334,6 +340,19 @@ export default function ConfigFiles() {
               required
             />
           </div>
+          <div>
+            <label className="flex items-center gap-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={newAutoResync}
+                onChange={(e) => setNewAutoResync(e.target.checked)}
+              />
+              <span>Auto re-sync when referenced values change</span>
+            </label>
+            <p className="text-xs text-slate-500 mt-1 ml-6">
+              When a secret or variable referenced as <code>{'${KEY}'}</code> is updated, BRIDGEPORT will re-sync this file to all attached services.
+            </p>
+          </div>
           <div className="flex gap-2 justify-end">
             <button
               type="button"
@@ -343,6 +362,7 @@ export default function ConfigFiles() {
                 setNewFilename('');
                 setNewContent('');
                 setNewDescription('');
+                setNewAutoResync(true);
               }}
               className="btn btn-ghost"
             >
@@ -500,6 +520,19 @@ export default function ConfigFiles() {
                 autoFocus
               />
             )}
+          </div>
+          <div>
+            <label className="flex items-center gap-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={editAutoResync}
+                onChange={(e) => setEditAutoResync(e.target.checked)}
+              />
+              <span>Auto re-sync when referenced values change</span>
+            </label>
+            <p className="text-xs text-slate-500 mt-1 ml-6">
+              When a secret or variable referenced as <code>{'${KEY}'}</code> is updated, BRIDGEPORT will re-sync this file to all attached services.
+            </p>
           </div>
           <div className="flex gap-2 justify-end">
             <button
