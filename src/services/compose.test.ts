@@ -101,6 +101,19 @@ describe('compose', () => {
       expect(parsed.services['web-app'].ports).toEqual(['80:80']);
     });
 
+    it('preserves a non-wildcard host IP so loopback-only bindings do not silently widen', async () => {
+      mockPrisma.service.findUniqueOrThrow.mockResolvedValue(baseService({
+        exposedPorts: JSON.stringify([
+          { hostIp: '127.0.0.1', host: 8080, container: 80, protocol: 'tcp' },
+        ]),
+      }) as any);
+
+      const artifacts = await generateDeploymentArtifacts('svc-1');
+      const parsed = YAML.parse(artifacts.compose.content);
+
+      expect(parsed.services['web-app'].ports).toEqual(['127.0.0.1:8080:80']);
+    });
+
     it('omits ports section when exposedPorts is null', async () => {
       mockPrisma.service.findUniqueOrThrow.mockResolvedValue(baseService({
         exposedPorts: null,
@@ -259,6 +272,102 @@ describe('compose', () => {
         { host: 443, container: 443 },
       ]);
       expect(serializeExposedPorts(json)).toEqual(['443:443']);
+    });
+
+    it('rejects non-numeric container values (no Number() coercion)', () => {
+      const json = JSON.stringify([
+        { host: 80, container: '80' },     // numeric string — was previously coerced
+        { host: 80, container: true },     // boolean → 1
+        { host: 80, container: [80] },     // single-element array → 80
+        { host: 443, container: 443 },
+      ]);
+      expect(serializeExposedPorts(json)).toEqual(['443:443']);
+    });
+
+    it('rejects non-numeric host values (no Number() coercion)', () => {
+      const json = JSON.stringify([
+        { host: '8080', container: 80 },
+        { host: true, container: 80 },
+        { host: 8080, container: 80 },
+      ]);
+      expect(serializeExposedPorts(json)).toEqual(['8080:80']);
+    });
+
+    it('omits wildcard hostIp 0.0.0.0 so docker-compose default applies', () => {
+      const json = JSON.stringify([
+        { hostIp: '0.0.0.0', host: 8080, container: 80 },
+      ]);
+      expect(serializeExposedPorts(json)).toEqual(['8080:80']);
+    });
+
+    it('omits wildcard hostIp :: so docker-compose default applies', () => {
+      const json = JSON.stringify([
+        { hostIp: '::', host: 8080, container: 80 },
+      ]);
+      expect(serializeExposedPorts(json)).toEqual(['8080:80']);
+    });
+
+    it('omits empty-string hostIp as wildcard', () => {
+      const json = JSON.stringify([
+        { hostIp: '', host: 8080, container: 80 },
+      ]);
+      expect(serializeExposedPorts(json)).toEqual(['8080:80']);
+    });
+
+    it('preserves IPv4 hostIp prefix', () => {
+      const json = JSON.stringify([
+        { hostIp: '127.0.0.1', host: 8080, container: 80, protocol: 'tcp' },
+      ]);
+      expect(serializeExposedPorts(json)).toEqual(['127.0.0.1:8080:80']);
+    });
+
+    it('brackets IPv6 hostIp in the compose port string', () => {
+      const json = JSON.stringify([
+        { hostIp: '::1', host: 8080, container: 80, protocol: 'tcp' },
+      ]);
+      expect(serializeExposedPorts(json)).toEqual(['[::1]:8080:80']);
+    });
+
+    it('collapses IPv4 wildcard and IPv6 wildcard dual-stack bindings to one entry', () => {
+      // Docker reports dual-stack as two entries with the same host port.
+      const json = JSON.stringify([
+        { hostIp: '0.0.0.0', host: 8080, container: 80, protocol: 'tcp' },
+        { hostIp: '::', host: 8080, container: 80, protocol: 'tcp' },
+      ]);
+      expect(serializeExposedPorts(json)).toEqual(['8080:80']);
+    });
+
+    it('keeps distinct hostIp bindings on the same host port', () => {
+      const json = JSON.stringify([
+        { hostIp: '127.0.0.1', host: 8080, container: 80, protocol: 'tcp' },
+        { hostIp: '192.168.1.10', host: 8080, container: 80, protocol: 'tcp' },
+      ]);
+      expect(serializeExposedPorts(json)).toEqual([
+        '127.0.0.1:8080:80',
+        '192.168.1.10:8080:80',
+      ]);
+    });
+
+    it('defaults host=container while still preserving hostIp', () => {
+      const json = JSON.stringify([
+        { hostIp: '127.0.0.1', host: null, container: 80, protocol: 'tcp' },
+      ]);
+      expect(serializeExposedPorts(json)).toEqual(['127.0.0.1:80:80']);
+    });
+
+    it('falls back to tcp for unknown protocols rather than emitting invalid suffix', () => {
+      // A malformed/future protocol value should not leak into the compose YAML.
+      const json = JSON.stringify([
+        { host: 80, container: 80, protocol: 'garbage' },
+      ]);
+      expect(serializeExposedPorts(json)).toEqual(['80:80']);
+    });
+
+    it('emits /sctp suffix for sctp protocol', () => {
+      const json = JSON.stringify([
+        { host: 36412, container: 36412, protocol: 'sctp' },
+      ]);
+      expect(serializeExposedPorts(json)).toEqual(['36412:36412/sctp']);
     });
   });
 

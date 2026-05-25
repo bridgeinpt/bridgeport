@@ -86,8 +86,8 @@ describe('docker', () => {
         expect(info.running).toBe(true);
         expect(info.health).toBe('healthy');
         expect(info.image).toBe('nginx:latest');
-        expect(info.ports).toContainEqual({ host: 8080, container: 80, protocol: 'tcp' });
-        expect(info.ports).toContainEqual({ host: null, container: 443, protocol: 'tcp' });
+        expect(info.ports).toContainEqual({ host: 8080, container: 80, protocol: 'tcp', hostIp: '0.0.0.0' });
+        expect(info.ports).toContainEqual({ host: null, container: 443, protocol: 'tcp', hostIp: null });
       });
 
       it('should return not_found when container does not exist', async () => {

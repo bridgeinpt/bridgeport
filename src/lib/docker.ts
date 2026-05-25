@@ -18,7 +18,7 @@ export interface ContainerDetails {
   state: string;
   running: boolean;
   health?: string;
-  ports: Array<{ host: number | null; container: number; protocol: string }>;
+  ports: Array<{ host: number | null; container: number; protocol: string; hostIp?: string | null }>;
   image: string;
 }
 
@@ -121,7 +121,7 @@ export class DockerSocketClient implements DockerClient {
       const info = await container.inspect();
 
       // Parse ports from NetworkSettings
-      const ports: Array<{ host: number | null; container: number; protocol: string }> = [];
+      const ports: Array<{ host: number | null; container: number; protocol: string; hostIp?: string | null }> = [];
       const portsData = info.NetworkSettings?.Ports || {};
 
       for (const [containerPort, bindings] of Object.entries(portsData)) {
@@ -134,6 +134,7 @@ export class DockerSocketClient implements DockerClient {
               host: binding.HostPort ? parseInt(binding.HostPort, 10) : null,
               container: containerPortNum,
               protocol: protocol || 'tcp',
+              hostIp: binding.HostIp || null,
             });
           }
         } else {
@@ -141,6 +142,7 @@ export class DockerSocketClient implements DockerClient {
             host: null,
             container: containerPortNum,
             protocol: protocol || 'tcp',
+            hostIp: null,
           });
         }
       }
@@ -355,7 +357,7 @@ export class DockerSSHClient implements DockerClient {
     const image = parts[3] || '';
     const portsJson = parts.slice(4).join('|');
 
-    const ports: Array<{ host: number | null; container: number; protocol: string }> = [];
+    const ports: Array<{ host: number | null; container: number; protocol: string; hostIp?: string | null }> = [];
     try {
       const portsData = safeJsonParse(portsJson, {});
       for (const [containerPort, bindings] of Object.entries(portsData)) {
@@ -368,6 +370,7 @@ export class DockerSSHClient implements DockerClient {
               host: binding.HostPort ? parseInt(binding.HostPort, 10) : null,
               container: containerPortNum,
               protocol: protocol || 'tcp',
+              hostIp: binding.HostIp || null,
             });
           }
         } else {
@@ -375,6 +378,7 @@ export class DockerSSHClient implements DockerClient {
             host: null,
             container: containerPortNum,
             protocol: protocol || 'tcp',
+            hostIp: null,
           });
         }
       }

@@ -38,19 +38,42 @@ export interface ExposedPort {
   host: number | null;
   container: number;
   protocol?: string;
+  hostIp?: string | null;
+}
+
+const VALID_PROTOCOLS = new Set(['tcp', 'udp', 'sctp']);
+
+function isWildcardHostIp(hostIp: string | null | undefined): boolean {
+  if (!hostIp) return true;
+  return hostIp === '0.0.0.0' || hostIp === '::';
+}
+
+function formatHostIpPrefix(hostIp: string | null | undefined): string {
+  if (isWildcardHostIp(hostIp)) return '';
+  // IPv6 addresses contain colons and must be bracketed in the compose port
+  // format (e.g., `[::1]:8080:80`).
+  return hostIp!.includes(':') ? `[${hostIp}]:` : `${hostIp}:`;
 }
 
 /**
  * Convert a service's stored `exposedPorts` JSON (as discovered from a running
  * container) into docker-compose `ports:` string entries.
  *
- * When the host side is missing/null we default it to the container port so the
- * regenerated compose still publishes the port. Without this, Docker silently
- * starts the container with no host binding and the service becomes unreachable
- * from outside the docker bridge network (issue #117).
+ * Behavior:
+ * - Explicit `{host, container}` → `"host:container"`.
+ * - `host: null` (container only `EXPOSE`s the port, no `-p`) → default the
+ *   host side to the container port (`"container:container"`) so the
+ *   regenerated compose still publishes it. Without this, Docker silently
+ *   starts the container with no host binding and the service becomes
+ *   unreachable from outside the docker bridge network (issue #117).
+ * - `hostIp` is preserved end-to-end. A binding originally created with
+ *   `127.0.0.1:8080:80` round-trips as `"127.0.0.1:8080:80"` rather than
+ *   silently widening to `0.0.0.0:8080` on regenerate.
+ * - Wildcard host IPs (`0.0.0.0`, `::`, empty) are emitted without a prefix
+ *   so docker-compose binds on all interfaces (its default).
  *
- * Duplicate entries (Docker reports the same mapping once per host IP family)
- * are de-duplicated.
+ * Duplicate entries (Docker reports the same mapping once per host IP family,
+ * e.g., IPv4 + IPv6) collapse to one.
  */
 export function serializeExposedPorts(exposedPortsJson: string | null | undefined): string[] {
   const parsed = safeJsonParse<unknown>(exposedPortsJson, []);
@@ -63,22 +86,27 @@ export function serializeExposedPorts(exposedPortsJson: string | null | undefine
     if (!raw || typeof raw !== 'object') continue;
     const entry = raw as Partial<ExposedPort>;
 
-    const container = Number(entry.container);
+    if (typeof entry.container !== 'number') continue;
+    const container = entry.container;
     if (!Number.isInteger(container) || container <= 0 || container > 65535) continue;
 
-    const hostRaw = entry.host;
     let host: number;
-    if (hostRaw === null || hostRaw === undefined) {
+    if (entry.host === null || entry.host === undefined) {
       host = container;
     } else {
-      const hostNum = Number(hostRaw);
-      if (!Number.isInteger(hostNum) || hostNum <= 0 || hostNum > 65535) continue;
-      host = hostNum;
+      if (typeof entry.host !== 'number') continue;
+      if (!Number.isInteger(entry.host) || entry.host <= 0 || entry.host > 65535) continue;
+      host = entry.host;
     }
 
-    const protocol = typeof entry.protocol === 'string' ? entry.protocol.toLowerCase() : 'tcp';
-    const suffix = protocol && protocol !== 'tcp' ? `/${protocol}` : '';
-    const portString = `${host}:${container}${suffix}`;
+    const rawProtocol = typeof entry.protocol === 'string' ? entry.protocol.toLowerCase() : 'tcp';
+    const protocol = VALID_PROTOCOLS.has(rawProtocol) ? rawProtocol : 'tcp';
+    const suffix = protocol === 'tcp' ? '' : `/${protocol}`;
+
+    const hostIp = typeof entry.hostIp === 'string' ? entry.hostIp : null;
+    const prefix = formatHostIpPrefix(hostIp);
+
+    const portString = `${prefix}${host}:${container}${suffix}`;
 
     if (seen.has(portString)) continue;
     seen.add(portString);
