@@ -11,6 +11,7 @@ import {
 import { logAudit, actorFrom } from '../services/audit.js';
 import { validateBody, findOrNotFound, handleUniqueConstraint } from '../lib/helpers.js';
 import { requireOperator } from '../plugins/authorize.js';
+import { triggerAutoResyncForKey } from '../services/config-file-auto-resync.js';
 
 const createSecretSchema = z.object({
   key: z.string().min(1).regex(/^[A-Z][A-Z0-9_]*$/, 'Key must be uppercase with underscores'),
@@ -238,6 +239,22 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
 
       try {
         const existing = await prisma.secret.findUnique({ where: { id } });
+
+        // Detect whether the secret VALUE actually changed (vs. just metadata).
+        // We decrypt the previous value to compare; metadata-only updates skip
+        // the auto-resync trigger.
+        let valueActuallyChanged = false;
+        if (existing && body.value !== undefined) {
+          try {
+            const previousValue = await getSecretValue(id);
+            valueActuallyChanged = previousValue !== body.value;
+          } catch {
+            // If decryption fails (corrupted record / missing key), assume the
+            // value changed so we err on the side of triggering a resync.
+            valueActuallyChanged = true;
+          }
+        }
+
         const secret = await updateSecret(id, body);
 
         await logAudit({
@@ -249,6 +266,19 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
           ...actorFrom(request),
           environmentId: existing?.environmentId,
         });
+
+        if (valueActuallyChanged && existing) {
+          // Fire-and-forget: don't block the PATCH response. Errors are logged
+          // inside the trigger (and by the catch below as a safety net).
+          void triggerAutoResyncForKey(
+            existing.environmentId,
+            secret.key,
+            `secret:${secret.key}:patch`,
+            actorFrom(request)
+          ).catch((err) => {
+            console.error('[auto-resync] failed for secret patch:', err);
+          });
+        }
 
         return { secret };
       } catch {
@@ -455,6 +485,9 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
         if (body.value !== undefined) updateData.value = body.value;
         if (body.description !== undefined) updateData.description = body.description;
 
+        const valueActuallyChanged =
+          body.value !== undefined && body.value !== existing.value;
+
         const v = await prisma.var.update({
           where: { id },
           data: updateData,
@@ -477,6 +510,19 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
           ...actorFrom(request),
           environmentId: existing.environmentId,
         });
+
+        if (valueActuallyChanged) {
+          // Fire-and-forget: don't block the PATCH response. Errors are logged
+          // inside the trigger (and by the catch below as a safety net).
+          void triggerAutoResyncForKey(
+            existing.environmentId,
+            v.key,
+            `var:${v.key}:patch`,
+            actorFrom(request)
+          ).catch((err) => {
+            console.error('[auto-resync] failed for var patch:', err);
+          });
+        }
 
         return { var: v };
       } catch {

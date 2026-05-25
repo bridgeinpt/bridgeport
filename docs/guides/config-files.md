@@ -12,6 +12,7 @@ Config files let you store, version, and sync configuration to your servers via 
 - [Secret and Variable Placeholders](#secret-and-variable-placeholders)
 - [Edit History and Rollback](#edit-history-and-rollback)
 - [Sync Status](#sync-status)
+- [Auto Re-sync on Value Change](#auto-re-sync-on-value-change)
 - [Use Cases](#use-cases)
 - [Configuration Options](#configuration-options)
 - [Troubleshooting](#troubleshooting)
@@ -334,6 +335,37 @@ Individual attachment statuses are visible on the config file detail page and on
 
 ---
 
+## Auto Re-sync on Value Change
+
+When a [secret](secrets.md) or [variable](secrets.md#creating-variables) is updated (via `PATCH /api/secrets/:id` or `PATCH /api/vars/:id`), BRIDGEPORT can automatically re-sync any config file that references it via `${KEY}`. This keeps deployed files in sync with their resolved values without a manual sync step.
+
+**How it works:**
+
+1. After a secret/var PATCH succeeds and the **value actually changes** (metadata-only edits do not trigger it), BRIDGEPORT scans the environment for text config files where `autoResync = true` and `content` contains the literal `${KEY}`.
+2. Each matching config file is synced to all its attached services -- once per config file, regardless of how many times `${KEY}` appears.
+3. Each triggered sync writes an audit log with `details.autoTriggered = true` and `details.triggeredBy = "var:<KEY>:patch"` (or `secret:<KEY>:patch`).
+4. The trigger is fire-and-forget: it runs in the background after the PATCH response is sent, and a single failing host does not abort the rest.
+
+**Scope and limits:**
+
+- Only text files are considered (binary files don't get placeholder substitution).
+- Only files with `autoResync = true` are considered (the default for new files).
+- Creating/deleting a secret or variable does **not** trigger auto-resync (only PATCH does, and only when the value changes).
+- The full file is re-synced; BRIDGEPORT does not do partial substitution.
+
+**Disabling auto re-sync per file:**
+
+Set `autoResync` to `false` in the create or update payload (or uncheck the toggle in the UI) for any file that you want to keep manually controlled.
+
+```http
+PATCH /api/config-files/:id
+{
+  "autoResync": false
+}
+```
+
+---
+
 ## Use Cases
 
 ### .env Files
@@ -404,6 +436,7 @@ Any text-based configuration file can be managed through BRIDGEPORT. Sync cronta
 | `isBinary` | boolean | false | Whether this is a binary/asset file |
 | `mimeType` | string | null | MIME type for binary files |
 | `fileSize` | integer | null | Size in bytes (for binary files) |
+| `autoResync` | boolean | true | Auto re-sync attached services when a referenced `${KEY}` secret or var changes (see [Auto Re-sync on Value Change](#auto-re-sync-on-value-change)) |
 
 ### Service Attachment Fields
 

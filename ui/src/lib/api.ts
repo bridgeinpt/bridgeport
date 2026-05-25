@@ -873,6 +873,7 @@ export interface ConfigFile {
   isBinary: boolean;
   mimeType: string | null;
   fileSize: number | null;
+  autoResync: boolean;
   createdAt: string;
   updatedAt: string;
   environmentId: string;
@@ -890,6 +891,7 @@ export interface ConfigFileInput {
   isBinary?: boolean;
   mimeType?: string;
   fileSize?: number;
+  autoResync?: boolean;
 }
 
 export interface ServiceFile {

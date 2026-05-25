@@ -402,6 +402,7 @@ model ConfigFile {
   isBinary    Boolean  @default(false) // Whether this is a binary/asset file
   mimeType    String? // MIME type for binary files (e.g., "application/x-x509-ca-cert")
   fileSize    Int? // Size in bytes for display
+  autoResync  Boolean  @default(true) // Re-sync attached services automatically when a referenced ${KEY} secret/var changes
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
