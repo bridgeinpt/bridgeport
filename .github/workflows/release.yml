@@ -58,7 +58,7 @@ jobs:
 
       - name: Compute image tags
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           # `latest` and `stable` are suppressed automatically when the ref
@@ -72,7 +72,7 @@ jobs:
             type=raw,value=stable,enable=${{ !contains(github.ref_name, '-') }}
 
       - name: Build and push image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile
