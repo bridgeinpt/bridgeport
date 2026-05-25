@@ -407,9 +407,11 @@ services:
     restart: unless-stopped
     volumes:
       - "/opt/app-api/config/nginx.conf:/opt/app-api/config/nginx.conf:ro"
+    ports:
+      - "8080:80"
 ```
 
-The auto-generated template includes the image, container name, restart policy, and read-only volume mounts for any attached config files.
+The auto-generated template includes the image, container name, restart policy, read-only volume mounts for any attached config files, and `ports:` entries derived from the service's discovered `exposedPorts`. If a discovered port has no host binding (e.g., the container only `EXPOSE`s the port), the host side defaults to the container port so the regenerated compose still publishes it. To opt out of a port binding entirely, switch to a custom template.
 
 #### Custom Templates
 

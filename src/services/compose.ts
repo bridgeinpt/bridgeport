@@ -2,6 +2,7 @@ import { prisma } from '../lib/db.js';
 import { createHash } from 'crypto';
 import YAML from 'yaml';
 import { resolveSecretPlaceholders } from './secrets.js';
+import { safeJsonParse } from '../lib/helpers.js';
 
 export interface ComposeConfig {
   version?: string;
@@ -31,6 +32,60 @@ export interface GeneratedArtifacts {
 
 function computeChecksum(content: string): string {
   return createHash('sha256').update(content).digest('hex');
+}
+
+export interface ExposedPort {
+  host: number | null;
+  container: number;
+  protocol?: string;
+}
+
+/**
+ * Convert a service's stored `exposedPorts` JSON (as discovered from a running
+ * container) into docker-compose `ports:` string entries.
+ *
+ * When the host side is missing/null we default it to the container port so the
+ * regenerated compose still publishes the port. Without this, Docker silently
+ * starts the container with no host binding and the service becomes unreachable
+ * from outside the docker bridge network (issue #117).
+ *
+ * Duplicate entries (Docker reports the same mapping once per host IP family)
+ * are de-duplicated.
+ */
+export function serializeExposedPorts(exposedPortsJson: string | null | undefined): string[] {
+  const parsed = safeJsonParse<unknown>(exposedPortsJson, []);
+  if (!Array.isArray(parsed)) return [];
+
+  const seen = new Set<string>();
+  const result: string[] = [];
+
+  for (const raw of parsed) {
+    if (!raw || typeof raw !== 'object') continue;
+    const entry = raw as Partial<ExposedPort>;
+
+    const container = Number(entry.container);
+    if (!Number.isInteger(container) || container <= 0 || container > 65535) continue;
+
+    const hostRaw = entry.host;
+    let host: number;
+    if (hostRaw === null || hostRaw === undefined) {
+      host = container;
+    } else {
+      const hostNum = Number(hostRaw);
+      if (!Number.isInteger(hostNum) || hostNum <= 0 || hostNum > 65535) continue;
+      host = hostNum;
+    }
+
+    const protocol = typeof entry.protocol === 'string' ? entry.protocol.toLowerCase() : 'tcp';
+    const suffix = protocol && protocol !== 'tcp' ? `/${protocol}` : '';
+    const portString = `${host}:${container}${suffix}`;
+
+    if (seen.has(portString)) continue;
+    seen.add(portString);
+    result.push(portString);
+  }
+
+  return result;
 }
 
 /**
@@ -132,6 +187,15 @@ export async function generateDeploymentArtifacts(
       svc.volumes = artifacts.configFiles.map(
         (cf) => `${cf.mountPath}:${cf.mountPath}:ro`
       );
+    }
+
+    // Add `ports:` entries derived from the service's discovered exposedPorts.
+    // Without this, regenerating compose for a service that previously had
+    // explicit port bindings would drop them and the container would come up
+    // unreachable (issue #117).
+    const ports = serializeExposedPorts(service.exposedPorts);
+    if (ports.length > 0) {
+      svc.ports = ports;
     }
 
     composeContent = YAML.stringify(composeConfig);
