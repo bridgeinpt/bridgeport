@@ -6,6 +6,12 @@ import { parseRegistryFromImage } from '../lib/image-utils.js';
 import { checkServiceUpdate } from '../lib/scheduler.js';
 import { findOrCreateContainerImage } from './image-management.js';
 import { SERVER_STATUS, HEALTH_STATUS, CONTAINER_STATUS, DISCOVERY_STATUS } from '../lib/constants.js';
+import {
+  filterServers as filterTemplateServers,
+  parseServerTags,
+  type TemplateServer,
+  type TemplateServerFilters,
+} from './template-engine.js';
 import type { Server, Service, RegistryConnection } from '@prisma/client';
 
 /**
@@ -134,6 +140,60 @@ export async function deleteServer(serverId: string): Promise<void> {
   await prisma.server.delete({
     where: { id: serverId },
   });
+}
+
+/**
+ * Load servers for the config-file template engine, applying iteration filters.
+ *
+ * The `environment` filter may be either an environment name or id; when
+ * omitted, the current environment is used. Returned servers carry a parsed
+ * `tags` array and are sorted alphabetically by name for deterministic output.
+ *
+ * Empty result (no matches, no servers, or unknown environment) returns `[]`
+ * without throwing — callers render the empty set as an empty string.
+ */
+export async function listServersForTemplate(
+  currentEnvironmentId: string,
+  filters: TemplateServerFilters
+): Promise<TemplateServer[]> {
+  // Resolve the target environmentId: a filter may name the env by id or name.
+  let targetEnvId = currentEnvironmentId;
+  if (filters.environment) {
+    const env = await prisma.environment.findFirst({
+      where: {
+        OR: [{ id: filters.environment }, { name: filters.environment }],
+      },
+      select: { id: true },
+    });
+    if (!env) {
+      return [];
+    }
+    targetEnvId = env.id;
+  }
+
+  const rows = await prisma.server.findMany({
+    where: { environmentId: targetEnvId },
+    select: {
+      id: true,
+      name: true,
+      hostname: true,
+      publicIp: true,
+      tags: true,
+      environmentId: true,
+    },
+  });
+
+  const servers: TemplateServer[] = rows.map((s) => ({
+    id: s.id,
+    name: s.name,
+    hostname: s.hostname,
+    publicIp: s.publicIp,
+    tags: parseServerTags(s.tags),
+    environmentId: s.environmentId,
+  }));
+
+  // Use the resolved environmentId so filterServers' env check matches.
+  return filterTemplateServers(servers, { ...filters, environment: targetEnvId }, targetEnvId);
 }
 
 export async function checkServerHealth(serverId: string): Promise<{

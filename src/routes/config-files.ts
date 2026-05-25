@@ -638,11 +638,21 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
               }
             } else {
               // Text files: resolve ${SECRET_KEY} placeholders and trim trailing empty lines
-              const { content: rawContent, missing } = await resolveSecretPlaceholders(
+              const { content: rawContent, missing, templateErrors } = await resolveSecretPlaceholders(
                 service.server.environmentId,
                 configFile.content
               );
               const resolvedContent = rawContent.trimEnd();
+
+              if (templateErrors.length > 0) {
+                results.push({
+                  file: configFile.name,
+                  targetPath,
+                  success: false,
+                  error: `Template errors: ${templateErrors.join('; ')}`,
+                });
+                continue;
+              }
 
               if (missing.length > 0) {
                 results.push({
@@ -902,11 +912,22 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
                 stderr = writeErr instanceof Error ? writeErr.message : 'SFTP write failed';
               }
             } else {
-              const { content: rawContent, missing } = await resolveSecretPlaceholders(
+              const { content: rawContent, missing, templateErrors } = await resolveSecretPlaceholders(
                 server.environmentId,
                 configFile.content
               );
               const resolvedContent = rawContent.trimEnd();
+
+              if (templateErrors.length > 0) {
+                results.push({
+                  configFileName: configFile.name,
+                  serviceName: service.name,
+                  targetPath: sf.targetPath,
+                  success: false,
+                  error: `Template errors: ${templateErrors.join('; ')}`,
+                });
+                continue;
+              }
 
               if (missing.length > 0) {
                 results.push({
@@ -1072,11 +1093,23 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
                   stderr = writeErr instanceof Error ? writeErr.message : 'SFTP write failed';
                 }
               } else {
-                const { content: rawContent, missing } = await resolveSecretPlaceholders(
+                const { content: rawContent, missing, templateErrors } = await resolveSecretPlaceholders(
                   server.environmentId,
                   configFile.content
                 );
                 const resolvedContent = rawContent.trimEnd();
+
+                if (templateErrors.length > 0) {
+                  results.push({
+                    serviceId: sf.service.id,
+                    serviceName: sf.service.name,
+                    serverName: server.name,
+                    targetPath: sf.targetPath,
+                    success: false,
+                    error: `Template errors: ${templateErrors.join('; ')}`,
+                  });
+                  continue;
+                }
 
                 if (missing.length > 0) {
                   results.push({

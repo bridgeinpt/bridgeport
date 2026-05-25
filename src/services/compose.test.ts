@@ -19,7 +19,7 @@ vi.mock('../lib/crypto.js', () => ({
 }));
 
 vi.mock('./secrets.js', () => ({
-  resolveSecretPlaceholders: vi.fn().mockResolvedValue({ content: 'resolved', unresolvedKeys: [] }),
+  resolveSecretPlaceholders: vi.fn().mockResolvedValue({ content: 'resolved', missing: [], templateErrors: [] }),
 }));
 
 import YAML from 'yaml';
