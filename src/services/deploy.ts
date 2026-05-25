@@ -12,7 +12,8 @@ import { checkServiceUpdate } from '../lib/scheduler.js';
 import { pruneServerImages } from './servers.js';
 import { sendSystemNotification, NOTIFICATION_TYPES } from './notifications.js';
 import { recordTagDeployment } from './image-management.js';
-import { safeJsonParse } from '../lib/helpers.js';
+import { safeJsonParse, getErrorMessage } from '../lib/helpers.js';
+import { getSystemSettings } from './system-settings.js';
 import { eventBus } from '../lib/event-bus.js';
 import { DEPLOYMENT_STATUS, CONTAINER_STATUS, HISTORY_STATUS } from '../lib/constants.js';
 import type { Deployment, Service } from '@prisma/client';
@@ -68,6 +69,31 @@ export async function deployService(
     logs.push(`[${timestamp}] ${message}`);
   };
 
+  // Hoisted so the catch block can also capture container logs on failure
+  let dockerClient: DockerClient | null = null;
+  let sshClient: CommandClient | null = null;
+
+  // Append `docker logs <container>` output (best-effort) so deployment plan view
+  // surfaces internal container output without needing SSH access. Safe to call
+  // when the container doesn't exist — failures are recorded as a note.
+  const captureContainerLogs = async () => {
+    if (!dockerClient) return;
+    try {
+      const settings = await getSystemSettings();
+      const tail = settings.defaultLogLines;
+      const containerLogs = await dockerClient.getContainerLogs(service.containerName, {
+        tail,
+        timestamps: true,
+      });
+      logs.push(`\n--- container logs (${service.containerName}, last ${tail} lines) ---`);
+      logs.push(containerLogs.trim() || '(no output)');
+    } catch (err) {
+      logs.push(
+        `\n--- container logs unavailable (${service.containerName}): ${getErrorMessage(err, 'unknown error')} ---`
+      );
+    }
+  };
+
   try {
     await prisma.deployment.update({
       where: { id: deployment.id },
@@ -79,7 +105,7 @@ export async function deployService(
     log(`Starting deployment of ${service.name} with tag ${imageTag}`);
 
     // Create appropriate Docker client based on server's dockerMode
-    const { dockerClient, sshClient, error: clientError, mode, needsConnect } = await createDockerClientForServer(
+    const { dockerClient: createdClient, sshClient: createdSsh, error: clientError, mode, needsConnect } = await createDockerClientForServer(
       {
         hostname: service.server.hostname,
         dockerMode: service.server.dockerMode,
@@ -88,6 +114,9 @@ export async function deployService(
       },
       getEnvironmentSshKey
     );
+
+    dockerClient = createdClient;
+    sshClient = createdSsh;
 
     if (!dockerClient) {
       throw new Error(clientError || 'Failed to create Docker client');
@@ -223,6 +252,9 @@ export async function deployService(
 
     log(`Container ${service.containerName} is running`);
 
+    // Capture container output so deploy plan view shows internal logs without SSH
+    await captureContainerLogs();
+
     if (sshClient) {
       sshClient.disconnect();
     }
@@ -308,6 +340,14 @@ export async function deployService(
     const errorMessage = error instanceof Error ? error.message : String(error);
     log(`ERROR: ${errorMessage}`);
 
+    // Capture container output (best-effort) so failed deploys surface internal
+    // logs in the deployment plan view without requiring SSH access.
+    await captureContainerLogs();
+
+    if (sshClient) {
+      try { sshClient.disconnect(); } catch { /* ignore */ }
+    }
+
     // Record failed deployment in container image history
     const historyEntry = await recordTagDeployment(
       service.containerImage.id,
@@ -367,7 +407,7 @@ export async function getDeployment(deploymentId: string): Promise<Deployment | 
 
 export async function getContainerLogs(
   serviceId: string,
-  tail: number = 100
+  options: { tail?: number; until?: string; timestamps?: boolean } = {}
 ): Promise<string> {
   const service = await prisma.service.findUniqueOrThrow({
     where: { id: serviceId },
@@ -393,7 +433,11 @@ export async function getContainerLogs(
     if (needsConnect && sshClient) {
       await sshClient.connect();
     }
-    return await dockerClient.getContainerLogs(service.containerName, { tail });
+    return await dockerClient.getContainerLogs(service.containerName, {
+      tail: options.tail ?? 100,
+      until: options.until,
+      timestamps: options.timestamps,
+    });
   } finally {
     if (sshClient) {
       sshClient.disconnect();

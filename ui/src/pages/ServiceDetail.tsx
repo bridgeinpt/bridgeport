@@ -93,6 +93,13 @@ export default function ServiceDetail() {
   const [deleting, setDeleting] = useState(false);
   const [checking, setChecking] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsLoadingOlder, setLogsLoadingOlder] = useState(false);
+  // Oldest timestamp (ISO) parsed from logs — used as the `before` cursor for "Load older"
+  const [oldestLogTimestamp, setOldestLogTimestamp] = useState<string | null>(null);
+  // No-more-older indicator (server returned an empty page for the `before` cursor)
+  const [noMoreOlderLogs, setNoMoreOlderLogs] = useState(false);
+  const logsContainerRef = useRef<HTMLPreElement>(null);
   const [showConfig, setShowConfig] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -372,20 +379,77 @@ export default function ServiceDetail() {
     }
   };
 
+  // Extract the first ISO-8601 timestamp from a `docker logs -t` line.
+  // Format example: "2026-05-25T10:23:45.123456789Z message ..."
+  const extractOldestTimestamp = (text: string): string | null => {
+    const lines = text.split('\n').filter((l) => l.trim().length > 0);
+    for (const line of lines) {
+      const match = line.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/);
+      if (match) return match[1];
+    }
+    return null;
+  };
+
   const loadLogs = async () => {
     if (!id) return;
+    setLogsLoading(true);
+    setShowLogs(true);
+    setNoMoreOlderLogs(false);
+    setOldestLogTimestamp(null);
     try {
-      const { logs } = await getServiceLogs(id, 200);
+      // tail omitted -> server uses admin-configured defaultLogLines
+      const { logs } = await getServiceLogs(id);
       setLogs(logs);
-      setShowLogs(true);
+      setOldestLogTimestamp(extractOldestTimestamp(logs));
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to load logs';
       if (message.includes('No such container')) {
         setLogs('Container not found. The service may not be running or has not been deployed yet.');
-        setShowLogs(true);
       } else {
         toast.error(message);
+        setShowLogs(false);
       }
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  const loadOlderLogs = async () => {
+    if (!id || !oldestLogTimestamp || logsLoadingOlder) return;
+    setLogsLoadingOlder(true);
+    try {
+      // Use the oldest visible timestamp as the `before` cursor. Server returns
+      // up to defaultLogLines older lines ending at that timestamp.
+      const { logs: older } = await getServiceLogs(id, { before: oldestLogTimestamp });
+      const trimmed = older.trim();
+      if (!trimmed) {
+        setNoMoreOlderLogs(true);
+        return;
+      }
+      const newOldest = extractOldestTimestamp(older);
+      if (newOldest && newOldest === oldestLogTimestamp) {
+        // Server clipped at the same boundary — nothing new to fetch
+        setNoMoreOlderLogs(true);
+        return;
+      }
+      // Preserve scroll position when prepending older content
+      const container = logsContainerRef.current;
+      const previousHeight = container?.scrollHeight ?? 0;
+      const previousTop = container?.scrollTop ?? 0;
+      setLogs((prev) => `${trimmed}\n${prev}`);
+      if (newOldest) setOldestLogTimestamp(newOldest);
+      // After DOM updates, restore the user's view by adjusting for added height
+      requestAnimationFrame(() => {
+        if (container) {
+          const delta = container.scrollHeight - previousHeight;
+          container.scrollTop = previousTop + delta;
+        }
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to load older logs';
+      toast.error(message);
+    } finally {
+      setLogsLoadingOlder(false);
     }
   };
 
@@ -2039,8 +2103,24 @@ export default function ServiceDetail() {
                 ✕
               </button>
             </div>
-            <pre className="flex-1 p-4 overflow-auto font-mono text-sm text-slate-300 bg-slate-950">
-              {logs || 'No logs available'}
+            <div className="flex items-center justify-between px-4 py-2 border-b border-slate-700 bg-slate-900/60">
+              <button
+                onClick={loadOlderLogs}
+                disabled={!oldestLogTimestamp || logsLoadingOlder || noMoreOlderLogs || logsLoading}
+                className="btn btn-ghost btn-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                title={noMoreOlderLogs ? 'No earlier logs available' : 'Load earlier log entries'}
+              >
+                {logsLoadingOlder ? 'Loading...' : noMoreOlderLogs ? 'No earlier logs' : 'Load older'}
+              </button>
+              <div className="text-xs text-slate-500">
+                {logsLoading ? 'Loading...' : oldestLogTimestamp ? `Oldest visible: ${oldestLogTimestamp}` : ''}
+              </div>
+            </div>
+            <pre
+              ref={logsContainerRef}
+              className="flex-1 p-4 overflow-auto font-mono text-sm text-slate-300 bg-slate-950"
+            >
+              {logs || (logsLoading ? 'Loading logs...' : 'No logs available')}
             </pre>
           </div>
         </div>

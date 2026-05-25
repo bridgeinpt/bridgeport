@@ -477,8 +477,16 @@ export const getServiceHistory = (id: string, limit?: number) =>
     `/services/${id}/history${limit ? `?limit=${limit}` : ''}`
   );
 
-export const getServiceLogs = (id: string, tail?: number) =>
-  api.get<{ logs: string }>(`/services/${id}/logs${tail ? `?tail=${tail}` : ''}`);
+export const getServiceLogs = (
+  id: string,
+  opts?: { tail?: number; before?: string }
+) => {
+  const params = new URLSearchParams();
+  if (opts?.tail) params.set('tail', String(opts.tail));
+  if (opts?.before) params.set('before', opts.before);
+  const qs = params.toString();
+  return api.get<{ logs: string }>(`/services/${id}/logs${qs ? `?${qs}` : ''}`);
+};
 
 export const getDeploymentHistory = (id: string, limit?: number) =>
   api.get<{ deployments: Deployment[] }>(`/services/${id}/deployments${limit ? `?limit=${limit}` : ''}`);

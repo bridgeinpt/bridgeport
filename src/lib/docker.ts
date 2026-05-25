@@ -1,6 +1,6 @@
 import Docker from 'dockerode';
 import { access, constants } from 'fs/promises';
-import type { CommandClient } from './ssh.js';
+import { shellEscape, type CommandClient } from './ssh.js';
 import { CONTAINER_STATUS, DOCKER_MODE } from './constants.js';
 import { safeJsonParse } from './helpers.js';
 
@@ -68,7 +68,10 @@ export interface DockerClient {
   getContainerStats(containerName: string): Promise<ContainerStats>;
   restartContainer(containerName: string): Promise<void>;
   pullImage(image: string, auth?: RegistryAuthConfig): Promise<void>;
-  getContainerLogs(containerName: string, options?: { tail?: number }): Promise<string>;
+  getContainerLogs(
+    containerName: string,
+    options?: { tail?: number; until?: string; timestamps?: boolean }
+  ): Promise<string>;
   pruneImages(mode: 'dangling' | 'all'): Promise<{ spaceReclaimedBytes: number }>;
 }
 
@@ -280,14 +283,25 @@ export class DockerSocketClient implements DockerClient {
     });
   }
 
-  async getContainerLogs(containerName: string, options?: { tail?: number }): Promise<string> {
+  async getContainerLogs(
+    containerName: string,
+    options?: { tail?: number; until?: string; timestamps?: boolean }
+  ): Promise<string> {
     const container = this.docker.getContainer(containerName);
+
+    // dockerode accepts `until` as a Unix timestamp (seconds). Convert from ISO if provided.
+    let untilTs: number | undefined;
+    if (options?.until) {
+      const parsed = Math.floor(new Date(options.until).getTime() / 1000);
+      if (!Number.isNaN(parsed)) untilTs = parsed;
+    }
 
     const logs = await container.logs({
       stdout: true,
       stderr: true,
       tail: options?.tail || 100,
-      timestamps: false,
+      timestamps: options?.timestamps ?? false,
+      ...(untilTs !== undefined ? { until: untilTs } : {}),
     });
 
     // Docker logs may include header bytes for multiplexed streams
@@ -496,10 +510,15 @@ export class DockerSSHClient implements DockerClient {
     }
   }
 
-  async getContainerLogs(containerName: string, options?: { tail?: number }): Promise<string> {
+  async getContainerLogs(
+    containerName: string,
+    options?: { tail?: number; until?: string; timestamps?: boolean }
+  ): Promise<string> {
     const args = ['docker logs'];
     if (options?.tail) args.push('--tail', options.tail.toString());
-    args.push(containerName);
+    if (options?.timestamps) args.push('-t');
+    if (options?.until) args.push('--until', shellEscape(options.until));
+    args.push(shellEscape(containerName));
 
     const { stdout, stderr, code } = await this.client.exec(this.pathPrefix + args.join(' '));
     if (code !== 0) {

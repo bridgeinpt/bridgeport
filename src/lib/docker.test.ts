@@ -322,6 +322,94 @@ describe('docker', () => {
         await expect(docker.getContainerLogs('nonexistent'))
           .rejects.toThrow('Failed to get logs');
       });
+
+      it('should add -t flag when timestamps is true', async () => {
+        const mockClient = createMockCommandClient(new Map([
+          ['docker logs', { stdout: '2026-05-20T10:00:00Z hello\n', stderr: '', code: 0 }],
+        ]));
+
+        const docker = new DockerSSHClient(mockClient);
+        await docker.getContainerLogs('my-container', { timestamps: true });
+
+        const cmd = (mockClient.exec as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+        expect(cmd).toMatch(/\bdocker logs\b.*\B-t\b/);
+      });
+
+      it('should not add -t flag when timestamps is false or omitted', async () => {
+        const mockClient = createMockCommandClient(new Map([
+          ['docker logs', { stdout: 'hello\n', stderr: '', code: 0 }],
+        ]));
+
+        const docker = new DockerSSHClient(mockClient);
+        await docker.getContainerLogs('my-container');
+
+        const cmd = (mockClient.exec as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+        // The container name 'my-container' contains 't', so we have to check
+        // for ` -t ` as a token, not just the letter.
+        expect(cmd).not.toMatch(/\s-t\s/);
+        expect(cmd).not.toMatch(/\s-t$/);
+      });
+
+      it('should pass --until with shell-escaped value', async () => {
+        const mockClient = createMockCommandClient(new Map([
+          ['docker logs', { stdout: '', stderr: '', code: 0 }],
+        ]));
+
+        const docker = new DockerSSHClient(mockClient);
+        await docker.getContainerLogs('my-container', { until: '2026-05-20T10:00:00Z' });
+
+        const cmd = (mockClient.exec as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+        expect(cmd).toContain(`--until '2026-05-20T10:00:00Z'`);
+      });
+
+      it('should shell-escape a malicious until value', async () => {
+        const mockClient = createMockCommandClient(new Map([
+          ['docker logs', { stdout: '', stderr: '', code: 0 }],
+        ]));
+
+        const docker = new DockerSSHClient(mockClient);
+        await docker.getContainerLogs('my-container', { until: `2026-05-20'; rm -rf /; echo '` });
+
+        const cmd = (mockClient.exec as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+        // The malicious quote must be escaped, so the surrounding single-quote
+        // structure remains intact and no unescaped `rm -rf /` can run as a
+        // separate command.
+        expect(cmd).not.toMatch(/--until '2026-05-20'; rm -rf/);
+        expect(cmd).toContain(`'\\''`);
+      });
+
+      it('should shell-escape the container name', async () => {
+        const mockClient = createMockCommandClient(new Map([
+          ['docker logs', { stdout: '', stderr: '', code: 0 }],
+        ]));
+
+        const docker = new DockerSSHClient(mockClient);
+        await docker.getContainerLogs(`evil; rm -rf /`);
+
+        const cmd = (mockClient.exec as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+        expect(cmd).toContain(`'evil; rm -rf /'`);
+        // Must not appear as a separate shell command.
+        expect(cmd).not.toMatch(/;\s*rm -rf \/\s*$/);
+      });
+
+      it('should combine tail, timestamps, until and escaped name', async () => {
+        const mockClient = createMockCommandClient(new Map([
+          ['docker logs', { stdout: 'log\n', stderr: '', code: 0 }],
+        ]));
+
+        const docker = new DockerSSHClient(mockClient);
+        await docker.getContainerLogs('my-container', {
+          tail: 25,
+          timestamps: true,
+          until: '2026-05-20T10:00:00Z',
+        });
+
+        const cmd = (mockClient.exec as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+        expect(cmd).toContain('--tail 25');
+        expect(cmd).toContain(' -t ');
+        expect(cmd).toContain(`--until '2026-05-20T10:00:00Z'`);
+        expect(cmd).toContain(`'my-container'`);
+      });
     });
 
     describe('convertToMb (via stats parsing)', () => {
