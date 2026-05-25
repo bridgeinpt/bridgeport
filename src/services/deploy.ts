@@ -73,11 +73,17 @@ export async function deployService(
   let dockerClient: DockerClient | null = null;
   let sshClient: CommandClient | null = null;
 
+  // Tracks whether a successful capture has already happened, so the catch
+  // block doesn't re-invoke against an already-disconnected client and append
+  // a misleading "unavailable" note after the real logs.
+  let containerLogsCaptured = false;
+
   // Append `docker logs <container>` output (best-effort) so deployment plan view
   // surfaces internal container output without needing SSH access. Safe to call
   // when the container doesn't exist — failures are recorded as a note.
   const captureContainerLogs = async () => {
     if (!dockerClient) return;
+    if (containerLogsCaptured) return;
     try {
       const settings = await getSystemSettings();
       const tail = settings.defaultLogLines;
@@ -87,6 +93,9 @@ export async function deployService(
       });
       logs.push(`\n--- container logs (${service.containerName}, last ${tail} lines) ---`);
       logs.push(containerLogs.trim() || '(no output)');
+      // Only mark as captured on the success path so a transient failure can
+      // still be retried from the catch block.
+      containerLogsCaptured = true;
     } catch (err) {
       logs.push(
         `\n--- container logs unavailable (${service.containerName}): ${getErrorMessage(err, 'unknown error')} ---`

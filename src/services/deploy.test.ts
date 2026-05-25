@@ -318,6 +318,49 @@ describe('deploy', () => {
       expect(logs).not.toContain('--- container logs');
     });
 
+    it('does not re-capture container logs in the catch block after a successful capture', async () => {
+      // Regression test: previously, a post-success failure (e.g. recordTagDeployment
+      // throwing after sshClient was disconnected) caused the catch block to invoke
+      // captureContainerLogs again, producing a misleading "unavailable" note after
+      // the already-captured real logs.
+      const service = createMockServiceData();
+      mockPrisma.service.findUniqueOrThrow.mockResolvedValue(service as any);
+      mockPrisma.deployment.create.mockResolvedValue({ id: 'dep-1', status: 'running' } as any);
+      mockPrisma.deployment.update.mockResolvedValue({ id: 'dep-1', status: 'failed' } as any);
+      // Force the post-success path to throw AFTER captureContainerLogs has already
+      // emitted real logs. service.update is called twice on the success path; make
+      // the second call (status: 'running' after logs captured) throw.
+      let svcUpdateCalls = 0;
+      mockPrisma.service.update.mockImplementation(async () => {
+        svcUpdateCalls += 1;
+        if (svcUpdateCalls > 1) throw new Error('post-success failure');
+        return {} as any;
+      });
+
+      const mockDocker = {
+        pullImage: vi.fn().mockResolvedValue(undefined),
+        restartContainer: vi.fn().mockResolvedValue(undefined),
+        listContainers: vi.fn().mockResolvedValue([
+          { id: 'c1', name: service.containerName, image: 'web-app:v2.0', status: 'Up', state: 'running' },
+        ]),
+        getContainerLogs: vi.fn().mockResolvedValue('first capture line\n'),
+      };
+      mockCreateDocker.mockResolvedValue({ dockerClient: mockDocker, sshClient: null, mode: 'socket' } as any);
+
+      await deployService('svc-1', 'user-1', 'user-id-1', {
+        imageTag: 'v2.0',
+        pullImage: true,
+        generateArtifacts: false,
+      });
+
+      // getContainerLogs must be called exactly once — not re-invoked from catch.
+      expect(mockDocker.getContainerLogs).toHaveBeenCalledTimes(1);
+      const logs = getPersistedLogs();
+      expect(logs).toContain('first capture line');
+      // The misleading "unavailable" note must not appear after a successful capture.
+      expect(logs).not.toContain('container logs unavailable');
+    });
+
     it('uses settings.defaultLogLines as the tail value (not a hardcoded 100)', async () => {
       mockGetSystemSettings.mockResolvedValueOnce({ defaultLogLines: 250 } as any);
 

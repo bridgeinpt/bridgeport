@@ -289,10 +289,13 @@ export class DockerSocketClient implements DockerClient {
   ): Promise<string> {
     const container = this.docker.getContainer(containerName);
 
-    // dockerode accepts `until` as a Unix timestamp (seconds). Convert from ISO if provided.
+    // dockerode accepts `until` as a Unix timestamp (seconds). Convert from ISO
+    // if provided. Preserve sub-second precision (Docker Engine API accepts a
+    // fractional value) so pagination cursors like ".500Z" don't get floored
+    // and cause partial overlap with the rendered page.
     let untilTs: number | undefined;
     if (options?.until) {
-      const parsed = Math.floor(new Date(options.until).getTime() / 1000);
+      const parsed = new Date(options.until).getTime() / 1000;
       if (!Number.isNaN(parsed)) untilTs = parsed;
     }
 

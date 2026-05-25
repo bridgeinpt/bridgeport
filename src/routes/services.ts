@@ -345,9 +345,13 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
 
       try {
         // Fall back to admin-configured defaultLogLines when no explicit tail is given
+        // or when the provided tail is unparseable / out of range.
+        // Cap to 10000 to align with the admin setting's upper bound.
+        const MAX_TAIL = 10000;
         let tailValue: number;
-        if (tail) {
-          tailValue = parseInt(tail);
+        const parsedTail = tail !== undefined ? parseInt(tail, 10) : NaN;
+        if (Number.isFinite(parsedTail) && parsedTail >= 1) {
+          tailValue = Math.min(parsedTail, MAX_TAIL);
         } else {
           const settings = await getSystemSettings();
           tailValue = settings.defaultLogLines;

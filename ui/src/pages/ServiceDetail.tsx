@@ -408,6 +408,9 @@ export default function ServiceDetail() {
       } else {
         toast.error(message);
         setShowLogs(false);
+        // Clear any previous log content so a future re-open doesn't show
+        // stale text with the Load Older button permanently disabled.
+        setLogs('');
       }
     } finally {
       setLogsLoading(false);
@@ -427,17 +430,43 @@ export default function ServiceDetail() {
         return;
       }
       const newOldest = extractOldestTimestamp(older);
-      if (newOldest && newOldest === oldestLogTimestamp) {
+      if (!newOldest) {
+        // Can't parse a timestamp from the older chunk -> cannot advance the
+        // cursor safely. Mark pagination as exhausted to avoid re-fetching the
+        // same payload on subsequent clicks.
+        setNoMoreOlderLogs(true);
+        return;
+      }
+      if (newOldest === oldestLogTimestamp) {
         // Server clipped at the same boundary — nothing new to fetch
         setNoMoreOlderLogs(true);
+        return;
+      }
+      // docker --until is inclusive, so the boundary line (the previous oldest
+      // log timestamp) appears in both pages. Drop leading lines whose
+      // timestamp equals the prior cursor to avoid visible duplicates.
+      const olderLines = trimmed.split('\n');
+      let dropIdx = 0;
+      while (dropIdx < olderLines.length) {
+        const m = olderLines[dropIdx].match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/);
+        if (m && m[1] === oldestLogTimestamp) {
+          dropIdx++;
+        } else {
+          break;
+        }
+      }
+      const dedupedTrimmed = olderLines.slice(dropIdx).join('\n');
+      if (!dedupedTrimmed) {
+        // The entire older chunk was the boundary line — nothing new to add.
+        setOldestLogTimestamp(newOldest);
         return;
       }
       // Preserve scroll position when prepending older content
       const container = logsContainerRef.current;
       const previousHeight = container?.scrollHeight ?? 0;
       const previousTop = container?.scrollTop ?? 0;
-      setLogs((prev) => `${trimmed}\n${prev}`);
-      if (newOldest) setOldestLogTimestamp(newOldest);
+      setLogs((prev) => `${dedupedTrimmed}\n${prev}`);
+      setOldestLogTimestamp(newOldest);
       // After DOM updates, restore the user's view by adjusting for added height
       requestAnimationFrame(() => {
         if (container) {
