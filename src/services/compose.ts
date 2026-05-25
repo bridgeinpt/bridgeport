@@ -150,11 +150,19 @@ export async function generateDeploymentArtifacts(
       // Binary files: pass through content as-is (already base64-encoded)
       content = sf.configFile.content;
     } else {
-      // Text files: resolve secret placeholders and trim trailing empty lines
-      const { content: resolvedContent } = await resolveSecretPlaceholders(
+      // Text files: resolve secret placeholders and trim trailing empty lines.
+      // templateErrors indicate the template syntax itself is broken (malformed
+      // {{range}}, unknown filter, etc); the rendered content would ship with
+      // raw directive text or empty bodies and is unsafe to deploy — fail loudly.
+      const { content: resolvedContent, templateErrors } = await resolveSecretPlaceholders(
         environmentId,
         sf.configFile.content
       );
+      if (templateErrors.length > 0) {
+        throw new Error(
+          `Config file "${sf.configFile.filename}" has template errors: ${templateErrors.join('; ')}`
+        );
+      }
       content = resolvedContent.trimEnd();
     }
 
