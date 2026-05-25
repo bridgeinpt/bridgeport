@@ -273,7 +273,8 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
           void triggerAutoResyncForKey(
             existing.environmentId,
             secret.key,
-            `secret:${secret.key}:patch`
+            `secret:${secret.key}:patch`,
+            actorFrom(request)
           ).catch((err) => {
             console.error('[auto-resync] failed for secret patch:', err);
           });
@@ -516,7 +517,8 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
           void triggerAutoResyncForKey(
             existing.environmentId,
             v.key,
-            `var:${v.key}:patch`
+            `var:${v.key}:patch`,
+            actorFrom(request)
           ).catch((err) => {
             console.error('[auto-resync] failed for var patch:', err);
           });

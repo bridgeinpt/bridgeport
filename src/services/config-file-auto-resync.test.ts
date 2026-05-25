@@ -132,7 +132,9 @@ describe('triggerAutoResyncForKey', () => {
 
   it('queries Prisma with the correct filter shape and syncs matching files', async () => {
     const cf = buildConfigFileFixture();
-    mockPrisma.configFile.findMany.mockResolvedValue([{ id: cf.id, name: cf.name }]);
+    mockPrisma.configFile.findMany.mockResolvedValue([
+      { id: cf.id, name: cf.name, content: cf.content },
+    ]);
     mockPrisma.configFile.findUnique.mockResolvedValue(cf);
 
     await triggerAutoResyncForKey('env-1', 'UPSTREAMS', 'var:UPSTREAMS:patch');
@@ -146,7 +148,7 @@ describe('triggerAutoResyncForKey', () => {
         isBinary: false,
         content: { contains: '${UPSTREAMS}' },
       },
-      select: { id: true, name: true },
+      select: { id: true, name: true, content: true },
     });
 
     // Audit log records the trigger source on the auto path.
@@ -169,7 +171,9 @@ describe('triggerAutoResyncForKey', () => {
     const cf = buildConfigFileFixture({
       content: 'a ${UPSTREAMS} b ${UPSTREAMS} c ${UPSTREAMS}',
     });
-    mockPrisma.configFile.findMany.mockResolvedValue([{ id: cf.id, name: cf.name }]);
+    mockPrisma.configFile.findMany.mockResolvedValue([
+      { id: cf.id, name: cf.name, content: cf.content },
+    ]);
     mockPrisma.configFile.findUnique.mockResolvedValue(cf);
 
     await triggerAutoResyncForKey('env-1', 'UPSTREAMS', 'var:UPSTREAMS:patch');
@@ -190,8 +194,8 @@ describe('triggerAutoResyncForKey', () => {
 
   it('one failing file does not prevent the rest from syncing', async () => {
     mockPrisma.configFile.findMany.mockResolvedValue([
-      { id: 'cf-bad', name: 'bad.conf' },
-      { id: 'cf-good', name: 'good.conf' },
+      { id: 'cf-bad', name: 'bad.conf', content: '${UPSTREAMS}' },
+      { id: 'cf-good', name: 'good.conf', content: '${UPSTREAMS}' },
     ]);
 
     // First findUnique call (cf-bad) rejects; second resolves to a real file.
@@ -221,9 +225,70 @@ describe('triggerAutoResyncForKey', () => {
     expect(logAudit).not.toHaveBeenCalled();
   });
 
+  it('post-filters out SQL LIKE underscore-wildcard false positives', async () => {
+    // SQLite LIKE treats `_` as single-char wildcard, and Prisma does NOT
+    // escape it. For key `FOO_BAR`, the coarse SQL filter `%${FOO_BAR}%` would
+    // match a row whose content contains `${FOOXBAR}`. The JS post-filter must
+    // drop that row and only sync the file with the literal placeholder.
+    const matchingRow = {
+      id: 'cf-match',
+      name: 'match.conf',
+      content: 'use ${FOO_BAR} here',
+    };
+    const falsePositiveRow = {
+      id: 'cf-falsepos',
+      name: 'falsepos.conf',
+      // `_` in `FOO_BAR` matches `X` under SQL LIKE, so SQLite would surface
+      // this row even though it does not literally reference ${FOO_BAR}.
+      content: 'use ${FOOXBAR} here',
+    };
+    mockPrisma.configFile.findMany.mockResolvedValue([matchingRow, falsePositiveRow]);
+    mockPrisma.configFile.findUnique.mockResolvedValue(
+      buildConfigFileFixture({ id: 'cf-match', name: 'match.conf' })
+    );
+
+    await triggerAutoResyncForKey('env-1', 'FOO_BAR', 'var:FOO_BAR:patch');
+
+    // Only the literal-match row should have been fetched for sync; the
+    // false-positive row must be filtered out before any per-row work runs.
+    expect(mockPrisma.configFile.findUnique).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.configFile.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'cf-match' } })
+    );
+
+    expect(logAudit).toHaveBeenCalledTimes(1);
+    const auditCall = vi.mocked(logAudit).mock.calls[0][0];
+    expect(auditCall.resourceId).toBe('cf-match');
+  });
+
+  it('propagates actor identity fields into the audit log row', async () => {
+    const cf = buildConfigFileFixture();
+    mockPrisma.configFile.findMany.mockResolvedValue([
+      { id: cf.id, name: cf.name, content: cf.content },
+    ]);
+    mockPrisma.configFile.findUnique.mockResolvedValue(cf);
+
+    await triggerAutoResyncForKey('env-1', 'UPSTREAMS', 'var:UPSTREAMS:patch', {
+      userId: 'user-42',
+      apiTokenId: 'tok-7',
+    });
+
+    expect(logAudit).toHaveBeenCalledTimes(1);
+    const auditCall = vi.mocked(logAudit).mock.calls[0][0];
+    expect(auditCall.userId).toBe('user-42');
+    expect(auditCall.apiTokenId).toBe('tok-7');
+    // Trigger metadata is still on details so we can distinguish from
+    // operator-initiated syncs.
+    const details = auditCall.details as Record<string, unknown>;
+    expect(details.autoTriggered).toBe(true);
+    expect(details.triggeredBy).toBe('var:UPSTREAMS:patch');
+  });
+
   it('audit details.allSuccess reflects partial server failures', async () => {
     const cf = buildConfigFileFixture();
-    mockPrisma.configFile.findMany.mockResolvedValue([{ id: cf.id, name: cf.name }]);
+    mockPrisma.configFile.findMany.mockResolvedValue([
+      { id: cf.id, name: cf.name, content: cf.content },
+    ]);
     mockPrisma.configFile.findUnique.mockResolvedValue(cf);
 
     // Simulate SSH client creation failure for the (only) server.

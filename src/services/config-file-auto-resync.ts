@@ -3,6 +3,17 @@ import { createClientForServer, shellEscape } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 import { resolveSecretPlaceholders } from './secrets.js';
 import { logAudit } from './audit.js';
+
+/**
+ * Actor fields used to attribute the auto-triggered audit log row to the user
+ * (or service account) whose PATCH started the cascade. Shape matches what
+ * `actorFrom(request)` returns in `./audit.ts`.
+ */
+export interface AutoResyncActor {
+  userId?: string;
+  apiTokenId?: string;
+  serviceAccountId?: string;
+}
 import { getErrorMessage } from '../lib/helpers.js';
 
 /**
@@ -204,21 +215,28 @@ export async function triggerAutoResyncForKey(
   environmentId: string,
   key: string,
   triggeredBy: string,
+  actor?: AutoResyncActor,
 ): Promise<void> {
   try {
     // ${KEY} placeholder - binary files don't get substitution and are skipped
     // (see config-files route: only the text branch calls resolveSecretPlaceholders).
     const placeholder = '${' + key + '}';
 
-    const candidates = await prisma.configFile.findMany({
+    // SQL LIKE coarse-filter for indexing performance. We still post-filter in JS
+    // because SQLite's LIKE treats `_` as a single-char wildcard, and Prisma does
+    // NOT escape it. Without the JS filter, triggering for key `FOO_BAR` would
+    // also match a file containing `${FOOXBAR}` since `_` matches any char.
+    const rawCandidates = await prisma.configFile.findMany({
       where: {
         environmentId,
         autoResync: true,
         isBinary: false,
         content: { contains: placeholder },
       },
-      select: { id: true, name: true },
+      select: { id: true, name: true, content: true },
     });
+
+    const candidates = rawCandidates.filter((cf) => cf.content.includes(placeholder));
 
     if (candidates.length === 0) return;
 
@@ -229,6 +247,7 @@ export async function triggerAutoResyncForKey(
           if (!outcome) return; // Not attached to anything - nothing to do.
 
           await logAudit({
+            ...(actor ?? {}),
             action: 'sync_files',
             resourceType: 'config_file',
             resourceId: cf.id,
