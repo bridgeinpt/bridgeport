@@ -420,6 +420,39 @@ describe('secrets', () => {
       expect(templateErrors).toEqual([]);
     });
 
+    it('does not interpret $ patterns in var values as replacement metacharacters', async () => {
+      mockPrisma.server.findMany.mockResolvedValue([]);
+      mockPrisma.var.findMany.mockResolvedValueOnce([
+        { key: 'DB_PASS', value: 'pa$$word' },
+      ]);
+      mockPrisma.secret.findMany.mockResolvedValue([]);
+
+      const { content } = await resolveSecretPlaceholders(
+        'env-1',
+        'password: ${DB_PASS}'
+      );
+
+      // Without the function-replacement form, `$$` becomes `$` and the value
+      // is mangled to `pa$word`. Verify the literal preservation.
+      expect(content).toBe('password: pa$$word');
+    });
+
+    it('does not interpret $& or $1 patterns in secret values', async () => {
+      mockPrisma.server.findMany.mockResolvedValue([]);
+      mockPrisma.var.findMany.mockResolvedValue([]);
+      mockPrisma.secret.findMany.mockResolvedValue([
+        { key: 'TRICKY', encryptedValue: 'enc-tricky', nonce: 'n1' },
+      ]);
+      vi.mocked(decrypt).mockReturnValue('a$&b$1c');
+
+      const { content } = await resolveSecretPlaceholders(
+        'env-1',
+        'value=${TRICKY}'
+      );
+
+      expect(content).toBe('value=a$&b$1c');
+    });
+
     it('resolves vars alongside server iteration without spurious missing', async () => {
       // Realistic mix: range emits hostnames, vars supplies the port — no errors.
       mockPrisma.server.findMany.mockResolvedValue([

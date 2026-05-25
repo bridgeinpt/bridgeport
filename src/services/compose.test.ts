@@ -114,6 +114,30 @@ describe('compose', () => {
       expect(parsed.services['web-app'].ports).toEqual(['127.0.0.1:8080:80']);
     });
 
+    it('fails the build when a config file has template errors', async () => {
+      const { resolveSecretPlaceholders } = await import('./secrets.js');
+      vi.mocked(resolveSecretPlaceholders).mockResolvedValueOnce({
+        content: '',
+        missing: [],
+        templateErrors: ['Nested {{range}} blocks are not supported'],
+      });
+
+      mockPrisma.service.findUniqueOrThrow.mockResolvedValue(baseService({
+        files: [
+          {
+            targetPath: '/etc/app.conf',
+            configFile: {
+              filename: 'app.conf',
+              content: '{{range servers tag="web"}}{{range servers tag="db"}}x{{end}}{{end}}',
+              isBinary: false,
+            },
+          },
+        ],
+      }) as any);
+
+      await expect(generateDeploymentArtifacts('svc-1')).rejects.toThrow(/template errors/);
+    });
+
     it('omits ports section when exposedPorts is null', async () => {
       mockPrisma.service.findUniqueOrThrow.mockResolvedValue(baseService({
         exposedPorts: null,

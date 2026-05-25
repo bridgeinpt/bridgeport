@@ -177,14 +177,16 @@ export async function resolveSecretPlaceholders(
 
   let resolvedContent = templateContent;
 
-  // Resolve vars first
+  // Resolve vars first. Use the function-replacement form so `$`, `$&`, `$1`
+  // etc. in the value are preserved literally instead of being interpreted as
+  // String.replace replacement patterns (e.g. a secret like `pa$$word`).
   for (const [key, value] of Object.entries(vars)) {
-    resolvedContent = resolvedContent.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), value);
+    resolvedContent = resolvedContent.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), () => value);
   }
 
   // Then resolve secrets (overrides vars if same key)
   for (const [key, value] of Object.entries(secrets)) {
-    resolvedContent = resolvedContent.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), value);
+    resolvedContent = resolvedContent.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), () => value);
   }
 
   // Find any remaining unresolved placeholders

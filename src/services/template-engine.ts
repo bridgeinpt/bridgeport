@@ -116,8 +116,12 @@ function parseRangeHead(
     return { filters };
   }
 
-  // Tokenize key="value" pairs.
-  const filterRe = /(\w+)\s*=\s*"((?:[^"\\]|\\.)*)"\s*/g;
+  // Tokenize key="value" pairs with a *sticky* regex so any unparsable token
+  // between pairs (leading or middle garbage) causes the loop to bail out
+  // instead of being silently skipped. The trailing-content check below then
+  // catches both leading and trailing garbage.
+  const filterRe = /(\w+)\s*=\s*"((?:[^"\\]|\\.)*)"\s*/y;
+  filterRe.lastIndex = 0;
   let consumed = 0;
   let match: RegExpExecArray | null;
   while ((match = filterRe.exec(argsPart)) !== null) {
@@ -216,7 +220,37 @@ export async function renderTemplate(
 
     if (nested) {
       errors.push('Nested {{range}} blocks are not supported');
-      // Skip past the offending range head; leave subsequent content intact.
+      // Behavior: emit nothing for the whole outer block, then resume parsing
+      // *after* its matching {{end}}. Without this, the inner {{range}} would
+      // be re-parsed as a new outer range and the outer {{range}}/{{end}}
+      // directives would leak into the rendered output as literal text.
+      const skipRe = /\{\{\s*([^}]+?)\s*\}\}/g;
+      skipRe.lastIndex = headEnd;
+      let depth = 1;
+      let outerEnd: RegExpExecArray | null = null;
+      let skip: RegExpExecArray | null;
+      while ((skip = skipRe.exec(content)) !== null) {
+        const t = skip[1].trim();
+        if (/^range\b/.test(t)) depth++;
+        else if (t === 'end') {
+          depth--;
+          if (depth === 0) {
+            outerEnd = skip;
+            break;
+          }
+        }
+      }
+      // Drop literal between cursor and rangeStart too — the outer block is
+      // discarded as a unit so partial fragments don't leak through.
+      pieces.push({ type: 'literal', text: content.slice(cursor, rangeStart) });
+      if (outerEnd) {
+        cursor = outerEnd.index + outerEnd[0].length;
+        directiveRe.lastIndex = cursor;
+      } else {
+        // Unclosed outer block — swallow the rest of the content.
+        cursor = content.length;
+        directiveRe.lastIndex = cursor;
+      }
       continue;
     }
 

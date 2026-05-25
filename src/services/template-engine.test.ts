@@ -86,6 +86,25 @@ describe('template-engine', () => {
     expect(errors.some((e) => /Nested/.test(e))).toBe(true);
   });
 
+  it('does not leak outer {{range}}/{{end}} as literal text when nested', async () => {
+    const { content, errors } = await renderTemplate(
+      '{{range servers tag="web"}}A{{range servers tag="db"}}B{{end}}C{{end}}',
+      { listServers: async () => [], currentEnvironmentId: 'env1' }
+    );
+    expect(errors.length).toBeGreaterThan(0);
+    expect(content).not.toContain('{{range');
+    expect(content).not.toContain('{{end}}');
+  });
+
+  it('rejects garbage tokens between filter args', async () => {
+    const { errors } = await renderTemplate(
+      '{{range servers garbage tag="web"}}{{.name}}{{end}}',
+      { listServers: async () => [], currentEnvironmentId: 'env1' }
+    );
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors.some((e) => /Malformed|Unknown/.test(e))).toBe(true);
+  });
+
   it('reports unclosed range without throwing', async () => {
     const { content, errors } = await renderTemplate(
       'before {{range servers tag="web"}}{{.name}}',
