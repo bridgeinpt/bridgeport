@@ -225,7 +225,7 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
       const server = await findOrNotFound(
         prisma.server.findUnique({
           where: { id },
-          include: { services: true },
+          include: { serviceDeployments: { include: { service: true } } },
         }),
         'Server',
         reply
@@ -262,10 +262,10 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
 
     const token = authHeader.slice(7);
 
-    // Find server by agent token
+    // Find server by agent token. Include deployments so we can map containerName → ServiceDeployment.
     const server = await prisma.server.findFirst({
       where: { agentToken: token, metricsMode: METRICS_MODE.AGENT },
-      include: { services: true },
+      include: { serviceDeployments: { include: { service: { select: { id: true, name: true } } } } },
     });
 
     if (!server) {
@@ -353,21 +353,19 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
       data: serverUpdateData,
     });
 
-    // Save service metrics and health if provided
+    // Save service metrics and health if provided. Per-server runtime state now lives on ServiceDeployment.
     if (serviceMetrics && serviceMetrics.length > 0) {
       for (const sm of serviceMetrics) {
-        const service = server.services.find((s) => s.containerName === sm.containerName);
-        if (service) {
+        const sd = server.serviceDeployments.find((s) => s.containerName === sm.containerName);
+        if (sd) {
           const { containerName, state, health, ...metricsData } = sm;
 
-          // Save metrics
-          await saveServiceMetrics(service.id, metricsData);
+          // Save metrics linked to the ServiceDeployment row.
+          await saveServiceMetrics(sd.id, metricsData);
 
-          // Update service health status if provided
           if (state !== undefined || health !== undefined) {
             const isRunning = state === CONTAINER_STATUS.RUNNING;
 
-            // Determine health status from container health
             let healthStatus: string = HEALTH_STATUS.UNKNOWN;
             if (!isRunning) {
               healthStatus = HEALTH_STATUS.UNKNOWN;
@@ -379,7 +377,6 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
               healthStatus = HEALTH_STATUS.NONE;
             }
 
-            // Determine overall status
             let status: string = CONTAINER_STATUS.RUNNING;
             if (!isRunning) {
               status = CONTAINER_STATUS.STOPPED;
@@ -389,8 +386,8 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
               status = SERVER_STATUS.HEALTHY;
             }
 
-            await prisma.service.update({
-              where: { id: service.id },
+            await prisma.serviceDeployment.update({
+              where: { id: sd.id },
               data: {
                 status,
                 containerStatus: state || CONTAINER_STATUS.STOPPED,
@@ -403,13 +400,13 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
       }
     }
 
-    // Process agent-performed service health checks
+    // Process agent-performed service health checks (now per-deployment)
     if (serviceHealthChecks && serviceHealthChecks.length > 0) {
       for (const hc of serviceHealthChecks) {
-        const service = server.services.find((s) => s.containerName === hc.containerName);
-        if (service) {
-          await prisma.service.update({
-            where: { id: service.id },
+        const sd = server.serviceDeployments.find((s) => s.containerName === hc.containerName);
+        if (sd) {
+          await prisma.serviceDeployment.update({
+            where: { id: sd.id },
             data: {
               agentHealthSuccess: hc.success,
               agentHealthStatusCode: hc.statusCode ?? null,
@@ -421,9 +418,8 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
       }
     }
 
-    // Process agent-performed TCP port checks
+    // Agent TCP port checks (per-deployment)
     if (tcpCheckResults && tcpCheckResults.length > 0) {
-      // Group results by container name
       const resultsByContainer = new Map<string, typeof tcpCheckResults>();
       for (const result of tcpCheckResults) {
         const existing = resultsByContainer.get(result.containerName) || [];
@@ -432,10 +428,10 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       for (const [containerName, results] of resultsByContainer) {
-        const service = server.services.find((s) => s.containerName === containerName);
-        if (service) {
-          await prisma.service.update({
-            where: { id: service.id },
+        const sd = server.serviceDeployments.find((s) => s.containerName === containerName);
+        if (sd) {
+          await prisma.serviceDeployment.update({
+            where: { id: sd.id },
             data: {
               agentTcpCheckResults: JSON.stringify(results),
               agentTcpCheckedAt: now,
@@ -445,9 +441,8 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
       }
     }
 
-    // Process agent-performed TLS certificate checks
+    // Agent TLS cert checks (per-deployment)
     if (certCheckResults && certCheckResults.length > 0) {
-      // Group results by container name
       const resultsByContainer = new Map<string, typeof certCheckResults>();
       for (const result of certCheckResults) {
         const existing = resultsByContainer.get(result.containerName) || [];
@@ -456,10 +451,10 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       for (const [containerName, results] of resultsByContainer) {
-        const service = server.services.find((s) => s.containerName === containerName);
-        if (service) {
-          await prisma.service.update({
-            where: { id: service.id },
+        const sd = server.serviceDeployments.find((s) => s.containerName === containerName);
+        if (sd) {
+          await prisma.serviceDeployment.update({
+            where: { id: sd.id },
             data: {
               agentCertCheckResults: JSON.stringify(results),
               agentCertCheckedAt: now,
@@ -481,18 +476,16 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
 
     const token = authHeader.slice(7);
 
-    // Find server by agent token
+    // Find server by agent token. Pull per-deployment runtime, with template health/check config.
     const server = await prisma.server.findFirst({
       where: { agentToken: token, metricsMode: METRICS_MODE.AGENT },
       include: {
-        services: {
+        serviceDeployments: {
           where: { discoveryStatus: DISCOVERY_STATUS.FOUND },
           select: {
             id: true,
             containerName: true,
-            healthCheckUrl: true,
-            tcpChecks: true,
-            certChecks: true,
+            service: { select: { healthCheckUrl: true, tcpChecks: true, certChecks: true } },
           },
         },
       },
@@ -515,14 +508,14 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
       }
     };
 
-    // Build service config including health checks
-    const servicesConfig = server.services
-      .filter((s) => s.healthCheckUrl || s.tcpChecks || s.certChecks)
-      .map((s) => ({
-        containerName: s.containerName,
-        healthCheckUrl: s.healthCheckUrl,
-        tcpChecks: parseChecks(s.tcpChecks),
-        certChecks: parseChecks(s.certChecks),
+    // Build service config including health checks (sourced from the template).
+    const servicesConfig = server.serviceDeployments
+      .filter((sd) => sd.service.healthCheckUrl || sd.service.tcpChecks || sd.service.certChecks)
+      .map((sd) => ({
+        containerName: sd.containerName,
+        healthCheckUrl: sd.service.healthCheckUrl,
+        tcpChecks: parseChecks(sd.service.tcpChecks),
+        certChecks: parseChecks(sd.service.certChecks),
       }));
 
     // Extract metrics config for the agent

@@ -95,19 +95,25 @@ describe('environment routes', () => {
         environmentId: env.id,
         name: 'counts-img',
       });
+      // Service is env-scoped after the 2.0 split, so _count.services is just
+      // the number of Service rows with this environmentId. We still attach
+      // deployments via serverId to mirror a realistic seed shape.
       await createTestService(app.prisma, {
+        environmentId: env.id,
         serverId: s1.id,
         containerImageId: img.id,
         name: 'counts-svc-1',
         containerName: 'counts-c-1',
       });
       await createTestService(app.prisma, {
+        environmentId: env.id,
         serverId: s1.id,
         containerImageId: img.id,
         name: 'counts-svc-2',
         containerName: 'counts-c-2',
       });
       await createTestService(app.prisma, {
+        environmentId: env.id,
         serverId: s2.id,
         containerImageId: img.id,
         name: 'counts-svc-3',
@@ -153,8 +159,9 @@ describe('environment routes', () => {
     });
 
     it('should not leak children from a neighboring environment into the counts', async () => {
-      // Guards against the env-scoping in the services count (which goes through
-      // Server.environmentId rather than a direct Service.envId field).
+      // Guards against env-scoping in the services count: after the 2.0 split
+      // Service has environmentId directly, so a service in envB must not count
+      // toward envA.
       const envA = await createTestEnvironment(app.prisma, { name: 'iso-env-a' });
       const envB = await createTestEnvironment(app.prisma, { name: 'iso-env-b' });
       const serverB = await createTestServer(app.prisma, {
@@ -166,6 +173,7 @@ describe('environment routes', () => {
         name: 'iso-img-b',
       });
       await createTestService(app.prisma, {
+        environmentId: envB.id,
         serverId: serverB.id,
         containerImageId: imgB.id,
         name: 'iso-svc-b',

@@ -153,12 +153,12 @@ export async function saveServerMetrics(
 }
 
 export async function saveServiceMetrics(
-  serviceId: string,
+  serviceDeploymentId: string,
   metrics: ServiceMetricsData
 ): Promise<void> {
   await prisma.serviceMetrics.create({
     data: {
-      serviceId,
+      serviceDeploymentId,
       ...metrics,
     },
   });
@@ -184,14 +184,14 @@ export async function getServerMetrics(
 }
 
 export async function getServiceMetrics(
-  serviceId: string,
+  serviceDeploymentId: string,
   from?: Date,
   to?: Date,
   limit: number = 100
 ) {
   return prisma.serviceMetrics.findMany({
     where: {
-      serviceId,
+      serviceDeploymentId,
       collectedAt: {
         ...(from && { gte: from }),
         ...(to && { lte: to }),
@@ -240,7 +240,7 @@ interface ServerLatestRow {
 }
 interface ServiceLatestRow {
   id: string;
-  serviceId: string;
+  serviceDeploymentId: string;
   cpuPercent: number | null;
   memoryUsedMb: number | null;
   memoryLimitMb: number | null;
@@ -262,7 +262,7 @@ export async function getEnvironmentMetricsSummary(environmentId: string) {
   // ROW_NUMBER() OVER (PARTITION BY ... ORDER BY ...). The
   // `@@index([serverId, collectedAt(sort: Desc)])` index on each metrics
   // table makes this almost free.
-  const [servers, services] = await Promise.all([
+  const [servers, deployments] = await Promise.all([
     prisma.server.findMany({
       where: { environmentId },
       select: {
@@ -273,19 +273,22 @@ export async function getEnvironmentMetricsSummary(environmentId: string) {
         metricsMode: true,
       },
     }),
-    prisma.service.findMany({
+    // Service.server moved to ServiceDeployment in 2.0. Each row here is one
+    // (service, server) pair carrying the runtime containerName that
+    // ServiceMetrics is keyed against.
+    prisma.serviceDeployment.findMany({
       where: { server: { environmentId } },
       select: {
         id: true,
-        name: true,
-        containerName: true,
         serverId: true,
+        containerName: true,
+        service: { select: { id: true, name: true } },
       },
     }),
   ]);
 
   const serverIds = servers.map((s) => s.id);
-  const serviceIds = services.map((s) => s.id);
+  const deploymentIds = deployments.map((d) => d.id);
 
   const [serverLatest, serviceLatest] = await Promise.all([
     serverIds.length === 0
@@ -303,27 +306,27 @@ export async function getEnvironmentMetricsSummary(environmentId: string) {
             WHERE "serverId" IN (${Prisma.join(serverIds)})
           ) WHERE rn = 1
         `,
-    serviceIds.length === 0
+    deploymentIds.length === 0
       ? Promise.resolve([] as ServiceLatestRow[])
       : prisma.$queryRaw<ServiceLatestRow[]>`
-          SELECT id, "serviceId", "cpuPercent", "memoryUsedMb", "memoryLimitMb",
+          SELECT id, "serviceDeploymentId", "cpuPercent", "memoryUsedMb", "memoryLimitMb",
                  "networkRxMb", "networkTxMb", "restartCount", "collectedAt"
           FROM (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY "serviceId" ORDER BY "collectedAt" DESC) AS rn
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY "serviceDeploymentId" ORDER BY "collectedAt" DESC) AS rn
             FROM "ServiceMetrics"
-            WHERE "serviceId" IN (${Prisma.join(serviceIds)})
+            WHERE "serviceDeploymentId" IN (${Prisma.join(deploymentIds)})
           ) WHERE rn = 1
         `,
   ]);
 
   const serverMetricById = new Map(serverLatest.map((m) => [m.serverId, m]));
-  const serviceMetricById = new Map(serviceLatest.map((m) => [m.serviceId, m]));
+  const serviceMetricByDeployment = new Map(serviceLatest.map((m) => [m.serviceDeploymentId, m]));
 
-  const servicesByServer = new Map<string, typeof services>();
-  for (const svc of services) {
-    const arr = servicesByServer.get(svc.serverId) ?? [];
-    arr.push(svc);
-    servicesByServer.set(svc.serverId, arr);
+  const deploymentsByServer = new Map<string, typeof deployments>();
+  for (const d of deployments) {
+    const arr = deploymentsByServer.get(d.serverId) ?? [];
+    arr.push(d);
+    deploymentsByServer.set(d.serverId, arr);
   }
 
   return servers.map((server) => ({
@@ -333,11 +336,12 @@ export async function getEnvironmentMetricsSummary(environmentId: string) {
     tags: server.tags,
     metricsMode: server.metricsMode,
     latestMetrics: serverMetricById.get(server.id) ?? null,
-    services: (servicesByServer.get(server.id) ?? []).map((service) => ({
-      id: service.id,
-      name: service.name,
-      containerName: service.containerName,
-      latestMetrics: serviceMetricById.get(service.id) ?? null,
+    services: (deploymentsByServer.get(server.id) ?? []).map((d) => ({
+      id: d.service.id,
+      deploymentId: d.id,
+      name: d.service.name,
+      containerName: d.containerName,
+      latestMetrics: serviceMetricByDeployment.get(d.id) ?? null,
     })),
   }));
 }
@@ -366,9 +370,13 @@ export async function collectServerDataSSH(serverId: string): Promise<CombinedSe
     where: { id: serverId },
     include: {
       environment: true,
-      services: {
+      serviceDeployments: {
         where: { discoveryStatus: DISCOVERY_STATUS.FOUND },
-        select: { id: true, containerName: true, healthCheckUrl: true },
+        select: {
+          id: true,
+          containerName: true,
+          service: { select: { healthCheckUrl: true } },
+        },
       },
     },
   });
@@ -419,34 +427,30 @@ export async function collectServerDataSSH(serverId: string): Promise<CombinedSe
     const serviceData: ServiceHealthData[] = [];
 
     if (dockerClient) {
-      for (const service of server.services) {
+      for (const sd of server.serviceDeployments) {
         try {
-          // Get container health and stats using Docker client
-          const containerHealth = await dockerClient.getContainerHealth(service.containerName);
-          const metrics = await dockerClient.getContainerStats(service.containerName);
+          const containerHealth = await dockerClient.getContainerHealth(sd.containerName);
+          const metrics = await dockerClient.getContainerStats(sd.containerName);
 
-          // Check URL health if configured (requires SSH/local for curl)
           let urlHealth: UrlHealthResult | null = null;
-          if (service.healthCheckUrl && dockerSSH) {
-            urlHealth = await dockerSSH.checkUrl(service.healthCheckUrl);
+          if (sd.service.healthCheckUrl && dockerSSH) {
+            urlHealth = await dockerSSH.checkUrl(sd.service.healthCheckUrl);
           }
 
-          // Determine health and overall status
           const healthStatus = determineHealthStatus(containerHealth.health, containerHealth.running, urlHealth);
           const overallStatus = determineOverallStatus(containerHealth.state, containerHealth.running, healthStatus);
 
           serviceData.push({
-            containerName: service.containerName,
+            containerName: sd.containerName,
             metrics: Object.keys(metrics).length > 0 ? metrics : null,
             containerStatus: containerHealth.state,
             healthStatus,
             overallStatus,
           });
         } catch (err) {
-          // Don't let individual container errors cascade to mark the server as unhealthy
-          console.error(`[Metrics] Failed to collect data for container ${service.containerName}:`, err);
+          console.error(`[Metrics] Failed to collect data for container ${sd.containerName}:`, err);
           serviceData.push({
-            containerName: service.containerName,
+            containerName: sd.containerName,
             metrics: null,
             containerStatus: SERVER_STATUS.UNKNOWN,
             healthStatus: SERVER_STATUS.UNKNOWN,

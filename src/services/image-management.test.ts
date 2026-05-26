@@ -23,6 +23,9 @@ const { mockPrisma } = vi.hoisted(() => ({
       update: vi.fn(),
       updateMany: vi.fn(),
     },
+    serviceDeployment: {
+      updateMany: vi.fn(),
+    },
     imageDigest: {
       create: vi.fn(),
       update: vi.fn(),
@@ -31,6 +34,11 @@ const { mockPrisma } = vi.hoisted(() => ({
       findMany: vi.fn(),
       count: vi.fn(),
     },
+    // linkServiceToContainerImage wraps its writes in $transaction([...]) so a
+    // failure between the two updates can't leave inconsistent state. The mock
+    // resolves each promise in the array — Prisma's real $transaction has the
+    // same observable behavior for our purposes.
+    $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
   },
 }));
 
@@ -122,7 +130,8 @@ describe('image-management', () => {
   });
 
   describe('linkServiceToContainerImage', () => {
-    it('links service and sets imageDigestId from latest digest', async () => {
+    it('links service and updates ServiceDeployment imageDigestId from latest digest', async () => {
+      // 2.0: imageDigestId now lives on ServiceDeployment, not Service.
       mockPrisma.containerImage.findUniqueOrThrow.mockResolvedValue({
         id: 'img-1',
         tagFilter: 'latest',
@@ -131,24 +140,28 @@ describe('image-management', () => {
         id: 'digest-1',
         tags: '["latest", "v1.0"]',
       });
-      mockPrisma.service.update.mockResolvedValue({ id: 'svc-1', imageDigestId: 'digest-1' });
+      mockPrisma.service.update.mockResolvedValue({ id: 'svc-1' });
+      mockPrisma.serviceDeployment.updateMany.mockResolvedValue({ count: 1 });
 
-      const result = await linkServiceToContainerImage('img-1', 'svc-1');
-      expect(result.imageDigestId).toBe('digest-1');
+      await linkServiceToContainerImage('img-1', 'svc-1');
+
+      // Link sets the container image on the template …
       expect(mockPrisma.service.update).toHaveBeenCalledWith({
         where: { id: 'svc-1' },
-        data: expect.objectContaining({
-          containerImageId: 'img-1',
-          imageDigestId: 'digest-1',
-        }),
+        data: expect.objectContaining({ containerImageId: 'img-1' }),
+      });
+      // … and propagates the latest digest to all of the template's deployments.
+      expect(mockPrisma.serviceDeployment.updateMany).toHaveBeenCalledWith({
+        where: { serviceId: 'svc-1' },
+        data: { imageDigestId: 'digest-1' },
       });
     });
   });
 
   describe('recordTagDeployment', () => {
-    it('creates history and clears updateAvailable on success', async () => {
+    it('creates history and updates ServiceDeployment imageDigestId for all deployments on success', async () => {
       mockPrisma.containerImage.update.mockResolvedValue({});
-      mockPrisma.service.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.serviceDeployment.updateMany.mockResolvedValue({ count: 2 });
       mockPrisma.containerImageHistory.create.mockResolvedValue({
         id: 'hist-1',
         tag: 'v2.0',
@@ -161,8 +174,9 @@ describe('image-management', () => {
         where: { id: 'img-1' },
         data: { updateAvailable: false, deployedDigestId: 'digest-1' },
       });
-      expect(mockPrisma.service.updateMany).toHaveBeenCalledWith({
-        where: { containerImageId: 'img-1' },
+      // 2.0: imageDigestId is on the ServiceDeployment, not the Service template.
+      expect(mockPrisma.serviceDeployment.updateMany).toHaveBeenCalledWith({
+        where: { service: { containerImageId: 'img-1' } },
         data: { imageDigestId: 'digest-1' },
       });
     });

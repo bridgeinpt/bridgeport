@@ -342,18 +342,24 @@ describe('buildDeploymentPlan', () => {
     ).rejects.toThrow('No services found for deployment');
   });
 
-  it('creates plan with deploy steps for services', async () => {
-    const mockServices = [
-      makeService('svc-1', 'web-app'),
+  it('creates plan with one deploy step per ServiceDeployment', async () => {
+    // Service template with two per-server deployments → expect two deploy steps.
+    const svc = makeService('svc-1', 'web-app');
+    (svc as any).serviceDeployments = [
+      { id: 'sd-1', server: { name: 'srv-a', hostname: 'a.local' } },
+      { id: 'sd-2', server: { name: 'srv-b', hostname: 'b.local' } },
     ];
-    mockPrisma.service.findMany.mockResolvedValue(mockServices as any);
+    mockPrisma.service.findMany.mockResolvedValue([svc] as any);
 
     const createdPlan = { id: 'plan-1', name: 'Deploy v1.0' };
     mockPrisma.deploymentPlan.create.mockResolvedValue(createdPlan as any);
-    mockPrisma.deploymentPlanStep.createMany.mockResolvedValue({ count: 1 });
+    mockPrisma.deploymentPlanStep.createMany.mockResolvedValue({ count: 2 });
     mockPrisma.deploymentPlan.findUniqueOrThrow.mockResolvedValue({
       ...createdPlan,
-      steps: [{ id: 'step-1', order: 0, action: 'deploy' }],
+      steps: [
+        { id: 'step-1', order: 0, action: 'deploy' },
+        { id: 'step-2', order: 1, action: 'deploy' },
+      ],
     } as any);
 
     const plan = await buildDeploymentPlan({
@@ -374,10 +380,15 @@ describe('buildDeploymentPlan', () => {
         }),
       })
     );
+    // Fan-out: one deploy step per ServiceDeployment, both linked back to the same serviceId.
+    const stepData = mockPrisma.deploymentPlanStep.createMany.mock.calls[0][0].data as any[];
+    expect(stepData).toHaveLength(2);
+    expect(stepData.map((s) => s.serviceDeploymentId).sort()).toEqual(['sd-1', 'sd-2']);
+    expect(stepData.every((s) => s.serviceId === 'svc-1' && s.action === 'deploy')).toBe(true);
     expect(plan.id).toBe('plan-1');
   });
 
-  it('creates health check steps for services with health dependencies', async () => {
+  it('creates health check steps per deployment for services with health dependencies', async () => {
     const svc = makeService('svc-1', 'web-app', [], []);
     svc.dependencies = [{
       id: 'dep-1',
@@ -387,6 +398,10 @@ describe('buildDeploymentPlan', () => {
       createdAt: new Date(),
       dependsOn: {} as Service,
     }] as any;
+    // One deployment → expect deploy + health_check = 2 steps.
+    (svc as any).serviceDeployments = [
+      { id: 'sd-1', server: { name: 'srv-a', hostname: 'a.local' } },
+    ];
 
     mockPrisma.service.findMany.mockResolvedValue([svc] as any);
     mockPrisma.deploymentPlan.create.mockResolvedValue({ id: 'plan-1' } as any);
@@ -406,7 +421,9 @@ describe('buildDeploymentPlan', () => {
     const data = mockPrisma.deploymentPlanStep.createMany.mock.calls[0][0].data;
     expect(data).toHaveLength(2);
     expect(data[0].action).toBe('deploy');
+    expect(data[0].serviceDeploymentId).toBe('sd-1');
     expect(data[1].action).toBe('health_check');
+    expect(data[1].serviceDeploymentId).toBe('sd-1');
   });
 });
 
@@ -426,6 +443,7 @@ describe('executePlan', () => {
   });
 
   it('executes deploy steps sequentially and marks plan completed', async () => {
+    // 2.0: each step targets a ServiceDeployment (per-server), not a Service template directly.
     const plan = {
       id: 'plan-1',
       name: 'Test Plan',
@@ -435,7 +453,16 @@ describe('executePlan', () => {
       parallelExecution: false,
       imageTag: 'v1.0',
       steps: [
-        { id: 'step-1', order: 0, action: 'deploy', targetTag: 'v1.0', previousTag: 'v0.9', service: { id: 'svc-1', name: 'web-app' }, serviceId: 'svc-1' },
+        {
+          id: 'step-1', order: 0, action: 'deploy', targetTag: 'v1.0', previousTag: 'v0.9',
+          service: { id: 'svc-1', name: 'web-app' }, serviceId: 'svc-1',
+          serviceDeploymentId: 'sd-1',
+          serviceDeployment: {
+            id: 'sd-1',
+            server: { id: 'srv-1', name: 'srv-a' },
+            service: { id: 'svc-1', name: 'web-app' },
+          },
+        },
       ],
     };
 
@@ -457,6 +484,14 @@ describe('executePlan', () => {
 
     await executePlan('plan-1');
 
+    // deployService is called with the ServiceDeployment id (per-server), NOT the Service id.
+    expect(mockDeployService).toHaveBeenCalledWith(
+      'sd-1',
+      expect.any(String),
+      undefined,
+      expect.objectContaining({ imageTag: 'v1.0' })
+    );
+
     // Plan marked running then completed
     expect(mockPrisma.deploymentPlan.update).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -475,6 +510,17 @@ describe('executePlan', () => {
   });
 
   it('triggers rollback on failure when autoRollback is enabled', async () => {
+    const buildStep = (id: string, order: number, sdId: string, svcId: string, svcName: string) => ({
+      id, order, action: 'deploy', targetTag: 'v1.0', previousTag: 'v0.9',
+      service: { id: svcId, name: svcName }, serviceId: svcId,
+      serviceDeploymentId: sdId,
+      serviceDeployment: {
+        id: sdId,
+        server: { id: 'srv-1', name: 'srv-a' },
+        service: { id: svcId, name: svcName },
+      },
+    });
+
     const plan = {
       id: 'plan-1',
       name: 'Test Plan',
@@ -484,56 +530,47 @@ describe('executePlan', () => {
       parallelExecution: false,
       imageTag: 'v1.0',
       steps: [
-        { id: 'step-1', order: 0, action: 'deploy', targetTag: 'v1.0', previousTag: 'v0.9', service: { id: 'svc-1', name: 'web-app' }, serviceId: 'svc-1' },
-        { id: 'step-2', order: 1, action: 'deploy', targetTag: 'v1.0', previousTag: 'v0.9', service: { id: 'svc-2', name: 'api' }, serviceId: 'svc-2' },
+        buildStep('step-1', 0, 'sd-1', 'svc-1', 'web-app'),
+        buildStep('step-2', 1, 'sd-2', 'svc-2', 'api'),
       ],
     };
 
-    // First call for executePlan, second for rollbackPlan
+    // First call for executePlan, second for rollbackPlan (steps in reverse order with statuses).
     mockPrisma.deploymentPlan.findUniqueOrThrow
       .mockResolvedValueOnce(plan as any)
       .mockResolvedValueOnce({
         ...plan,
         steps: [
-          { ...plan.steps[0], status: 'success', previousTag: 'v0.9', action: 'deploy', service: { id: 'svc-1', name: 'web-app' } },
-          { ...plan.steps[1], status: 'failed', previousTag: 'v0.9', action: 'deploy', service: { id: 'svc-2', name: 'api' } },
+          { ...plan.steps[1], status: 'failed' },
+          { ...plan.steps[0], status: 'success' },
         ],
-      } as any);
+      } as any)
+      .mockResolvedValueOnce({ ...plan, logs: 'existing logs', steps: [] } as any);
 
     mockPrisma.deploymentPlan.update.mockResolvedValue({} as any);
     mockPrisma.deploymentPlanStep.update.mockResolvedValue({} as any);
 
-    // First deploy succeeds
+    // First deploy succeeds; second deploy throws; rollback deploy of step-1 succeeds.
     mockDeployService
-      .mockResolvedValueOnce({
-        deployment: { id: 'dep-1', status: 'success' },
-        logs: 'OK',
-      } as any)
-      // Second deploy fails
+      .mockResolvedValueOnce({ deployment: { id: 'dep-1', status: 'success' }, logs: 'OK' } as any)
       .mockRejectedValueOnce(new Error('Deploy failed'))
-      // Rollback deploy succeeds
-      .mockResolvedValueOnce({
-        deployment: { id: 'dep-3', status: 'success' },
-        logs: 'Rolled back',
-      } as any);
+      .mockResolvedValueOnce({ deployment: { id: 'dep-3', status: 'success' }, logs: 'Rolled back' } as any);
 
-    // Step status checks during sequential execution
     mockPrisma.deploymentPlanStep.findUniqueOrThrow
       .mockResolvedValueOnce({ id: 'step-1', status: 'success' } as any)
       .mockResolvedValueOnce({ id: 'step-2', status: 'failed' } as any);
 
-    mockPrisma.deploymentPlan.findUniqueOrThrow.mockResolvedValue({
-      ...plan,
-      logs: 'existing logs',
-      steps: [
-        { ...plan.steps[0], status: 'success', previousTag: 'v0.9', action: 'deploy', service: { id: 'svc-1', name: 'web-app' } },
-      ],
-    } as any);
-
     await executePlan('plan-1');
 
-    // Rollback should have been called - deployService called 3 times (2 deploys + 1 rollback)
+    // 2 deploys + 1 rollback = 3 deployService calls.
     expect(mockDeployService).toHaveBeenCalledTimes(3);
+    // The rollback call targets the ServiceDeployment id (per-server), reusing previousTag.
+    expect(mockDeployService).toHaveBeenCalledWith(
+      'sd-1',
+      'rollback',
+      undefined,
+      expect.objectContaining({ imageTag: 'v0.9' })
+    );
   });
 
   it('marks plan as failed without rollback when autoRollback is disabled', async () => {
@@ -546,7 +583,16 @@ describe('executePlan', () => {
       parallelExecution: false,
       imageTag: 'v1.0',
       steps: [
-        { id: 'step-1', order: 0, action: 'deploy', targetTag: 'v1.0', previousTag: 'v0.9', service: { id: 'svc-1', name: 'web-app' }, serviceId: 'svc-1' },
+        {
+          id: 'step-1', order: 0, action: 'deploy', targetTag: 'v1.0', previousTag: 'v0.9',
+          service: { id: 'svc-1', name: 'web-app' }, serviceId: 'svc-1',
+          serviceDeploymentId: 'sd-1',
+          serviceDeployment: {
+            id: 'sd-1',
+            server: { id: 'srv-1', name: 'srv-a' },
+            service: { id: 'svc-1', name: 'web-app' },
+          },
+        },
       ],
     };
 
@@ -619,15 +665,27 @@ describe('rollbackPlan', () => {
   });
 
   it('rolls back successful deploy steps in reverse order', async () => {
+    const buildStep = (id: string, order: number, sdId: string, svcId: string, svcName: string, previousTag: string | null, status: string = 'success', action: string = 'deploy') => ({
+      id, order, action, status, previousTag,
+      service: { id: svcId, name: svcName },
+      serviceDeploymentId: sdId,
+      serviceDeployment: {
+        id: sdId,
+        server: { id: 'srv-1', name: 'srv-a' },
+        service: { id: svcId, name: svcName },
+      },
+    });
+
     mockPrisma.deploymentPlan.findUniqueOrThrow.mockResolvedValue({
       id: 'plan-1',
       name: 'Test Plan',
       environmentId: 'env-1',
       userId: 'user-1',
+      logs: '',
       steps: [
         // Reverse order (desc by order)
-        { id: 'step-2', order: 1, action: 'deploy', status: 'success', previousTag: 'v0.9', service: { id: 'svc-2', name: 'api' } },
-        { id: 'step-1', order: 0, action: 'deploy', status: 'success', previousTag: 'v0.8', service: { id: 'svc-1', name: 'web' } },
+        buildStep('step-2', 1, 'sd-2', 'svc-2', 'api', 'v0.9'),
+        buildStep('step-1', 0, 'sd-1', 'svc-1', 'web', 'v0.8'),
       ],
     } as any);
 
@@ -643,13 +701,13 @@ describe('rollbackPlan', () => {
     // Both steps rolled back
     expect(mockDeployService).toHaveBeenCalledTimes(2);
 
-    // First rollback uses step-2's previous tag (reverse order)
+    // First rollback (step-2, the most recent deploy) uses sd-2 and v0.9.
     expect(mockDeployService).toHaveBeenCalledWith(
-      'svc-2', 'rollback', 'user-1',
+      'sd-2', 'rollback', 'user-1',
       expect.objectContaining({ imageTag: 'v0.9' })
     );
     expect(mockDeployService).toHaveBeenCalledWith(
-      'svc-1', 'rollback', 'user-1',
+      'sd-1', 'rollback', 'user-1',
       expect.objectContaining({ imageTag: 'v0.8' })
     );
 
@@ -662,14 +720,26 @@ describe('rollbackPlan', () => {
   });
 
   it('skips health_check steps during rollback', async () => {
+    const buildStep = (id: string, order: number, sdId: string, svcId: string, svcName: string, previousTag: string | null, status: string = 'success', action: string = 'deploy') => ({
+      id, order, action, status, previousTag,
+      service: { id: svcId, name: svcName },
+      serviceDeploymentId: sdId,
+      serviceDeployment: {
+        id: sdId,
+        server: { id: 'srv-1', name: 'srv-a' },
+        service: { id: svcId, name: svcName },
+      },
+    });
+
     mockPrisma.deploymentPlan.findUniqueOrThrow.mockResolvedValue({
       id: 'plan-1',
       name: 'Test Plan',
       environmentId: 'env-1',
       userId: 'user-1',
+      logs: '',
       steps: [
-        { id: 'step-2', order: 1, action: 'health_check', status: 'success', previousTag: null, service: { id: 'svc-1', name: 'web' } },
-        { id: 'step-1', order: 0, action: 'deploy', status: 'success', previousTag: 'v0.9', service: { id: 'svc-1', name: 'web' } },
+        buildStep('step-2', 1, 'sd-1', 'svc-1', 'web', null, 'success', 'health_check'),
+        buildStep('step-1', 0, 'sd-1', 'svc-1', 'web', 'v0.9'),
       ],
     } as any);
 

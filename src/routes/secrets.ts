@@ -60,12 +60,7 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
                 select: {
                   id: true,
                   name: true,
-                  server: {
-                    select: {
-                      id: true,
-                      name: true,
-                    },
-                  },
+                  serviceDeployments: { select: { server: { select: { id: true, name: true } } } },
                 },
               },
             },
@@ -104,11 +99,11 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
               id: file.id,
               name: file.name,
               filename: file.filename,
-              services: file.services.map((sf) => ({
+              services: file.services.flatMap((sf) => sf.service.serviceDeployments.map((sd) => ({
                 id: sf.service.id,
                 name: sf.service.name,
-                serverName: sf.service.server.name,
-              })),
+                serverName: sd.server.name,
+              }))),
             });
           }
         }
@@ -352,12 +347,7 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
                 select: {
                   id: true,
                   name: true,
-                  server: {
-                    select: {
-                      id: true,
-                      name: true,
-                    },
-                  },
+                  serviceDeployments: { select: { server: { select: { id: true, name: true } } } },
                 },
               },
             },
@@ -394,11 +384,11 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
               id: file.id,
               name: file.name,
               filename: file.filename,
-              services: file.services.map((sf) => ({
+              services: file.services.flatMap((sf) => sf.service.serviceDeployments.map((sd) => ({
                 id: sf.service.id,
                 name: sf.service.name,
-                serverName: sf.service.server.name,
-              })),
+                serverName: sd.server.name,
+              }))),
             });
           }
         }

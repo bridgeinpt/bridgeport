@@ -300,6 +300,31 @@ model Service {
 }
 ```
 
+**Service template / deployment split (2.0)**: A `Service` is **environment-scoped** and acts as a reusable template; per-server runtime state (status, healthStatus, containerName, exposedPorts, discovery + agent check fields) lives on `ServiceDeployment`. Foreign keys on `Deployment`, `ServiceMetrics`, `DeploymentPlanStep`, and `ServiceFile` were rewired through `ServiceDeployment`. Auto-migration creates exactly one `ServiceDeployment` per pre-2.0 service. See [Services guide](../guides/services.md#how-it-works) for the data model walk-through.
+
+```prisma
+model Service {
+  // template-only fields: imageTag, composeTemplate, baseEnv,
+  // deployStrategy ('sequential' | 'parallel'), health* settings, etc.
+  environmentId String
+  serviceDeployments ServiceDeployment[]
+}
+
+model ServiceDeployment {
+  serviceId      String
+  serverId       String
+  containerName  String
+  status         String  // per-server runtime
+  containerStatus String
+  healthStatus   String
+  discoveryStatus String
+  exposedPorts   String?
+  envOverrides   String?
+  // ... lastCheckedAt, lastDeployedAt, agent check fields
+  @@unique([serverId, containerName])
+}
+```
+
 For details on working with migrations, see [Database Migrations](database-migrations.md).
 
 ---

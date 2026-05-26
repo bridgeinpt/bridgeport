@@ -51,14 +51,17 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      // Existence check first — avoids wasting a service.count traversal on 404s.
-      // The added latency on the happy path (sequential vs parallel) is ~1ms p50;
-      // well within the route's perf budget.
+      // Thin endpoint: just the env row + denormalized child counts. Per-resource
+      // detail (servers, services, etc.) lives on dedicated endpoints.
+      //
+      // After the 2.0 split, Service is env-scoped (has environmentId directly),
+      // so it can be counted through the standard `_count.services` selector
+      // without traversing a Server join.
       const environment = await prisma.environment.findUnique({
         where: { id },
         include: {
           _count: {
-            select: { servers: true, secrets: true, databases: true },
+            select: { servers: true, services: true, secrets: true, databases: true },
           },
         },
       });
@@ -67,17 +70,7 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
         return reply.code(404).send({ error: 'Environment not found' });
       }
 
-      // Service count requires traversing Server (no direct env FK on Service).
-      const servicesCount = await prisma.service.count({
-        where: { server: { environmentId: id } },
-      });
-
-      return {
-        environment: {
-          ...environment,
-          _count: { ...environment._count, services: servicesCount },
-        },
-      };
+      return { environment };
     }
   );
 

@@ -81,14 +81,18 @@ describe('server routes', () => {
         environmentId: env.id,
         name: 'sc-img',
       });
-      // sa: 2 services, sb: 0 services.
+      // sa: 2 deployments, sb: 0 deployments. After the 2.0 split, per-server
+      // "service count" is the number of ServiceDeployments on that server,
+      // surfaced to callers as _count.services for back-compat.
       await createTestService(app.prisma, {
+        environmentId: env.id,
         serverId: sa.id,
         containerImageId: img.id,
         name: 'sc-svc-1',
         containerName: 'sc-c-1',
       });
       await createTestService(app.prisma, {
+        environmentId: env.id,
         serverId: sa.id,
         containerImageId: img.id,
         name: 'sc-svc-2',
@@ -137,6 +141,7 @@ describe('server routes', () => {
         name: 'detail-img',
       });
       await createTestService(app.prisma, {
+        environmentId: envId,
         serverId: server.id,
         containerImageId: img.id,
         name: 'detail-svc',
@@ -167,12 +172,14 @@ describe('server routes', () => {
         imageName: 'registry.example.com/inc-image',
       });
       await createTestService(app.prisma, {
+        environmentId: envId,
         serverId: server.id,
         containerImageId: img.id,
         name: 'inc-svc-1',
         containerName: 'inc-c-1',
       });
       await createTestService(app.prisma, {
+        environmentId: envId,
         serverId: server.id,
         containerImageId: img.id,
         name: 'inc-svc-2',
@@ -204,6 +211,7 @@ describe('server routes', () => {
         name: 'badinc-img',
       });
       await createTestService(app.prisma, {
+        environmentId: envId,
         serverId: server.id,
         containerImageId: img.id,
         name: 'badinc-svc',

@@ -450,17 +450,14 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
       if (!image) return;
 
       const service = await findOrNotFound(
-        prisma.service.findUnique({
-          where: { id: serviceId },
-          include: { server: true },
-        }),
+        prisma.service.findUnique({ where: { id: serviceId } }),
         'Service',
         reply
       );
       if (!service) return;
 
-      // Verify service is in same environment
-      if (service.server.environmentId !== image.environmentId) {
+      // Verify service is in same environment (Service is env-scoped post-2.0)
+      if (service.environmentId !== image.environmentId) {
         return reply.code(400).send({ error: 'Service must be in the same environment as the container image' });
       }
 
@@ -493,18 +490,12 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
       // Find services in same environment that are linked to a different container image
       const services = await prisma.service.findMany({
         where: {
-          server: {
-            environmentId: image.environmentId,
-          },
-          containerImageId: {
-            not: id,
-          },
+          environmentId: image.environmentId,
+          containerImageId: { not: id },
         },
         include: {
-          server: true,
-          containerImage: {
-            select: { id: true, name: true, imageName: true },
-          },
+          serviceDeployments: { include: { server: true } },
+          containerImage: { select: { id: true, name: true, imageName: true } },
         },
       });
 

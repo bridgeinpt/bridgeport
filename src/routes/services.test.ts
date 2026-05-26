@@ -38,7 +38,7 @@ describe('service routes', () => {
 
   describe('GET /api/servers/:serverId/services', () => {
     it('should list services for server', async () => {
-      await createTestService(app.prisma, { serverId, containerImageId: imageId, name: 'list-svc' });
+      await createTestService(app.prisma, { environmentId: envId, serverId, containerImageId: imageId, name: 'list-svc' });
 
       const res = await app.inject({
         method: 'GET',
@@ -84,7 +84,7 @@ describe('service routes', () => {
 
   describe('GET /api/services/:id', () => {
     it('should return service details', async () => {
-      const svc = await createTestService(app.prisma, { serverId, containerImageId: imageId, name: 'detail-svc' });
+      const svc = await createTestService(app.prisma, { environmentId: envId, serverId, containerImageId: imageId, name: 'detail-svc' });
 
       const res = await app.inject({
         method: 'GET',
@@ -113,7 +113,8 @@ describe('service routes', () => {
   // ==================== POST /api/servers/:serverId/services ====================
 
   describe('POST /api/servers/:serverId/services', () => {
-    it('should create service linked to container image', async () => {
+    it('should create service linked to container image and an attached ServiceDeployment', async () => {
+      // 2.0: this legacy endpoint creates the Service template AND the per-server deployment.
       const res = await app.inject({
         method: 'POST',
         url: `/api/servers/${serverId}/services`,
@@ -128,9 +129,15 @@ describe('service routes', () => {
       expect(res.statusCode).toBe(200);
       expect(res.json().service).toMatchObject({
         name: 'new-svc',
-        containerName: 'new-container',
         containerImageId: imageId,
       });
+      // The deployment lives in its own table now; check it exists.
+      const deployments = await app.prisma.serviceDeployment.findMany({
+        where: { serviceId: res.json().service.id },
+      });
+      expect(deployments).toHaveLength(1);
+      expect(deployments[0].containerName).toBe('new-container');
+      expect(deployments[0].serverId).toBe(serverId);
     });
 
     it('should reject missing containerImageId with 400', async () => {
@@ -166,7 +173,7 @@ describe('service routes', () => {
 
   describe('PATCH /api/services/:id', () => {
     it('should update service', async () => {
-      const svc = await createTestService(app.prisma, { serverId, containerImageId: imageId, name: 'upd-svc' });
+      const svc = await createTestService(app.prisma, { environmentId: envId, serverId, containerImageId: imageId, name: 'upd-svc' });
 
       const res = await app.inject({
         method: 'PATCH',
@@ -195,7 +202,7 @@ describe('service routes', () => {
 
   describe('DELETE /api/services/:id', () => {
     it('should delete a service', async () => {
-      const svc = await createTestService(app.prisma, { serverId, containerImageId: imageId, name: 'del-svc' });
+      const svc = await createTestService(app.prisma, { environmentId: envId, serverId, containerImageId: imageId, name: 'del-svc' });
 
       const res = await app.inject({
         method: 'DELETE',

@@ -13,7 +13,9 @@ import {
   deployService,
   checkServiceUpdates,
   type EnvironmentDetail,
+  type ServerWithServices,
   type ServerWithServicesCount,
+  type ServiceWithServer,
   type MetricsSummaryServer,
   type AuditLog,
   type Database,
@@ -51,6 +53,8 @@ interface Alert {
 interface ServiceWithUpdate extends Service {
   serverName: string;
   serverId: string;
+  /** Target tag for the update, derived from the linked container image. */
+  targetTag: string;
 }
 
 interface DatabaseWithBackups extends Database {
@@ -183,17 +187,21 @@ export default function Dashboard() {
       }
     });
 
-    // Unhealthy services (using Set for O(1) lookup)
+    // Unhealthy services (using Set for O(1) lookup).
+    // We iterate the flat `services` array (one row per service template enriched
+    // with the first deployment's runtime + server, via listServices' back-compat
+    // surface). In 2.0 these fields are populated from ServiceDeployment.
     const healthyStatuses = new Set(['running', 'healthy', 'unknown']);
     services.forEach((service) => {
-      const serverName = service.server.name;
-      if (!healthyStatuses.has(service.status)) {
+      const serverName = service.server?.name ?? 'unknown';
+      const status = service.status ?? 'unknown';
+      if (!healthyStatuses.has(status)) {
         result.push({
           id: `unhealthy-${service.id}`,
           type: 'unhealthy',
           severity: 'error',
           title: 'Unhealthy Service',
-          description: `${service.name} on ${serverName}: ${service.status}`,
+          description: `${service.name} on ${serverName}: ${status}`,
           link: `/services/${service.id}`,
         });
       }
@@ -229,11 +237,24 @@ export default function Dashboard() {
     return result.filter((alert) => !dismissedAlerts.includes(alert.id));
   }, [metrics, services, auditLogs, dismissedAlerts]);
 
-  // Services with available updates
+  // Services with available updates (driven by the linked ContainerImage in 2.0).
+  // The "update available" signal moved off Service onto ContainerImage when the
+  // template/deployment split landed. Read `containerImage.updateAvailable` and
+  // diff `containerImage.bestTag` against the current `imageTag`.
   const servicesWithUpdates = useMemo<ServiceWithUpdate[]>(() => {
     return services
-      .filter((s) => s.latestAvailableTag && s.latestAvailableTag !== s.imageTag)
-      .map((s) => ({ ...s, serverName: s.server.name, serverId: s.server.id }));
+      .filter(
+        (s) =>
+          s.containerImage?.updateAvailable &&
+          s.containerImage?.bestTag &&
+          s.containerImage.bestTag !== s.imageTag
+      )
+      .map((s) => ({
+        ...s,
+        serverName: s.server?.name ?? 'unknown',
+        serverId: s.server?.id ?? '',
+        targetTag: s.containerImage!.bestTag!,
+      }));
   }, [services]);
 
   // Recent activity (filtered to relevant actions)
@@ -244,21 +265,31 @@ export default function Dashboard() {
       .slice(0, 5);
   }, [auditLogs]);
 
-  // All services with server info for health grid
+  // All services with server info for health grid.
+  // `server` is the back-compat surface from listServices (first deployment) — may
+  // be undefined for templates with no deployments.
   const allServices = useMemo(() => {
-    return services.map((s) => ({ ...s, serverName: s.server.name }));
+    return services.map((s) => ({ ...s, serverName: s.server?.name ?? 'unknown' }));
   }, [services]);
 
   // Build a topology-friendly `ServerWithServices[]` shape from the separate
   // servers + services arrays. The topology component still expects nested services.
-  const serversWithServices = useMemo(() => {
-    const byServer = new Map<string, Service[]>();
+  // Services that aren't yet attached to a server (no deployments) are skipped.
+  // We cast to ServerWithServices: TopologyDiagram reads status / healthStatus /
+  // containerImage / imageTag, all of which are present on listServices' back-compat
+  // surface (first deployment flattened onto the template).
+  const serversWithServices = useMemo<ServerWithServices[]>(() => {
+    const byServer = new Map<string, ServiceWithServerName[]>();
     for (const s of services) {
+      if (!s.serverId) continue;
       const list = byServer.get(s.serverId);
       if (list) list.push(s);
       else byServer.set(s.serverId, [s]);
     }
-    return servers.map((srv) => ({ ...srv, services: byServer.get(srv.id) ?? [] }));
+    return servers.map((srv) => ({
+      ...srv,
+      services: (byServer.get(srv.id) ?? []) as unknown as ServiceWithServer[],
+    }));
   }, [servers, services]);
 
   // Service health counts
@@ -324,21 +355,21 @@ export default function Dashboard() {
     // Deploy all services in parallel using Promise.allSettled
     const deployPromises = servicesWithUpdates.map((service) =>
       deployService(service.id, {
-        imageTag: service.latestAvailableTag!,
+        imageTag: service.targetTag,
         pullImage: true,
       }).then(
         () => ({
           serviceId: service.id,
           serviceName: service.name,
           serverName: service.serverName,
-          imageTag: service.latestAvailableTag!,
+          imageTag: service.targetTag,
           success: true as const,
         }),
         (err) => ({
           serviceId: service.id,
           serviceName: service.name,
           serverName: service.serverName,
-          imageTag: service.latestAvailableTag!,
+          imageTag: service.targetTag,
           success: false as const,
           error: err instanceof Error ? err.message : 'Deploy failed',
         })
@@ -628,12 +659,12 @@ export default function Dashboard() {
                     <p className="text-xs text-slate-400">
                       <span className="font-mono">{service.imageTag}</span>
                       <span className="mx-2 text-slate-500">&rarr;</span>
-                      <span className="font-mono text-primary-400">{service.latestAvailableTag}</span>
+                      <span className="font-mono text-primary-400">{service.targetTag}</span>
                     </p>
                   </div>
                 </div>
                 <button
-                  onClick={() => handleDeploy(service.id, service.latestAvailableTag!)}
+                  onClick={() => handleDeploy(service.id, service.targetTag)}
                   disabled={deploying === service.id}
                   className="btn btn-sm btn-primary"
                 >
@@ -652,15 +683,15 @@ export default function Dashboard() {
               </div>
             ))}
           </div>
-          {services.some((svc) => svc.lastUpdateCheckAt) && (
+          {services.some((svc) => svc.containerImage?.lastCheckedAt) && (
             <p className="text-xs text-slate-500 mt-3">
               Last checked:{' '}
               {formatDistanceToNow(
                 new Date(
                   Math.max(
                     ...services
-                      .filter((svc) => svc.lastUpdateCheckAt)
-                      .map((svc) => new Date(svc.lastUpdateCheckAt!).getTime())
+                      .filter((svc) => svc.containerImage?.lastCheckedAt)
+                      .map((svc) => new Date(svc.containerImage!.lastCheckedAt!).getTime())
                   )
                 ),
                 { addSuffix: true }

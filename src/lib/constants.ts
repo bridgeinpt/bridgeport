@@ -37,6 +37,10 @@ export type HealthStatus = (typeof HEALTH_STATUS)[keyof typeof HEALTH_STATUS];
 export const DISCOVERY_STATUS = {
   FOUND: 'found',
   MISSING: 'missing',
+  // Manually-attached deployments that have never been deployed yet. Filtered out
+  // of health-check / monitoring queries so they don't generate spurious "container
+  // crashed" alerts before the first deploy actually runs.
+  PENDING: 'pending',
 } as const;
 export type DiscoveryStatus = (typeof DISCOVERY_STATUS)[keyof typeof DISCOVERY_STATUS];
 

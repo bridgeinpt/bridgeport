@@ -41,8 +41,8 @@ import { Modal } from '../components/Modal';
 import { RefreshIcon, CheckIcon, WarningIcon, FileIcon } from '../components/Icons';
 import { safeJsonParse } from '../lib/helpers';
 
-function parseExposedPorts(portsJson: string | null): ExposedPort[] {
-  return safeJsonParse(portsJson, [] as ExposedPort[]);
+function parseExposedPorts(portsJson: string | null | undefined): ExposedPort[] {
+  return safeJsonParse(portsJson ?? null, [] as ExposedPort[]);
 }
 
 function formatPorts(ports: ExposedPort[], maxDisplay = 3): string {
@@ -384,7 +384,9 @@ export default function ServerDetail() {
         composePath: newService.composePath || undefined,
         healthCheckUrl: newService.healthCheckUrl || undefined,
       });
-      setServer((prev) => prev ? { ...prev, services: [...prev.services, service] } : null);
+      // Newly-created Service template has no deployment runtime fields yet; the
+      // back-compat surface treats them as optional, so we just append the row.
+      setServer((prev) => prev ? { ...prev, services: [...prev.services, service as typeof prev.services[number]] } : null);
       setShowCreateService(false);
       setNewService({
         name: '',
@@ -1310,8 +1312,8 @@ export default function ServerDetail() {
                               {formatPorts(ports)}
                             </td>
                             <td className="py-3">
-                              <span className={`badge ${getContainerStatusColor(service.containerStatus || service.status)}`}>
-                                {service.containerStatus || service.status}
+                              <span className={`badge ${getContainerStatusColor(service.containerStatus || service.status || 'unknown')}`}>
+                                {service.containerStatus || service.status || 'unknown'}
                               </span>
                             </td>
                             <td className="py-3">
