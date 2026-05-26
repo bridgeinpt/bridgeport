@@ -31,6 +31,7 @@ on:
     branches: [master]
     paths:
       - 'src/routes/monitoring.ts'
+      - 'src/routes/databases.ts'
       - 'src/services/**'
       - 'prisma/schema.prisma'
       - 'tests/stress/**'

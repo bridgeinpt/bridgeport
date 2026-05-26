@@ -417,9 +417,68 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // ==================== Database Monitoring Endpoints ====================
 
   // Get aggregate database metrics history for charts
+  //
+  // Columnar shape — issue #139. Per type-group we emit a shared `timestamps[]`
+  // plus a `series` keyed by query name:
+  //   - scalar queries           → number[][]              (db × time)
+  //   - row/rows queries (object/array) → { rows: unknown[][] } (db × time of object/array)
+  // The nested row-result shape preserves the original structure so the UI
+  // doesn't need to reconstruct objects; only the per-point repetition of the
+  // outer envelope (id/name/time) is what we collapse.
   fastify.get(
     '/api/environments/:envId/databases/metrics/history',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: {
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              types: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    type: { type: 'string' },
+                    typeName: { type: 'string' },
+                    queryMeta: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          name: { type: 'string' },
+                          displayName: { type: 'string' },
+                          resultType: { type: 'string' },
+                          unit: { type: 'string' },
+                          chartGroup: { type: 'string' },
+                          resultMapping: { type: 'object', additionalProperties: { type: 'string' } },
+                        },
+                      },
+                    },
+                    databases: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string' },
+                          name: { type: 'string' },
+                          serverId: { type: ['string', 'null'] },
+                          serverName: { type: ['string', 'null'] },
+                        },
+                      },
+                    },
+                    timestamps: { type: 'array', items: { type: 'string' } },
+                    // series carries query-name keyed entries whose shape
+                    // depends on the query's resultType — declare loose here.
+                    series: { type: 'object', additionalProperties: true },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
     async (request) => {
       const { envId } = request.params as { envId: string };
       const { hours } = request.query as { hours?: string };
@@ -447,24 +506,35 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
         })
       );
 
-      // Group databases by type
-      const typeGroups = new Map<string, {
+      type QueryMeta = { name: string; displayName: string; resultType: string; unit?: string; chartGroup?: string; resultMapping?: Record<string, string> };
+      type DbBucket = {
+        id: string;
+        name: string;
+        serverId: string | null;
+        serverName: string | null;
+        // Parsed per-point payloads paired with their ISO timestamp. We hold
+        // these here until we know the full timestamp union for the group.
+        points: Array<{ time: string; parsed: Record<string, unknown> }>;
+      };
+      type Group = {
         type: string;
         typeName: string;
-        queryMeta: Array<{ name: string; displayName: string; resultType: string; unit?: string; chartGroup?: string; resultMapping?: Record<string, string> }>;
-        databases: Array<{ id: string; name: string; serverId: string | null; serverName: string | null; data: Array<Record<string, unknown>> }>;
-      }>();
+        queryMeta: QueryMeta[];
+        databases: DbBucket[];
+      };
+
+      // Group databases by type (preserves insertion order = entity order).
+      const typeGroups = new Map<string, Group>();
 
       for (const { db, metrics } of metricsPerDb) {
         const dbType = db.type;
         const typeName = db.databaseType?.displayName || db.type;
 
         if (!typeGroups.has(dbType)) {
-          // Build queryMeta for this type
-          const queryMeta: Array<{ name: string; displayName: string; resultType: string; unit?: string; chartGroup?: string; resultMapping?: Record<string, string> }> = [];
+          const queryMeta: QueryMeta[] = [];
           if (db.databaseType?.monitoringConfig) {
             const config = safeJsonParse(db.databaseType.monitoringConfig, null) as {
-              queries: Array<{ name: string; displayName: string; resultType: string; unit?: string; chartGroup?: string; resultMapping?: Record<string, string> }>;
+              queries: QueryMeta[];
             } | null;
             for (const q of config?.queries ?? []) {
               queryMeta.push({
@@ -480,37 +550,121 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
           typeGroups.set(dbType, { type: dbType, typeName, queryMeta, databases: [] });
         }
 
-        // Build time-series data for this database
-        const data = metrics.map((m) => {
-          const parsed = safeJsonParse(m.metricsJson, {} as Record<string, unknown>);
-          const point: Record<string, unknown> = { time: m.collectedAt.toISOString() };
-
-          for (const [key, value] of Object.entries(parsed)) {
-            if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-              // Row result — flatten fields
-              for (const [field, fieldValue] of Object.entries(value as Record<string, unknown>)) {
-                point[`${key}.${field}`] = fieldValue;
-              }
-            } else {
-              // Scalar or rows (array) — keep as-is
-              point[key] = value;
-            }
-          }
-          return point;
-        });
+        const points = metrics.map((m) => ({
+          time: m.collectedAt.toISOString(),
+          parsed: safeJsonParse(m.metricsJson, {} as Record<string, unknown>),
+        }));
 
         typeGroups.get(dbType)!.databases.push({
           id: db.id,
           name: db.name,
           serverId: db.server?.id || null,
           serverName: db.server?.name || null,
-          data,
+          points,
         });
       }
 
-      return {
-        types: Array.from(typeGroups.values()),
-      };
+      // Project each group into the columnar shape.
+      const types = Array.from(typeGroups.values()).map((group) => {
+        // Union of timestamps across all dbs in this group.
+        const tsSet = new Set<string>();
+        for (const db of group.databases) for (const p of db.points) tsSet.add(p.time);
+        const timestamps = Array.from(tsSet).sort();
+        const tsIndex = new Map<string, number>();
+        timestamps.forEach((t, i) => tsIndex.set(t, i));
+        const T = timestamps.length;
+
+        // series[queryName] = either number[][] (scalar/row.fields flattened)
+        // or { rows: unknown[][] } (row/rows result kept structurally intact).
+        const series: Record<string, unknown> = {};
+
+        // Build a quick lookup for query resultType so we know how to bucket.
+        const metaByName = new Map<string, QueryMeta>();
+        for (const q of group.queryMeta) metaByName.set(q.name, q);
+
+        // Discover keys used in the data — scalar queries flatten `row` results
+        // as `${name}.${field}` (matching old behaviour). We compute this on a
+        // first pass so the per-db row arrays all have consistent column sets.
+        const scalarKeys = new Set<string>();
+        const rowsKeys = new Set<string>(); // queries with resultType === 'rows' (array)
+
+        for (const db of group.databases) {
+          for (const p of db.points) {
+            for (const [key, value] of Object.entries(p.parsed)) {
+              const meta = metaByName.get(key);
+              const resultType = meta?.resultType;
+
+              if (resultType === 'rows' || Array.isArray(value)) {
+                rowsKeys.add(key);
+              } else if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+                // row result — flatten fields into separate scalar keys
+                for (const field of Object.keys(value as Record<string, unknown>)) {
+                  scalarKeys.add(`${key}.${field}`);
+                }
+              } else {
+                // scalar
+                scalarKeys.add(key);
+              }
+            }
+          }
+        }
+
+        // Allocate empty number[][] for scalar keys, { rows: ... } for rows.
+        for (const key of scalarKeys) {
+          series[key] = group.databases.map(() => new Array<number | null>(T).fill(null));
+        }
+        for (const key of rowsKeys) {
+          series[key] = {
+            rows: group.databases.map(() => new Array<unknown>(T).fill(null)),
+          };
+        }
+
+        // Fill values.
+        group.databases.forEach((db, dbIdx) => {
+          for (const p of db.points) {
+            const ti = tsIndex.get(p.time);
+            if (ti === undefined) continue;
+            for (const [key, value] of Object.entries(p.parsed)) {
+              const meta = metaByName.get(key);
+              const resultType = meta?.resultType;
+
+              if (resultType === 'rows' || Array.isArray(value)) {
+                const slot = series[key] as { rows: unknown[][] };
+                slot.rows[dbIdx]![ti] = value;
+              } else if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+                for (const [field, fieldValue] of Object.entries(value as Record<string, unknown>)) {
+                  const compound = `${key}.${field}`;
+                  const arr = series[compound] as Array<Array<number | null>> | undefined;
+                  if (arr) {
+                    arr[dbIdx]![ti] = typeof fieldValue === 'number' ? fieldValue : (fieldValue as number | null);
+                  }
+                }
+              } else {
+                const arr = series[key] as Array<Array<number | null>> | undefined;
+                if (arr) {
+                  arr[dbIdx]![ti] = typeof value === 'number' ? value : (value as number | null);
+                }
+              }
+            }
+          }
+        });
+
+        return {
+          type: group.type,
+          typeName: group.typeName,
+          queryMeta: group.queryMeta,
+          databases: group.databases.map((db) => ({
+            id: db.id,
+            name: db.name,
+            serverId: db.serverId,
+            serverName: db.serverName,
+          })),
+          timestamps,
+          series,
+        };
+      });
+
+      return { types };
     }
   );
 

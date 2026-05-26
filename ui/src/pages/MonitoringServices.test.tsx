@@ -32,16 +32,15 @@ vi.mock('../lib/api', async () => {
     }),
     getServiceMetricsHistory: vi.fn().mockResolvedValue({
       services: [
-        {
-          id: 'svc-1',
-          name: 'api',
-          serverId: 's1',
-          serverName: 'web-01',
-          data: [
-            { time: '2024-01-15T12:00:00Z', cpu: 12.5, memory: 256, networkRx: 1, networkTx: 2 },
-          ],
-        },
+        { id: 'svc-1', name: 'api', serverId: 's1', serverName: 'web-01' },
       ],
+      timestamps: ['2024-01-15T12:00:00Z'],
+      series: {
+        cpu: [[12.5]],
+        memory: [[256]],
+        networkRx: [[1]],
+        networkTx: [[2]],
+      },
     }),
   };
 });

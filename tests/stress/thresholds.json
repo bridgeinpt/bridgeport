@@ -63,13 +63,18 @@
     },
     "server-metrics-history": {
       "path": "/api/environments/{envId}/metrics/history?hours=6",
-      "maxP99Ms": 50,
-      "minRps": 500
+      "maxP99Ms": 30,
+      "minRps": 800
     },
     "service-metrics-history": {
       "path": "/api/environments/{envId}/services/metrics/history?hours=6",
-      "maxP99Ms": 50,
-      "minRps": 500
+      "maxP99Ms": 30,
+      "minRps": 800
+    },
+    "database-metrics-history": {
+      "path": "/api/environments/{envId}/databases/metrics/history?hours=6",
+      "maxP99Ms": 30,
+      "minRps": 800
     },
     "secrets-list": {
       "path": "/api/environments/{envId}/secrets",

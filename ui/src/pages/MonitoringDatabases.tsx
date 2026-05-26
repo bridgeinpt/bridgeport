@@ -130,45 +130,65 @@ export default function MonitoringDatabases() {
     [setMonitoringDatabaseTypeTab, setMonitoringDatabaseFilter]
   );
 
-  // Chart data preparation for scalar queries (one line per database)
-  const prepareScalarChartData = (
-    queryName: string,
-    databases: typeof filteredDatabases
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ): { data: any[]; names: string[] } => {
-    const timeMap = new Map<string, Record<string, unknown>>();
-    const nameSet = new Set<string>();
+  // Columnar response: `series[queryName]` is `number[][]` indexed by
+  // [databaseIndex][timestampIndex]. We build a Recharts-ready dataset by
+  // unioning the active group's timestamps and pulling each visible db's
+  // column slice.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const prepareScalarChartData = (queryName: string): { data: any[]; names: string[] } => {
+    if (!activeGroup) return { data: [], names: [] };
+    const seriesEntry = activeGroup.series?.[queryName];
+    // Scalar/row-flattened entries are arrays; `rows` entries are objects.
+    if (!seriesEntry || !Array.isArray(seriesEntry)) return { data: [], names: [] };
+    const matrix = seriesEntry as Array<Array<number | null>>;
+    const timestamps = activeGroup.timestamps;
 
-    databases.forEach((db) => {
-      db.data.forEach((point) => {
-        const time = point.time as string;
-        if (!timeMap.has(time)) timeMap.set(time, { time });
-        const entry = timeMap.get(time)!;
-        const val = point[queryName];
-        if (val != null) {
-          entry[db.name] = val;
-          nameSet.add(db.name);
-        }
-      });
+    const visibleIdx: number[] = [];
+    const names: string[] = [];
+    activeGroup.databases.forEach((db, i) => {
+      if (filterSet.size > 0 && !filterSet.has(db.id)) return;
+      // Only include dbs that have at least one non-null sample (matches old
+      // behaviour where a db with all-null points didn't add a chart line).
+      const row = matrix[i];
+      if (!row || row.every((v) => v == null)) return;
+      visibleIdx.push(i);
+      names.push(db.name);
     });
 
-    const data = Array.from(timeMap.values()).sort((a, b) =>
-      (a.time as string).localeCompare(b.time as string)
-    );
-    return { data, names: Array.from(nameSet) };
+    const data = timestamps.map((time, ti) => {
+      const point: Record<string, string | number | null> = { time };
+      visibleIdx.forEach((di, n) => {
+        const v = matrix[di]?.[ti] ?? null;
+        if (v != null) point[names[n]!] = v;
+      });
+      return point;
+    });
+
+    return { data, names };
   };
 
-  // Get latest "rows" snapshot per database
+  // Get latest "rows" snapshot per database. Backend now stores them in
+  // `series[queryName].rows[dbIdx][timeIdx]` so we look up the last non-null
+  // entry per visible database.
   const getRowsPerDatabase = (queryName: string): Array<{ dbName: string; rows: Array<Record<string, unknown>> }> => {
+    if (!activeGroup) return [];
+    const seriesEntry = activeGroup.series?.[queryName];
+    if (!seriesEntry || Array.isArray(seriesEntry)) return [];
+    const rowsMatrix = (seriesEntry as { rows: Array<Array<unknown>> }).rows;
     const results: Array<{ dbName: string; rows: Array<Record<string, unknown>> }> = [];
-    for (const db of filteredDatabases) {
-      if (db.data.length === 0) continue;
-      const latest = db.data[db.data.length - 1];
-      const val = latest[queryName];
-      if (Array.isArray(val) && val.length > 0) {
-        results.push({ dbName: db.name, rows: val as Array<Record<string, unknown>> });
+    activeGroup.databases.forEach((db, i) => {
+      if (filterSet.size > 0 && !filterSet.has(db.id)) return;
+      const series = rowsMatrix[i];
+      if (!series) return;
+      // walk from newest → oldest to find the most recent non-empty snapshot
+      for (let ti = series.length - 1; ti >= 0; ti--) {
+        const val = series[ti];
+        if (Array.isArray(val) && val.length > 0) {
+          results.push({ dbName: db.name, rows: val as Array<Record<string, unknown>> });
+          break;
+        }
       }
-    }
+    });
     return results;
   };
 
@@ -177,10 +197,11 @@ export default function MonitoringDatabases() {
     if (!activeGroup) return new Map<string, { data: unknown[]; names: string[] }>();
     const map = new Map<string, { data: unknown[]; names: string[] }>();
     activeGroup.queryMeta.filter(m => m.resultType === 'scalar').forEach(meta => {
-      map.set(meta.name, prepareScalarChartData(meta.name, filteredDatabases));
+      map.set(meta.name, prepareScalarChartData(meta.name));
     });
     return map;
-  }, [activeGroup, filteredDatabases]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeGroup, filterSet]);
 
   const memoizedRowsData = useMemo(() => {
     if (!activeGroup) return new Map<string, Array<{ dbName: string; rows: Array<Record<string, unknown>> }>>();
@@ -189,7 +210,8 @@ export default function MonitoringDatabases() {
       map.set(meta.name, getRowsPerDatabase(meta.name));
     });
     return map;
-  }, [activeGroup, filteredDatabases]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeGroup, filterSet]);
 
   const formatTime = (time: string) => {
     const date = new Date(time);
@@ -325,7 +347,7 @@ export default function MonitoringDatabases() {
       </div>
 
       {/* Charts */}
-      {activeGroup && filteredDatabases.length > 0 && filteredDatabases.some(db => db.data.length > 0) ? (
+      {activeGroup && filteredDatabases.length > 0 && activeGroup.timestamps.length > 0 ? (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {activeGroup.queryMeta.filter(m => m.resultType === 'scalar').map(meta => {

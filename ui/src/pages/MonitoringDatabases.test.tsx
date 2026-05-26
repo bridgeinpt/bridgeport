@@ -31,14 +31,12 @@ vi.mock('../lib/api', async () => {
             { name: 'database_size', displayName: 'Database Size', resultType: 'scalar', unit: 'bytes' },
           ],
           databases: [
-            {
-              id: 'db-1',
-              name: 'Main DB',
-              data: [
-                { time: '2024-01-15T12:00:00Z', database_size: 52428800 },
-              ],
-            },
+            { id: 'db-1', name: 'Main DB', serverId: null, serverName: null },
           ],
+          timestamps: ['2024-01-15T12:00:00Z'],
+          series: {
+            database_size: [[52428800]],
+          },
         },
       ],
     }),
