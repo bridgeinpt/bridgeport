@@ -359,11 +359,6 @@ describe('notifications', () => {
       ]);
       mockPrisma.notificationPreference.findMany.mockResolvedValue([]);
       mockPrisma.notification.createMany.mockResolvedValue({ count: 3 });
-      mockPrisma.notification.findMany.mockResolvedValue([
-        { id: 'notif-1', userId: 'user-1' },
-        { id: 'notif-2', userId: 'user-2' },
-        { id: 'notif-3', userId: 'user-3' },
-      ]);
       mockPrisma.notification.update.mockResolvedValue({});
       vi.mocked(sendEmail).mockResolvedValue({ success: true } as any);
     });
@@ -508,9 +503,21 @@ describe('notifications', () => {
       expect(sendEmail).toHaveBeenCalledTimes(3);
 
       // Only successful recipients got emailSentAt updates (1 and 3, not 2).
+      // Notification ids are generated client-side and embedded in the createMany
+      // payload, so match by userId to recover the ids the production code used.
+      const insertedRows = mockPrisma.notification.createMany.mock.calls[0][0].data as Array<{
+        id: string;
+        userId: string;
+      }>;
+      const idByUserId = new Map(insertedRows.map((row) => [row.userId, row.id]));
+      const expectedUpdatedIds = [idByUserId.get('user-1')!, idByUserId.get('user-3')!].sort();
       const updateCalls = mockPrisma.notification.update.mock.calls;
       const updatedIds = updateCalls.map((c: any) => c[0].where.id).sort();
-      expect(updatedIds).toEqual(['notif-1', 'notif-3']);
+      expect(updatedIds).toEqual(expectedUpdatedIds);
+      // Also assert update was not called for user-2 (the failing recipient).
+      expect(updatedIds).not.toContain(idByUserId.get('user-2'));
+      // Sanity: every inserted row has a non-empty id (client-side cuid).
+      expect(insertedRows.every((row) => typeof row.id === 'string' && row.id.length > 0)).toBe(true);
 
       // The failure was logged but did not propagate.
       expect(errSpy).toHaveBeenCalled();

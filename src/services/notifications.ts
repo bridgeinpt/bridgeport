@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { prisma } from '../lib/db.js';
 import type { Notification, NotificationType, NotificationPreference } from '@prisma/client';
 import { sendEmail, generateNotificationEmail } from './email.js';
@@ -471,7 +472,9 @@ export async function processSystemNotificationJob(job: NotificationJob): Promis
 
   // Figure out which users get an in-app notification, honoring per-user
   // toggles + environment filter. Same semantics as the old per-user send().
-  type Recipient = { userId: string; email: string | null; emailEnabled: boolean };
+  // We generate the notification id up front so we can correlate inserted rows
+  // back to recipients (for the emailSentAt update) without a fragile re-query.
+  type Recipient = { id: string; userId: string; email: string | null; emailEnabled: boolean };
   const recipients: Recipient[] = [];
   for (const user of users) {
     const pref = prefByUserId.get(user.id);
@@ -484,6 +487,7 @@ export async function processSystemNotificationJob(job: NotificationJob): Promis
     }
 
     recipients.push({
+      id: randomUUID(),
       userId: user.id,
       email: user.email,
       emailEnabled: pref?.emailEnabled ?? defaultEmailEnabled,
@@ -491,12 +495,14 @@ export async function processSystemNotificationJob(job: NotificationJob): Promis
   }
 
   if (recipients.length > 0) {
-    // Bulk-insert in-app notification rows. SQLite + createMany returns count only,
-    // so we re-query by (userId, createdAt) below when we need notification.id for
-    // the emailSentAt update.
+    // Bulk-insert in-app notification rows. We pass our own client-generated ids
+    // so we can map userId -> notificationId directly from the recipients list,
+    // avoiding a re-query (which would be ambiguous when two jobs for the same
+    // typeCode insert rows for shared users in the same millisecond).
     const now = new Date();
     await prisma.notification.createMany({
       data: recipients.map((r) => ({
+        id: r.id,
         typeId: notificationType.id,
         userId: r.userId,
         title,
@@ -515,16 +521,9 @@ export async function processSystemNotificationJob(job: NotificationJob): Promis
     // Email fan-out. One failure must not block the others — wrap each in try/catch.
     const emailRecipients = recipients.filter((r) => r.emailEnabled && r.email);
     if (emailRecipients.length > 0) {
-      // Re-fetch the just-inserted rows for the recipients we need to update with emailSentAt.
-      const inserted = await prisma.notification.findMany({
-        where: {
-          typeId: notificationType.id,
-          userId: { in: emailRecipients.map((r) => r.userId) },
-          createdAt: now,
-        },
-        select: { id: true, userId: true },
-      });
-      const notificationIdByUserId = new Map(inserted.map((n) => [n.userId, n.id]));
+      // Map userId -> notificationId from the recipients we just inserted. No
+      // re-query needed: ids were generated client-side above.
+      const notificationIdByUserId = new Map(recipients.map((r) => [r.userId, r.id]));
 
       const { html, text } = generateNotificationEmail(title, message, notificationType.severity, envName);
       for (const r of emailRecipients) {
