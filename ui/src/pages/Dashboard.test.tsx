@@ -125,9 +125,18 @@ describe('Dashboard', () => {
   });
 
   it('should derive healthy server count from the separate listServers response', async () => {
-    // Servers array now drives the "N/M healthy" label, NOT environment.servers
-    // (which no longer exists on the slim env-detail response).
+    // Servers array drives the healthy count (from the loaded page).
+    // The displayed total prefers environment._count.servers when available.
     const api = await import('../lib/api');
+    vi.mocked(api.getEnvironment).mockResolvedValueOnce({
+      environment: {
+        id: 'env-1',
+        name: 'Production',
+        createdAt: '2024-01-01',
+        updatedAt: '2024-01-01',
+        _count: { servers: 3, services: 0, databases: 0, secrets: 3 },
+      },
+    } as Awaited<ReturnType<typeof api.getEnvironment>>);
     vi.mocked(api.listServers).mockResolvedValueOnce({
       servers: [
         {
@@ -167,16 +176,64 @@ describe('Dashboard', () => {
           _count: { services: 0 },
         },
       ],
-      // total intentionally higher than the returned page to ensure the UI uses
-      // the page length and not `total` for the displayed count.
+      total: 3,
+    } as Awaited<ReturnType<typeof api.listServers>>);
+
+    renderWithProviders(<Dashboard />);
+
+    await waitFor(() => {
+      // 1 healthy out of 3 servers (page matches _count, so no "loaded" suffix).
+      expect(screen.getByText(/\(1\/3 healthy\)/)).toBeInTheDocument();
+    });
+  });
+
+  it('should show truncation note when env._count.servers exceeds the loaded page', async () => {
+    const api = await import('../lib/api');
+    vi.mocked(api.getEnvironment).mockResolvedValueOnce({
+      environment: {
+        id: 'env-1',
+        name: 'Production',
+        createdAt: '2024-01-01',
+        updatedAt: '2024-01-01',
+        // 10 total in the env, but only 2 loaded into the page.
+        _count: { servers: 10, services: 0, databases: 0, secrets: 3 },
+      },
+    } as Awaited<ReturnType<typeof api.getEnvironment>>);
+    vi.mocked(api.listServers).mockResolvedValueOnce({
+      servers: [
+        {
+          id: 's1',
+          name: 'web-01',
+          hostname: '10.0.0.1',
+          publicIp: null,
+          tags: '[]',
+          status: 'healthy',
+          serverType: 'remote',
+          lastCheckedAt: null,
+          environmentId: 'env-1',
+          _count: { services: 0 },
+        },
+        {
+          id: 's2',
+          name: 'web-02',
+          hostname: '10.0.0.2',
+          publicIp: null,
+          tags: '[]',
+          status: 'unhealthy',
+          serverType: 'remote',
+          lastCheckedAt: null,
+          environmentId: 'env-1',
+          _count: { services: 0 },
+        },
+      ],
       total: 10,
     } as Awaited<ReturnType<typeof api.listServers>>);
 
     renderWithProviders(<Dashboard />);
 
     await waitFor(() => {
-      // 1 healthy out of 3 returned servers.
-      expect(screen.getByText(/\(1\/3 healthy\)/)).toBeInTheDocument();
+      // 1 healthy out of 10 total, but only 2 loaded.
+      expect(screen.getByText(/\(1\/10 healthy, 2 loaded\)/)).toBeInTheDocument();
     });
   });
 

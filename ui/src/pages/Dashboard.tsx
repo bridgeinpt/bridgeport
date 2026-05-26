@@ -84,8 +84,8 @@ export default function Dashboard() {
     try {
       const [envRes, serversRes, servicesRes, metricsRes, logsRes, dbRes] = await Promise.all([
         getEnvironment(selectedEnvironment.id),
-        listServers(selectedEnvironment.id, { includeServicesCount: true, limit: 500 }),
-        listServices(selectedEnvironment.id, { limit: 1000 }),
+        listServers(selectedEnvironment.id, { includeServicesCount: true, limit: 1000 }),
+        listServices(selectedEnvironment.id, { limit: 5000 }),
         getEnvironmentMetricsSummary(selectedEnvironment.id),
         getAuditLogs({ environmentId: selectedEnvironment.id, limit: 15 }),
         listDatabases(selectedEnvironment.id),
@@ -270,9 +270,18 @@ export default function Dashboard() {
   }, [allServices]);
 
 
-  const refreshServices = async () => {
+  const refreshEnvData = async () => {
     if (!selectedEnvironment?.id) return;
-    const servicesRes = await listServices(selectedEnvironment.id, { limit: 1000 });
+    // Re-fetch env (for fresh _count), servers (for fresh status) and services
+    // in parallel. Servers can become stale after a deploy (e.g. container
+    // restart can flip health), so we refetch them too — not just services.
+    const [envRes, serversRes, servicesRes] = await Promise.all([
+      getEnvironment(selectedEnvironment.id),
+      listServers(selectedEnvironment.id, { includeServicesCount: true, limit: 1000 }),
+      listServices(selectedEnvironment.id, { limit: 5000 }),
+    ]);
+    setEnvironment(envRes.environment);
+    setServers(serversRes.servers);
     setServices(servicesRes.services);
   };
 
@@ -280,8 +289,8 @@ export default function Dashboard() {
     setDeploying(serviceId);
     try {
       await deployService(serviceId, { imageTag, pullImage: true });
-      // Refresh services so the dashboard reflects the new tag/status.
-      await refreshServices();
+      // Refresh env/servers/services so the dashboard reflects the new tag/status.
+      await refreshEnvData();
     } catch (error) {
       console.error('Deploy failed:', error);
     } finally {
@@ -297,7 +306,7 @@ export default function Dashboard() {
         .filter((svc) => svc.containerImage?.registryConnectionId)
         .map((svc) => svc.id);
       await Promise.all(serviceIds.map((id) => checkServiceUpdates(id)));
-      await refreshServices();
+      await refreshEnvData();
     } catch (error) {
       console.error('Update check failed:', error);
     } finally {
@@ -340,8 +349,8 @@ export default function Dashboard() {
     setDeployAllResults(results);
     setDeployingAll(false);
 
-    // Refresh services so the dashboard reflects the new tags/status.
-    await refreshServices();
+    // Refresh env/servers/services so the dashboard reflects the new tags/status.
+    await refreshEnvData();
 
     const successCount = results.filter((r) => r.success).length;
     if (successCount === results.length) {
@@ -376,8 +385,17 @@ export default function Dashboard() {
     );
   }
 
-  const serverCount = servers.length;
+  // Prefer `_count.servers` from the env-detail response for the displayed total
+  // (cheap, always accurate). Fall back to the page length if it's missing.
+  // healthyServers necessarily reflects only the loaded page.
+  const serverCount = environment._count?.servers ?? servers.length;
   const healthyServers = servers.filter((s) => s.status === 'healthy').length;
+  const serversTruncated = serverCount > servers.length;
+  // Same idea for services. `serviceHealthCounts.total` (above) is page-length;
+  // we override the displayed total here for honesty when the env has more services
+  // than were loaded.
+  const serviceTotal = environment._count?.services ?? serviceHealthCounts.total;
+  const servicesTruncated = serviceTotal > serviceHealthCounts.total;
 
   return (
     <div className="p-6">
@@ -660,7 +678,7 @@ export default function Dashboard() {
               <ServerIcon className="w-5 h-5 text-blue-400" />
               Servers Health
               <span className="text-sm font-normal text-slate-400">
-                ({healthyServers}/{serverCount} healthy)
+                ({healthyServers}/{serverCount} healthy{serversTruncated ? `, ${servers.length} loaded` : ''})
               </span>
             </h2>
             <Link to="/servers" className="text-sm text-primary-400 hover:text-primary-300">
@@ -696,7 +714,7 @@ export default function Dashboard() {
               <CubeIcon className="w-5 h-5 text-green-400" />
               Services Health
               <span className="text-sm font-normal text-slate-400">
-                ({serviceHealthCounts.healthy}/{serviceHealthCounts.total} healthy)
+                ({serviceHealthCounts.healthy}/{serviceTotal} healthy{servicesTruncated ? `, ${serviceHealthCounts.total} loaded` : ''})
               </span>
             </h2>
             <Link to="/services" className="text-sm text-primary-400 hover:text-primary-300">

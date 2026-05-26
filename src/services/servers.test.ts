@@ -189,7 +189,24 @@ describe('servers', () => {
   });
 
   describe('getServer', () => {
-    it('should return server with services included', async () => {
+    it('should return the server row without including services by default', async () => {
+      const mockResult = {
+        id: 'srv-1',
+        name: 'web-server',
+      };
+      mockPrisma.server.findUnique.mockResolvedValue(mockResult);
+
+      const result = await getServer('srv-1');
+
+      expect(result).toEqual(mockResult);
+      // Default getServer should NOT include services (the relation is loaded on
+      // demand via the dedicated /api/servers/:id/services endpoint).
+      expect(mockPrisma.server.findUnique).toHaveBeenCalledWith({
+        where: { id: 'srv-1' },
+      });
+    });
+
+    it('should include services with containerImage when includeServices is true', async () => {
       const mockResult = {
         id: 'srv-1',
         name: 'web-server',
@@ -197,7 +214,7 @@ describe('servers', () => {
       };
       mockPrisma.server.findUnique.mockResolvedValue(mockResult);
 
-      const result = await getServer('srv-1');
+      const result = await getServer('srv-1', { includeServices: true });
 
       expect(result).toEqual(mockResult);
       expect(mockPrisma.server.findUnique).toHaveBeenCalledWith({
