@@ -118,12 +118,26 @@ export default function MonitoringServices() {
     [history, entityIdFilter]
   );
 
+  // Regression guard: a weaker "filtered.length > 0" check rendered empty
+  // chart cards when the user filtered down to services with no samples —
+  // match the master behaviour of `some(s => s.data.length > 0)` by checking
+  // actual non-null values in the columnar series.
   const hasAnyHistory = useMemo(() => {
     if (history.timestamps.length === 0) return false;
     const filtered = filterSet.size === 0
       ? history.services
       : history.services.filter((s) => filterSet.has(s.id));
-    return filtered.length > 0;
+    if (filtered.length === 0) return false;
+
+    const filteredIdxs = filtered.map((s) => history.services.indexOf(s));
+    for (const series of Object.values(history.series)) {
+      if (!series) continue;
+      for (const idx of filteredIdxs) {
+        const row = series[idx];
+        if (row && row.some((v) => v !== null)) return true;
+      }
+    }
+    return false;
   }, [history, filterSet]);
 
   const formatTime = (time: string) => {

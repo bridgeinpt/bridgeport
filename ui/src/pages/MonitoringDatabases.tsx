@@ -168,8 +168,12 @@ export default function MonitoringDatabases() {
   };
 
   // Get latest "rows" snapshot per database. Backend now stores them in
-  // `series[queryName].rows[dbIdx][timeIdx]` so we look up the last non-null
-  // entry per visible database.
+  // `series[queryName].rows[dbIdx][timeIdx]` so we look up the LAST snapshot
+  // (latest timestamp) per visible database. If that latest snapshot is empty,
+  // the database is omitted — matching the pre-columnar behaviour where only
+  // the most recent point was inspected (a query whose current value is `[]`,
+  // e.g. `pg_stat_replication` after slots dropped, should not show stale
+  // historical rows).
   const getRowsPerDatabase = (queryName: string): Array<{ dbName: string; rows: Array<Record<string, unknown>> }> => {
     if (!activeGroup) return [];
     const seriesEntry = activeGroup.series?.[queryName];
@@ -180,13 +184,10 @@ export default function MonitoringDatabases() {
       if (filterSet.size > 0 && !filterSet.has(db.id)) return;
       const series = rowsMatrix[i];
       if (!series) return;
-      // walk from newest → oldest to find the most recent non-empty snapshot
-      for (let ti = series.length - 1; ti >= 0; ti--) {
-        const val = series[ti];
-        if (Array.isArray(val) && val.length > 0) {
-          results.push({ dbName: db.name, rows: val as Array<Record<string, unknown>> });
-          break;
-        }
+      const lastIdx = series.length - 1;
+      const val = lastIdx >= 0 ? series[lastIdx] : null;
+      if (Array.isArray(val) && val.length > 0) {
+        results.push({ dbName: db.name, rows: val as Array<Record<string, unknown>> });
       }
     });
     return results;

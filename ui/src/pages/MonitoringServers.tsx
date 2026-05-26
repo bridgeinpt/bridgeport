@@ -123,15 +123,28 @@ export default function MonitoringServers() {
     [history, entityIdFilter]
   );
 
-  // True when we have at least one server row that contains a non-null point
-  // for any active metric (used to decide whether to show the "no data" card).
+  // True when we have at least one filtered server row that contains a
+  // non-null point for any active metric (used to decide whether to show the
+  // "no data" card). Regression guard: a weaker gate (just "filtered.length
+  // > 0") rendered empty chart cards when the user filtered down to servers
+  // with no samples — match the master behaviour of `some(s => s.data.length
+  // > 0)` by checking actual non-null values in the columnar series.
   const hasAnyHistory = useMemo(() => {
     if (history.timestamps.length === 0) return false;
     const filtered = filterSet.size === 0
       ? history.servers
       : history.servers.filter((s) => filterSet.has(s.id));
     if (filtered.length === 0) return false;
-    return true;
+
+    const filteredIdxs = filtered.map((s) => history.servers.indexOf(s));
+    for (const series of Object.values(history.series)) {
+      if (!series) continue;
+      for (const idx of filteredIdxs) {
+        const row = series[idx];
+        if (row && row.some((v) => v !== null)) return true;
+      }
+    }
+    return false;
   }, [history, filterSet]);
 
   const formatTime = (time: string) => {
