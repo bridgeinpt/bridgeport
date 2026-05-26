@@ -3,22 +3,23 @@ import { prisma } from '../lib/db.js';
 /**
  * Log a health check result.
  *
- * Writes the full audit row to HealthCheckLog AND (for 'server' and 'service'
- * resourceTypes only) updates the denormalized lastHealthCheck* cache columns
- * on the target entity in a single transaction, so GET /:envId/health-status
- * can read current status directly from the entity table instead of scanning
- * the log.
+ * Writes the full audit row to HealthCheckLog AND (for 'server' and
+ * 'service_deployment' resourceTypes only) updates the denormalized
+ * lastHealthCheck* cache columns on the target entity in a single transaction,
+ * so GET /:envId/health-status can read current status directly from the
+ * entity table instead of scanning the log.
  *
  * resourceType maps:
- *   - 'server'    -> Server.lastHealthCheck*
- *   - 'service'   -> Service.lastHealthCheck*
- *   - 'container' -> log only (NO cache update). Container runtime checks
- *                    would otherwise clobber the URL probe result the
- *                    dashboard surfaces — see Finding 1 in PR #147.
+ *   - 'server'             -> Server.lastHealthCheck*
+ *   - 'service_deployment' -> ServiceDeployment.lastHealthCheck*
+ *   - 'container'          -> log only (NO cache update). Container runtime
+ *                             checks would otherwise clobber the URL probe
+ *                             result the dashboard surfaces — see Finding 1
+ *                             in PR #147.
  */
 export async function logHealthCheck(params: {
   environmentId: string;
-  resourceType: 'server' | 'service' | 'container';
+  resourceType: 'server' | 'service' | 'service_deployment' | 'container';
   resourceId: string;
   resourceName: string;
   checkType: 'ssh' | 'url' | 'container_health' | 'discovery';
@@ -47,8 +48,8 @@ export async function logHealthCheck(params: {
         where: { id: params.resourceId },
         data: cacheUpdate,
       });
-    } else if (params.resourceType === 'service') {
-      await tx.service.updateMany({
+    } else if (params.resourceType === 'service_deployment') {
+      await tx.serviceDeployment.updateMany({
         where: { id: params.resourceId },
         data: cacheUpdate,
       });

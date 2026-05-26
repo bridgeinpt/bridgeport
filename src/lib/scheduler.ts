@@ -17,6 +17,7 @@ import {
 } from '../services/metrics.js';
 import { checkDueBackups } from '../services/database-backup.js';
 import { sendSystemNotification, NOTIFICATION_TYPES, cleanupOldNotifications } from '../services/notifications.js';
+import { drain as drainNotificationQueue } from '../services/notification-queue.js';
 import pLimit from 'p-limit';
 import { recordFailure, recordSuccess } from '../services/bounce-tracker.js';
 import { buildDeploymentPlan, executePlan } from '../services/orchestration.js';
@@ -166,34 +167,31 @@ async function runServerHealthChecks(): Promise<void> {
  */
 async function runServiceHealthChecks(): Promise<void> {
   try {
-    const services = await prisma.service.findMany({
+    // Iterate per-deployment now that runtime status lives on ServiceDeployment.
+    const deployments = await prisma.serviceDeployment.findMany({
       where: {
-        healthCheckUrl: { not: null },
         discoveryStatus: DISCOVERY_STATUS.FOUND,
+        service: { healthCheckUrl: { not: null } },
         // Skip agent-mode servers - agents now perform health checks
-        server: {
-          metricsMode: { not: METRICS_MODE.AGENT },
-        },
+        server: { metricsMode: { not: METRICS_MODE.AGENT } },
       },
       select: {
         id: true,
-        name: true,
+        service: { select: { name: true } },
         server: { select: { environmentId: true, metricsMode: true } },
       },
     });
 
-    console.log(`[Scheduler] Running health checks on ${services.length} services`);
+    console.log(`[Scheduler] Running health checks on ${deployments.length} service deployments`);
 
-    await Promise.allSettled(services.map((service) => concurrencyLimit(async () => {
+    await Promise.allSettled(deployments.map((deployment) => concurrencyLimit(async () => {
       const start = Date.now();
       try {
-        const result = await checkServiceHealth(service.id);
+        const result = await checkServiceHealth(deployment.id);
         const durationMs = Date.now() - start;
 
-        // Determine if health check was successful
         const isHealthy = result.container.running && (result.url === null || result.url.success);
 
-        // Build error message based on what failed
         let errorMessage: string | undefined;
         if (!isHealthy) {
           if (!result.container.running) {
@@ -203,12 +201,11 @@ async function runServiceHealthChecks(): Promise<void> {
           }
         }
 
-        // Log health check result
         await logHealthCheck({
-          environmentId: service.server.environmentId,
-          resourceType: 'service',
-          resourceId: service.id,
-          resourceName: service.name,
+          environmentId: deployment.server.environmentId,
+          resourceType: 'service_deployment',
+          resourceId: deployment.id,
+          resourceName: deployment.service.name,
           checkType: 'url',
           status: isHealthy ? HEALTH_CHECK_STATUS.SUCCESS : HEALTH_CHECK_STATUS.FAILURE,
           durationMs,
@@ -219,19 +216,18 @@ async function runServiceHealthChecks(): Promise<void> {
         const durationMs = Date.now() - start;
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
-        // Log failed health check
         await logHealthCheck({
-          environmentId: service.server.environmentId,
-          resourceType: 'service',
-          resourceId: service.id,
-          resourceName: service.name,
+          environmentId: deployment.server.environmentId,
+          resourceType: 'service_deployment',
+          resourceId: deployment.id,
+          resourceName: deployment.service.name,
           checkType: 'url',
           status: HEALTH_CHECK_STATUS.FAILURE,
           durationMs,
           errorMessage,
         });
 
-        console.error(`[Scheduler] Health check failed for service ${service.name}:`, error);
+        console.error(`[Scheduler] Health check failed for deployment ${deployment.id}:`, error);
       }
     })));
   } catch (error) {
@@ -318,7 +314,8 @@ async function checkImageForUpdates(
  */
 async function runUpdateChecks(): Promise<void> {
   try {
-    // Get all container images with registry connections
+    // Get all container images with registry connections.
+    // Image updates apply per-Service (template-level) — auto-deploy fans out to all deployments.
     const containerImages = await prisma.containerImage.findMany({
       where: {
         registryConnectionId: { not: null },
@@ -332,7 +329,7 @@ async function runUpdateChecks(): Promise<void> {
         registryConnectionId: true,
         environmentId: true,
         services: {
-          where: { discoveryStatus: DISCOVERY_STATUS.FOUND },
+          where: { serviceDeployments: { some: { discoveryStatus: DISCOVERY_STATUS.FOUND } } },
           select: {
             id: true,
             name: true,
@@ -413,45 +410,61 @@ async function runUpdateChecks(): Promise<void> {
 }
 
 /**
- * Manually trigger update check for a specific service
+ * Manually trigger update check for a service deployment (or any service id).
+ * The check is template-scoped (one registry call per container image),
+ * but exposed as `checkServiceUpdate(serviceOrDeploymentId)` so callers don't
+ * need to know which entity they hold.
  */
-export async function checkServiceUpdate(serviceId: string): Promise<{
+export async function checkServiceUpdate(serviceOrDeploymentId: string): Promise<{
   hasUpdate: boolean;
   bestTag?: string;
   newestDigestId?: string;
   error?: string;
 }> {
-  const service = await prisma.service.findUnique({
-    where: { id: serviceId },
-    include: {
-      containerImage: {
-        select: {
-          id: true,
-          imageName: true,
-          tagFilter: true,
-          registryConnectionId: true,
+  // Try to resolve as a ServiceDeployment first; fall back to Service.
+  const containerImage = await (async () => {
+    const deployment = await prisma.serviceDeployment.findUnique({
+      where: { id: serviceOrDeploymentId },
+      select: {
+        service: {
+          select: {
+            containerImage: {
+              select: { id: true, imageName: true, tagFilter: true, registryConnectionId: true },
+            },
+          },
         },
       },
-    },
-  });
+    });
+    if (deployment) return deployment.service.containerImage;
 
-  if (!service) {
+    const service = await prisma.service.findUnique({
+      where: { id: serviceOrDeploymentId },
+      select: {
+        containerImage: {
+          select: { id: true, imageName: true, tagFilter: true, registryConnectionId: true },
+        },
+      },
+    });
+    return service?.containerImage ?? null;
+  })();
+
+  if (!containerImage) {
     return { hasUpdate: false, error: 'Service not found' };
   }
 
-  if (!service.containerImage?.registryConnectionId) {
+  if (!containerImage.registryConnectionId) {
     return { hasUpdate: false, error: 'No registry connection configured' };
   }
 
-  const creds = await getRegistryCredentials(service.containerImage.registryConnectionId);
+  const creds = await getRegistryCredentials(containerImage.registryConnectionId);
   if (!creds) {
     return { hasUpdate: false, error: 'Could not get registry credentials' };
   }
 
   return checkImageForUpdates(
-    service.containerImage.id,
-    service.containerImage.imageName,
-    service.containerImage.tagFilter,
+    containerImage.id,
+    containerImage.imageName,
+    containerImage.tagFilter,
     creds
   );
 }
@@ -468,9 +481,10 @@ async function runMetricsCollection(): Promise<void> {
         metricsMode: METRICS_MODE.SSH,
       },
       include: {
-        services: {
+        serviceDeployments: {
           where: { discoveryStatus: DISCOVERY_STATUS.FOUND },
-          select: { id: true, containerName: true },
+          // serviceId needed to deep-link notifications to the parent Service page.
+          select: { id: true, containerName: true, serviceId: true },
         },
       },
     });
@@ -505,20 +519,19 @@ async function runMetricsCollection(): Promise<void> {
           eventBus.emitEvent({ type: 'metrics_updated', data: { serverId: server.id, environmentId: server.environmentId } });
         }
 
-        // Update service health status (service metrics are agent-only now)
+        // Update service deployment health status (service metrics are agent-only now)
         for (const serviceData of data.serviceData) {
-          const service = server.services.find((s) => s.containerName === serviceData.containerName);
-          if (!service) continue;
+          const sd = server.serviceDeployments.find((s) => s.containerName === serviceData.containerName);
+          if (!sd) continue;
 
           // Get previous status for comparison
-          const prevService = await prisma.service.findUnique({
-            where: { id: service.id },
+          const prev = await prisma.serviceDeployment.findUnique({
+            where: { id: sd.id },
             select: { containerStatus: true, healthStatus: true },
           });
 
-          // Update service health status
-          await prisma.service.update({
-            where: { id: service.id },
+          await prisma.serviceDeployment.update({
+            where: { id: sd.id },
             data: {
               status: serviceData.overallStatus,
               containerStatus: serviceData.containerStatus,
@@ -527,9 +540,8 @@ async function runMetricsCollection(): Promise<void> {
             },
           });
 
-          // Emit health_status event for service status changes
-          if (serviceData.overallStatus !== prevService?.containerStatus) {
-            eventBus.emitEvent({ type: 'health_status', data: { resourceType: 'service', resourceId: service.id, status: serviceData.overallStatus, environmentId: server.environmentId } });
+          if (serviceData.overallStatus !== prev?.containerStatus) {
+            eventBus.emitEvent({ type: 'health_status', data: { resourceType: 'service_deployment', resourceId: sd.id, status: serviceData.overallStatus, environmentId: server.environmentId } });
           }
 
           // Log container health check result
@@ -538,8 +550,8 @@ async function runMetricsCollection(): Promise<void> {
           await logHealthCheck({
             environmentId: server.environmentId,
             resourceType: 'container',
-            resourceId: service.id,
-            resourceName: service.containerName,
+            resourceId: sd.id,
+            resourceName: sd.containerName,
             checkType: 'container_health',
             status: containerHealthy ? HEALTH_CHECK_STATUS.SUCCESS : HEALTH_CHECK_STATUS.FAILURE,
             errorMessage: !containerHealthy
@@ -549,53 +561,60 @@ async function runMetricsCollection(): Promise<void> {
 
           // Handle container status changes (crash detection)
           const crashStates: string[] = [CONTAINER_STATUS.EXITED, CONTAINER_STATUS.DEAD];
-          const wasCrashed = prevService && crashStates.includes(prevService.containerStatus);
+          const wasCrashed = prev && crashStates.includes(prev.containerStatus);
           const isCrashed = crashStates.includes(serviceData.containerStatus);
           const isRunning = serviceData.containerStatus === CONTAINER_STATUS.RUNNING;
 
           if (isCrashed && !wasCrashed) {
-            // Container crashed
-            const bounce = await recordFailure('service', service.id, 'crash', NOTIFICATION_TYPES.SYSTEM_CONTAINER_CRASH);
+            const bounce = await recordFailure('service_deployment', sd.id, 'crash', NOTIFICATION_TYPES.SYSTEM_CONTAINER_CRASH);
             if (bounce.shouldAlert) {
               notifyAsync(
                 NOTIFICATION_TYPES.SYSTEM_CONTAINER_CRASH,
                 server.environmentId,
-                { containerName: service.containerName, serverName: server.name }
+                { containerName: sd.containerName, serverName: server.name, serviceId: sd.serviceId, resourceType: 'service_deployment', resourceId: sd.id }
               );
             }
           } else if (isRunning && wasCrashed) {
-            // Container recovered
-            const bounce = await recordSuccess('service', service.id, 'crash');
+            const bounce = await recordSuccess('service_deployment', sd.id, 'crash');
             if (bounce.wasRecovered) {
               notifyAsync(
                 NOTIFICATION_TYPES.SYSTEM_CONTAINER_RECOVERED,
                 server.environmentId,
-                { containerName: service.containerName, serverName: server.name }
+                { containerName: sd.containerName, serverName: server.name, serviceId: sd.serviceId, resourceType: 'service_deployment', resourceId: sd.id }
               );
             }
           }
 
           // Handle health check status changes
-          if (serviceData.healthStatus === HEALTH_STATUS.UNHEALTHY && prevService?.healthStatus !== HEALTH_STATUS.UNHEALTHY) {
-            const bounce = await recordFailure('service', service.id, 'health_check', NOTIFICATION_TYPES.SYSTEM_HEALTH_CHECK_FAILED);
+          if (serviceData.healthStatus === HEALTH_STATUS.UNHEALTHY && prev?.healthStatus !== HEALTH_STATUS.UNHEALTHY) {
+            const bounce = await recordFailure('service_deployment', sd.id, 'health_check', NOTIFICATION_TYPES.SYSTEM_HEALTH_CHECK_FAILED);
             if (bounce.shouldAlert) {
               notifyAsync(
                 NOTIFICATION_TYPES.SYSTEM_HEALTH_CHECK_FAILED,
                 server.environmentId,
                 {
-                  resourceType: 'Service',
-                  resourceName: service.containerName,
+                  resourceType: 'service_deployment',
+                  resourceId: sd.id,
+                  // serviceId lets Slack/UI deep-link to the parent Service page,
+                  // which is the route the UI actually has for "view this".
+                  serviceId: sd.serviceId,
+                  resourceName: sd.containerName,
                   error: 'Health check failed',
                 }
               );
             }
-          } else if (serviceData.healthStatus === HEALTH_STATUS.HEALTHY && prevService?.healthStatus === HEALTH_STATUS.UNHEALTHY) {
-            const bounce = await recordSuccess('service', service.id, 'health_check');
+          } else if (serviceData.healthStatus === HEALTH_STATUS.HEALTHY && prev?.healthStatus === HEALTH_STATUS.UNHEALTHY) {
+            const bounce = await recordSuccess('service_deployment', sd.id, 'health_check');
             if (bounce.wasRecovered) {
               notifyAsync(
                 NOTIFICATION_TYPES.SYSTEM_HEALTH_CHECK_RECOVERED,
                 server.environmentId,
-                { resourceType: 'Service', resourceName: service.containerName }
+                {
+                  resourceType: 'service_deployment',
+                  resourceId: sd.id,
+                  serviceId: sd.serviceId,
+                  resourceName: sd.containerName,
+                }
               );
             }
           }
@@ -934,6 +953,15 @@ export function startScheduler(config: Partial<GlobalSchedulerConfig> = {}): voi
   timers.set('auditLogCleanup', setInterval(runAuditLogCleanup, 24 * 60 * 60 * 1000)); // Daily
   timers.set('digestCleanup', setInterval(runDigestCleanup, 24 * 60 * 60 * 1000)); // Daily
   timers.set('imagePrune', setInterval(runImagePrune, 7 * 24 * 60 * 60 * 1000)); // Weekly
+
+  // Notification queue drain — safety net in case the setImmediate kick on
+  // enqueue is missed (e.g. process under heavy load). Most drains happen on
+  // enqueue; this interval is a no-op when the queue is empty.
+  timers.set('notificationQueue', setInterval(() => {
+    drainNotificationQueue().catch((err) => {
+      console.error('[Scheduler] Notification queue drain failed:', err);
+    });
+  }, 250));
 }
 
 /**

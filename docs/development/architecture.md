@@ -300,6 +300,31 @@ model Service {
 }
 ```
 
+**Service template / deployment split (2.0)**: A `Service` is **environment-scoped** and acts as a reusable template; per-server runtime state (status, healthStatus, containerName, exposedPorts, discovery + agent check fields) lives on `ServiceDeployment`. Foreign keys on `Deployment`, `ServiceMetrics`, `DeploymentPlanStep`, and `ServiceFile` were rewired through `ServiceDeployment`. Auto-migration creates exactly one `ServiceDeployment` per pre-2.0 service. See [Services guide](../guides/services.md#how-it-works) for the data model walk-through.
+
+```prisma
+model Service {
+  // template-only fields: imageTag, composeTemplate, baseEnv,
+  // deployStrategy ('sequential' | 'parallel'), health* settings, etc.
+  environmentId String
+  serviceDeployments ServiceDeployment[]
+}
+
+model ServiceDeployment {
+  serviceId      String
+  serverId       String
+  containerName  String
+  status         String  // per-server runtime
+  containerStatus String
+  healthStatus   String
+  discoveryStatus String
+  exposedPorts   String?
+  envOverrides   String?
+  // ... lastCheckedAt, lastDeployedAt, agent check fields
+  @@unique([serverId, containerName])
+}
+```
+
 For details on working with migrations, see [Database Migrations](database-migrations.md).
 
 ---
@@ -475,7 +500,8 @@ User               - Authentication with role (admin/operator/viewer), lastActiv
 ApiToken           - Per-user API tokens with hash, expiry, last used tracking
 Environment        - Logical grouping with SSH key, per-module settings (General/Monitoring/Operations/Data/Configuration)
 Server             - Physical/virtual machine with metricsMode, dockerMode (ssh/socket), agent status tracking, denormalized lastHealthCheck* cache
-Service            - Docker container linked to ContainerImage, with dependencies, health config, TCP/cert checks, denormalized lastHealthCheck* cache
+Service            - Template entity (env-scoped) linked to ContainerImage, with dependencies, health config, TCP/cert checks
+ServiceDeployment  - Per-server runtime of a Service template (containerName, status, agent results, denormalized lastHealthCheck* cache)
 Secret             - Encrypted key-value with neverReveal flag
 ConfigFile         - Synced configuration files (text + binary support with isBinary, mimeType)
 FileHistory        - Edit history for config files
@@ -499,7 +525,7 @@ ServiceDatabase    - Links services to databases with connection env var
 # Monitoring & Metrics
 ServerMetrics      - Time-series server metrics (CPU, memory, disk, load, TCP, FDs)
 ServiceMetrics     - Time-series container metrics (CPU, memory, network, block I/O)
-HealthCheckLog     - Append-only health check audit trail (duration, status, response details). The "current" status for dashboards lives in denormalized lastHealthCheck* columns on Server / Service, written atomically by logHealthCheck() in the same transaction as the log row — so GET /:envId/health-status reads the entity tables and never scans the log. Note: container-resourceType checks log here for audit but do NOT update the cache (would clobber URL probe results). The cache also decays to UNKNOWN after 1h of no updates.
+HealthCheckLog     - Append-only health check audit trail (duration, status, response details). The "current" status for dashboards lives in denormalized lastHealthCheck* columns on Server / ServiceDeployment, written atomically by logHealthCheck() in the same transaction as the log row — so GET /:envId/health-status reads the entity tables and never scans the log. Note: container-resourceType checks log here for audit but do NOT update the cache (would clobber URL probe results). The cache also decays to UNKNOWN after 1h of no updates.
 AgentContainerSnapshot - Agent-reported container discovery data (latest per server)
 AgentProcessSnapshot   - Agent-reported top processes (latest per server)
 AgentEvent         - Agent lifecycle events (deploy, status change, token regen)

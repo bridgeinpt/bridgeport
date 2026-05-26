@@ -82,8 +82,12 @@ export async function getContainerImage(id: string): Promise<ContainerImage & { 
     include: {
       services: {
         include: {
-          server: { select: { id: true, name: true, hostname: true, environmentId: true } },
-          imageDigest: { select: { id: true, manifestDigest: true, tags: true } },
+          serviceDeployments: {
+            include: {
+              server: { select: { id: true, name: true, hostname: true, environmentId: true } },
+              imageDigest: { select: { id: true, manifestDigest: true, tags: true } },
+            },
+          },
         },
       },
       registryConnection: true,
@@ -136,9 +140,14 @@ export async function listContainerImages(
   const imageIds = pageImages.map((img) => img.id);
 
   const [services, latestDigests, latestHistory] = await Promise.all([
+    // Service.server moved to ServiceDeployment in 2.0; eager-load deployments
+    // here so the page render still has access to each (service, server) pair
+    // without an N+1.
     prisma.service.findMany({
       where: { containerImageId: { in: imageIds } },
-      include: { server: true },
+      include: {
+        serviceDeployments: { include: { server: true } },
+      },
     }),
     // For each image, the digest with the max(pushedAt). One groupBy +
     // targeted findMany keeps this linear in image count.
@@ -220,14 +229,26 @@ export async function linkServiceToContainerImage(
     bestTag = getBestTag(digestTags, tagFilterPatterns) || bestTag;
   }
 
-  return prisma.service.update({
-    where: { id: serviceId },
-    data: {
-      containerImageId,
-      imageTag: bestTag,
-      imageDigestId: latestDigest?.id ?? null,
-    },
-  });
+  // imageDigestId now lives on ServiceDeployment, not Service. Update all
+  // deployments of this service to point at the latest digest AND update the
+  // Service template atomically — otherwise a failure between the two writes
+  // would leave deployments pointing at a digest that no longer matches the
+  // service's containerImageId.
+  const [, service] = await prisma.$transaction([
+    prisma.serviceDeployment.updateMany({
+      where: { serviceId },
+      data: { imageDigestId: latestDigest?.id ?? null },
+    }),
+    prisma.service.update({
+      where: { id: serviceId },
+      data: {
+        containerImageId,
+        imageTag: bestTag,
+      },
+    }),
+  ]);
+
+  return service;
 }
 
 /**
@@ -270,10 +291,10 @@ export async function recordTagDeployment(
       },
     });
 
-    // Update all linked services' imageDigestId
+    // Update all linked service deployments' imageDigestId (imageDigest moved from Service to ServiceDeployment)
     if (imageDigestId) {
-      await prisma.service.updateMany({
-        where: { containerImageId },
+      await prisma.serviceDeployment.updateMany({
+        where: { service: { containerImageId } },
         data: { imageDigestId },
       });
     }
@@ -302,10 +323,10 @@ export interface EnhancedHistoryEntry extends ContainerImageHistory {
     service: {
       id: string;
       name: string;
-      server: {
-        id: string;
-        name: string;
-      };
+    } | null;
+    serviceDeployment: {
+      id: string;
+      server: { id: string; name: string };
     } | null;
     user: {
       id: string;
@@ -343,12 +364,12 @@ export async function getTagHistory(
           startedAt: true,
           completedAt: true,
           service: {
+            select: { id: true, name: true },
+          },
+          serviceDeployment: {
             select: {
               id: true,
-              name: true,
-              server: {
-                select: { id: true, name: true },
-              },
+              server: { select: { id: true, name: true } },
             },
           },
           user: {
@@ -371,7 +392,7 @@ export async function getTagHistory(
       .map((d) => ({
         id: d.service!.id,
         name: d.service!.name,
-        serverName: d.service!.server.name,
+        serverName: d.serviceDeployment?.server.name ?? '',
       }))
       // Remove duplicates
       .filter((s, i, arr) => arr.findIndex((x) => x.id === s.id) === i);
@@ -409,7 +430,7 @@ export async function getLinkedServicesWithDependencies(
   return prisma.service.findMany({
     where: { containerImageId },
     include: {
-      server: true,
+      serviceDeployments: { include: { server: true } },
       dependencies: {
         include: {
           dependsOn: true,
@@ -636,7 +657,7 @@ export async function cleanupOldImageDigests(retentionDays: number = 90): Promis
   const deleted = await prisma.imageDigest.deleteMany({
     where: {
       discoveredAt: { lt: cutoff },
-      services: { none: {} },
+      serviceDeployments: { none: {} },
       historyEntries: { none: {} },
     },
   });
@@ -647,7 +668,13 @@ export async function getImageDigest(digestId: string) {
   return prisma.imageDigest.findUnique({
     where: { id: digestId },
     include: {
-      services: { select: { id: true, name: true } },
+      serviceDeployments: {
+        select: {
+          id: true,
+          server: { select: { id: true, name: true } },
+          service: { select: { id: true, name: true } },
+        },
+      },
       containerImage: { select: { id: true, tagFilter: true } },
     },
   });

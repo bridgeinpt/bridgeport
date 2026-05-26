@@ -32,10 +32,11 @@ export async function createMultiEnvScenario(prisma: PrismaClient) {
   });
   const stagingService = await createTestService(prisma, {
     name: 'app-staging',
-    containerName: 'app-staging',
-    serverId: stagingServer.id,
+    environmentId: staging.id,
     containerImageId: stagingImage.id,
     imageTag: 'v1.1.0',
+    serverId: stagingServer.id,
+    containerName: 'app-staging',
   });
 
   // Production environment
@@ -53,10 +54,11 @@ export async function createMultiEnvScenario(prisma: PrismaClient) {
   });
   const prodService = await createTestService(prisma, {
     name: 'app-prod',
-    containerName: 'app-prod',
-    serverId: prodServer.id,
+    environmentId: production.id,
     containerImageId: prodImage.id,
     imageTag: 'v1.0.0',
+    serverId: prodServer.id,
+    containerName: 'app-prod',
   });
 
   return {

@@ -87,3 +87,47 @@ export function parsePaginationQuery(
     offset: typeof offsetStr === 'string' && offsetStr ? parseInt(offsetStr, 10) : defaults.offset,
   };
 }
+
+/**
+ * Back-compat helper: flatten a ServiceDeployment's runtime fields onto its
+ * Service template so legacy UI code reading `service.status`, `service.containerName`,
+ * `service.healthStatus`, etc. keeps working.
+ *
+ * The 2.0 split moved per-server runtime fields off Service onto ServiceDeployment.
+ * Several UI pages (Dashboard, Services list, ServerDetail) consume the old surface;
+ * this helper builds it from a `(deployment & { service })` row.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function flattenDeploymentOntoService(deployment: any): any {
+  const { service, ...d } = deployment;
+  return {
+    ...service,
+    // The flattened object's `id` stays the Service template id (back-compat).
+    // `deploymentId` exposes the underlying ServiceDeployment id so callers can
+    // drive per-deployment endpoints (deploy, restart, health, logs) from the
+    // flattened shape.
+    deploymentId: d.id,
+    // Runtime / per-server fields
+    containerName: d.containerName,
+    composePath: d.composePath,
+    status: d.status,
+    containerStatus: d.containerStatus,
+    healthStatus: d.healthStatus,
+    exposedPorts: d.exposedPorts,
+    discoveryStatus: d.discoveryStatus,
+    lastCheckedAt: d.lastCheckedAt,
+    lastDiscoveredAt: d.lastDiscoveredAt,
+    lastDeployedAt: d.lastDeployedAt,
+    serverId: d.serverId,
+    server: d.server,
+    // Agent check fields
+    agentHealthSuccess: d.agentHealthSuccess,
+    agentHealthStatusCode: d.agentHealthStatusCode,
+    agentHealthDurationMs: d.agentHealthDurationMs,
+    agentHealthCheckedAt: d.agentHealthCheckedAt,
+    agentTcpCheckResults: d.agentTcpCheckResults,
+    agentTcpCheckedAt: d.agentTcpCheckedAt,
+    agentCertCheckResults: d.agentCertCheckResults,
+    agentCertCheckedAt: d.agentCertCheckedAt,
+  };
+}

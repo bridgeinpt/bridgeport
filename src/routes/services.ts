@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma, isPrismaNotFoundError } from '../lib/db.js';
 import {
   deployService,
+  deployServiceTemplate,
   getDeploymentHistory,
   getDeployment,
   getContainerLogs,
@@ -17,28 +18,45 @@ import { checkServiceUpdate } from '../lib/scheduler.js';
 import { determineHealthStatus, determineOverallStatus } from '../services/servers.js';
 import { getSystemSettings } from '../services/system-settings.js';
 import { HEALTH_STATUS, CONTAINER_STATUS, DISCOVERY_STATUS, HEALTH_CHECK_STATUS } from '../lib/constants.js';
-import { validateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery } from '../lib/helpers.js';
+import { validateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery, flattenDeploymentOntoService } from '../lib/helpers.js';
+
+// --- schemas ---
 
 const createServiceSchema = z.object({
   name: z.string().min(1),
-  containerName: z.string().min(1),
-  containerImageId: z.string().min(1),  // Required - links to ContainerImage
+  containerImageId: z.string().min(1),
   imageTag: z.string().default('latest'),
-  composePath: z.string().optional(),
+  composeTemplate: z.string().nullable().optional(),
+  healthCheckUrl: z.string().nullable().optional(),
+  baseEnv: z.record(z.string(), z.string()).optional(),
+  deployStrategy: z.enum(['sequential', 'parallel']).optional(),
 });
 
 const updateServiceSchema = z.object({
   name: z.string().min(1).optional(),
-  containerName: z.string().min(1).optional(),
-  containerImageId: z.string().min(1).optional(),  // Can change container image
+  containerImageId: z.string().min(1).optional(),
   imageTag: z.string().optional(),
-  composePath: z.string().nullable().optional(),
+  composeTemplate: z.string().nullable().optional(),
   healthCheckUrl: z.string().nullable().optional(),
+  baseEnv: z.record(z.string(), z.string()).nullable().optional(),
+  deployStrategy: z.enum(['sequential', 'parallel']).optional(),
   serviceTypeId: z.string().nullable().optional(),
-  // Health check configuration for deployment orchestration
   healthWaitMs: z.number().int().min(0).optional(),
   healthRetries: z.number().int().min(1).optional(),
   healthIntervalMs: z.number().int().min(0).optional(),
+});
+
+const createDeploymentSchema = z.object({
+  serverId: z.string().min(1),
+  containerName: z.string().min(1),
+  composePath: z.string().nullable().optional(),
+  envOverrides: z.record(z.string(), z.string()).optional(),
+});
+
+const updateDeploymentSchema = z.object({
+  containerName: z.string().min(1).optional(),
+  composePath: z.string().nullable().optional(),
+  envOverrides: z.record(z.string(), z.string()).nullable().optional(),
 });
 
 const runCommandSchema = z.object({
@@ -49,10 +67,21 @@ const deploySchema = z.object({
   imageTag: z.string().optional(),
   generateArtifacts: z.boolean().default(true),
   pullImage: z.boolean().default(true),
+  strategy: z.enum(['sequential', 'parallel']).optional(),
 });
 
+// --- helpers ---
+
+function serializeJsonField(value: Record<string, string> | null | undefined): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return JSON.stringify(value);
+}
+
 export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
-  // List services for server
+  // --- LIST / GET ---
+
+  // List services (templates) attached to a server via their deployments.
   fastify.get(
     '/api/servers/:serverId/services',
     { preHandler: [fastify.authenticate] },
@@ -62,17 +91,20 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
       // omit lastHealthCheckError: the column is TEXT and can carry multi-KB
       // error messages. Polling after an incident bloats responses unboundedly;
       // detail views still load it explicitly when needed.
-      const services = await prisma.service.findMany({
+      const deployments = await prisma.serviceDeployment.findMany({
         where: { serverId },
-        orderBy: { name: 'asc' },
         omit: { lastHealthCheckError: true },
+        include: { service: { include: { containerImage: true, serviceType: true } } },
+        orderBy: { service: { name: 'asc' } },
       });
 
+      // Return as service rows (with deployment runtime flattened on) for backwards compatibility.
+      const services = deployments.map((d) => flattenDeploymentOntoService(d));
       return { services };
     }
   );
 
-  // List services for environment (paginated)
+  // List services (templates) for an environment.
   fastify.get(
     '/api/environments/:envId/services',
     { preHandler: [fastify.authenticate] },
@@ -80,7 +112,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
       const { envId } = request.params as { envId: string };
       const { limit, offset } = parsePaginationQuery(request.query as Record<string, unknown>);
 
-      const where = { server: { environmentId: envId } };
+      const where = { environmentId: envId };
 
       const [services, total] = await Promise.all([
         prisma.service.findMany({
@@ -88,11 +120,13 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           include: {
             containerImage: true,
             serviceType: true,
-            server: { select: { id: true, name: true } },
+            serviceDeployments: {
+              // See note on the per-server list above — keep large error blobs
+              // out of paginated list responses. The cache lives on deployments.
+              omit: { lastHealthCheckError: true },
+              include: { server: { select: { id: true, name: true } } },
+            },
           },
-          // See note on the per-server list above — keep large error blobs out
-          // of paginated list responses.
-          omit: { lastHealthCheckError: true },
           orderBy: { name: 'asc' },
           take: limit,
           skip: offset,
@@ -100,11 +134,31 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         prisma.service.count({ where }),
       ]);
 
-      return { services, total };
+      // Back-compat: surface the first deployment's runtime/server on the service row.
+      const enriched = services.map((s) => {
+        const first = s.serviceDeployments[0];
+        if (!first) return s;
+        return {
+          ...s,
+          containerName: first.containerName,
+          composePath: first.composePath,
+          status: first.status,
+          containerStatus: first.containerStatus,
+          healthStatus: first.healthStatus,
+          exposedPorts: first.exposedPorts,
+          discoveryStatus: first.discoveryStatus,
+          lastCheckedAt: first.lastCheckedAt,
+          lastDiscoveredAt: first.lastDiscoveredAt,
+          serverId: first.serverId,
+          server: first.server,
+        };
+      });
+
+      return { services: enriched, total };
     }
   );
 
-  // Get service
+  // Get service template
   fastify.get(
     '/api/services/:id',
     { preHandler: [fastify.authenticate] },
@@ -115,20 +169,17 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         prisma.service.findUnique({
           where: { id },
           include: {
-            server: {
-              include: { environment: true },
-            },
+            environment: true,
             serviceType: {
               include: {
-                commands: {
-                  orderBy: { sortOrder: 'asc' },
-                },
+                commands: { orderBy: { sortOrder: 'asc' } },
               },
             },
             containerImage: {
-              include: {
-                registryConnection: true,
-              },
+              include: { registryConnection: true },
+            },
+            serviceDeployments: {
+              include: { server: true },
             },
           },
         }),
@@ -137,22 +188,51 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
       );
       if (!service) return;
 
-      return { service };
+      // Back-compat flatten: the legacy UI consumes top-level container/server fields.
+      // Surface the first deployment's runtime state on the service object so existing
+      // components keep working. New UI code reads `serviceDeployments` directly.
+      const first = service.serviceDeployments[0];
+      const enriched = first
+        ? {
+            ...service,
+            containerName: first.containerName,
+            composePath: first.composePath,
+            status: first.status,
+            containerStatus: first.containerStatus,
+            healthStatus: first.healthStatus,
+            exposedPorts: first.exposedPorts,
+            discoveryStatus: first.discoveryStatus,
+            lastCheckedAt: first.lastCheckedAt,
+            lastDiscoveredAt: first.lastDiscoveredAt,
+            serverId: first.serverId,
+            server: first.server,
+            agentHealthSuccess: first.agentHealthSuccess,
+            agentHealthStatusCode: first.agentHealthStatusCode,
+            agentHealthDurationMs: first.agentHealthDurationMs,
+            agentHealthCheckedAt: first.agentHealthCheckedAt,
+            agentTcpCheckResults: first.agentTcpCheckResults,
+            agentTcpCheckedAt: first.agentTcpCheckedAt,
+            agentCertCheckResults: first.agentCertCheckResults,
+            agentCertCheckedAt: first.agentCertCheckedAt,
+          }
+        : service;
+
+      return { service: enriched };
     }
   );
 
-  // Create service
+  // --- CREATE / UPDATE / DELETE template ---
+
+  // Create service template (decoupled from servers).
   fastify.post(
-    '/api/servers/:serverId/services',
+    '/api/environments/:envId/services',
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
-      const { serverId } = request.params as { serverId: string };
+      const { envId } = request.params as { envId: string };
       const body = validateBody(createServiceSchema, request, reply);
       if (!body) return;
 
       try {
-        const server = await prisma.server.findUnique({ where: { id: serverId } });
-
         // Verify containerImage exists and is in the same environment
         const containerImage = await prisma.containerImage.findUnique({
           where: { id: body.containerImageId },
@@ -160,14 +240,20 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         if (!containerImage) {
           return reply.code(400).send({ error: 'Container image not found' });
         }
-        if (containerImage.environmentId !== server?.environmentId) {
+        if (containerImage.environmentId !== envId) {
           return reply.code(400).send({ error: 'Container image must be in the same environment' });
         }
 
         const service = await prisma.service.create({
           data: {
-            ...body,
-            serverId,
+            name: body.name,
+            containerImageId: body.containerImageId,
+            imageTag: body.imageTag,
+            composeTemplate: body.composeTemplate ?? null,
+            healthCheckUrl: body.healthCheckUrl ?? null,
+            baseEnv: body.baseEnv ? JSON.stringify(body.baseEnv) : null,
+            deployStrategy: body.deployStrategy ?? 'sequential',
+            environmentId: envId,
           },
         });
 
@@ -176,9 +262,9 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           resourceType: 'service',
           resourceId: service.id,
           resourceName: service.name,
-          details: { containerName: service.containerName, containerImageId: service.containerImageId },
+          details: { containerImageId: service.containerImageId },
           ...actorFrom(request),
-          environmentId: server?.environmentId,
+          environmentId: envId,
         });
 
         return { service };
@@ -189,7 +275,104 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
-  // Update service
+  // Legacy create-under-server endpoint: creates the template (env-scoped) and a deployment row.
+  // Retained for backwards compatibility with the CLI / older UI flows.
+  fastify.post(
+    '/api/servers/:serverId/services',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { serverId } = request.params as { serverId: string };
+      const body = validateBody(
+        createServiceSchema.extend({ containerName: z.string().min(1).optional() }),
+        request,
+        reply
+      );
+      if (!body) return;
+
+      try {
+        const server = await prisma.server.findUnique({ where: { id: serverId } });
+        if (!server) return reply.code(404).send({ error: 'Server not found' });
+
+        const containerImage = await prisma.containerImage.findUnique({
+          where: { id: body.containerImageId },
+        });
+        if (!containerImage) {
+          return reply.code(400).send({ error: 'Container image not found' });
+        }
+        if (containerImage.environmentId !== server.environmentId) {
+          return reply.code(400).send({ error: 'Container image must be in the same environment' });
+        }
+
+        // Legacy CLI flow attaches the same service name to multiple servers:
+        //   bridgeport services create --server A --name redis ...
+        //   bridgeport services create --server B --name redis ...
+        // Post-2.0 the unique constraint is (environmentId, name) at the
+        // template level, so the second call would explode. If a template with
+        // this name already exists in the environment with a MATCHING
+        // containerImageId, attach a new ServiceDeployment to it instead of
+        // creating a duplicate template. If the existing template uses a
+        // different image, fail with 409 — the caller must reconcile.
+        const existingService = await prisma.service.findUnique({
+          where: { environmentId_name: { environmentId: server.environmentId, name: body.name } },
+        });
+
+        let service = existingService;
+        if (existingService) {
+          if (existingService.containerImageId !== body.containerImageId) {
+            return reply.code(409).send({
+              error: `A service named "${body.name}" already exists in this environment with a different container image. Use a different name or update the existing service.`,
+            });
+          }
+        } else {
+          service = await prisma.service.create({
+            data: {
+              name: body.name,
+              containerImageId: body.containerImageId,
+              imageTag: body.imageTag,
+              composeTemplate: body.composeTemplate ?? null,
+              healthCheckUrl: body.healthCheckUrl ?? null,
+              baseEnv: body.baseEnv ? JSON.stringify(body.baseEnv) : null,
+              deployStrategy: body.deployStrategy ?? 'sequential',
+              environmentId: server.environmentId,
+            },
+          });
+        }
+
+        const newDeployment = await prisma.serviceDeployment.create({
+          data: {
+            serviceId: service!.id,
+            serverId: server.id,
+            containerName: body.containerName ?? body.name,
+            // First-time CLI attach: not deployed yet — keep it out of
+            // scheduler health checks until the first deploy runs.
+            discoveryStatus: DISCOVERY_STATUS.PENDING,
+          },
+        });
+
+        await logAudit({
+          action: existingService ? 'attach_deployment' : 'create',
+          resourceType: 'service',
+          resourceId: service!.id,
+          resourceName: service!.name,
+          details: {
+            containerImageId: service!.containerImageId,
+            serverId: server.id,
+            serviceDeploymentId: newDeployment.id,
+            reusedExistingTemplate: !!existingService,
+          },
+          ...actorFrom(request),
+          environmentId: server.environmentId,
+        });
+
+        return { service };
+      } catch (error) {
+        if (handleUniqueConstraint(error, 'Service already exists', reply)) return;
+        throw error;
+      }
+    }
+  );
+
+  // Update service template
   fastify.patch(
     '/api/services/:id',
     { preHandler: [fastify.authenticate] },
@@ -201,11 +384,15 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
       try {
         const existing = await prisma.service.findUnique({
           where: { id },
-          include: { server: true },
         });
+        const { baseEnv, ...rest } = body;
+        const data: Record<string, unknown> = { ...rest };
+        if (baseEnv !== undefined) {
+          data.baseEnv = baseEnv === null ? null : JSON.stringify(baseEnv);
+        }
         const service = await prisma.service.update({
           where: { id },
-          data: body,
+          data,
         });
 
         await logAudit({
@@ -215,7 +402,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           resourceName: service.name,
           details: { changes: body },
           ...actorFrom(request),
-          environmentId: existing?.server.environmentId,
+          environmentId: existing?.environmentId,
         });
 
         return { service };
@@ -228,7 +415,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
-  // Delete service
+  // Delete service template (and cascade its deployments).
   fastify.delete(
     '/api/services/:id',
     { preHandler: [fastify.authenticate] },
@@ -236,10 +423,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
       const { id } = request.params as { id: string };
 
       try {
-        const service = await prisma.service.findUnique({
-          where: { id },
-          include: { server: true },
-        });
+        const service = await prisma.service.findUnique({ where: { id } });
         await prisma.service.delete({ where: { id } });
 
         if (service) {
@@ -249,7 +433,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
             resourceId: id,
             resourceName: service.name,
             ...actorFrom(request),
-            environmentId: service.server.environmentId,
+            environmentId: service.environmentId,
           });
         }
 
@@ -263,7 +447,144 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
-  // Deploy service
+  // --- ServiceDeployment CRUD ---
+
+  // Add a deployment for an existing service template on a new server.
+  fastify.post(
+    '/api/services/:id/deployments',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = validateBody(createDeploymentSchema, request, reply);
+      if (!body) return;
+
+      const service = await prisma.service.findUnique({ where: { id } });
+      if (!service) return reply.code(404).send({ error: 'Service not found' });
+
+      const server = await prisma.server.findUnique({ where: { id: body.serverId } });
+      if (!server) return reply.code(400).send({ error: 'Server not found' });
+      if (server.environmentId !== service.environmentId) {
+        return reply.code(400).send({ error: 'Server must be in the same environment as the service' });
+      }
+
+      try {
+        const deployment = await prisma.serviceDeployment.create({
+          data: {
+            serviceId: id,
+            serverId: body.serverId,
+            containerName: body.containerName,
+            composePath: body.composePath ?? null,
+            envOverrides: serializeJsonField(body.envOverrides) ?? null,
+            // Newly attached deployments haven't been deployed yet. Mark them
+            // pending so the scheduler's `discoveryStatus='found'` filter skips
+            // them — otherwise we'd health-check a non-existent container and
+            // fire false SYSTEM_CONTAINER_CRASH alerts. Flips to 'found' after
+            // the first successful deploy or container discovery.
+            discoveryStatus: DISCOVERY_STATUS.PENDING,
+          },
+        });
+
+        await logAudit({
+          action: 'create',
+          resourceType: 'service_deployment',
+          resourceId: deployment.id,
+          resourceName: `${service.name}@${server.name}`,
+          details: { serviceId: id, serverId: body.serverId, containerName: body.containerName },
+          ...actorFrom(request),
+          environmentId: service.environmentId,
+        });
+
+        return { deployment };
+      } catch (error) {
+        if (handleUniqueConstraint(error, 'Deployment for that server or container name already exists', reply)) return;
+        throw error;
+      }
+    }
+  );
+
+  // Update a deployment (container name, compose path, env overrides).
+  fastify.patch(
+    '/api/services/:id/deployments/:depId',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id, depId } = request.params as { id: string; depId: string };
+      const body = validateBody(updateDeploymentSchema, request, reply);
+      if (!body) return;
+
+      try {
+        const data: Record<string, unknown> = {};
+        if (body.containerName !== undefined) data.containerName = body.containerName;
+        if (body.composePath !== undefined) data.composePath = body.composePath;
+        if (body.envOverrides !== undefined) {
+          data.envOverrides = body.envOverrides === null ? null : JSON.stringify(body.envOverrides);
+        }
+
+        const deployment = await prisma.serviceDeployment.update({
+          where: { id: depId },
+          data,
+          include: { service: true, server: true },
+        });
+
+        await logAudit({
+          action: 'update',
+          resourceType: 'service_deployment',
+          resourceId: depId,
+          resourceName: `${deployment.service.name}@${deployment.server.name}`,
+          details: { changes: body, serviceId: id },
+          ...actorFrom(request),
+          environmentId: deployment.service.environmentId,
+        });
+
+        return { deployment };
+      } catch (error) {
+        if (isPrismaNotFoundError(error)) {
+          return reply.code(404).send({ error: 'Deployment not found' });
+        }
+        if (handleUniqueConstraint(error, 'Container name already in use on this server', reply)) return;
+        throw error;
+      }
+    }
+  );
+
+  // Remove a deployment (does not remove the template).
+  fastify.delete(
+    '/api/services/:id/deployments/:depId',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id, depId } = request.params as { id: string; depId: string };
+
+      try {
+        const deployment = await prisma.serviceDeployment.findUnique({
+          where: { id: depId },
+          include: { service: true, server: true },
+        });
+        if (!deployment) return reply.code(404).send({ error: 'Deployment not found' });
+
+        await prisma.serviceDeployment.delete({ where: { id: depId } });
+
+        await logAudit({
+          action: 'delete',
+          resourceType: 'service_deployment',
+          resourceId: depId,
+          resourceName: `${deployment.service.name}@${deployment.server.name}`,
+          details: { serviceId: id, serverId: deployment.serverId },
+          ...actorFrom(request),
+          environmentId: deployment.service.environmentId,
+        });
+
+        return { success: true };
+      } catch (error) {
+        if (isPrismaNotFoundError(error)) {
+          return reply.code(404).send({ error: 'Deployment not found' });
+        }
+        throw error;
+      }
+    }
+  );
+
+  // --- Deploy ---
+
+  // Deploy a service template across all its deployments (sequential | parallel).
   fastify.post(
     '/api/services/:id/deploy',
     { preHandler: [fastify.authenticate] },
@@ -272,27 +593,110 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
       const body = validateBody(deploySchema, request, reply);
       if (!body) return;
 
-      const service = await prisma.service.findUnique({
-        where: { id },
-        include: { server: true },
-      });
+      const service = await prisma.service.findUnique({ where: { id } });
+      if (!service) return reply.code(404).send({ error: 'Service not found' });
 
       try {
-        const result = await deployService(
+        const outcome = await deployServiceTemplate(
           id,
           request.authUser!.email,
           userIdForFk(request.authUser!),
-          body
+          {
+            imageTag: body.imageTag,
+            generateArtifacts: body.generateArtifacts,
+            pullImage: body.pullImage,
+            strategy: body.strategy,
+          }
         );
+
+        // Surface zero-deployment template error as a 400 so CI/release
+        // automation doesn't treat a no-op rollout as success.
+        if (outcome.error) {
+          await logAudit({
+            action: 'deploy',
+            resourceType: 'service',
+            resourceId: id,
+            resourceName: service.name,
+            details: { imageTag: body.imageTag },
+            success: false,
+            error: outcome.error,
+            ...actorFrom(request),
+            environmentId: service.environmentId,
+          });
+          return reply.code(400).send({ error: outcome.error });
+        }
 
         await logAudit({
           action: 'deploy',
           resourceType: 'service',
           resourceId: id,
-          resourceName: service?.name,
-          details: { imageTag: body.imageTag || service?.imageTag, deploymentId: result.deployment?.id },
+          resourceName: service.name,
+          details: {
+            imageTag: body.imageTag || service.imageTag,
+            strategy: body.strategy ?? service.deployStrategy,
+            halted: outcome.halted,
+            deploymentCount: outcome.results.length,
+          },
           ...actorFrom(request),
-          environmentId: service?.server.environmentId,
+          environmentId: service.environmentId,
+        });
+
+        return outcome;
+      } catch (error) {
+        const message = getErrorMessage(error, 'Deployment failed');
+
+        await logAudit({
+          action: 'deploy',
+          resourceType: 'service',
+          resourceId: id,
+          resourceName: service.name,
+          details: { imageTag: body.imageTag },
+          success: false,
+          error: message,
+          ...actorFrom(request),
+          environmentId: service.environmentId,
+        });
+
+        return reply.code(500).send({ error: message });
+      }
+    }
+  );
+
+  // Deploy a single ServiceDeployment (per-server target).
+  fastify.post(
+    '/api/services/:id/deployments/:depId/deploy',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id, depId } = request.params as { id: string; depId: string };
+      const body = validateBody(deploySchema, request, reply);
+      if (!body) return;
+
+      const deployment = await prisma.serviceDeployment.findUnique({
+        where: { id: depId },
+        include: { service: true, server: true },
+      });
+      if (!deployment) return reply.code(404).send({ error: 'Deployment not found' });
+
+      try {
+        const result = await deployService(
+          depId,
+          request.authUser!.email,
+          userIdForFk(request.authUser!),
+          {
+            imageTag: body.imageTag,
+            generateArtifacts: body.generateArtifacts,
+            pullImage: body.pullImage,
+          }
+        );
+
+        await logAudit({
+          action: 'deploy',
+          resourceType: 'service_deployment',
+          resourceId: depId,
+          resourceName: `${deployment.service.name}@${deployment.server.name}`,
+          details: { imageTag: body.imageTag || deployment.service.imageTag, deploymentId: result.deployment?.id, serviceId: id },
+          ...actorFrom(request),
+          environmentId: deployment.service.environmentId,
         });
 
         return result;
@@ -301,14 +705,14 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
 
         await logAudit({
           action: 'deploy',
-          resourceType: 'service',
-          resourceId: id,
-          resourceName: service?.name,
-          details: { imageTag: body.imageTag },
+          resourceType: 'service_deployment',
+          resourceId: depId,
+          resourceName: `${deployment.service.name}@${deployment.server.name}`,
+          details: { imageTag: body.imageTag, serviceId: id },
           success: false,
           error: message,
           ...actorFrom(request),
-          environmentId: service?.server.environmentId,
+          environmentId: deployment.service.environmentId,
         });
 
         return reply.code(500).send({ error: message });
@@ -316,9 +720,11 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
-  // Get deployment history
+  // --- History / Logs / Restart / Health ---
+
+  // Get deployment history (per Service template)
   fastify.get(
-    '/api/services/:id/deployments',
+    '/api/services/:id/deployments-history',
     { preHandler: [fastify.authenticate] },
     async (request) => {
       const { id } = request.params as { id: string };
@@ -342,12 +748,12 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
-  // Get container logs
+  // Get container logs for a specific deployment.
   fastify.get(
-    '/api/services/:id/logs',
+    '/api/services/:id/deployments/:depId/logs',
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
-      const { id } = request.params as { id: string };
+      const { depId } = request.params as { id: string; depId: string };
       const { tail, before } = request.query as { tail?: string; before?: string };
 
       try {
@@ -365,7 +771,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         }
 
         // `-t` (timestamps) is always on so the UI can paginate via `before=<timestamp>`
-        const logs = await getContainerLogs(id, {
+        const logs = await getContainerLogs(depId, {
           tail: tailValue,
           until: before,
           timestamps: true,
@@ -378,29 +784,28 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
-  // Stream container logs (SSE)
+  // Stream container logs (SSE) for a specific deployment.
   fastify.get(
-    '/api/services/:id/logs/stream',
+    '/api/services/:id/deployments/:depId/logs/stream',
     { preHandler: [fastify.authenticate] },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      const { id } = request.params as { id: string };
+      const { depId } = request.params as { id: string; depId: string };
 
-      const service = await findOrNotFound(
-        prisma.service.findUnique({
-          where: { id },
+      const deployment = await findOrNotFound(
+        prisma.serviceDeployment.findUnique({
+          where: { id: depId },
           include: { server: true },
         }),
-        'Service',
+        'Deployment',
         reply
       );
-      if (!service) return;
+      if (!deployment) return;
 
-      // Create appropriate client based on hostname
       const { client, error } = await createClientForServer(
-        service.server.hostname,
-        service.server.environmentId,
+        deployment.server.hostname,
+        deployment.server.environmentId,
         getEnvironmentSshKey,
-        { serverType: service.server.serverType }
+        { serverType: deployment.server.serverType }
       );
       if (!client) {
         return reply.code(400).send({ error });
@@ -415,13 +820,11 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
       try {
         await client.connect();
 
-        // Get default log lines from system settings
         const settings = await getSystemSettings();
         const defaultLogLines = settings.defaultLogLines;
 
-        // Stream logs (add PATH for non-interactive SSH)
         await client.execStream(
-          `export PATH="/usr/local/bin:/usr/bin:$PATH" && docker logs -f --tail ${defaultLogLines} ${shellEscape(service.containerName)}`,
+          `export PATH="/usr/local/bin:/usr/bin:$PATH" && docker logs -f --tail ${defaultLogLines} ${shellEscape(deployment.containerName)}`,
           (data, isStderr) => {
             const eventType = isStderr ? 'stderr' : 'stdout';
             reply.raw.write(`event: ${eventType}\n`);
@@ -439,7 +842,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
-  // Get available image tags
+  // Get available image tags (template-scoped — tag is shared across deployments).
   fastify.get(
     '/api/services/:id/image-tags',
     { preHandler: [fastify.authenticate] },
@@ -456,29 +859,28 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
-  // Restart container
+  // Restart a specific deployment's container
   fastify.post(
-    '/api/services/:id/restart',
+    '/api/services/:id/deployments/:depId/restart',
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
-      const { id } = request.params as { id: string };
+      const { id, depId } = request.params as { id: string; depId: string };
 
-      const service = await findOrNotFound(
-        prisma.service.findUnique({
-          where: { id },
-          include: { server: true },
+      const deployment = await findOrNotFound(
+        prisma.serviceDeployment.findUnique({
+          where: { id: depId },
+          include: { server: true, service: { select: { name: true, environmentId: true } } },
         }),
-        'Service',
+        'Deployment',
         reply
       );
-      if (!service) return;
+      if (!deployment) return;
 
-      // Create appropriate client based on hostname
       const { client, error } = await createClientForServer(
-        service.server.hostname,
-        service.server.environmentId,
+        deployment.server.hostname,
+        deployment.server.environmentId,
         getEnvironmentSshKey,
-        { serverType: service.server.serverType }
+        { serverType: deployment.server.serverType }
       );
       if (!client) {
         return reply.code(400).send({ error });
@@ -495,26 +897,26 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         // --force-recreate` so a NEW container is created and config files
         // are re-read. We deliberately do NOT regenerate compose artifacts
         // here: restart means "down + up with the current on-disk compose".
-        // Use the deploy.ts pattern (composeUp with forceRecreate=true).
-        if (service.composePath) {
-          await docker.composeDown(service.composePath, service.containerName);
-          await docker.composeUp(service.composePath, service.containerName, true);
+        if (deployment.composePath) {
+          await docker.composeDown(deployment.composePath, deployment.containerName);
+          await docker.composeUp(deployment.composePath, deployment.containerName, true);
         } else {
-          await docker.restartContainer(service.containerName);
+          await docker.restartContainer(deployment.containerName);
         }
 
         await logAudit({
           action: 'restart',
-          resourceType: 'service',
-          resourceId: id,
-          resourceName: service.name,
+          resourceType: 'service_deployment',
+          resourceId: depId,
+          resourceName: `${deployment.service.name}@${deployment.server.name}`,
           details: {
-            containerName: service.containerName,
-            serverName: service.server.name,
-            mode: service.composePath ? 'compose' : 'docker',
+            containerName: deployment.containerName,
+            serverName: deployment.server.name,
+            serviceId: id,
+            mode: deployment.composePath ? 'compose' : 'docker',
           },
           ...actorFrom(request),
-          environmentId: service.server.environmentId,
+          environmentId: deployment.service.environmentId,
         });
 
         return { success: true };
@@ -523,13 +925,16 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
 
         await logAudit({
           action: 'restart',
-          resourceType: 'service',
-          resourceId: id,
-          resourceName: service.name,
+          resourceType: 'service_deployment',
+          resourceId: depId,
+          resourceName: `${deployment.service.name}@${deployment.server.name}`,
+          // serviceId is needed by /services/:id/history so failure entries
+          // appear in the per-template audit view.
+          details: { serviceId: id },
           success: false,
           error: message,
           ...actorFrom(request),
-          environmentId: service.server.environmentId,
+          environmentId: deployment.service.environmentId,
         });
 
         return reply.code(500).send({ error: message });
@@ -539,29 +944,28 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
-  // Health check service - comprehensive refresh of all service info
+  // Refresh runtime status of a specific deployment.
   fastify.post(
-    '/api/services/:id/health',
+    '/api/services/:id/deployments/:depId/health',
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
-      const { id } = request.params as { id: string };
+      const { id, depId } = request.params as { id: string; depId: string };
 
-      const service = await findOrNotFound(
-        prisma.service.findUnique({
-          where: { id },
-          include: { server: true },
+      const deployment = await findOrNotFound(
+        prisma.serviceDeployment.findUnique({
+          where: { id: depId },
+          include: { server: true, service: true },
         }),
-        'Service',
+        'Deployment',
         reply
       );
-      if (!service) return;
+      if (!deployment) return;
 
-      // Create appropriate client based on hostname
       const { client, error } = await createClientForServer(
-        service.server.hostname,
-        service.server.environmentId,
+        deployment.server.hostname,
+        deployment.server.environmentId,
         getEnvironmentSshKey,
-        { serverType: service.server.serverType }
+        { serverType: deployment.server.serverType }
       );
       if (!client) {
         return reply.code(400).send({ error });
@@ -573,56 +977,52 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
       try {
         await client.connect();
 
-        // Get comprehensive container info (state, health, ports, image)
-        const containerInfo = await docker.getContainerInfo(service.containerName);
+        const containerInfo = await docker.getContainerInfo(deployment.containerName);
 
-        // Check URL health if configured
         let urlHealth: { success: boolean; statusCode?: number; error?: string } | null = null;
-        if (service.healthCheckUrl) {
-          urlHealth = await docker.checkUrl(service.healthCheckUrl);
+        if (deployment.service.healthCheckUrl) {
+          urlHealth = await docker.checkUrl(deployment.service.healthCheckUrl);
         }
 
-        // Determine container status
         const containerStatus = containerInfo.state;
-
-        // Determine health status using shared function
         const healthStatus = determineHealthStatus(
           containerInfo.health,
           containerInfo.running,
           urlHealth
         );
-
-        // Determine overall status using shared function
         const status = determineOverallStatus(
           containerInfo.state,
           containerInfo.running,
           healthStatus
         );
 
-        // Serialize ports to JSON
         const exposedPorts = containerInfo.ports.length > 0
           ? JSON.stringify(containerInfo.ports)
           : null;
 
-        // Extract current image tag from running container
-        const currentImageTag = containerInfo.image ? containerInfo.image.split(':')[1] || service.imageTag : service.imageTag;
+        // Sync image tag back to the template on discovery.
+        const currentImageTag = containerInfo.image ? containerInfo.image.split(':')[1] || deployment.service.imageTag : deployment.service.imageTag;
 
-        // Update service with all refreshed data
-        await prisma.service.update({
-          where: { id },
+        await prisma.serviceDeployment.update({
+          where: { id: depId },
           data: {
             status,
             containerStatus,
             healthStatus,
             exposedPorts,
-            imageTag: currentImageTag,
             discoveryStatus: containerInfo.state === CONTAINER_STATUS.NOT_FOUND ? DISCOVERY_STATUS.MISSING : DISCOVERY_STATUS.FOUND,
             lastCheckedAt: new Date(),
-            lastDiscoveredAt: containerInfo.state !== CONTAINER_STATUS.NOT_FOUND ? new Date() : service.lastDiscoveredAt,
+            lastDiscoveredAt: containerInfo.state !== CONTAINER_STATUS.NOT_FOUND ? new Date() : deployment.lastDiscoveredAt,
           },
         });
 
-        // Build container health response for compatibility
+        if (currentImageTag !== deployment.service.imageTag) {
+          await prisma.service.update({
+            where: { id: deployment.serviceId },
+            data: { imageTag: currentImageTag },
+          });
+        }
+
         const containerHealth = {
           state: containerInfo.state,
           status: containerInfo.running ? 'Running' : `Container is ${containerInfo.state}`,
@@ -630,18 +1030,14 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           running: containerInfo.running,
         };
 
-        // Check for available image updates (uses containerImage.registryConnectionId)
         let updateInfo: { hasUpdate: boolean; bestTag?: string } | null = null;
         try {
-          const updateResult = await checkServiceUpdate(id);
+          const updateResult = await checkServiceUpdate(depId);
           if (!updateResult.error) {
-            updateInfo = {
-              hasUpdate: updateResult.hasUpdate,
-              bestTag: updateResult.bestTag,
-            };
+            updateInfo = { hasUpdate: updateResult.hasUpdate, bestTag: updateResult.bestTag };
           }
-        } catch (err) {
-          console.error(`[HealthCheck] Failed to check updates for ${service.name}:`, err);
+        } catch {
+          console.error('[HealthCheck] Failed to check updates for service', deployment.service.name);
         }
 
         const durationMs = Date.now() - start;
@@ -649,19 +1045,19 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
 
         await logAudit({
           action: 'health_check',
-          resourceType: 'service',
-          resourceId: id,
-          resourceName: service.name,
-          details: { status, containerStatus, healthStatus, containerHealth, urlHealth, exposedPorts, updateInfo },
+          resourceType: 'service_deployment',
+          resourceId: depId,
+          resourceName: deployment.service.name,
+          details: { status, containerStatus, healthStatus, containerHealth, urlHealth, exposedPorts, updateInfo, serviceId: id },
           ...actorFrom(request),
-          environmentId: service.server.environmentId,
+          environmentId: deployment.service.environmentId,
         });
 
         await logHealthCheck({
-          environmentId: service.server.environmentId,
-          resourceType: 'service',
-          resourceId: id,
-          resourceName: service.name,
+          environmentId: deployment.service.environmentId,
+          resourceType: 'service_deployment',
+          resourceId: depId,
+          resourceName: deployment.service.name,
           checkType: urlHealth ? 'url' : 'container_health',
           status: isHealthy ? HEALTH_CHECK_STATUS.SUCCESS : HEALTH_CHECK_STATUS.FAILURE,
           durationMs,
@@ -684,9 +1080,8 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         const durationMs = Date.now() - start;
         const message = getErrorMessage(error, 'Health check failed');
 
-        // Update status to unknown on error
-        await prisma.service.update({
-          where: { id },
+        await prisma.serviceDeployment.update({
+          where: { id: depId },
           data: {
             status: HEALTH_STATUS.UNKNOWN,
             containerStatus: HEALTH_STATUS.UNKNOWN,
@@ -697,20 +1092,23 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
 
         await logAudit({
           action: 'health_check',
-          resourceType: 'service',
-          resourceId: id,
-          resourceName: service.name,
+          resourceType: 'service_deployment',
+          resourceId: depId,
+          resourceName: deployment.service.name,
+          // serviceId is needed by /services/:id/history so failure entries
+          // appear in the per-template audit view.
+          details: { serviceId: id },
           success: false,
           error: message,
           ...actorFrom(request),
-          environmentId: service.server.environmentId,
+          environmentId: deployment.service.environmentId,
         });
 
         await logHealthCheck({
-          environmentId: service.server.environmentId,
-          resourceType: 'service',
-          resourceId: id,
-          resourceName: service.name,
+          environmentId: deployment.service.environmentId,
+          resourceType: 'service_deployment',
+          resourceId: depId,
+          resourceName: deployment.service.name,
           checkType: 'url',
           status: HEALTH_CHECK_STATUS.FAILURE,
           durationMs,
@@ -724,7 +1122,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
-  // Get service action history
+  // Get service action history (audit + deployments)
   fastify.get(
     '/api/services/:id/history',
     { preHandler: [fastify.authenticate] },
@@ -733,32 +1131,27 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
       const { limit } = request.query as { limit?: string };
 
       const service = await findOrNotFound(
-        prisma.service.findUnique({
-          where: { id },
-          include: { server: true },
-        }),
+        prisma.service.findUnique({ where: { id } }),
         'Service',
         reply
       );
       if (!service) return;
 
-      // Get audit logs for this service (deploy, restart, health_check actions)
       const logs = await prisma.auditLog.findMany({
         where: {
-          resourceType: 'service',
-          resourceId: id,
+          OR: [
+            { resourceType: 'service', resourceId: id },
+            { resourceType: 'service_deployment', details: { contains: `"serviceId":"${id}"` } },
+          ],
           action: { in: ['deploy', 'restart', 'health_check', 'update', 'create'] },
         },
         orderBy: { createdAt: 'desc' },
         take: limit ? parseInt(limit, 10) : 50,
         include: {
-          user: {
-            select: { id: true, email: true, name: true },
-          },
+          user: { select: { id: true, email: true, name: true } },
         },
       });
 
-      // Also get deployments for this service
       const deployments = await prisma.deployment.findMany({
         where: { serviceId: id },
         orderBy: { startedAt: 'desc' },
@@ -770,6 +1163,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           triggeredBy: true,
           startedAt: true,
           completedAt: true,
+          serviceDeploymentId: true,
         },
       });
 
@@ -777,7 +1171,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
-  // Check for updates
+  // Check for image updates (template-scope)
   fastify.post(
     '/api/services/:id/check-updates',
     { preHandler: [fastify.authenticate] },
@@ -787,7 +1181,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
       const service = await findOrNotFound(
         prisma.service.findUnique({
           where: { id },
-          include: { server: true, containerImage: true },
+          include: { containerImage: true },
         }),
         'Service',
         reply
@@ -800,13 +1194,9 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: result.error });
       }
 
-      // Fetch updated container image data
       const updatedContainerImage = await prisma.containerImage.findUnique({
         where: { id: service.containerImageId },
-        select: {
-          lastCheckedAt: true,
-          updateAvailable: true,
-        },
+        select: { lastCheckedAt: true, updateAvailable: true },
       });
 
       return {
@@ -819,7 +1209,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
-  // Get command for a predefined command (for CLI)
+  // Get predefined command (for CLI). Returns template + command (no per-deployment context).
   fastify.post(
     '/api/services/:id/run-command',
     { preHandler: [fastify.authenticate] },
@@ -832,12 +1222,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         prisma.service.findUnique({
           where: { id },
           include: {
-            serviceType: {
-              include: {
-                commands: true,
-              },
-            },
-            server: true,
+            serviceType: { include: { commands: true } },
           },
         }),
         'Service',
@@ -849,9 +1234,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: 'Service has no service type configured' });
       }
 
-      const command = service.serviceType.commands.find(
-        (cmd) => cmd.name === body.commandName
-      );
+      const command = service.serviceType.commands.find((cmd) => cmd.name === body.commandName);
 
       if (!command) {
         return reply.code(404).send({
@@ -867,7 +1250,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         resourceName: service.name,
         details: { commandName: body.commandName, command: command.command },
         ...actorFrom(request),
-        environmentId: service.server.environmentId,
+        environmentId: service.environmentId,
       });
 
       return { command: command.command };

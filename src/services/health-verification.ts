@@ -1,5 +1,5 @@
 import { prisma } from '../lib/db.js';
-import { DockerSSH, createClientForServer } from '../lib/ssh.js';
+import { DockerSSH } from '../lib/ssh.js';
 import { createDockerClientForServer } from '../lib/docker.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 import { determineHealthStatus, determineOverallStatus, type UrlHealthResult } from './servers.js';
@@ -15,39 +15,35 @@ export interface HealthVerificationResult {
 }
 
 export interface HealthVerificationOptions {
-  serviceId: string;
-  waitMs?: number;        // Initial wait before checking (default: service.healthWaitMs)
-  maxRetries?: number;    // Number of attempts (default: service.healthRetries)
-  intervalMs?: number;    // Time between retries (default: service.healthIntervalMs)
+  /** Per-server deployment id (the runtime entity to verify). */
+  serviceDeploymentId: string;
+  waitMs?: number;
+  maxRetries?: number;
+  intervalMs?: number;
 }
 
-/**
- * Wait for a specified duration
- */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
- * Verify service health with configurable timing.
- * Used during orchestrated deployments to gate deployment progression.
+ * Verify service-deployment health with configurable timing.
+ * Used during orchestrated deployments to gate progression.
  */
 export async function verifyServiceHealth(
   options: HealthVerificationOptions
 ): Promise<HealthVerificationResult> {
-  const service = await prisma.service.findUniqueOrThrow({
-    where: { id: options.serviceId },
+  const deployment = await prisma.serviceDeployment.findUniqueOrThrow({
+    where: { id: options.serviceDeploymentId },
     include: {
-      server: {
-        include: { environment: true },
-      },
+      server: { include: { environment: true } },
+      service: { select: { name: true, healthCheckUrl: true, healthWaitMs: true, healthRetries: true, healthIntervalMs: true } },
     },
   });
 
-  // Use provided options or fall back to service-specific config
-  const waitMs = options.waitMs ?? service.healthWaitMs;
-  const maxRetries = options.maxRetries ?? service.healthRetries;
-  const intervalMs = options.intervalMs ?? service.healthIntervalMs;
+  const waitMs = options.waitMs ?? deployment.service.healthWaitMs;
+  const maxRetries = options.maxRetries ?? deployment.service.healthRetries;
+  const intervalMs = options.intervalMs ?? deployment.service.healthIntervalMs;
 
   const logs: string[] = [];
   const log = (message: string) => {
@@ -55,22 +51,20 @@ export async function verifyServiceHealth(
     logs.push(`[${timestamp}] ${message}`);
   };
 
-  log(`Starting health verification for ${service.name}`);
+  log(`Starting health verification for ${deployment.service.name} on ${deployment.server.name}`);
   log(`Config: waitMs=${waitMs}, maxRetries=${maxRetries}, intervalMs=${intervalMs}`);
 
-  // Initial wait for service to stabilize
   if (waitMs > 0) {
     log(`Waiting ${waitMs}ms for service to stabilize...`);
     await sleep(waitMs);
   }
 
-  // Create Docker client based on server's dockerMode
   const { dockerClient, sshClient, error: clientError, needsConnect } = await createDockerClientForServer(
     {
-      hostname: service.server.hostname,
-      dockerMode: service.server.dockerMode,
-      serverType: service.server.serverType,
-      environmentId: service.server.environmentId,
+      hostname: deployment.server.hostname,
+      dockerMode: deployment.server.dockerMode,
+      serverType: deployment.server.serverType,
+      environmentId: deployment.server.environmentId,
     },
     getEnvironmentSshKey
   );
@@ -86,14 +80,13 @@ export async function verifyServiceHealth(
     };
   }
 
-  // For URL health checks, we still need the DockerSSH wrapper
   const dockerSSH = sshClient ? new DockerSSH(sshClient) : null;
 
   try {
     if (needsConnect && sshClient) {
       await sshClient.connect();
     }
-    log(`Connected to ${service.server.name}`);
+    log(`Connected to ${deployment.server.name}`);
 
     let attempt = 0;
     let lastContainerStatus: string = HEALTH_STATUS.UNKNOWN;
@@ -104,19 +97,16 @@ export async function verifyServiceHealth(
       attempt++;
       log(`Health check attempt ${attempt}/${maxRetries}`);
 
-      // Get container health
-      const containerHealth = await dockerClient.getContainerHealth(service.containerName);
+      const containerHealth = await dockerClient.getContainerHealth(deployment.containerName);
       lastContainerStatus = containerHealth.state;
 
-      // Check URL health if configured (requires SSH for curl command)
       let urlHealth: UrlHealthResult | null = null;
-      if (service.healthCheckUrl && dockerSSH) {
-        urlHealth = await dockerSSH.checkUrl(service.healthCheckUrl);
+      if (deployment.service.healthCheckUrl && dockerSSH) {
+        urlHealth = await dockerSSH.checkUrl(deployment.service.healthCheckUrl);
         lastUrlCheck = urlHealth;
-        log(`URL check (${service.healthCheckUrl}): ${urlHealth.success ? 'success' : 'failed'} - ${urlHealth.statusCode || urlHealth.error}`);
+        log(`URL check (${deployment.service.healthCheckUrl}): ${urlHealth.success ? 'success' : 'failed'} - ${urlHealth.statusCode || urlHealth.error}`);
       }
 
-      // Determine health status
       lastHealthStatus = determineHealthStatus(
         containerHealth.health,
         containerHealth.running,
@@ -131,13 +121,11 @@ export async function verifyServiceHealth(
 
       log(`Container: ${containerHealth.state}, Health: ${lastHealthStatus}, Overall: ${overallStatus}`);
 
-      // Check if healthy
       if (lastHealthStatus === HEALTH_STATUS.HEALTHY) {
-        log(`Service ${service.name} is healthy`);
+        log(`Service ${deployment.service.name} is healthy on ${deployment.server.name}`);
 
-        // Update service status in database
-        await prisma.service.update({
-          where: { id: service.id },
+        await prisma.serviceDeployment.update({
+          where: { id: deployment.id },
           data: {
             containerStatus: lastContainerStatus,
             healthStatus: lastHealthStatus,
@@ -156,12 +144,11 @@ export async function verifyServiceHealth(
         };
       }
 
-      // Also accept 'running' or 'none' if there's no health check configured
       if (lastHealthStatus === HEALTH_STATUS.NONE && containerHealth.running) {
-        log(`Service ${service.name} is running (no health check configured)`);
+        log(`Service ${deployment.service.name} is running (no health check configured)`);
 
-        await prisma.service.update({
-          where: { id: service.id },
+        await prisma.serviceDeployment.update({
+          where: { id: deployment.id },
           data: {
             containerStatus: lastContainerStatus,
             healthStatus: lastHealthStatus,
@@ -180,19 +167,16 @@ export async function verifyServiceHealth(
         };
       }
 
-      // Wait before next attempt (unless this is the last attempt)
       if (attempt < maxRetries) {
         log(`Waiting ${intervalMs}ms before next attempt...`);
         await sleep(intervalMs);
       }
     }
 
-    // All retries exhausted
     log(`Health verification failed after ${maxRetries} attempts`);
 
-    // Update service status
-    await prisma.service.update({
-      where: { id: service.id },
+    await prisma.serviceDeployment.update({
+      where: { id: deployment.id },
       data: {
         containerStatus: lastContainerStatus,
         healthStatus: lastHealthStatus,
@@ -227,26 +211,25 @@ export async function verifyServiceHealth(
 }
 
 /**
- * Quick health check without retries (for status updates)
+ * Quick health check without retries (for status updates).
  */
 export async function quickHealthCheck(
-  serviceId: string
+  serviceDeploymentId: string
 ): Promise<{ containerStatus: string; healthStatus: string; running: boolean }> {
-  const service = await prisma.service.findUniqueOrThrow({
-    where: { id: serviceId },
+  const deployment = await prisma.serviceDeployment.findUniqueOrThrow({
+    where: { id: serviceDeploymentId },
     include: {
-      server: {
-        include: { environment: true },
-      },
+      server: { include: { environment: true } },
+      service: { select: { healthCheckUrl: true } },
     },
   });
 
   const { dockerClient, sshClient, needsConnect } = await createDockerClientForServer(
     {
-      hostname: service.server.hostname,
-      dockerMode: service.server.dockerMode,
-      serverType: service.server.serverType,
-      environmentId: service.server.environmentId,
+      hostname: deployment.server.hostname,
+      dockerMode: deployment.server.dockerMode,
+      serverType: deployment.server.serverType,
+      environmentId: deployment.server.environmentId,
     },
     getEnvironmentSshKey
   );
@@ -255,18 +238,17 @@ export async function quickHealthCheck(
     return { containerStatus: HEALTH_STATUS.UNKNOWN, healthStatus: HEALTH_STATUS.UNKNOWN, running: false };
   }
 
-  // For URL health checks, we need the DockerSSH wrapper
   const dockerSSH = sshClient ? new DockerSSH(sshClient) : null;
 
   try {
     if (needsConnect && sshClient) {
       await sshClient.connect();
     }
-    const containerHealth = await dockerClient.getContainerHealth(service.containerName);
+    const containerHealth = await dockerClient.getContainerHealth(deployment.containerName);
 
     let urlHealth: UrlHealthResult | null = null;
-    if (service.healthCheckUrl && dockerSSH) {
-      urlHealth = await dockerSSH.checkUrl(service.healthCheckUrl);
+    if (deployment.service.healthCheckUrl && dockerSSH) {
+      urlHealth = await dockerSSH.checkUrl(deployment.service.healthCheckUrl);
     }
 
     const healthStatus = determineHealthStatus(

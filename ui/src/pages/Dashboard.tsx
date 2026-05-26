@@ -47,6 +47,8 @@ interface Alert {
 interface ServiceWithUpdate extends Service {
   serverName: string;
   serverId: string;
+  /** Target tag for the update, derived from the linked container image. */
+  targetTag: string;
 }
 
 interface DatabaseWithBackups extends Database {
@@ -177,13 +179,14 @@ export default function Dashboard() {
     const healthyStatuses = new Set(['running', 'healthy', 'unknown']);
     environment?.servers.forEach((server) => {
       server.services.forEach((service) => {
-        if (!healthyStatuses.has(service.status)) {
+        const status = service.status ?? 'unknown';
+        if (!healthyStatuses.has(status)) {
           result.push({
             id: `unhealthy-${service.id}`,
             type: 'unhealthy',
             severity: 'error',
             title: 'Unhealthy Service',
-            description: `${service.name} on ${server.name}: ${service.status}`,
+            description: `${service.name} on ${server.name}: ${status}`,
             link: `/services/${service.id}`,
           });
         }
@@ -220,13 +223,23 @@ export default function Dashboard() {
     return result.filter((alert) => !dismissedAlerts.includes(alert.id));
   }, [metrics, environment, auditLogs, dismissedAlerts]);
 
-  // Services with available updates
+  // Services with available updates (driven by the linked ContainerImage in 2.0)
   const servicesWithUpdates = useMemo<ServiceWithUpdate[]>(() => {
     return (
       environment?.servers.flatMap((server) =>
         server.services
-          .filter((s) => s.latestAvailableTag && s.latestAvailableTag !== s.imageTag)
-          .map((s) => ({ ...s, serverName: server.name, serverId: server.id }))
+          .filter(
+            (s) =>
+              s.containerImage?.updateAvailable &&
+              s.containerImage?.bestTag &&
+              s.containerImage.bestTag !== s.imageTag
+          )
+          .map((s) => ({
+            ...s,
+            serverName: server.name,
+            serverId: server.id,
+            targetTag: s.containerImage!.bestTag!,
+          }))
       ) || []
     );
   }, [environment]);
@@ -303,21 +316,21 @@ export default function Dashboard() {
     // Deploy all services in parallel using Promise.allSettled
     const deployPromises = servicesWithUpdates.map((service) =>
       deployService(service.id, {
-        imageTag: service.latestAvailableTag!,
+        imageTag: service.targetTag,
         pullImage: true,
       }).then(
         () => ({
           serviceId: service.id,
           serviceName: service.name,
           serverName: service.serverName,
-          imageTag: service.latestAvailableTag!,
+          imageTag: service.targetTag,
           success: true as const,
         }),
         (err) => ({
           serviceId: service.id,
           serviceName: service.name,
           serverName: service.serverName,
-          imageTag: service.latestAvailableTag!,
+          imageTag: service.targetTag,
           success: false as const,
           error: err instanceof Error ? err.message : 'Deploy failed',
         })
@@ -603,12 +616,12 @@ export default function Dashboard() {
                     <p className="text-xs text-slate-400">
                       <span className="font-mono">{service.imageTag}</span>
                       <span className="mx-2 text-slate-500">&rarr;</span>
-                      <span className="font-mono text-primary-400">{service.latestAvailableTag}</span>
+                      <span className="font-mono text-primary-400">{service.targetTag}</span>
                     </p>
                   </div>
                 </div>
                 <button
-                  onClick={() => handleDeploy(service.id, service.latestAvailableTag!)}
+                  onClick={() => handleDeploy(service.id, service.targetTag)}
                   disabled={deploying === service.id}
                   className="btn btn-sm btn-primary"
                 >
@@ -628,7 +641,7 @@ export default function Dashboard() {
             ))}
           </div>
           {environment.servers.some((s) =>
-            s.services.some((svc) => svc.lastUpdateCheckAt)
+            s.services.some((svc) => svc.containerImage?.lastCheckedAt)
           ) && (
             <p className="text-xs text-slate-500 mt-3">
               Last checked:{' '}
@@ -637,8 +650,8 @@ export default function Dashboard() {
                   Math.max(
                     ...environment.servers.flatMap((s) =>
                       s.services
-                        .filter((svc) => svc.lastUpdateCheckAt)
-                        .map((svc) => new Date(svc.lastUpdateCheckAt!).getTime())
+                        .filter((svc) => svc.containerImage?.lastCheckedAt)
+                        .map((svc) => new Date(svc.containerImage!.lastCheckedAt!).getTime())
                     )
                   )
                 ),

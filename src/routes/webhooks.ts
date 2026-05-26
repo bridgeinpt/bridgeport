@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import crypto from 'crypto';
 import { prisma } from '../lib/db.js';
-import { deployService } from '../services/deploy.js';
+import { deployService, deployServiceTemplate } from '../services/deploy.js';
 import { buildDeploymentPlan, executePlan } from '../services/orchestration.js';
 import { logAudit } from '../services/audit.js';
 import { DEPLOYMENT_STATUS } from '../lib/constants.js';
@@ -67,7 +67,7 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
     );
     if (!environment) return;
 
-    // Find service by name in the environment
+    // Find service by name in the environment (Service is env-scoped now).
     const service = await findOrNotFound(
       prisma.service.findFirst({
         where: {
@@ -75,10 +75,9 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
             { id: body.service },
             { name: body.service },
           ],
-          server: {
-            environmentId: environment.id,
-          },
+          environmentId: environment.id,
         },
+        include: { serviceDeployments: { select: { id: true } } },
       }),
       'Service',
       reply
@@ -86,7 +85,8 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
     if (!service) return;
 
     try {
-      const result = await deployService(
+      // Fan out: deploy this template's strategy (sequential | parallel) across all its deployments.
+      const outcome = await deployServiceTemplate(
         service.id,
         'webhook',
         null,
@@ -101,14 +101,28 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
         resourceType: 'service',
         resourceId: service.id,
         resourceName: service.name,
-        details: { source: 'custom-webhook', imageTag: body.imageTag, deploymentId: result.deployment.id },
+        details: { source: 'custom-webhook', imageTag: body.imageTag, deploymentCount: outcome.results.length, halted: outcome.halted },
         environmentId: environment.id,
       });
 
+      // Treat template-level error (e.g. zero deployments) as a 400 — the
+      // caller didn't trigger any actual deploy, so reporting success=true would
+      // mislead CI/release automation.
+      if (outcome.error) {
+        return reply.code(400).send({
+          success: false,
+          error: outcome.error,
+          deploymentCount: 0,
+          halted: outcome.halted,
+        });
+      }
+
+      const firstFailure = outcome.results.find((r) => !r.result || r.result.deployment.status !== DEPLOYMENT_STATUS.SUCCESS);
       return {
-        success: result.deployment.status === DEPLOYMENT_STATUS.SUCCESS,
-        deploymentId: result.deployment.id,
-        status: result.deployment.status,
+        success: !firstFailure,
+        deploymentCount: outcome.results.length,
+        halted: outcome.halted,
+        results: outcome.results.map((r) => ({ serviceDeploymentId: r.serviceDeploymentId, status: r.result?.deployment.status ?? 'failed' })),
       };
     } catch (error) {
       const message = getErrorMessage(error, 'Deployment failed');
@@ -170,18 +184,17 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
       const results = [];
       for (const service of services) {
         try {
-          const result = await deployService(
+          // Fan-out across all deployments using the template's configured strategy.
+          const outcome = await deployServiceTemplate(
             service.id,
             'github-webhook',
             null,
-            {
-              imageTag: packageData.package_version.version,
-            }
+            { imageTag: packageData.package_version.version }
           );
 
-          const serviceWithServer = await prisma.service.findUnique({
+          const serviceRow = await prisma.service.findUnique({
             where: { id: service.id },
-            include: { server: true },
+            select: { environmentId: true },
           });
 
           await logAudit({
@@ -189,13 +202,16 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
             resourceType: 'service',
             resourceId: service.id,
             resourceName: service.name,
-            details: { source: 'github-webhook', packageName: packageData.name, imageTag: packageData.package_version.version },
-            environmentId: serviceWithServer?.server.environmentId,
+            details: { source: 'github-webhook', packageName: packageData.name, imageTag: packageData.package_version.version, deploymentCount: outcome.results.length, halted: outcome.halted },
+            environmentId: serviceRow?.environmentId,
           });
 
+          const anyFailed = outcome.error
+            ? true
+            : outcome.results.some((r) => !r.result || r.result.deployment.status !== DEPLOYMENT_STATUS.SUCCESS);
           results.push({
             service: service.name,
-            status: result.deployment.status,
+            status: anyFailed ? DEPLOYMENT_STATUS.FAILED : DEPLOYMENT_STATUS.SUCCESS,
           });
         } catch {
           results.push({

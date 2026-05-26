@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { api, getServiceLogs } from './api';
+import { api, getServiceDeploymentLogs } from './api';
 
 // Mock sentry to avoid import issues
 vi.mock('./sentry', () => ({
@@ -244,54 +244,54 @@ describe('ApiClient', () => {
   });
 });
 
-describe('getServiceLogs', () => {
-  it('hits the logs endpoint without query string when no options are given', async () => {
+describe('getServiceDeploymentLogs', () => {
+  it('hits the per-deployment logs endpoint without query string when no options are given', async () => {
     mockFetch.mockReturnValueOnce(jsonResponse({ logs: 'output' }));
-    await getServiceLogs('svc-1');
+    await getServiceDeploymentLogs('svc-1', 'dep-1');
 
     const [url] = mockFetch.mock.calls[0];
-    expect(url).toBe('/api/services/svc-1/logs');
+    expect(url).toBe('/api/services/svc-1/deployments/dep-1/logs');
   });
 
-  it('hits the logs endpoint without query string when options are empty', async () => {
+  it('hits the per-deployment logs endpoint without query string when options are empty', async () => {
     mockFetch.mockReturnValueOnce(jsonResponse({ logs: 'output' }));
-    await getServiceLogs('svc-1', {});
+    await getServiceDeploymentLogs('svc-1', 'dep-1', {});
 
     const [url] = mockFetch.mock.calls[0];
-    expect(url).toBe('/api/services/svc-1/logs');
+    expect(url).toBe('/api/services/svc-1/deployments/dep-1/logs');
   });
 
   it('includes tail in the query string when provided', async () => {
     mockFetch.mockReturnValueOnce(jsonResponse({ logs: '' }));
-    await getServiceLogs('svc-1', { tail: 200 });
+    await getServiceDeploymentLogs('svc-1', 'dep-1', { tail: 200 });
 
     const [url] = mockFetch.mock.calls[0];
-    expect(url).toBe('/api/services/svc-1/logs?tail=200');
+    expect(url).toBe('/api/services/svc-1/deployments/dep-1/logs?tail=200');
   });
 
   it('includes before in the query string when provided', async () => {
     mockFetch.mockReturnValueOnce(jsonResponse({ logs: '' }));
-    await getServiceLogs('svc-1', { before: '2026-05-20T10:00:00Z' });
+    await getServiceDeploymentLogs('svc-1', 'dep-1', { before: '2026-05-20T10:00:00Z' });
 
     const [url] = mockFetch.mock.calls[0];
     // URLSearchParams URL-encodes the colon characters.
-    expect(url).toBe('/api/services/svc-1/logs?before=2026-05-20T10%3A00%3A00Z');
+    expect(url).toBe('/api/services/svc-1/deployments/dep-1/logs?before=2026-05-20T10%3A00%3A00Z');
   });
 
   it('includes both tail and before when both are provided', async () => {
     mockFetch.mockReturnValueOnce(jsonResponse({ logs: '' }));
-    await getServiceLogs('svc-1', { tail: 50, before: '2026-05-20T10:00:00Z' });
+    await getServiceDeploymentLogs('svc-1', 'dep-1', { tail: 50, before: '2026-05-20T10:00:00Z' });
 
     const [url] = mockFetch.mock.calls[0];
-    expect(url).toBe('/api/services/svc-1/logs?tail=50&before=2026-05-20T10%3A00%3A00Z');
+    expect(url).toBe('/api/services/svc-1/deployments/dep-1/logs?tail=50&before=2026-05-20T10%3A00%3A00Z');
   });
 
   it('does not send tail=0 as a query param (treats 0 as falsy)', async () => {
-    // Documents current behavior: getServiceLogs uses `if (opts?.tail)`, so 0 is dropped.
+    // Documents current behavior: uses `if (opts?.tail)`, so 0 is dropped.
     mockFetch.mockReturnValueOnce(jsonResponse({ logs: '' }));
-    await getServiceLogs('svc-1', { tail: 0 });
+    await getServiceDeploymentLogs('svc-1', 'dep-1', { tail: 0 });
 
     const [url] = mockFetch.mock.calls[0];
-    expect(url).toBe('/api/services/svc-1/logs');
+    expect(url).toBe('/api/services/svc-1/deployments/dep-1/logs');
   });
 });

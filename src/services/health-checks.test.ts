@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { mockPrisma, txHealthCheckLogCreate, txServerUpdateMany, txServiceUpdateMany } = vi.hoisted(() => {
+const { mockPrisma, txHealthCheckLogCreate, txServerUpdateMany, txServiceDeploymentUpdateMany } = vi.hoisted(() => {
   const txHealthCheckLogCreate = vi.fn();
   const txServerUpdateMany = vi.fn();
-  const txServiceUpdateMany = vi.fn();
+  const txServiceDeploymentUpdateMany = vi.fn();
   return {
     txHealthCheckLogCreate,
     txServerUpdateMany,
-    txServiceUpdateMany,
+    txServiceDeploymentUpdateMany,
     mockPrisma: {
       healthCheckLog: {
         deleteMany: vi.fn(),
@@ -22,7 +22,7 @@ const { mockPrisma, txHealthCheckLogCreate, txServerUpdateMany, txServiceUpdateM
         await cb({
           healthCheckLog: { create: txHealthCheckLogCreate },
           server: { updateMany: txServerUpdateMany },
-          service: { updateMany: txServiceUpdateMany },
+          serviceDeployment: { updateMany: txServiceDeploymentUpdateMany },
         });
       }),
     },
@@ -86,7 +86,7 @@ describe('health-checks', () => {
         data: { lastHealthCheckAt: unknown };
       };
       expect(serverUpdateArg.data.lastHealthCheckAt).toBeInstanceOf(Date);
-      expect(txServiceUpdateMany).not.toHaveBeenCalled();
+      expect(txServiceDeploymentUpdateMany).not.toHaveBeenCalled();
     });
 
     it('wraps log insert + cache update in a single $transaction', async () => {
@@ -105,9 +105,9 @@ describe('health-checks', () => {
               order.push('tx:server.updateMany');
             }),
           },
-          service: {
+          serviceDeployment: {
             updateMany: vi.fn(async () => {
-              order.push('tx:service.updateMany');
+              order.push('tx:serviceDeployment.updateMany');
             }),
           },
         });
@@ -134,14 +134,14 @@ describe('health-checks', () => {
       ]);
     });
 
-    it('stores error message for failed checks and updates Service cache', async () => {
+    it('stores error message for failed checks and updates ServiceDeployment cache', async () => {
       txHealthCheckLogCreate.mockResolvedValue({});
-      txServiceUpdateMany.mockResolvedValue({ count: 1 });
+      txServiceDeploymentUpdateMany.mockResolvedValue({ count: 1 });
 
       await logHealthCheck({
         environmentId: 'env-1',
-        resourceType: 'service',
-        resourceId: 'svc-1',
+        resourceType: 'service_deployment',
+        resourceId: 'svcdep-1',
         resourceName: 'web-app',
         checkType: 'url',
         status: 'failure',
@@ -156,8 +156,8 @@ describe('health-checks', () => {
           errorMessage: 'Service unavailable',
         }),
       });
-      expect(txServiceUpdateMany).toHaveBeenCalledWith({
-        where: { id: 'svc-1' },
+      expect(txServiceDeploymentUpdateMany).toHaveBeenCalledWith({
+        where: { id: 'svcdep-1' },
         data: expect.objectContaining({
           lastHealthCheckStatus: 'failure',
           lastHealthCheckType: 'url',
@@ -196,11 +196,11 @@ describe('health-checks', () => {
       });
     });
 
-    it('logs container resourceType but does NOT update the Service cache', async () => {
+    it('logs container resourceType but does NOT update the ServiceDeployment cache', async () => {
       // Container runtime checks live in HealthCheckLog for audit, but they must
-      // not touch Service.lastHealthCheck* — that cache reflects the URL/SSH
-      // probe surfaced on the dashboard, and a container_health failure would
-      // otherwise clobber a passing URL probe. See Finding 1 in PR #147.
+      // not touch ServiceDeployment.lastHealthCheck* — that cache reflects the
+      // URL/SSH probe surfaced on the dashboard, and a container_health failure
+      // would otherwise clobber a passing URL probe. See Finding 1 in PR #147.
       txHealthCheckLogCreate.mockResolvedValue({});
 
       await logHealthCheck({
@@ -220,7 +220,7 @@ describe('health-checks', () => {
           status: 'success',
         }),
       });
-      expect(txServiceUpdateMany).not.toHaveBeenCalled();
+      expect(txServiceDeploymentUpdateMany).not.toHaveBeenCalled();
       expect(txServerUpdateMany).not.toHaveBeenCalled();
     });
   });

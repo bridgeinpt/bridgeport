@@ -141,6 +141,7 @@ export async function seedStressData(
 
     for (let svc = 0; svc < options.servicesPerServer; svc++) {
       const service = await createTestService(prisma, {
+        environmentId: env.id,
         serverId: server.id,
         // Spread services across the seeded images so a `containerImageId`
         // lookup isn't skewed to one row.
@@ -149,6 +150,15 @@ export async function seedStressData(
       serviceIds.push(service.id);
     }
   }
+
+  // Metrics are per-deployment in 2.0 — resolve the deployment ids the
+  // factory created for each (service, server) pair so we can seed
+  // ServiceMetrics.serviceDeploymentId below.
+  const deployments = await prisma.serviceDeployment.findMany({
+    where: { serviceId: { in: serviceIds } },
+    select: { id: true },
+  });
+  const deploymentIds = deployments.map((d) => d.id);
 
   // -- Metrics (bulk-insert; the seed itself shouldn't be slow)
   const now = Date.now();
@@ -179,9 +189,9 @@ export async function seedStressData(
     }))
   );
 
-  const serviceMetrics = serviceIds.flatMap((serviceId) =>
+  const serviceMetrics = deploymentIds.flatMap((serviceDeploymentId) =>
     Array.from({ length: options.metricsPerEntity }, (_, i) => ({
-      serviceId,
+      serviceDeploymentId,
       collectedAt: new Date(now - (options.metricsPerEntity - 1 - i) * intervalMs),
       cpuPercent: 5 + (i % 30),
       memoryUsedMb: 128 + i * 16,
@@ -268,10 +278,10 @@ export async function seedStressData(
         createdAt: new Date(now - j * 60_000),
       }))
     );
-    const serviceLogs = serviceIds.flatMap((id, idx) =>
+    const serviceLogs = deploymentIds.flatMap((id, idx) =>
       Array.from({ length: options.healthLogsPerResource }, (_, j) => ({
         environmentId: env.id,
-        resourceType: 'service',
+        resourceType: 'service_deployment',
         resourceId: id,
         resourceName: `service-${idx}`,
         checkType: 'container_health',

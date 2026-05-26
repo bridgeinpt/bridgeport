@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
 
 export type BRIDGEPORTEvent =
-  | { type: 'health_status'; data: { resourceType: 'server' | 'service'; resourceId: string; status: string; environmentId: string } }
+  | { type: 'health_status'; data: { resourceType: 'server' | 'service' | 'service_deployment'; resourceId: string; status: string; environmentId: string } }
   | { type: 'deployment_progress'; data: { deploymentId?: string; planId?: string; serviceId: string; status: string; environmentId: string } }
   | { type: 'notification'; data: { userId: string; count: number } }
   | { type: 'metrics_updated'; data: { serverId: string; environmentId: string } }
