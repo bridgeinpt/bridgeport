@@ -417,9 +417,68 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // ==================== Database Monitoring Endpoints ====================
 
   // Get aggregate database metrics history for charts
+  //
+  // Columnar shape — issue #139. Per type-group we emit a shared `timestamps[]`
+  // plus a `series` keyed by query name:
+  //   - scalar queries           → number[][]              (db × time)
+  //   - row/rows queries (object/array) → { rows: unknown[][] } (db × time of object/array)
+  // The nested row-result shape preserves the original structure so the UI
+  // doesn't need to reconstruct objects; only the per-point repetition of the
+  // outer envelope (id/name/time) is what we collapse.
   fastify.get(
     '/api/environments/:envId/databases/metrics/history',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: {
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              types: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    type: { type: 'string' },
+                    typeName: { type: 'string' },
+                    queryMeta: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          name: { type: 'string' },
+                          displayName: { type: 'string' },
+                          resultType: { type: 'string' },
+                          unit: { type: 'string' },
+                          chartGroup: { type: 'string' },
+                          resultMapping: { type: 'object', additionalProperties: { type: 'string' } },
+                        },
+                      },
+                    },
+                    databases: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          id: { type: 'string' },
+                          name: { type: 'string' },
+                          serverId: { type: ['string', 'null'] },
+                          serverName: { type: ['string', 'null'] },
+                        },
+                      },
+                    },
+                    timestamps: { type: 'array', items: { type: 'string' } },
+                    // series carries query-name keyed entries whose shape
+                    // depends on the query's resultType — declare loose here.
+                    series: { type: 'object', additionalProperties: true },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
     async (request) => {
       const { envId } = request.params as { envId: string };
       const { hours } = request.query as { hours?: string };
@@ -436,35 +495,64 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
         },
       });
 
-      // Fetch metrics for all databases in parallel
-      const metricsPerDb = await Promise.all(
-        databases.map(async (db) => {
-          const metrics = await prisma.databaseMetrics.findMany({
-            where: { databaseId: db.id, collectedAt: { gte: since } },
-            orderBy: { collectedAt: 'asc' },
-          });
-          return { db, metrics };
-        })
-      );
+      // Fetch all metrics for all databases in a single query, then bucket by
+      // databaseId. This used to be N parallel findMany calls (one per db)
+      // which blocked the ≥800 RPS / p99 ≤30 ms target. Matches the pattern
+      // used by /metrics/history in routes/monitoring.ts.
+      const databaseIds = databases.map((d) => d.id);
+      const allMetrics =
+        databaseIds.length === 0
+          ? []
+          : await prisma.databaseMetrics.findMany({
+              where: {
+                databaseId: { in: databaseIds },
+                collectedAt: { gte: since },
+              },
+              orderBy: { collectedAt: 'asc' },
+            });
 
-      // Group databases by type
-      const typeGroups = new Map<string, {
+      // Group by databaseId in memory. `orderBy collectedAt asc` on the query
+      // means each bucket preserves the ascending order without re-sorting.
+      const metricsByDbId = new Map<string, typeof allMetrics>();
+      for (const id of databaseIds) metricsByDbId.set(id, []);
+      for (const m of allMetrics) metricsByDbId.get(m.databaseId)?.push(m);
+
+      // Preserve the existing iteration order over `databases` (used to build
+      // the `databases[]` metadata in the response).
+      const metricsPerDb = databases.map((db) => ({
+        db,
+        metrics: metricsByDbId.get(db.id) ?? [],
+      }));
+
+      type QueryMeta = { name: string; displayName: string; resultType: string; unit?: string; chartGroup?: string; resultMapping?: Record<string, string> };
+      type DbBucket = {
+        id: string;
+        name: string;
+        serverId: string | null;
+        serverName: string | null;
+        // Parsed per-point payloads paired with their ISO timestamp. We hold
+        // these here until we know the full timestamp union for the group.
+        points: Array<{ time: string; parsed: Record<string, unknown> }>;
+      };
+      type Group = {
         type: string;
         typeName: string;
-        queryMeta: Array<{ name: string; displayName: string; resultType: string; unit?: string; chartGroup?: string; resultMapping?: Record<string, string> }>;
-        databases: Array<{ id: string; name: string; serverId: string | null; serverName: string | null; data: Array<Record<string, unknown>> }>;
-      }>();
+        queryMeta: QueryMeta[];
+        databases: DbBucket[];
+      };
+
+      // Group databases by type (preserves insertion order = entity order).
+      const typeGroups = new Map<string, Group>();
 
       for (const { db, metrics } of metricsPerDb) {
         const dbType = db.type;
         const typeName = db.databaseType?.displayName || db.type;
 
         if (!typeGroups.has(dbType)) {
-          // Build queryMeta for this type
-          const queryMeta: Array<{ name: string; displayName: string; resultType: string; unit?: string; chartGroup?: string; resultMapping?: Record<string, string> }> = [];
+          const queryMeta: QueryMeta[] = [];
           if (db.databaseType?.monitoringConfig) {
             const config = safeJsonParse(db.databaseType.monitoringConfig, null) as {
-              queries: Array<{ name: string; displayName: string; resultType: string; unit?: string; chartGroup?: string; resultMapping?: Record<string, string> }>;
+              queries: QueryMeta[];
             } | null;
             for (const q of config?.queries ?? []) {
               queryMeta.push({
@@ -480,37 +568,157 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
           typeGroups.set(dbType, { type: dbType, typeName, queryMeta, databases: [] });
         }
 
-        // Build time-series data for this database
-        const data = metrics.map((m) => {
-          const parsed = safeJsonParse(m.metricsJson, {} as Record<string, unknown>);
-          const point: Record<string, unknown> = { time: m.collectedAt.toISOString() };
-
-          for (const [key, value] of Object.entries(parsed)) {
-            if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-              // Row result — flatten fields
-              for (const [field, fieldValue] of Object.entries(value as Record<string, unknown>)) {
-                point[`${key}.${field}`] = fieldValue;
-              }
-            } else {
-              // Scalar or rows (array) — keep as-is
-              point[key] = value;
-            }
-          }
-          return point;
-        });
+        const points = metrics.map((m) => ({
+          time: m.collectedAt.toISOString(),
+          parsed: safeJsonParse(m.metricsJson, {} as Record<string, unknown>),
+        }));
 
         typeGroups.get(dbType)!.databases.push({
           id: db.id,
           name: db.name,
           serverId: db.server?.id || null,
           serverName: db.server?.name || null,
-          data,
+          points,
         });
       }
 
-      return {
-        types: Array.from(typeGroups.values()),
-      };
+      // Project each group into the columnar shape.
+      const types = Array.from(typeGroups.values()).map((group) => {
+        // Union of timestamps across all dbs in this group.
+        const tsSet = new Set<string>();
+        for (const db of group.databases) for (const p of db.points) tsSet.add(p.time);
+        const timestamps = Array.from(tsSet).sort();
+        const tsIndex = new Map<string, number>();
+        timestamps.forEach((t, i) => tsIndex.set(t, i));
+        const T = timestamps.length;
+
+        // series[queryName] = either number[][] (scalar/row.fields flattened)
+        // or { rows: unknown[][] } (row/rows result kept structurally intact).
+        const series: Record<string, unknown> = {};
+
+        // Build a quick lookup for query resultType so we know how to bucket.
+        const metaByName = new Map<string, QueryMeta>();
+        for (const q of group.queryMeta) metaByName.set(q.name, q);
+
+        // Discover keys used in the data — scalar queries flatten `row` results
+        // as `${name}.${field}` (matching old behaviour). We compute this on a
+        // first pass so the per-db row arrays all have consistent column sets.
+        //
+        // Bucketing rules (resolved before allocation so each key lives in
+        // EXACTLY one of scalarKeys / rowsKeys):
+        //   - If the query's declared `resultType` is 'rows' → rowsKeys.
+        //   - If the query's declared `resultType` is 'scalar' → scalarKeys
+        //     (even if a specific point's value happens to be an array — we
+        //     respect the declared shape, otherwise UI's prepareScalarChartData
+        //     silently renders empty because the slot is `{ rows }`).
+        //   - If the query's declared `resultType` is 'row' → flatten into
+        //     `${name}.${field}` scalar keys (matching old behaviour).
+        //   - For keys WITHOUT meta, fall back to value-shape dispatch.
+        // Finally: if a key ends up in BOTH buckets (mixed-shape values for a
+        // meta-less key), `rowsKeys` wins — see the cleanup pass below.
+        const scalarKeys = new Set<string>();
+        const rowsKeys = new Set<string>(); // queries with resultType === 'rows' (array)
+
+        for (const db of group.databases) {
+          for (const p of db.points) {
+            for (const [key, value] of Object.entries(p.parsed)) {
+              const meta = metaByName.get(key);
+              const resultType = meta?.resultType;
+
+              if (resultType === 'rows') {
+                rowsKeys.add(key);
+              } else if (resultType === 'scalar') {
+                // Declared scalar — keep as scalar even if value is array/null.
+                scalarKeys.add(key);
+              } else if (resultType === 'row') {
+                // Declared row — flatten any record-shaped value's fields.
+                if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+                  for (const field of Object.keys(value as Record<string, unknown>)) {
+                    scalarKeys.add(`${key}.${field}`);
+                  }
+                }
+              } else if (Array.isArray(value)) {
+                // No meta — infer from value shape.
+                rowsKeys.add(key);
+              } else if (value !== null && typeof value === 'object') {
+                for (const field of Object.keys(value as Record<string, unknown>)) {
+                  scalarKeys.add(`${key}.${field}`);
+                }
+              } else {
+                scalarKeys.add(key);
+              }
+            }
+          }
+        }
+
+        // If a meta-less key picked up both shapes across points, prefer rows
+        // (safer: the UI can render a stale-shape table; an empty chart is
+        // acceptable). Removing from scalarKeys also resolves the dispatch
+        // ambiguity in the fill loop below.
+        for (const key of rowsKeys) {
+          if (scalarKeys.has(key)) scalarKeys.delete(key);
+        }
+
+        // Allocate empty number[][] for scalar keys, { rows: ... } for rows.
+        for (const key of scalarKeys) {
+          series[key] = group.databases.map(() => new Array<number | null>(T).fill(null));
+        }
+        for (const key of rowsKeys) {
+          series[key] = {
+            rows: group.databases.map(() => new Array<unknown>(T).fill(null)),
+          };
+        }
+
+        // Fill values. Route by KEY membership (not per-point value shape) so
+        // a meta-less key that was bucketed into rowsKeys at discovery time
+        // doesn't crash when a specific point's value is scalar/null.
+        group.databases.forEach((db, dbIdx) => {
+          for (const p of db.points) {
+            const ti = tsIndex.get(p.time);
+            if (ti === undefined) continue;
+            for (const [key, value] of Object.entries(p.parsed)) {
+              if (rowsKeys.has(key)) {
+                // Store the value as-is; the rows slot is unknown[][] so any
+                // shape (array, scalar, null, object) is permitted. The UI
+                // checks Array.isArray() before rendering.
+                const slot = series[key] as { rows: unknown[][] };
+                slot.rows[dbIdx]![ti] = value;
+              } else if (scalarKeys.has(key)) {
+                // Direct scalar fill. For declared-scalar keys whose actual
+                // value is non-numeric (array, object), store null.
+                const arr = series[key] as Array<Array<number | null>>;
+                arr[dbIdx]![ti] = typeof value === 'number' ? value : null;
+              } else if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+                // Compound row-flatten case — fields end up in `${key}.${field}`
+                // entries that were registered as scalarKeys during discovery.
+                for (const [field, fieldValue] of Object.entries(value as Record<string, unknown>)) {
+                  const compound = `${key}.${field}`;
+                  const arr = series[compound] as Array<Array<number | null>> | undefined;
+                  if (arr) {
+                    arr[dbIdx]![ti] = typeof fieldValue === 'number' ? fieldValue : null;
+                  }
+                }
+              }
+            }
+          }
+        });
+
+        return {
+          type: group.type,
+          typeName: group.typeName,
+          queryMeta: group.queryMeta,
+          databases: group.databases.map((db) => ({
+            id: db.id,
+            name: db.name,
+            serverId: db.serverId,
+            serverName: db.serverName,
+          })),
+          timestamps,
+          series,
+        };
+      });
+
+      return { types };
     }
   );
 

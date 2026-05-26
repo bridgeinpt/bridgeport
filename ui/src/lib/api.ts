@@ -2528,66 +2528,108 @@ export interface HealthStatusResponse {
 export const getHealthStatus = (envId: string) =>
   api.get<HealthStatusResponse>(`/environments/${envId}/health-status`);
 
-// Metrics History
-export interface MetricsHistoryDataPoint {
-  time: string;
-  cpu?: number | null;
-  memory?: number | null;
-  memoryUsedMb?: number | null;
-  swap?: number | null;
-  swapUsedMb?: number | null;
-  disk?: number | null;
-  diskUsedGb?: number | null;
-  load1?: number | null;
-  load5?: number | null;
-  load15?: number | null;
-  openFds?: number | null;
-  maxFds?: number | null;
-  tcpEstablished?: number | null;
-  tcpListen?: number | null;
-  tcpTimeWait?: number | null;
-  tcpCloseWait?: number | null;
-  tcpTotal?: number | null;
-}
+// Metrics History — columnar response shape (issue #139).
+// All per-entity rows share the same `timestamps[]` index. `series[metric]` is
+// a parallel array (entity-index × time-index) with `null` for missing points.
+export type ServerMetricKey =
+  | 'cpu'
+  | 'memory'
+  | 'memoryUsedMb'
+  | 'swap'
+  | 'swapUsedMb'
+  | 'disk'
+  | 'diskUsedGb'
+  | 'load1'
+  | 'load5'
+  | 'load15'
+  | 'openFds'
+  | 'maxFds'
+  | 'tcpEstablished'
+  | 'tcpListen'
+  | 'tcpTimeWait'
+  | 'tcpCloseWait'
+  | 'tcpTotal';
 
 export interface MetricsHistoryServer {
   id: string;
   name: string;
   tags: string;
-  data: MetricsHistoryDataPoint[];
+}
+
+export interface MetricsHistoryResponse {
+  servers: MetricsHistoryServer[];
+  timestamps: string[];
+  series: Partial<Record<ServerMetricKey, Array<Array<number | null>>>>;
 }
 
 export const getMetricsHistory = (envId: string, hours: number = 24, metric?: 'cpu' | 'memory' | 'disk' | 'load') => {
   const params = new URLSearchParams();
   params.append('hours', hours.toString());
   if (metric) params.append('metric', metric);
-  return api.get<{ servers: MetricsHistoryServer[] }>(`/environments/${envId}/metrics/history?${params.toString()}`);
+  return api.get<MetricsHistoryResponse>(`/environments/${envId}/metrics/history?${params.toString()}`);
 };
 
-// Service Metrics History
-export interface ServiceMetricsHistoryDataPoint {
-  time: string;
-  cpu?: number | null;
-  memory?: number | null;
-  memoryLimit?: number | null;
-  networkRx?: number | null;
-  networkTx?: number | null;
-  restartCount?: number | null;
-}
+// Service Metrics History — columnar shape, see getMetricsHistory.
+export type ServiceMetricKey =
+  | 'cpu'
+  | 'memory'
+  | 'memoryLimit'
+  | 'networkRx'
+  | 'networkTx'
+  | 'restartCount';
 
 export interface ServiceMetricsHistoryItem {
   id: string;
+  deploymentId: string;
   name: string;
   serverName: string;
   serverId: string;
-  data: ServiceMetricsHistoryDataPoint[];
+}
+
+export interface ServiceMetricsHistoryResponse {
+  services: ServiceMetricsHistoryItem[];
+  timestamps: string[];
+  series: Partial<Record<ServiceMetricKey, Array<Array<number | null>>>>;
 }
 
 export const getServiceMetricsHistory = (envId: string, hours: number = 24) => {
   const params = new URLSearchParams();
   params.append('hours', hours.toString());
-  return api.get<{ services: ServiceMetricsHistoryItem[] }>(`/environments/${envId}/services/metrics/history?${params.toString()}`);
+  return api.get<ServiceMetricsHistoryResponse>(`/environments/${envId}/services/metrics/history?${params.toString()}`);
 };
+
+// Recharts expects an array of objects keyed by series name. `unpackSeries`
+// recombines the columnar API response into that shape for `ChartCard`,
+// honouring an optional `entityIds` filter so callers can scope to a subset
+// of entities without re-fetching.
+export function unpackSeries<Entity extends { id: string; name: string }>(
+  history: { entities: Entity[]; timestamps: string[]; rows: Array<Array<number | null>> | undefined },
+  options?: { entityIds?: Set<string> }
+): { data: Array<Record<string, string | number | null>>; names: string[] } {
+  const { entities, timestamps, rows } = history;
+  if (!rows || rows.length === 0 || timestamps.length === 0) {
+    return { data: [], names: [] };
+  }
+  const filter = options?.entityIds;
+  const visibleIdx: number[] = [];
+  const names: string[] = [];
+  entities.forEach((e, i) => {
+    if (filter && !filter.has(e.id)) return;
+    visibleIdx.push(i);
+    names.push(e.name);
+  });
+
+  const data = timestamps.map((time, ti) => {
+    const point: Record<string, string | number | null> = { time };
+    visibleIdx.forEach((ei, n) => {
+      const row = rows[ei];
+      point[names[n]!] = row ? row[ti] ?? null : null;
+    });
+    return point;
+  });
+
+  return { data, names };
+}
 
 // SSH Testing
 export interface SSHTestResult {
@@ -2840,6 +2882,15 @@ export interface DatabaseQueryMeta {
   resultMapping?: Record<string, string>;
 }
 
+// Columnar shape — see issue #139. `series` keys correspond to either query
+// names (scalar) or `${queryName}.${field}` (flattened row results); the
+// values are number[][] indexed by [databaseIndex][timestampIndex]. For
+// `rows` (array) result-type queries, the slot is `{ rows: unknown[][] }`
+// keeping the original array snapshot per (db, time).
+export type DatabaseSeriesEntry =
+  | Array<Array<number | null>>
+  | { rows: Array<Array<unknown>> };
+
 export interface DatabaseMetricsTypeGroup {
   type: string;
   typeName: string;
@@ -2849,8 +2900,9 @@ export interface DatabaseMetricsTypeGroup {
     name: string;
     serverId: string | null;
     serverName: string | null;
-    data: Array<Record<string, unknown>>;
   }>;
+  timestamps: string[];
+  series: Record<string, DatabaseSeriesEntry>;
 }
 
 export const getDatabaseMetricsHistory = (envId: string, hours: number = 24) => {

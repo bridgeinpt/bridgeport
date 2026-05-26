@@ -26,6 +26,17 @@ const metricsHistoryQuerySchema = z.object({
   metric: z.enum(['cpu', 'memory', 'disk', 'load']).optional(),
 });
 
+// Shared error-response schemas for the columnar /metrics/history endpoints.
+// fast-json-stringify needs every status code we emit declared so reply.send
+// type-narrowing stays consistent with what we actually return.
+const ERROR_RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: {
+    error: { type: 'string' },
+    details: {},
+  },
+} as const;
+
 const runHealthChecksSchema = z.object({
   type: z.enum(['all', 'servers', 'services']).optional().default('all'),
 });
@@ -281,9 +292,67 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
   );
 
   // Get metrics history for charts
+  //
+  // Columnar shape — issue #139. Instead of one nested per-server `data` array
+  // (which stringifies to a lot of repeated property names and forces V8 to
+  // allocate one object per point), we emit `timestamps[]` shared across all
+  // servers and per-metric `series` arrays where each row aligns to the same
+  // timestamp index. Sparse points become `null` so charts can distinguish
+  // "no sample" from "value was zero".
+  //
+  // A Fastify response schema is attached so fast-json-stringify replaces the
+  // generic JSON.stringify (any key not in the schema is dropped — which is
+  // why every top-level + nested field is declared explicitly below).
   fastify.get(
     '/api/environments/:envId/metrics/history',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: {
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              servers: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    name: { type: 'string' },
+                    tags: { type: ['string', 'null'] },
+                  },
+                },
+              },
+              timestamps: { type: 'array', items: { type: 'string' } },
+              series: {
+                type: 'object',
+                properties: {
+                  cpu: { type: 'array', items: { type: 'array', items: { type: ['number', 'null'] } } },
+                  memory: { type: 'array', items: { type: 'array', items: { type: ['number', 'null'] } } },
+                  memoryUsedMb: { type: 'array', items: { type: 'array', items: { type: ['number', 'null'] } } },
+                  swap: { type: 'array', items: { type: 'array', items: { type: ['number', 'null'] } } },
+                  swapUsedMb: { type: 'array', items: { type: 'array', items: { type: ['number', 'null'] } } },
+                  disk: { type: 'array', items: { type: 'array', items: { type: ['number', 'null'] } } },
+                  diskUsedGb: { type: 'array', items: { type: 'array', items: { type: ['number', 'null'] } } },
+                  load1: { type: 'array', items: { type: 'array', items: { type: ['number', 'null'] } } },
+                  load5: { type: 'array', items: { type: 'array', items: { type: ['number', 'null'] } } },
+                  load15: { type: 'array', items: { type: 'array', items: { type: ['number', 'null'] } } },
+                  openFds: { type: 'array', items: { type: 'array', items: { type: ['number', 'null'] } } },
+                  maxFds: { type: 'array', items: { type: 'array', items: { type: ['number', 'null'] } } },
+                  tcpEstablished: { type: 'array', items: { type: 'array', items: { type: ['number', 'null'] } } },
+                  tcpListen: { type: 'array', items: { type: 'array', items: { type: ['number', 'null'] } } },
+                  tcpTimeWait: { type: 'array', items: { type: 'array', items: { type: ['number', 'null'] } } },
+                  tcpCloseWait: { type: 'array', items: { type: 'array', items: { type: ['number', 'null'] } } },
+                  tcpTotal: { type: 'array', items: { type: 'array', items: { type: ['number', 'null'] } } },
+                },
+              },
+            },
+          },
+          400: ERROR_RESPONSE_SCHEMA,
+          404: ERROR_RESPONSE_SCHEMA,
+        },
+      },
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       const query = metricsHistoryQuerySchema.safeParse(request.query);
@@ -343,84 +412,154 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
               },
             });
 
+      // Collect the union of timestamps across all servers so every series row
+      // aligns to the same `timestamps[]` index.
+      const timestampSet = new Set<string>();
+      for (const row of rows) timestampSet.add(row.collectedAt.toISOString());
+      const timestamps = Array.from(timestampSet).sort();
+      const tsIndex = new Map<string, number>();
+      timestamps.forEach((t, i) => tsIndex.set(t, i));
+
+      // Bucket metric rows by server, then by timestamp index, so we can fill
+      // per-server arrays of length `timestamps.length` with `null` for gaps.
       const byServer = new Map<string, typeof rows>();
       for (const id of serverIds) byServer.set(id, []);
       for (const row of rows) byServer.get(row.serverId)?.push(row);
 
-      const serverMetrics = servers.map((server) => {
+      const T = timestamps.length;
+      const newNullRow = (): Array<number | null> => new Array<number | null>(T).fill(null);
+
+      // Which metric keys to emit. The `metric=` query param narrows the
+      // response to a single key when set — fast-json-stringify will drop the
+      // unused keys because they're absent from the assembled object.
+      const allKeys = [
+        'cpu',
+        'memory',
+        'memoryUsedMb',
+        'swap',
+        'swapUsedMb',
+        'disk',
+        'diskUsedGb',
+        'load1',
+        'load5',
+        'load15',
+        'openFds',
+        'maxFds',
+        'tcpEstablished',
+        'tcpListen',
+        'tcpTimeWait',
+        'tcpCloseWait',
+        'tcpTotal',
+      ] as const;
+      type SeriesKey = typeof allKeys[number];
+
+      const keysToEmit: SeriesKey[] =
+        metric === 'cpu'
+          ? ['cpu']
+          : metric === 'memory'
+          ? ['memory', 'memoryUsedMb']
+          : metric === 'disk'
+          ? ['disk', 'diskUsedGb']
+          : metric === 'load'
+          ? ['load1', 'load5', 'load15']
+          : [...allKeys];
+
+      const series: Partial<Record<SeriesKey, Array<Array<number | null>>>> = {};
+      for (const key of keysToEmit) series[key] = [];
+
+      const serverMeta = servers.map((server) => {
         const metrics = byServer.get(server.id) ?? [];
-        const data = metrics.map((m) => {
-          const base = { time: m.collectedAt.toISOString() };
+        const rowByKey: Partial<Record<SeriesKey, Array<number | null>>> = {};
+        for (const key of keysToEmit) rowByKey[key] = newNullRow();
 
-          if (!metric) {
-            const memPercent =
-              m.memoryUsedMb && m.memoryTotalMb
-                ? (m.memoryUsedMb / m.memoryTotalMb) * 100
-                : null;
-            const swapPercent =
-              m.swapUsedMb && m.swapTotalMb && m.swapTotalMb > 0
-                ? (m.swapUsedMb / m.swapTotalMb) * 100
-                : null;
-            const diskPercent =
-              m.diskUsedGb && m.diskTotalGb ? (m.diskUsedGb / m.diskTotalGb) * 100 : null;
-            return {
-              ...base,
-              cpu: m.cpuPercent,
-              memory: memPercent,
-              memoryUsedMb: m.memoryUsedMb,
-              swap: swapPercent,
-              swapUsedMb: m.swapUsedMb,
-              disk: diskPercent,
-              diskUsedGb: m.diskUsedGb,
-              load1: m.loadAvg1,
-              load5: m.loadAvg5,
-              load15: m.loadAvg15,
-              openFds: m.openFds,
-              maxFds: m.maxFds,
-              tcpEstablished: m.tcpEstablished,
-              tcpListen: m.tcpListen,
-              tcpTimeWait: m.tcpTimeWait,
-              tcpCloseWait: m.tcpCloseWait,
-              tcpTotal: m.tcpTotal,
-            };
-          }
-          if (metric === 'cpu') {
-            return { ...base, cpu: m.cpuPercent };
-          }
-          if (metric === 'memory') {
-            const memPercent =
-              m.memoryUsedMb && m.memoryTotalMb
-                ? (m.memoryUsedMb / m.memoryTotalMb) * 100
-                : null;
-            return { ...base, memory: memPercent, memoryUsedMb: m.memoryUsedMb };
-          }
-          if (metric === 'disk') {
-            const diskPercent =
-              m.diskUsedGb && m.diskTotalGb ? (m.diskUsedGb / m.diskTotalGb) * 100 : null;
-            return { ...base, disk: diskPercent, diskUsedGb: m.diskUsedGb };
-          }
-          if (metric === 'load') {
-            return { ...base, load1: m.loadAvg1, load5: m.loadAvg5, load15: m.loadAvg15 };
-          }
-          return base;
-        });
+        for (const m of metrics) {
+          const ti = tsIndex.get(m.collectedAt.toISOString());
+          if (ti === undefined) continue;
 
-        return {
-          id: server.id,
-          name: server.name,
-          tags: server.tags,
-          data,
-        };
+          const memPercent =
+            m.memoryUsedMb && m.memoryTotalMb
+              ? (m.memoryUsedMb / m.memoryTotalMb) * 100
+              : null;
+          const swapPercent =
+            m.swapUsedMb && m.swapTotalMb && m.swapTotalMb > 0
+              ? (m.swapUsedMb / m.swapTotalMb) * 100
+              : null;
+          const diskPercent =
+            m.diskUsedGb && m.diskTotalGb ? (m.diskUsedGb / m.diskTotalGb) * 100 : null;
+
+          // Only assign keys we're emitting (cheap branch per metric).
+          if (rowByKey.cpu) rowByKey.cpu[ti] = m.cpuPercent;
+          if (rowByKey.memory) rowByKey.memory[ti] = memPercent;
+          if (rowByKey.memoryUsedMb) rowByKey.memoryUsedMb[ti] = m.memoryUsedMb;
+          if (rowByKey.swap) rowByKey.swap[ti] = swapPercent;
+          if (rowByKey.swapUsedMb) rowByKey.swapUsedMb[ti] = m.swapUsedMb;
+          if (rowByKey.disk) rowByKey.disk[ti] = diskPercent;
+          if (rowByKey.diskUsedGb) rowByKey.diskUsedGb[ti] = m.diskUsedGb;
+          if (rowByKey.load1) rowByKey.load1[ti] = m.loadAvg1;
+          if (rowByKey.load5) rowByKey.load5[ti] = m.loadAvg5;
+          if (rowByKey.load15) rowByKey.load15[ti] = m.loadAvg15;
+          if (rowByKey.openFds) rowByKey.openFds[ti] = m.openFds;
+          if (rowByKey.maxFds) rowByKey.maxFds[ti] = m.maxFds;
+          if (rowByKey.tcpEstablished) rowByKey.tcpEstablished[ti] = m.tcpEstablished;
+          if (rowByKey.tcpListen) rowByKey.tcpListen[ti] = m.tcpListen;
+          if (rowByKey.tcpTimeWait) rowByKey.tcpTimeWait[ti] = m.tcpTimeWait;
+          if (rowByKey.tcpCloseWait) rowByKey.tcpCloseWait[ti] = m.tcpCloseWait;
+          if (rowByKey.tcpTotal) rowByKey.tcpTotal[ti] = m.tcpTotal;
+        }
+
+        for (const key of keysToEmit) series[key]!.push(rowByKey[key]!);
+
+        return { id: server.id, name: server.name, tags: server.tags };
       });
 
-      return { servers: serverMetrics };
+      return { servers: serverMeta, timestamps, series };
     }
   );
 
   // Get service metrics history for charts
+  //
+  // Columnar shape — see /metrics/history above for the rationale.
   fastify.get(
     '/api/environments/:envId/services/metrics/history',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: {
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              services: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    deploymentId: { type: 'string' },
+                    name: { type: 'string' },
+                    serverName: { type: 'string' },
+                    serverId: { type: 'string' },
+                  },
+                },
+              },
+              timestamps: { type: 'array', items: { type: 'string' } },
+              series: {
+                type: 'object',
+                properties: {
+                  cpu: { type: 'array', items: { type: 'array', items: { type: ['number', 'null'] } } },
+                  memory: { type: 'array', items: { type: 'array', items: { type: ['number', 'null'] } } },
+                  memoryLimit: { type: 'array', items: { type: 'array', items: { type: ['number', 'null'] } } },
+                  networkRx: { type: 'array', items: { type: 'array', items: { type: ['number', 'null'] } } },
+                  networkTx: { type: 'array', items: { type: 'array', items: { type: ['number', 'null'] } } },
+                  restartCount: { type: 'array', items: { type: 'array', items: { type: ['number', 'null'] } } },
+                },
+              },
+            },
+          },
+          400: ERROR_RESPONSE_SCHEMA,
+          404: ERROR_RESPONSE_SCHEMA,
+        },
+      },
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       const query = metricsHistoryQuerySchema.safeParse(request.query);
@@ -501,21 +640,59 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
               ORDER BY "collectedAt" ASC
             `;
 
+      // Union of all timestamps so every service row is the same length.
+      const timestampSet = new Set<string>();
+      for (const row of rows) {
+        const iso = row.collectedAt instanceof Date
+          ? row.collectedAt.toISOString()
+          : new Date(row.collectedAt).toISOString();
+        timestampSet.add(iso);
+      }
+      const timestamps = Array.from(timestampSet).sort();
+      const tsIndex = new Map<string, number>();
+      timestamps.forEach((t, i) => tsIndex.set(t, i));
+
       const byDeployment = new Map<string, MetricRow[]>();
       for (const id of deploymentIds) byDeployment.set(id, []);
       for (const row of rows) byDeployment.get(row.serviceDeploymentId)?.push(row);
 
-      const serviceMetrics = deployments.map((d) => {
+      const T = timestamps.length;
+      const cpu: Array<Array<number | null>> = [];
+      const memory: Array<Array<number | null>> = [];
+      const memoryLimit: Array<Array<number | null>> = [];
+      const networkRx: Array<Array<number | null>> = [];
+      const networkTx: Array<Array<number | null>> = [];
+      const restartCount: Array<Array<number | null>> = [];
+
+      const serviceMeta = deployments.map((d) => {
         const metrics = byDeployment.get(d.id) ?? [];
-        const data = metrics.map((m) => ({
-          time: m.collectedAt instanceof Date ? m.collectedAt.toISOString() : new Date(m.collectedAt).toISOString(),
-          cpu: m.cpuPercent,
-          memory: m.memoryUsedMb,
-          memoryLimit: m.memoryLimitMb,
-          networkRx: m.networkRxMb,
-          networkTx: m.networkTxMb,
-          restartCount: m.restartCount,
-        }));
+        const cpuRow = new Array<number | null>(T).fill(null);
+        const memRow = new Array<number | null>(T).fill(null);
+        const memLimitRow = new Array<number | null>(T).fill(null);
+        const rxRow = new Array<number | null>(T).fill(null);
+        const txRow = new Array<number | null>(T).fill(null);
+        const restartRow = new Array<number | null>(T).fill(null);
+
+        for (const m of metrics) {
+          const iso = m.collectedAt instanceof Date
+            ? m.collectedAt.toISOString()
+            : new Date(m.collectedAt).toISOString();
+          const ti = tsIndex.get(iso);
+          if (ti === undefined) continue;
+          cpuRow[ti] = m.cpuPercent;
+          memRow[ti] = m.memoryUsedMb;
+          memLimitRow[ti] = m.memoryLimitMb;
+          rxRow[ti] = m.networkRxMb;
+          txRow[ti] = m.networkTxMb;
+          restartRow[ti] = m.restartCount;
+        }
+
+        cpu.push(cpuRow);
+        memory.push(memRow);
+        memoryLimit.push(memLimitRow);
+        networkRx.push(rxRow);
+        networkTx.push(txRow);
+        restartCount.push(restartRow);
 
         return {
           id: d.serviceId,
@@ -523,11 +700,14 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
           name: d.serviceName,
           serverName: d.server.name,
           serverId: d.server.id,
-          data,
         };
       });
 
-      return { services: serviceMetrics };
+      return {
+        services: serviceMeta,
+        timestamps,
+        series: { cpu, memory, memoryLimit, networkRx, networkTx, restartCount },
+      };
     }
   );
 

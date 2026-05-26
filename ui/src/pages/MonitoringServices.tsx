@@ -4,7 +4,8 @@ import { useAppStore } from '../lib/store';
 import {
   getServiceMetricsHistory,
   getEnvironmentMetricsSummary,
-  type ServiceMetricsHistoryItem,
+  unpackSeries,
+  type ServiceMetricsHistoryResponse,
   type MetricsSummaryServer,
   type ServiceMetrics,
 } from '../lib/api';
@@ -25,7 +26,11 @@ export default function MonitoringServices() {
   } = useAppStore();
 
   const [servers, setServers] = useState<MetricsSummaryServer[]>([]);
-  const [serviceMetricsHistory, setServiceMetricsHistory] = useState<ServiceMetricsHistoryItem[]>([]);
+  const [history, setHistory] = useState<ServiceMetricsHistoryResponse>({
+    services: [],
+    timestamps: [],
+    series: {},
+  });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -40,7 +45,7 @@ export default function MonitoringServices() {
         getServiceMetricsHistory(selectedEnvironment.id, monitoringTimeRange),
       ]);
       setServers(summaryRes.servers);
-      setServiceMetricsHistory(serviceRes.services);
+      setHistory(serviceRes);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -62,10 +67,10 @@ export default function MonitoringServices() {
 
   // All service names for the filter (from history, sorted)
   const allServices = useMemo(() => {
-    return serviceMetricsHistory
+    return history.services
       .map((s) => ({ id: s.id, name: s.name }))
       .sort((a, b) => a.name.localeCompare(b.name));
-  }, [serviceMetricsHistory]);
+  }, [history.services]);
 
   // Filter by service ID
   const filterSet = useMemo(() => new Set(monitoringServiceFilter), [monitoringServiceFilter]);
@@ -74,15 +79,15 @@ export default function MonitoringServices() {
     if (filterSet.size === 0) return servers;
     // Only include servers that have at least one selected service
     const matchingServerIds = new Set(
-      serviceMetricsHistory.filter((s) => filterSet.has(s.id)).map((s) => s.serverId)
+      history.services.filter((s) => filterSet.has(s.id)).map((s) => s.serverId)
     );
     return servers.filter((s) => matchingServerIds.has(s.id));
-  }, [servers, filterSet, serviceMetricsHistory]);
+  }, [servers, filterSet, history.services]);
 
-  const filteredServiceMetricsHistory = useMemo(() => {
-    if (filterSet.size === 0) return serviceMetricsHistory;
-    return serviceMetricsHistory.filter((s) => filterSet.has(s.id));
-  }, [serviceMetricsHistory, filterSet]);
+  const entityIdFilter = useMemo(
+    () => (filterSet.size === 0 ? undefined : filterSet),
+    [filterSet]
+  );
 
   const handleFilterToggle = useCallback(
     (id: string) => {
@@ -94,34 +99,46 @@ export default function MonitoringServices() {
     [monitoringServiceFilter, setMonitoringServiceFilter]
   );
 
-  // Prepare chart data for service metrics
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const prepareServiceChartData = (metric: 'cpu' | 'memory' | 'networkRx' | 'networkTx'): any[] => {
-    const timeMap = new Map<string, { time: string; [key: string]: string | number | null }>();
+  // Columnar → Recharts via the shared helper. One unpack per metric so each
+  // chart's data array gets its own memo identity.
+  const cpuChart = useMemo(
+    () => unpackSeries({ entities: history.services, timestamps: history.timestamps, rows: history.series.cpu }, { entityIds: entityIdFilter }),
+    [history, entityIdFilter]
+  );
+  const memoryChart = useMemo(
+    () => unpackSeries({ entities: history.services, timestamps: history.timestamps, rows: history.series.memory }, { entityIds: entityIdFilter }),
+    [history, entityIdFilter]
+  );
+  const networkRxChart = useMemo(
+    () => unpackSeries({ entities: history.services, timestamps: history.timestamps, rows: history.series.networkRx }, { entityIds: entityIdFilter }),
+    [history, entityIdFilter]
+  );
+  const networkTxChart = useMemo(
+    () => unpackSeries({ entities: history.services, timestamps: history.timestamps, rows: history.series.networkTx }, { entityIds: entityIdFilter }),
+    [history, entityIdFilter]
+  );
 
-    filteredServiceMetricsHistory.forEach((service) => {
-      service.data.forEach((point) => {
-        if (!timeMap.has(point.time)) {
-          timeMap.set(point.time, { time: point.time });
-        }
-        const entry = timeMap.get(point.time)!;
-        if (metric === 'cpu') entry[service.name] = point.cpu ?? null;
-        else if (metric === 'memory') entry[service.name] = point.memory ?? null;
-        else if (metric === 'networkRx') entry[service.name] = point.networkRx ?? null;
-        else if (metric === 'networkTx') entry[service.name] = point.networkTx ?? null;
-      });
-    });
+  // Regression guard: a weaker "filtered.length > 0" check rendered empty
+  // chart cards when the user filtered down to services with no samples —
+  // match the master behaviour of `some(s => s.data.length > 0)` by checking
+  // actual non-null values in the columnar series.
+  const hasAnyHistory = useMemo(() => {
+    if (history.timestamps.length === 0) return false;
+    const filtered = filterSet.size === 0
+      ? history.services
+      : history.services.filter((s) => filterSet.has(s.id));
+    if (filtered.length === 0) return false;
 
-    return Array.from(timeMap.values()).sort((a, b) =>
-      a.time.localeCompare(b.time)
-    );
-  };
-
-  // Memoize chart data per metric to avoid recomputing on every render
-  const cpuChartData = useMemo(() => prepareServiceChartData('cpu'), [filteredServiceMetricsHistory]);
-  const memoryChartData = useMemo(() => prepareServiceChartData('memory'), [filteredServiceMetricsHistory]);
-  const networkRxChartData = useMemo(() => prepareServiceChartData('networkRx'), [filteredServiceMetricsHistory]);
-  const networkTxChartData = useMemo(() => prepareServiceChartData('networkTx'), [filteredServiceMetricsHistory]);
+    const filteredIdxs = filtered.map((s) => history.services.indexOf(s));
+    for (const series of Object.values(history.series)) {
+      if (!series) continue;
+      for (const idx of filteredIdxs) {
+        const row = series[idx];
+        if (row && row.some((v) => v !== null)) return true;
+      }
+    }
+    return false;
+  }, [history, filterSet]);
 
   const formatTime = (time: string) => {
     const date = new Date(time);
@@ -175,8 +192,6 @@ export default function MonitoringServices() {
     );
   }
 
-  const serviceNames = filteredServiceMetricsHistory.map((s) => s.name);
-
   return (
     <div className="p-6">
       <div className="flex items-center justify-end mb-5">
@@ -226,13 +241,13 @@ export default function MonitoringServices() {
       </div>
 
       {/* Service Charts and Table */}
-      {filteredServiceMetricsHistory.length > 0 && filteredServiceMetricsHistory.some((s) => s.data.length > 0) ? (
+      {hasAnyHistory ? (
         <>
           <div className="grid grid-cols-2 gap-6 mb-8">
-            <ChartCard title="CPU Usage" data={cpuChartData} names={serviceNames} formatTime={formatTime} unit="%" domain={[0, 'auto']} />
-            <ChartCard title="Memory Usage" data={memoryChartData} names={serviceNames} formatTime={formatTime} unit=" MB" domain={[0, 'auto']} />
-            <ChartCard title="Network RX" data={networkRxChartData} names={serviceNames} formatTime={formatTime} unit=" MB" domain={[0, 'auto']} />
-            <ChartCard title="Network TX" data={networkTxChartData} names={serviceNames} formatTime={formatTime} unit=" MB" domain={[0, 'auto']} />
+            <ChartCard title="CPU Usage" data={cpuChart.data} names={cpuChart.names} formatTime={formatTime} unit="%" domain={[0, 'auto']} />
+            <ChartCard title="Memory Usage" data={memoryChart.data} names={memoryChart.names} formatTime={formatTime} unit=" MB" domain={[0, 'auto']} />
+            <ChartCard title="Network RX" data={networkRxChart.data} names={networkRxChart.names} formatTime={formatTime} unit=" MB" domain={[0, 'auto']} />
+            <ChartCard title="Network TX" data={networkTxChart.data} names={networkTxChart.names} formatTime={formatTime} unit=" MB" domain={[0, 'auto']} />
           </div>
 
           {/* Services Table */}

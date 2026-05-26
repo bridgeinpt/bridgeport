@@ -5,8 +5,9 @@ import {
   getEnvironmentMetricsSummary,
   getMetricsHistory,
   getModuleSettings,
+  unpackSeries,
   type MetricsSummaryServer,
-  type MetricsHistoryServer,
+  type MetricsHistoryResponse,
 } from '../lib/api';
 import { formatDistanceToNow, format } from 'date-fns';
 import ChartCard from '../components/monitoring/ChartCard';
@@ -26,7 +27,11 @@ export default function MonitoringServers() {
   } = useAppStore();
 
   const [servers, setServers] = useState<MetricsSummaryServer[]>([]);
-  const [metricsHistory, setMetricsHistory] = useState<MetricsHistoryServer[]>([]);
+  const [history, setHistory] = useState<MetricsHistoryResponse>({
+    servers: [],
+    timestamps: [],
+    series: {},
+  });
   const [schedulerConfig, setSchedulerConfig] = useState<Record<string, unknown> | null>(null);
   const [disabledMetricsExpanded, setDisabledMetricsExpanded] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -44,7 +49,7 @@ export default function MonitoringServers() {
         getModuleSettings(selectedEnvironment.id, 'monitoring'),
       ]);
       setServers(summaryRes.servers);
-      setMetricsHistory(historyRes.servers);
+      setHistory(historyRes);
       setSchedulerConfig(configRes.settings);
     } finally {
       setLoading(false);
@@ -73,10 +78,12 @@ export default function MonitoringServers() {
     return servers.filter((s) => filterSet.has(s.id));
   }, [servers, filterSet]);
 
-  const filteredMetricsHistory = useMemo(() => {
-    if (filterSet.size === 0) return metricsHistory;
-    return metricsHistory.filter((s) => filterSet.has(s.id));
-  }, [metricsHistory, filterSet]);
+  // Active entity filter for the columnar `unpackSeries` helper — when the
+  // server filter is empty we pass `undefined` so all entities are returned.
+  const entityIdFilter = useMemo(
+    () => (filterSet.size === 0 ? undefined : filterSet),
+    [filterSet]
+  );
 
   const handleFilterToggle = useCallback(
     (id: string) => {
@@ -88,38 +95,57 @@ export default function MonitoringServers() {
     [monitoringServerFilter, setMonitoringServerFilter]
   );
 
-  // Prepare chart data for server metrics - combine all servers into single timeline
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const prepareServerChartData = (metric: 'cpu' | 'memory' | 'disk' | 'load' | 'swap' | 'tcp'): any[] => {
-    const timeMap = new Map<string, { time: string; [key: string]: string | number | null }>();
+  // Columnar API → Recharts-ready array. We do one unpack per metric so each
+  // chart's data array can be memoized independently — the rest of the
+  // monitoring code (auto-refresh every 30s) already expects stable refs.
+  const cpuChart = useMemo(
+    () => unpackSeries({ entities: history.servers, timestamps: history.timestamps, rows: history.series.cpu }, { entityIds: entityIdFilter }),
+    [history, entityIdFilter]
+  );
+  const memoryChart = useMemo(
+    () => unpackSeries({ entities: history.servers, timestamps: history.timestamps, rows: history.series.memory }, { entityIds: entityIdFilter }),
+    [history, entityIdFilter]
+  );
+  const swapChart = useMemo(
+    () => unpackSeries({ entities: history.servers, timestamps: history.timestamps, rows: history.series.swap }, { entityIds: entityIdFilter }),
+    [history, entityIdFilter]
+  );
+  const diskChart = useMemo(
+    () => unpackSeries({ entities: history.servers, timestamps: history.timestamps, rows: history.series.disk }, { entityIds: entityIdFilter }),
+    [history, entityIdFilter]
+  );
+  const loadChart = useMemo(
+    () => unpackSeries({ entities: history.servers, timestamps: history.timestamps, rows: history.series.load1 }, { entityIds: entityIdFilter }),
+    [history, entityIdFilter]
+  );
+  const tcpChart = useMemo(
+    () => unpackSeries({ entities: history.servers, timestamps: history.timestamps, rows: history.series.tcpTotal }, { entityIds: entityIdFilter }),
+    [history, entityIdFilter]
+  );
 
-    filteredMetricsHistory.forEach((server) => {
-      server.data.forEach((point) => {
-        if (!timeMap.has(point.time)) {
-          timeMap.set(point.time, { time: point.time });
-        }
-        const entry = timeMap.get(point.time)!;
-        if (metric === 'cpu') entry[server.name] = point.cpu ?? null;
-        else if (metric === 'memory') entry[server.name] = point.memory ?? null;
-        else if (metric === 'disk') entry[server.name] = point.disk ?? null;
-        else if (metric === 'load') entry[server.name] = point.load1 ?? null;
-        else if (metric === 'swap') entry[server.name] = point.swap ?? null;
-        else if (metric === 'tcp') entry[server.name] = point.tcpTotal ?? null;
-      });
-    });
+  // True when we have at least one filtered server row that contains a
+  // non-null point for any active metric (used to decide whether to show the
+  // "no data" card). Regression guard: a weaker gate (just "filtered.length
+  // > 0") rendered empty chart cards when the user filtered down to servers
+  // with no samples — match the master behaviour of `some(s => s.data.length
+  // > 0)` by checking actual non-null values in the columnar series.
+  const hasAnyHistory = useMemo(() => {
+    if (history.timestamps.length === 0) return false;
+    const filtered = filterSet.size === 0
+      ? history.servers
+      : history.servers.filter((s) => filterSet.has(s.id));
+    if (filtered.length === 0) return false;
 
-    return Array.from(timeMap.values()).sort((a, b) =>
-      a.time.localeCompare(b.time)
-    );
-  };
-
-  // Memoize chart data per metric to avoid recomputing on every render
-  const cpuChartData = useMemo(() => prepareServerChartData('cpu'), [filteredMetricsHistory]);
-  const memoryChartData = useMemo(() => prepareServerChartData('memory'), [filteredMetricsHistory]);
-  const swapChartData = useMemo(() => prepareServerChartData('swap'), [filteredMetricsHistory]);
-  const diskChartData = useMemo(() => prepareServerChartData('disk'), [filteredMetricsHistory]);
-  const loadChartData = useMemo(() => prepareServerChartData('load'), [filteredMetricsHistory]);
-  const tcpChartData = useMemo(() => prepareServerChartData('tcp'), [filteredMetricsHistory]);
+    const filteredIdxs = filtered.map((s) => history.servers.indexOf(s));
+    for (const series of Object.values(history.series)) {
+      if (!series) continue;
+      for (const idx of filteredIdxs) {
+        const row = series[idx];
+        if (row && row.some((v) => v !== null)) return true;
+      }
+    }
+    return false;
+  }, [history, filterSet]);
 
   const formatTime = (time: string) => {
     const date = new Date(time);
@@ -146,7 +172,6 @@ export default function MonitoringServers() {
   }
 
   const serversWithMetrics = filteredServers.filter((s) => s.latestMetrics);
-  const serverNames = filteredMetricsHistory.map((s) => s.name);
 
   return (
     <div className="p-6">
@@ -197,25 +222,25 @@ export default function MonitoringServers() {
       </div>
 
       {/* Server Charts */}
-      {filteredMetricsHistory.length > 0 && filteredMetricsHistory.some((s) => s.data.length > 0) ? (
+      {hasAnyHistory ? (
         <div className="grid grid-cols-2 gap-6 mb-8">
           {(schedulerConfig?.collectCpu ?? true) && (
-            <ChartCard title="CPU Usage" data={cpuChartData} names={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
+            <ChartCard title="CPU Usage" data={cpuChart.data} names={cpuChart.names} formatTime={formatTime} unit="%" domain={[0, 100]} />
           )}
           {(schedulerConfig?.collectMemory ?? true) && (
-            <ChartCard title="Memory Usage" data={memoryChartData} names={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
+            <ChartCard title="Memory Usage" data={memoryChart.data} names={memoryChart.names} formatTime={formatTime} unit="%" domain={[0, 100]} />
           )}
           {(schedulerConfig?.collectSwap ?? true) && (
-            <ChartCard title="Swap Usage" data={swapChartData} names={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
+            <ChartCard title="Swap Usage" data={swapChart.data} names={swapChart.names} formatTime={formatTime} unit="%" domain={[0, 100]} />
           )}
           {(schedulerConfig?.collectDisk ?? true) && (
-            <ChartCard title="Disk Usage" data={diskChartData} names={serverNames} formatTime={formatTime} unit="%" domain={[0, 100]} />
+            <ChartCard title="Disk Usage" data={diskChart.data} names={diskChart.names} formatTime={formatTime} unit="%" domain={[0, 100]} />
           )}
           {(schedulerConfig?.collectLoad ?? true) && (
-            <ChartCard title="Load Average" data={loadChartData} names={serverNames} formatTime={formatTime} domain={[0, 'auto']} />
+            <ChartCard title="Load Average" data={loadChart.data} names={loadChart.names} formatTime={formatTime} domain={[0, 'auto']} />
           )}
           {(schedulerConfig?.collectTcp ?? true) && (
-            <ChartCard title="TCP Connections" data={tcpChartData} names={serverNames} formatTime={formatTime} domain={[0, 'auto']} />
+            <ChartCard title="TCP Connections" data={tcpChart.data} names={tcpChart.names} formatTime={formatTime} domain={[0, 'auto']} />
           )}
         </div>
       ) : (

@@ -29,12 +29,17 @@ vi.mock('../lib/api', async () => {
     }),
     getMetricsHistory: vi.fn().mockResolvedValue({
       servers: [
-        {
-          id: 's1',
-          name: 'web-01',
-          data: [],
-        },
+        { id: 's1', name: 'web-01', tags: '' },
       ],
+      timestamps: ['2024-01-15T12:00:00Z'],
+      series: {
+        cpu: [[45.2]],
+        memory: [[62.1]],
+        swap: [[0]],
+        disk: [[30]],
+        load1: [[0.5]],
+        tcpTotal: [[100]],
+      },
     }),
     getModuleSettings: vi.fn().mockResolvedValue({
       settings: { metricsIntervalSec: 300 },

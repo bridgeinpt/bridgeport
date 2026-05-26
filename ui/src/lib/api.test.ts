@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { api, getServiceDeploymentLogs } from './api';
+import { api, getServiceDeploymentLogs, unpackSeries } from './api';
 
 // Mock sentry to avoid import issues
 vi.mock('./sentry', () => ({
@@ -293,5 +293,108 @@ describe('getServiceDeploymentLogs', () => {
 
     const [url] = mockFetch.mock.calls[0];
     expect(url).toBe('/api/services/svc-1/deployments/dep-1/logs');
+  });
+});
+
+// `unpackSeries` recombines the columnar API response (issue #139) into the
+// per-row objects that Recharts (ChartCard) consumes. The branches under test:
+//  - empty input (no rows, no timestamps)         → empty data + names
+//  - happy path (entities × timestamps)           → one `time`-keyed point per
+//                                                    timestamp, one column per
+//                                                    entity name
+//  - null preservation                            → gaps stay `null` (not 0,
+//                                                    not undefined) so charts
+//                                                    can draw discontinuities
+//  - entityIds filter                             → narrows columns + names
+//                                                    without re-fetching
+describe('unpackSeries', () => {
+  const entities = [
+    { id: 'a', name: 'Alpha' },
+    { id: 'b', name: 'Bravo' },
+  ];
+  const timestamps = ['2026-01-01T00:00:00Z', '2026-01-01T00:01:00Z'];
+
+  it('returns { data, names } shape with one entry per timestamp and one column per entity', async () => {
+    const result = unpackSeries({
+      entities,
+      timestamps,
+      rows: [
+        [1, 2],
+        [3, 4],
+      ],
+    });
+
+    expect(result.names).toEqual(['Alpha', 'Bravo']);
+    expect(result.data).toEqual([
+      { time: '2026-01-01T00:00:00Z', Alpha: 1, Bravo: 3 },
+      { time: '2026-01-01T00:01:00Z', Alpha: 2, Bravo: 4 },
+    ]);
+  });
+
+  it('preserves null values in rows (does not coerce to 0)', async () => {
+    const result = unpackSeries({
+      entities,
+      timestamps,
+      rows: [
+        [null, 2],
+        [3, null],
+      ],
+    });
+
+    // Crucially the null values stay null — Recharts uses this to draw the
+    // line discontinuity. Coercing to 0 would silently flatline the chart.
+    expect(result.data[0]!.Alpha).toBeNull();
+    expect(result.data[0]!.Bravo).toBe(3);
+    expect(result.data[1]!.Alpha).toBe(2);
+    expect(result.data[1]!.Bravo).toBeNull();
+  });
+
+  it('returns empty arrays when rows is undefined (metric not present)', async () => {
+    const result = unpackSeries({ entities, timestamps, rows: undefined });
+    expect(result.data).toEqual([]);
+    expect(result.names).toEqual([]);
+  });
+
+  it('returns empty arrays when rows is an empty array', async () => {
+    const result = unpackSeries({ entities, timestamps, rows: [] });
+    expect(result.data).toEqual([]);
+    expect(result.names).toEqual([]);
+  });
+
+  it('returns empty arrays when timestamps is empty (no samples)', async () => {
+    const result = unpackSeries({
+      entities,
+      timestamps: [],
+      rows: [
+        [1],
+        [2],
+      ],
+    });
+    expect(result.data).toEqual([]);
+    expect(result.names).toEqual([]);
+  });
+
+  it('narrows columns to the entityIds filter set, keeping the matching name(s)', async () => {
+    const result = unpackSeries(
+      {
+        entities,
+        timestamps,
+        rows: [
+          [1, 2],
+          [3, 4],
+        ],
+      },
+      { entityIds: new Set(['b']) }
+    );
+
+    expect(result.names).toEqual(['Bravo']);
+    expect(result.data).toEqual([
+      { time: '2026-01-01T00:00:00Z', Bravo: 3 },
+      { time: '2026-01-01T00:01:00Z', Bravo: 4 },
+    ]);
+    // Alpha must not leak into any point — that would break chart legends.
+    for (const point of result.data) {
+      expect(point).not.toHaveProperty('Alpha');
+    }
   });
 });

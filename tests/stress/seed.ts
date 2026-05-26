@@ -42,6 +42,8 @@ export interface StressSeedOptions {
   auditLogs: number;
   /** Health check log rows per resource (server + service). */
   healthLogsPerResource: number;
+  /** Monitored databases per environment (drives database-metrics-history). */
+  databases: number;
 }
 
 export const DEFAULT_SEED: StressSeedOptions = {
@@ -59,6 +61,7 @@ export const DEFAULT_SEED: StressSeedOptions = {
   configFiles: 30,
   auditLogs: 200,
   healthLogsPerResource: 5,
+  databases: 8,
 };
 
 /** IDs of seeded entities that scenarios can reference via {placeholder} in URLs. */
@@ -307,6 +310,65 @@ export async function seedStressData(
       }))
     );
     await prisma.healthCheckLog.createMany({ data: [...serverLogs, ...serviceLogs] });
+  }
+
+  // -- Databases (drives /databases/metrics/history scenario for issue #139).
+  // We need a DatabaseType with a `monitoringConfig.queries` array (the route
+  // reads this to build queryMeta) and a small set of monitored databases
+  // each with `metricsPerEntity` JSON metric points.
+  if (options.databases > 0) {
+    const monitoringConfig = JSON.stringify({
+      queries: [
+        { name: 'active_connections', displayName: 'Active Connections', resultType: 'scalar', unit: '' },
+        { name: 'cache_hit_ratio', displayName: 'Cache Hit Ratio', resultType: 'scalar', unit: '%' },
+        { name: 'database_size_bytes', displayName: 'Database Size', resultType: 'scalar', unit: 'bytes' },
+        { name: 'transactions_per_sec', displayName: 'Transactions/sec', resultType: 'scalar', unit: '' },
+      ],
+    });
+    const dbType = await prisma.databaseType.create({
+      data: {
+        name: `stress-postgres-${Date.now()}`,
+        displayName: 'PostgreSQL (stress)',
+        connectionFields: '[]',
+        defaultPort: 5432,
+        monitoringConfig,
+      },
+    });
+
+    const dbIds: string[] = [];
+    for (let i = 0; i < options.databases; i++) {
+      const db = await prisma.database.create({
+        data: {
+          name: `stress-db-${i}`,
+          type: 'postgres',
+          databaseTypeId: dbType.id,
+          environmentId: env.id,
+          serverId: serverIds[i % serverIds.length]!,
+          host: 'localhost',
+          port: 5432,
+          databaseName: `stressdb_${i}`,
+          monitoringEnabled: true,
+          monitoringStatus: 'connected',
+        },
+      });
+      dbIds.push(db.id);
+    }
+
+    const dbMetrics = dbIds.flatMap((databaseId, dbIdx) =>
+      Array.from({ length: options.metricsPerEntity }, (_, i) => ({
+        databaseId,
+        collectedAt: new Date(now - (options.metricsPerEntity - 1 - i) * intervalMs),
+        metricsJson: JSON.stringify({
+          active_connections: 10 + ((dbIdx + i) % 50),
+          cache_hit_ratio: 95 + ((dbIdx + i) % 5) * 0.5,
+          database_size_bytes: 100_000_000 + dbIdx * 1_000_000 + i * 1000,
+          transactions_per_sec: 50 + ((dbIdx + i) % 200),
+        }),
+      }))
+    );
+    if (dbMetrics.length > 0) {
+      await prisma.databaseMetrics.createMany({ data: dbMetrics });
+    }
   }
 
   return {
