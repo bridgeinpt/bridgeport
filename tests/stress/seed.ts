@@ -1,16 +1,14 @@
 /**
  * Stress test seed.
  *
- * Populates a test database with enough Servers, Services, ServerMetrics
- * and ServiceMetrics to exercise the monitoring-history endpoints, which
- * were flagged by Sentry as the source of two N+1 patterns:
+ * Populates a test database with enough data to exercise every read endpoint
+ * we stress test. Returns a `Refs` object whose keys are referenced by
+ * `thresholds.json` via `{placeholder}` substitution — that's how a scenario
+ * URL like `/api/services/{serviceId}` finds a real service ID at runtime.
  *
- *   - BRIDGEPORT-BE-2: GET /api/environments/:envId/metrics/history          (per-server N+1)
- *   - BRIDGEPORT-BE-5: GET /api/environments/:envId/services/metrics/history (per-service N+1)
- *
- * The dataset is intentionally biased toward many servers/services rather
- * than a deep metric history — the bug is in the *number* of queries, not
- * in scanning a large table.
+ * The data shape is intentionally biased toward many entities (servers,
+ * services, container images, secrets) rather than deep history — bugs of
+ * the "fan-out one query per entity" shape live in the *count*, not the depth.
  */
 import type { PrismaClient } from '@prisma/client';
 import {
@@ -18,11 +16,12 @@ import {
   createTestEnvironment,
   createTestServer,
   createTestContainerImage,
+  createTestImageDigest,
   createTestService,
 } from '../factories/index.js';
 
 export interface StressSeedOptions {
-  /** Number of servers per environment (higher = larger N for ServerMetrics N+1). */
+  /** Number of servers per environment (drives N for ServerMetrics N+1). */
   servers: number;
   /** Services per server (servers × servicesPerServer = N for ServiceMetrics N+1). */
   servicesPerServer: number;
@@ -30,6 +29,18 @@ export interface StressSeedOptions {
   metricsPerEntity: number;
   /** Minutes between metric points. */
   metricIntervalMin: number;
+  /** Number of container images in the env. */
+  containerImages: number;
+  /** Digests per container image (drives N+1 patterns in image listing). */
+  digestsPerImage: number;
+  /** Secrets per environment (drives N+1 patterns in secrets listing). */
+  secrets: number;
+  /** Config files per environment — secrets list scans their content. */
+  configFiles: number;
+  /** Audit log rows per environment. */
+  auditLogs: number;
+  /** Health check log rows per resource (server + service). */
+  healthLogsPerResource: number;
 }
 
 export const DEFAULT_SEED: StressSeedOptions = {
@@ -37,25 +48,86 @@ export const DEFAULT_SEED: StressSeedOptions = {
   servicesPerServer: 3,
   metricsPerEntity: 12,
   metricIntervalMin: 5,
+  containerImages: 15,
+  digestsPerImage: 4,
+  secrets: 20,
+  configFiles: 6,
+  auditLogs: 200,
+  healthLogsPerResource: 5,
 };
 
-export interface SeedResult {
-  user: { id: string; email: string };
-  environment: { id: string };
+/** IDs of seeded entities that scenarios can reference via {placeholder} in URLs. */
+export interface Refs {
+  envId: string;
+  serverId: string;
+  serviceId: string;
+  containerImageId: string;
+  secretId: string;
+  configFileId: string;
+  userId: string;
+  userEmail: string;
+}
+
+const SECRET_KEYS = [
+  'DATABASE_URL',
+  'REDIS_URL',
+  'JWT_SECRET',
+  'SENTRY_DSN',
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  'STRIPE_API_KEY',
+  'SLACK_WEBHOOK',
+  'GITHUB_TOKEN',
+  'PUBLIC_API_URL',
+];
+
+function compose(env: string, vars: string[]): string {
+  // A modestly-sized compose-style config file that references many secrets,
+  // so the secrets/vars usage-scan has real work to do per render.
+  const refs = vars.map((v, i) => `      - ${v}=\${${v}}\n      - APP_${i}_VAR=\$${v}`).join('\n');
+  return [
+    'version: "3.9"',
+    'services:',
+    `  app-${env}:`,
+    '    image: registry.example.com/app:latest',
+    '    environment:',
+    refs,
+    '    ports:',
+    '      - "8080:8080"',
+  ].join('\n');
 }
 
 export async function seedStressData(
   prisma: PrismaClient,
   options: StressSeedOptions = DEFAULT_SEED
-): Promise<SeedResult> {
+): Promise<Refs> {
   const user = await createTestUser(prisma, {
     email: 'stress@bridgeport.test',
     role: 'admin',
   });
 
   const env = await createTestEnvironment(prisma, { name: 'stress-env' });
-  const image = await createTestContainerImage(prisma, { environmentId: env.id });
 
+  // -- Container images + digests
+  const imageIds: string[] = [];
+  for (let i = 0; i < options.containerImages; i++) {
+    const img = await createTestContainerImage(prisma, {
+      environmentId: env.id,
+      imageName: `registry.example.com/stress/app-${i}`,
+    });
+    imageIds.push(img.id);
+
+    for (let d = 0; d < options.digestsPerImage; d++) {
+      await createTestImageDigest(prisma, {
+        containerImageId: img.id,
+        manifestDigest: `sha256:${(i * 100 + d).toString().padStart(64, 'a')}`,
+        tags: ['latest', `v1.${d}`],
+      });
+    }
+  }
+  const containerImageId = imageIds[0]!;
+
+  // -- Servers + services
   const serverIds: string[] = [];
   const serviceIds: string[] = [];
 
@@ -70,13 +142,15 @@ export async function seedStressData(
     for (let svc = 0; svc < options.servicesPerServer; svc++) {
       const service = await createTestService(prisma, {
         serverId: server.id,
-        containerImageId: image.id,
+        // Spread services across the seeded images so a `containerImageId`
+        // lookup isn't skewed to one row.
+        containerImageId: imageIds[(s * options.servicesPerServer + svc) % imageIds.length]!,
       });
       serviceIds.push(service.id);
     }
   }
 
-  // Bulk-insert metrics with createMany — the seed itself shouldn't be slow.
+  // -- Metrics (bulk-insert; the seed itself shouldn't be slow)
   const now = Date.now();
   const intervalMs = options.metricIntervalMin * 60 * 1000;
 
@@ -123,8 +197,100 @@ export async function seedStressData(
   await prisma.serverMetrics.createMany({ data: serverMetrics });
   await prisma.serviceMetrics.createMany({ data: serviceMetrics });
 
+  // -- Secrets (encrypted via the encryption layer would require initCrypto;
+  // the routes only decrypt on /secrets/:id/value, not on the list path that
+  // we stress test — so we can short-circuit with empty encrypted values).
+  const secretKeys = Array.from({ length: options.secrets }, (_, i) =>
+    i < SECRET_KEYS.length ? SECRET_KEYS[i]! : `SECRET_${i}`
+  );
+  await prisma.secret.createMany({
+    data: secretKeys.map((key) => ({
+      key,
+      encryptedValue: 'stub-encrypted',
+      nonce: 'stub-nonce',
+      environmentId: env.id,
+    })),
+  });
+  const firstSecret = await prisma.secret.findFirst({ where: { environmentId: env.id } });
+
+  // -- Vars
+  await prisma.var.createMany({
+    data: secretKeys.slice(0, Math.min(10, options.secrets)).map((key) => ({
+      key: `${key}_PUBLIC`,
+      value: `value-of-${key}`,
+      environmentId: env.id,
+    })),
+  });
+
+  // -- Config files (their content references the seeded secrets, exercising
+  // the secrets/vars usage-scan code path)
+  const configFileIds: string[] = [];
+  for (let i = 0; i < options.configFiles; i++) {
+    const file = await prisma.configFile.create({
+      data: {
+        name: `stack-${i}`,
+        filename: `docker-compose-${i}.yml`,
+        content: compose(`stack${i}`, secretKeys.slice(0, 6)),
+        environmentId: env.id,
+      },
+    });
+    configFileIds.push(file.id);
+  }
+
+  // -- Audit logs
+  if (options.auditLogs > 0) {
+    const actions = ['create', 'update', 'delete', 'deploy', 'restart'];
+    const resourceTypes = ['service', 'server', 'secret', 'config_file', 'environment'];
+    await prisma.auditLog.createMany({
+      data: Array.from({ length: options.auditLogs }, (_, i) => ({
+        action: actions[i % actions.length]!,
+        resourceType: resourceTypes[i % resourceTypes.length]!,
+        resourceId: serviceIds[i % serviceIds.length]!,
+        resourceName: `entity-${i}`,
+        environmentId: env.id,
+        userId: user.id,
+        createdAt: new Date(now - i * 60_000),
+      })),
+    });
+  }
+
+  // -- Health check logs (per resource) — drives /health-status N+1
+  if (options.healthLogsPerResource > 0) {
+    const serverLogs = serverIds.flatMap((id, idx) =>
+      Array.from({ length: options.healthLogsPerResource }, (_, j) => ({
+        environmentId: env.id,
+        resourceType: 'server',
+        resourceId: id,
+        resourceName: `server-${idx}`,
+        checkType: 'ssh',
+        status: j === 0 ? 'success' : (j % 3 === 0 ? 'failure' : 'success'),
+        durationMs: 120 + j * 5,
+        createdAt: new Date(now - j * 60_000),
+      }))
+    );
+    const serviceLogs = serviceIds.flatMap((id, idx) =>
+      Array.from({ length: options.healthLogsPerResource }, (_, j) => ({
+        environmentId: env.id,
+        resourceType: 'service',
+        resourceId: id,
+        resourceName: `service-${idx}`,
+        checkType: 'container_health',
+        status: 'success',
+        durationMs: 60 + j * 2,
+        createdAt: new Date(now - j * 60_000),
+      }))
+    );
+    await prisma.healthCheckLog.createMany({ data: [...serverLogs, ...serviceLogs] });
+  }
+
   return {
-    user: { id: user.id, email: user.email },
-    environment: { id: env.id },
+    envId: env.id,
+    serverId: serverIds[0]!,
+    serviceId: serviceIds[0]!,
+    containerImageId,
+    secretId: firstSecret!.id,
+    configFileId: configFileIds[0]!,
+    userId: user.id,
+    userEmail: user.email,
   };
 }

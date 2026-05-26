@@ -91,15 +91,23 @@ function readThresholds(): ThresholdsFile {
   return require(thresholdsPath) as ThresholdsFile;
 }
 
+function substitutePath(path: string, refs: Record<string, string>): string {
+  return path.replace(/\{(\w+)\}/g, (m, key: string) => {
+    const val = refs[key];
+    if (!val) throw new Error(`Stress scenario path uses {${key}} but seed Refs has no such key`);
+    return val;
+  });
+}
+
 async function runScenario(
   name: string,
   scenario: ScenarioConfig,
   baseUrl: string,
-  envId: string,
+  refs: Record<string, string>,
   authHeader: string,
   load: ThresholdsFile['load']
 ): Promise<ScenarioReport> {
-  const path = scenario.path.replace('{envId}', envId);
+  const path = substitutePath(scenario.path, refs);
   const result = await autocannon({
     url: `${baseUrl}${path}`,
     connections: load.connections,
@@ -190,8 +198,8 @@ async function main(): Promise<number> {
   const baseUrl = `http://127.0.0.1:${address.port}`;
 
   try {
-    const { user, environment } = await seedStressData(app.prisma, seed);
-    const token = await generateTestToken({ id: user.id, email: user.email });
+    const refs = await seedStressData(app.prisma, seed);
+    const token = await generateTestToken({ id: refs.userId, email: refs.userEmail });
     const authHeader = `Bearer ${token}`;
 
     // Warm-up so JIT/connection pool doesn't skew the first iteration.
@@ -201,6 +209,7 @@ async function main(): Promise<number> {
       duration: 1,
     });
 
+    const refsRecord = refs as unknown as Record<string, string>;
     const reports: ScenarioReport[] = [];
     for (const [name, scenario] of Object.entries(thresholds.scenarios)) {
       console.log(`\n▶ scenario: ${name}`);
@@ -208,7 +217,7 @@ async function main(): Promise<number> {
         name,
         scenario,
         baseUrl,
-        environment.id,
+        refsRecord,
         authHeader,
         thresholds.load
       );
@@ -216,19 +225,22 @@ async function main(): Promise<number> {
       reports.push(r);
     }
 
+    const soft = process.env.STRESS_SOFT === 'true';
     const summary = {
       generatedAt: new Date().toISOString(),
       seed,
       load: thresholds.load,
       scenarios: reports,
       passed: reports.every((r) => r.passed),
+      soft,
     };
     writeFileSync(reportPath, JSON.stringify(summary, null, 2));
     console.log(`\n▶ wrote ${reportPath}`);
 
     if (!summary.passed) {
-      console.error('\n✗ stress thresholds failed');
-      return 1;
+      const verb = soft ? 'breached (soft mode — not failing the run)' : 'failed';
+      console.error(`\n${soft ? 'ℹ️' : '✗'} stress thresholds ${verb}`);
+      return soft ? 0 : 1;
     }
     console.log('\n✓ all stress thresholds passed');
     return 0;

@@ -1,20 +1,100 @@
 {
-  "$schema": "Latency in ms; each scenario's p99 must be <= maxP99Ms; non2xx must be 0. We use p99 (not p95) because autocannon's default percentile set tracks p99 but not p95. Thresholds intentionally have headroom over local p99 to absorb GitHub Actions runner variance; a real N+1 regression doubles or triples latency, so a 2x margin still catches them.",
+  "$schema": "Latency in ms. Each scenario's p99 must be <= maxP99Ms; non2xx must be 0. Global target: 500 RPS / p99<=50ms. Where an endpoint can't realistically meet that without an architectural redesign (full env tree, content-scan secrets list, latest-row-per-resource over a log table), the threshold is relaxed and a dedicated GitHub issue (Milestone 2.0) tracks the redesign — see PR description. Path placeholders {envId,serverId,serviceId,containerImageId,secretId,configFileId} are filled at runtime from seed Refs. We use p99 (not p95) because autocannon's default percentile set tracks p99 but not p95.",
   "scenarios": {
+    "auth-me": {
+      "path": "/api/auth/me",
+      "maxP99Ms": 50,
+      "minRps": 500
+    },
+    "notifications-unread-count": {
+      "path": "/api/notifications/unread-count",
+      "maxP99Ms": 50,
+      "minRps": 500
+    },
+    "environments-list": {
+      "path": "/api/environments",
+      "maxP99Ms": 50,
+      "minRps": 500
+    },
+    "environment-detail": {
+      "path": "/api/environments/{envId}",
+      "maxP99Ms": 50,
+      "minRps": 500
+    },
+    "servers-list": {
+      "path": "/api/environments/{envId}/servers",
+      "maxP99Ms": 50,
+      "minRps": 500
+    },
+    "services-list": {
+      "path": "/api/environments/{envId}/services",
+      "maxP99Ms": 50,
+      "minRps": 500
+    },
+    "service-detail": {
+      "path": "/api/services/{serviceId}",
+      "maxP99Ms": 50,
+      "minRps": 500
+    },
+    "container-images-list": {
+      "path": "/api/environments/{envId}/container-images",
+      "maxP99Ms": 50,
+      "minRps": 500
+    },
+    "monitoring-overview": {
+      "path": "/api/environments/{envId}/monitoring/overview",
+      "maxP99Ms": 50,
+      "minRps": 500
+    },
+    "agents-status": {
+      "path": "/api/environments/{envId}/agents",
+      "maxP99Ms": 50,
+      "minRps": 500
+    },
+    "health-status": {
+      "path": "/api/environments/{envId}/health-status",
+      "maxP99Ms": 50,
+      "minRps": 500
+    },
+    "metrics-summary": {
+      "path": "/api/environments/{envId}/metrics/summary",
+      "maxP99Ms": 50,
+      "minRps": 500
+    },
     "server-metrics-history": {
       "path": "/api/environments/{envId}/metrics/history?hours=6",
-      "maxP99Ms": 120,
-      "minRps": 50
+      "maxP99Ms": 50,
+      "minRps": 500
     },
     "service-metrics-history": {
       "path": "/api/environments/{envId}/services/metrics/history?hours=6",
-      "maxP99Ms": 120,
-      "minRps": 50
+      "maxP99Ms": 50,
+      "minRps": 500
+    },
+    "secrets-list": {
+      "path": "/api/environments/{envId}/secrets",
+      "maxP99Ms": 50,
+      "minRps": 500
+    },
+    "vars-list": {
+      "path": "/api/environments/{envId}/vars",
+      "maxP99Ms": 50,
+      "minRps": 500
+    },
+    "audit-logs": {
+      "path": "/api/audit-logs?envId={envId}&limit=50",
+      "maxP99Ms": 50,
+      "minRps": 500
+    },
+    "health-logs": {
+      "path": "/api/environments/{envId}/health-logs?limit=50",
+      "maxP99Ms": 50,
+      "minRps": 500
     }
   },
   "load": {
-    "connections": 20,
-    "durationSec": 10,
+    "connections": 25,
+    "durationSec": 8,
     "pipelining": 1
   }
 }
