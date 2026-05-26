@@ -114,7 +114,7 @@ Resource limits and display defaults.
 | `maxUploadSizeMb` | `integer` | `50` | Maximum file upload size in megabytes (for config files and binary attachments) |
 | `activeUserWindowMin` | `integer` | `15` | Minutes of inactivity before a user is considered "inactive" in the active users count (Admin > Users) |
 | `registryMaxTags` | `integer` | `50` | Maximum number of tags to fetch when checking a container registry for updates |
-| `defaultLogLines` | `integer` | `50` | Default number of log lines to return when viewing container logs through the API |
+| `defaultLogLines` | `integer` | `50` | Default number of log lines to return when no explicit `tail` is requested. Used by the snapshot logs endpoint, the SSE log stream, the service detail logs viewer (initial fetch and "Load older" page size), and the per-deployment container log capture appended to deployment plan output. |
 
 ---
 

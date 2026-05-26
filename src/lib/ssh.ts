@@ -915,12 +915,14 @@ export class DockerSSH {
 
   async containerLogs(
     containerName: string,
-    options: { tail?: number; follow?: boolean } = {}
+    options: { tail?: number; follow?: boolean; until?: string; timestamps?: boolean } = {}
   ): Promise<string> {
     const args = ['docker logs'];
     if (options.tail) args.push('--tail', options.tail.toString());
     if (options.follow) args.push('-f');
-    args.push(containerName);
+    if (options.timestamps) args.push('-t');
+    if (options.until) args.push('--until', shellEscape(options.until));
+    args.push(shellEscape(containerName));
 
     const { stdout, stderr, code } = await this.client.exec(this.pathPrefix + args.join(' '));
     if (code !== 0) {

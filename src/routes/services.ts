@@ -341,10 +341,28 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const { tail } = request.query as { tail?: string };
+      const { tail, before } = request.query as { tail?: string; before?: string };
 
       try {
-        const logs = await getContainerLogs(id, tail ? parseInt(tail) : 100);
+        // Fall back to admin-configured defaultLogLines when no explicit tail is given
+        // or when the provided tail is unparseable / out of range.
+        // Cap to 10000 to align with the admin setting's upper bound.
+        const MAX_TAIL = 10000;
+        let tailValue: number;
+        const parsedTail = tail !== undefined ? parseInt(tail, 10) : NaN;
+        if (Number.isFinite(parsedTail) && parsedTail >= 1) {
+          tailValue = Math.min(parsedTail, MAX_TAIL);
+        } else {
+          const settings = await getSystemSettings();
+          tailValue = settings.defaultLogLines;
+        }
+
+        // `-t` (timestamps) is always on so the UI can paginate via `before=<timestamp>`
+        const logs = await getContainerLogs(id, {
+          tail: tailValue,
+          until: before,
+          timestamps: true,
+        });
         return { logs };
       } catch (error) {
         const message = getErrorMessage(error, 'Failed to get logs');
