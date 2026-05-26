@@ -498,8 +498,8 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
 
     // Check for available image updates for discovered deployments.
     for (const sd of discoveredDeployments) {
-      checkServiceUpdate(sd.id).catch((err) => {
-        console.error('[Discovery] Failed to check updates for deployment', sd.id, getErrorMessage(err));
+      checkServiceUpdate(sd.id).catch(() => {
+        console.error('[Discovery] Failed to check updates for deployment', sd.id);
       });
     }
 

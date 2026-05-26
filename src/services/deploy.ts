@@ -251,8 +251,8 @@ export async function deployService(
     });
 
     // Check for available image updates in background
-    checkServiceUpdate(serviceDeploymentId).catch((err) => {
-      console.error('[Deploy] Failed to check updates for deployment', serviceDeploymentId, getErrorMessage(err));
+    checkServiceUpdate(serviceDeploymentId).catch(() => {
+      console.error('[Deploy] Failed to check updates for deployment', serviceDeploymentId);
     });
 
     // Auto-prune images if enabled
