@@ -362,8 +362,8 @@ func TestClientListServices(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"services": []Service{
-				{ID: "svc-1", Name: "app", Status: "running", Health: "healthy"},
-				{ID: "svc-2", Name: "worker", Status: "running", Health: "none"},
+				{ID: "svc-1", Name: "app", Status: "running", HealthStatus: "healthy"},
+				{ID: "svc-2", Name: "worker", Status: "running", HealthStatus: "none"},
 			},
 		})
 	}))
