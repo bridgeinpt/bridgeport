@@ -77,8 +77,8 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 		for _, svc := range services {
 			status := output.StatusColor(svc.Status)
-			health := output.HealthColor(svc.Health)
-			table.Append([]string{svc.Name, status, health, svc.ImageName, svc.ImageTag})
+			health := output.HealthColor(svc.Health())
+			table.Append([]string{svc.Name, status, health, svc.ImageName(), svc.ImageTag})
 		}
 
 		table.Render()

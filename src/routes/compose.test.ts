@@ -11,6 +11,7 @@ describe('compose routes', () => {
   let app: TestApp;
   let adminToken: string;
   let serviceId: string;
+  let deploymentId: string;
 
   beforeAll(async () => {
     app = await buildTestApp();
@@ -21,17 +22,26 @@ describe('compose routes', () => {
     const server = await createTestServer(app.prisma, { environmentId: env.id, name: 'compose-server' });
     const image = await createTestContainerImage(app.prisma, { environmentId: env.id });
     const service = await createTestService(app.prisma, {
-      serverId: server.id,
+      environmentId: env.id,
       containerImageId: image.id,
       name: 'compose-svc',
+      // Legacy: this creates the attached ServiceDeployment too.
+      serverId: server.id,
     });
     serviceId = service.id;
 
-    // Set a compose template on the service
+    // 2.0: preview operates on a ServiceDeployment id (per-server). Look up the one
+    // the factory created so we can pass it to the preview endpoint.
+    const deployment = await app.prisma.serviceDeployment.findFirstOrThrow({
+      where: { serviceId },
+    });
+    deploymentId = deployment.id;
+
+    // Set a compose template on the service template
     await app.prisma.service.update({
       where: { id: serviceId },
       data: {
-        composeTemplate: 'version: "3"\nservices:\n  {{SERVICE_NAME}}:\n    image: {{IMAGE_NAME}}:{{IMAGE_TAG}}',
+        composeTemplate: 'version: "3"\nservices:\n  ${SERVICE_NAME}:\n    image: ${FULL_IMAGE}',
       },
     });
   });
@@ -41,10 +51,12 @@ describe('compose routes', () => {
   });
 
   describe('GET /api/services/:id/compose/preview', () => {
-    it('should preview compose template', async () => {
+    it('should preview compose template for a ServiceDeployment id', async () => {
+      // The preview route accepts a ServiceDeployment id under :id (it ultimately
+      // calls previewDeploymentArtifacts which looks up by deployment id).
       const res = await app.inject({
         method: 'GET',
-        url: `/api/services/${serviceId}/compose/preview`,
+        url: `/api/services/${deploymentId}/compose/preview`,
         headers: { authorization: `Bearer ${adminToken}` },
       });
 

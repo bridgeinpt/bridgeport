@@ -82,9 +82,12 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
           where: { ...summaryWhere, resourceType: 'server' },
           _count: true,
         }),
+        // Health-check writers now use 'service_deployment' (post-2.0 split). The
+        // UI still consumes a `service` summary key so we filter on the new
+        // resourceType but keep the response key for back-compat.
         prisma.healthCheckLog.groupBy({
           by: ['status'],
-          where: { ...summaryWhere, resourceType: 'service' },
+          where: { ...summaryWhere, resourceType: 'service_deployment' },
           _count: true,
         }),
         prisma.healthCheckLog.groupBy({
@@ -191,30 +194,28 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         }
       }
 
-      // Run service health checks
+      // Run service-deployment health checks (per-server runtime)
       if (type === 'all' || type === 'services') {
-        const services = await prisma.service.findMany({
+        const deployments = await prisma.serviceDeployment.findMany({
           where: {
-            server: { environmentId: envId },
-            healthCheckUrl: { not: null },
+            service: { environmentId: envId, healthCheckUrl: { not: null } },
           },
-          select: { id: true, name: true, healthCheckUrl: true },
+          select: { id: true, service: { select: { name: true } } },
         });
 
-        for (const service of services) {
+        for (const sd of deployments) {
           const start = Date.now();
           try {
-            const result = await checkServiceHealth(service.id);
+            const result = await checkServiceHealth(sd.id);
             const durationMs = Date.now() - start;
 
-            // Determine overall health status
             const isHealthy = result.container.running && (result.url === null || result.url.success);
 
             await logHealthCheck({
               environmentId: envId,
-              resourceType: 'service',
-              resourceId: service.id,
-              resourceName: service.name,
+              resourceType: 'service_deployment',
+              resourceId: sd.id,
+              resourceName: sd.service.name,
               checkType: result.url ? 'url' : 'container_health',
               status: isHealthy ? HEALTH_CHECK_STATUS.SUCCESS : HEALTH_CHECK_STATUS.FAILURE,
               durationMs,
@@ -223,8 +224,8 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
             });
 
             results.services.push({
-              id: service.id,
-              name: service.name,
+              id: sd.id,
+              name: sd.service.name,
               status: result.status,
               durationMs,
               error: result.url?.error,
@@ -235,9 +236,9 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
 
             await logHealthCheck({
               environmentId: envId,
-              resourceType: 'service',
-              resourceId: service.id,
-              resourceName: service.name,
+              resourceType: 'service_deployment',
+              resourceId: sd.id,
+              resourceName: sd.service.name,
               checkType: 'url',
               status: HEALTH_CHECK_STATUS.FAILURE,
               durationMs,
@@ -245,8 +246,8 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
             });
 
             results.services.push({
-              id: service.id,
-              name: service.name,
+              id: sd.id,
+              name: sd.service.name,
               status: SERVER_STATUS.UNHEALTHY,
               durationMs,
               error: errorMessage,
@@ -426,10 +427,11 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
       const since = new Date();
       since.setHours(since.getHours() - hours);
 
-      // Parallelize the env existence check with the server load. Service
-      // load happens after because filtering services by `serverId IN [...]`
-      // beats the `where: { server: { environmentId } }` EXISTS subquery
-      // when N=services is large (avoids 90 correlated lookups into Server).
+      // Parallelize the env existence check with the server load. Deployment
+      // load happens after because filtering deployments by
+      // `serverId IN [...]` beats the `where: { server: { environmentId } }`
+      // EXISTS subquery when N=deployments is large (avoids correlated
+      // lookups into Server).
       const [env, envServers] = await Promise.all([
         prisma.environment.findUnique({ where: { id: envId }, select: { id: true } }),
         prisma.server.findMany({
@@ -444,28 +446,35 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
       const envServerIds = envServers.map((s) => s.id);
       const serverNameById = new Map(envServers.map((s) => [s.id, s.name]));
 
-      const services = envServerIds.length === 0
+      // Metrics are per-deployment in 2.0. Each row pairs the runtime with
+      // its template name so the chart legend can show "<service> @ <server>".
+      const deployments = envServerIds.length === 0
         ? []
-        : (await prisma.service.findMany({
+        : (await prisma.serviceDeployment.findMany({
             where: {
               serverId: { in: envServerIds },
               discoveryStatus: DISCOVERY_STATUS.FOUND,
             },
-            select: { id: true, name: true, serverId: true },
-          })).map((s) => ({
-            id: s.id,
-            name: s.name,
-            server: { id: s.serverId, name: serverNameById.get(s.serverId) ?? '' },
+            select: {
+              id: true,
+              serverId: true,
+              service: { select: { id: true, name: true } },
+            },
+          })).map((d) => ({
+            id: d.id,
+            serviceId: d.service.id,
+            serviceName: d.service.name,
+            server: { id: d.serverId, name: serverNameById.get(d.serverId) ?? '' },
           }));
 
-      // Fetch all metrics in one query, then bucket by serviceId.
-      // Sentry BRIDGEPORT-BE-5 was an N+1 here when this loop ran per-service.
+      // Fetch all metrics in one query, then bucket by deployment.
+      // Sentry BRIDGEPORT-BE-5 was an N+1 here when this loop ran per-row.
       // We use $queryRaw to bypass Prisma's full row hydration — at 90
-      // services × 12+ points = 1k+ rows per request, hydration is a real
+      // deployments × 12+ points = 1k+ rows per request, hydration is a real
       // cost we don't need to pay for chart data.
-      const serviceIds = services.map((s) => s.id);
+      const deploymentIds = deployments.map((d) => d.id);
       interface MetricRow {
-        serviceId: string;
+        serviceDeploymentId: string;
         cpuPercent: number | null;
         memoryUsedMb: number | null;
         memoryLimitMb: number | null;
@@ -475,23 +484,23 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         collectedAt: Date;
       }
       const rows: MetricRow[] =
-        serviceIds.length === 0
+        deploymentIds.length === 0
           ? []
           : await prisma.$queryRaw<MetricRow[]>`
-              SELECT "serviceId", "cpuPercent", "memoryUsedMb", "memoryLimitMb",
+              SELECT "serviceDeploymentId", "cpuPercent", "memoryUsedMb", "memoryLimitMb",
                      "networkRxMb", "networkTxMb", "restartCount", "collectedAt"
               FROM "ServiceMetrics"
-              WHERE "serviceId" IN (${Prisma.join(serviceIds)})
+              WHERE "serviceDeploymentId" IN (${Prisma.join(deploymentIds)})
                 AND "collectedAt" >= ${since}
               ORDER BY "collectedAt" ASC
             `;
 
-      const byService = new Map<string, MetricRow[]>();
-      for (const id of serviceIds) byService.set(id, []);
-      for (const row of rows) byService.get(row.serviceId)?.push(row);
+      const byDeployment = new Map<string, MetricRow[]>();
+      for (const id of deploymentIds) byDeployment.set(id, []);
+      for (const row of rows) byDeployment.get(row.serviceDeploymentId)?.push(row);
 
-      const serviceMetrics = services.map((service) => {
-        const metrics = byService.get(service.id) ?? [];
+      const serviceMetrics = deployments.map((d) => {
+        const metrics = byDeployment.get(d.id) ?? [];
         const data = metrics.map((m) => ({
           time: m.collectedAt instanceof Date ? m.collectedAt.toISOString() : new Date(m.collectedAt).toISOString(),
           cpu: m.cpuPercent,
@@ -503,10 +512,11 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         }));
 
         return {
-          id: service.id,
-          name: service.name,
-          serverName: service.server.name,
-          serverId: service.server.id,
+          id: d.serviceId,
+          deploymentId: d.id,
+          name: d.serviceName,
+          serverName: d.server.name,
+          serverId: d.server.id,
           data,
         };
       });
@@ -666,22 +676,20 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         select: { id: true, status: true },
       });
 
-      // Get service stats
-      const services = await prisma.service.findMany({
-        where: { server: { environmentId: envId } },
+      // Service runtime now lives on ServiceDeployment — count per-deployment.
+      const deployments = await prisma.serviceDeployment.findMany({
+        where: { service: { environmentId: envId } },
         select: { id: true, status: true, healthStatus: true, containerStatus: true },
       });
 
-      // Count healthy resources
       const healthyServers = servers.filter((s) => s.status === SERVER_STATUS.HEALTHY).length;
-      const healthyServices = services.filter(
-        (s) => s.containerStatus === CONTAINER_STATUS.RUNNING && s.healthStatus !== HEALTH_STATUS.UNHEALTHY
+      const healthyServices = deployments.filter(
+        (d) => d.containerStatus === CONTAINER_STATUS.RUNNING && d.healthStatus !== HEALTH_STATUS.UNHEALTHY
       ).length;
 
-      // Count alerts (unhealthy resources)
       const unhealthyServers = servers.filter((s) => s.status === SERVER_STATUS.UNHEALTHY).length;
-      const unhealthyServices = services.filter(
-        (s) => s.healthStatus === HEALTH_STATUS.UNHEALTHY || s.containerStatus === CONTAINER_STATUS.EXITED || s.containerStatus === CONTAINER_STATUS.DEAD
+      const unhealthyServices = deployments.filter(
+        (d) => d.healthStatus === HEALTH_STATUS.UNHEALTHY || d.containerStatus === CONTAINER_STATUS.EXITED || d.containerStatus === CONTAINER_STATUS.DEAD
       ).length;
 
       // Get database monitoring stats
@@ -702,7 +710,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
             unhealthy: unhealthyServers,
           },
           services: {
-            total: services.length,
+            total: deployments.length,
             healthy: healthyServices,
             unhealthy: unhealthyServices,
           },
@@ -734,12 +742,12 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         select: { id: true, name: true },
       });
 
-      // Get all services in this environment
-      const services = await prisma.service.findMany({
-        where: { server: { environmentId: envId } },
+      // Get all service deployments in this environment.
+      const services = await prisma.serviceDeployment.findMany({
+        where: { service: { environmentId: envId } },
         select: {
           id: true,
-          name: true,
+          service: { select: { id: true, name: true } },
           server: { select: { id: true, name: true } },
         },
       });
@@ -775,7 +783,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
           : prisma.healthCheckLog.findMany({
               where: {
                 environmentId: envId,
-                resourceType: 'service',
+                resourceType: 'service_deployment',
                 resourceId: { in: serviceIds },
               },
               orderBy: { createdAt: 'desc' },
@@ -827,14 +835,17 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         };
       });
 
-      const serviceHealthStatus = services.map((service) => {
-        const log = latestServiceLog.get(service.id);
+      // services rows are ServiceDeployment shape: { id, service, server }.
+      // Latest-log lookup is keyed by deployment id (the resourceId stored on
+      // health_check audit rows).
+      const serviceHealthStatus = services.map((d) => {
+        const log = latestServiceLog.get(d.id);
         return {
-          id: service.id,
-          name: service.name,
+          id: d.id,
+          name: d.service.name,
           type: 'service' as const,
           status: toStatus(log),
-          serverName: service.server.name,
+          serverName: d.server.name,
           lastCheck: toLastCheck(log),
         };
       });

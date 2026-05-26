@@ -105,10 +105,11 @@ describe('metrics', () => {
   });
 
   describe('saveServiceMetrics', () => {
-    it('saves service metrics to database', async () => {
+    it('saves service metrics keyed by serviceDeploymentId (per-server)', async () => {
+      // 2.0: ServiceMetrics belongs to a ServiceDeployment (per-server runtime), not a Service template.
       mockPrisma.serviceMetrics.create.mockResolvedValue({ id: 'met-1' } as any);
 
-      await saveServiceMetrics('svc-1', {
+      await saveServiceMetrics('dep-1', {
         cpuPercent: 10.0,
         memoryUsedMb: 256,
         memoryLimitMb: 512,
@@ -119,7 +120,7 @@ describe('metrics', () => {
       expect(mockPrisma.serviceMetrics.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            serviceId: 'svc-1',
+            serviceDeploymentId: 'dep-1',
             cpuPercent: 10.0,
           }),
         })

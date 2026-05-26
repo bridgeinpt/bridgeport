@@ -35,10 +35,12 @@ export async function createHealthyDeploymentScenario(prisma: PrismaClient) {
 
   const service = await createTestService(prisma, {
     name: 'myapp',
-    containerName: 'myapp-container',
-    serverId: server.id,
+    environmentId: env.id,
     containerImageId: image.id,
     imageTag: 'v1.0.0',
+    // Legacy option: creates the attached ServiceDeployment (binding template ↔ server).
+    serverId: server.id,
+    containerName: 'myapp-container',
   });
 
   const deployment = await createTestDeployment(prisma, {

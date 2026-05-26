@@ -5,7 +5,7 @@ import { encrypt, decrypt } from '../lib/crypto.js';
 import { logAudit, actorFrom } from '../services/audit.js';
 import { requireAdmin } from '../plugins/authorize.js';
 import { createDefaultSettings } from '../services/environment-settings.js';
-import { safeJsonParse, validateBody, findOrNotFound, getErrorMessage } from '../lib/helpers.js';
+import { safeJsonParse, validateBody, findOrNotFound, getErrorMessage, flattenDeploymentOntoService } from '../lib/helpers.js';
 import { S3Client, ListBucketsCommand } from '@aws-sdk/client-s3';
 
 const createEnvSchema = z.object({
@@ -56,10 +56,14 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
           include: {
             servers: {
               include: {
-                services: {
+                serviceDeployments: {
                   include: {
-                    serviceType: true,
-                    containerImage: true,
+                    service: {
+                      include: {
+                        serviceType: true,
+                        containerImage: true,
+                      },
+                    },
                   },
                 },
               },
@@ -74,7 +78,14 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
       );
       if (!environment) return;
 
-      return { environment };
+      // Back-compat: expose a flattened `services` array per server (one entry per
+      // deployment) so legacy UI code that reads server.services keeps working.
+      const servers = environment.servers.map((s) => ({
+        ...s,
+        services: s.serviceDeployments.map((d) => flattenDeploymentOntoService(d)),
+      }));
+
+      return { environment: { ...environment, servers } };
     }
   );
 

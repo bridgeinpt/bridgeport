@@ -18,7 +18,7 @@ import { prisma } from '../lib/db.js';
 import { bundledAgentVersion } from '../lib/version.js';
 import { requireAdmin } from '../plugins/authorize.js';
 import { METRICS_MODE } from '../lib/constants.js';
-import { safeJsonParse, validateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery } from '../lib/helpers.js';
+import { safeJsonParse, validateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery, flattenDeploymentOntoService } from '../lib/helpers.js';
 
 const createServerSchema = z.object({
   name: z.string().min(1),
@@ -85,7 +85,10 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
       const server = await findOrNotFound(getServer(id), 'Server', reply);
       if (!server) return;
 
-      return { server };
+      // Back-compat: expose a flattened `services` array (one entry per deployment)
+      // so legacy UI code that reads server.services keeps working.
+      const services = server.serviceDeployments.map((d) => flattenDeploymentOntoService(d));
+      return { server: { ...server, services } };
     }
   );
 
@@ -204,7 +207,7 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
       try {
         const server = await getServer(id);
         console.log(`[Discover] Server ${server?.name}: dockerMode=${server?.dockerMode}, serverType=${server?.serverType}`);
-        const { services, missing } = await discoverContainers(id);
+        const { serviceDeployments, missing } = await discoverContainers(id);
 
         await logAudit({
           action: 'discover',
@@ -212,14 +215,22 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
           resourceId: id,
           resourceName: server?.name,
           details: {
-            discoveredServices: services.length,
+            discoveredServices: serviceDeployments.length,
             missingServices: missing,
           },
           ...actorFrom(request),
           environmentId: server?.environmentId,
         });
 
-        return { services, missing };
+        // Back-compat: surface a flattened services array so legacy UI keeps working.
+        // Re-fetch deployments with the service template + containerImage joined.
+        const enrichedDeployments = await prisma.serviceDeployment.findMany({
+          where: { serverId: id },
+          include: { service: { include: { containerImage: true } } },
+          orderBy: { service: { name: 'asc' } },
+        });
+        const services = enrichedDeployments.map((d) => flattenDeploymentOntoService(d));
+        return { serviceDeployments, missing, services };
       } catch (error) {
         console.error(`[Discover] Failed for server ${id}:`, error);
         return reply.code(500).send({ error: getErrorMessage(error, 'Discovery failed') });

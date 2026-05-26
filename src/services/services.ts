@@ -20,29 +20,34 @@ export interface ServiceHealthResult {
 }
 
 /**
- * Check health of a service (container status + optional URL check)
+ * Check health of a service deployment (container status + optional URL check).
+ * Takes a serviceDeploymentId (per-server runtime). Container/URL status are
+ * persisted on the ServiceDeployment row.
  */
-export async function checkServiceHealth(serviceId: string): Promise<ServiceHealthResult> {
-  const service = await prisma.service.findUnique({
-    where: { id: serviceId },
-    include: { server: true },
+export async function checkServiceHealth(serviceDeploymentId: string): Promise<ServiceHealthResult> {
+  const deployment = await prisma.serviceDeployment.findUnique({
+    where: { id: serviceDeploymentId },
+    include: {
+      server: true,
+      service: { select: { healthCheckUrl: true } },
+    },
   });
 
-  if (!service) {
-    throw new Error('Service not found');
+  if (!deployment) {
+    throw new Error('Service deployment not found');
   }
 
   // Create appropriate client based on hostname
   let client;
-  if (isLocalhost(service.server.hostname)) {
+  if (isLocalhost(deployment.server.hostname)) {
     client = new LocalClient();
   } else {
-    const sshCreds = await getEnvironmentSshKey(service.server.environmentId);
+    const sshCreds = await getEnvironmentSshKey(deployment.server.environmentId);
     if (!sshCreds) {
       throw new Error('SSH key not configured for this environment');
     }
     client = new SSHClient({
-      hostname: service.server.hostname,
+      hostname: deployment.server.hostname,
       username: sshCreds.username,
       privateKey: sshCreds.privateKey,
     });
@@ -54,12 +59,12 @@ export async function checkServiceHealth(serviceId: string): Promise<ServiceHeal
     await client.connect();
 
     // Check container health
-    const containerHealth = await docker.getContainerHealth(service.containerName);
+    const containerHealth = await docker.getContainerHealth(deployment.containerName);
 
-    // Check URL health if configured
+    // Check URL health if configured (URL is on the template)
     let urlHealth: { success: boolean; statusCode?: number; error?: string } | null = null;
-    if (service.healthCheckUrl) {
-      urlHealth = await docker.checkUrl(service.healthCheckUrl);
+    if (deployment.service.healthCheckUrl) {
+      urlHealth = await docker.checkUrl(deployment.service.healthCheckUrl);
     }
 
     // Determine overall status
@@ -76,9 +81,9 @@ export async function checkServiceHealth(serviceId: string): Promise<ServiceHeal
       status = CONTAINER_STATUS.RUNNING;
     }
 
-    // Update service status in database
-    await prisma.service.update({
-      where: { id: serviceId },
+    // Update service deployment status in database
+    await prisma.serviceDeployment.update({
+      where: { id: serviceDeploymentId },
       data: {
         status,
         lastCheckedAt: new Date(),

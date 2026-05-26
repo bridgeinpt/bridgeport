@@ -24,7 +24,7 @@ describe('monitoring routes', () => {
     const server = await createTestServer(app.prisma, { environmentId: envId, name: 'mon-server' });
     serverId = server.id;
     const image = await createTestContainerImage(app.prisma, { environmentId: envId });
-    const service = await createTestService(app.prisma, { serverId: server.id, containerImageId: image.id });
+    const service = await createTestService(app.prisma, { environmentId: envId, containerImageId: image.id, serverId: server.id });
     serviceId = service.id;
   });
 
@@ -155,22 +155,36 @@ describe('monitoring routes', () => {
     it('buckets service metrics back into the right service (regression: BRIDGEPORT-BE-5)', async () => {
       const image = await createTestContainerImage(app.prisma, { environmentId: envId });
       const svcA = await createTestService(app.prisma, {
+        environmentId: envId,
         serverId,
         containerImageId: image.id,
         name: 'svc-a',
       });
       const svcB = await createTestService(app.prisma, {
+        environmentId: envId,
         serverId,
         containerImageId: image.id,
         name: 'svc-b',
       });
+      // Metrics are per-deployment in 2.0; resolve the deployment ids the
+      // factory created when serverId was passed.
+      const [depA, depB] = await Promise.all([
+        app.prisma.serviceDeployment.findFirstOrThrow({ where: { serviceId: svcA.id } }),
+        app.prisma.serviceDeployment.findFirstOrThrow({ where: { serviceId: svcB.id } }),
+      ]);
+      // The discovery filter on the route only surfaces FOUND deployments —
+      // flip both fixtures so they appear in the response.
+      await app.prisma.serviceDeployment.updateMany({
+        where: { id: { in: [depA.id, depB.id] } },
+        data: { discoveryStatus: 'found' },
+      });
       const now = Date.now();
       await app.prisma.serviceMetrics.createMany({
         data: [
-          { serviceId: svcA.id, collectedAt: new Date(now - 60_000), cpuPercent: 1.1 },
-          { serviceId: svcA.id, collectedAt: new Date(now - 30_000), cpuPercent: 1.2 },
-          { serviceId: svcB.id, collectedAt: new Date(now - 60_000), cpuPercent: 2.1 },
-          { serviceId: svcB.id, collectedAt: new Date(now - 30_000), cpuPercent: 2.2 },
+          { serviceDeploymentId: depA.id, collectedAt: new Date(now - 60_000), cpuPercent: 1.1 },
+          { serviceDeploymentId: depA.id, collectedAt: new Date(now - 30_000), cpuPercent: 1.2 },
+          { serviceDeploymentId: depB.id, collectedAt: new Date(now - 60_000), cpuPercent: 2.1 },
+          { serviceDeploymentId: depB.id, collectedAt: new Date(now - 30_000), cpuPercent: 2.2 },
         ],
       });
 

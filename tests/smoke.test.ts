@@ -86,12 +86,22 @@ describe('test infrastructure smoke test', () => {
       });
       expect(image.environmentId).toBe(env.id);
 
+      // 2.0: Service is now a template (env-scoped). The factory's legacy
+      // `serverId` option creates an attached ServiceDeployment behind the scenes.
       const service = await createTestService(prisma, {
-        serverId: server.id,
+        environmentId: env.id,
         containerImageId: image.id,
+        serverId: server.id,
       });
-      expect(service.serverId).toBe(server.id);
+      expect(service.environmentId).toBe(env.id);
       expect(service.containerImageId).toBe(image.id);
+
+      // The factory should have created a ServiceDeployment binding the template to the server.
+      const deployments = await prisma.serviceDeployment.findMany({
+        where: { serviceId: service.id },
+      });
+      expect(deployments).toHaveLength(1);
+      expect(deployments[0].serverId).toBe(server.id);
 
       const deployment = await createTestDeployment(prisma, {
         serviceId: service.id,

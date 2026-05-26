@@ -86,17 +86,25 @@ function buildConfigFileFixture(overrides?: {
         : [
             {
               id: 'sf-1',
+              configFileId: overrides?.id ?? 'cf-1',
               targetPath: '/etc/nginx/nginx.conf',
+              // kind=base: serviceDeployment is null; fans out to service.serviceDeployments below.
+              serviceDeployment: null,
               service: {
                 id: 'svc-1',
                 name: 'web',
-                server: {
-                  id: 'srv-1',
-                  name: 'host-a',
-                  hostname: '10.0.0.1',
-                  environmentId: 'env-1',
-                  serverType: 'docker',
-                },
+                serviceDeployments: [
+                  {
+                    id: 'dep-1',
+                    server: {
+                      id: 'srv-1',
+                      name: 'host-a',
+                      hostname: '10.0.0.1',
+                      environmentId: 'env-1',
+                      serverType: 'docker',
+                    },
+                  },
+                ],
               },
             },
           ],
@@ -116,6 +124,7 @@ beforeEach(() => {
   vi.mocked(resolveSecretPlaceholders).mockResolvedValue({
     content: 'upstream { server 1.2.3.4; }',
     missing: [],
+    templateErrors: [],
   });
 });
 
@@ -354,6 +363,7 @@ describe('syncConfigFileToAttachedServices', () => {
     vi.mocked(resolveSecretPlaceholders).mockResolvedValue({
       content: 'upstream { server ${SECRET_A}; }',
       missing: ['SECRET_A'],
+      templateErrors: [],
     });
 
     const result = await syncConfigFileToAttachedServices('cf-1');

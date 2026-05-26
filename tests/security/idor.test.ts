@@ -55,9 +55,11 @@ beforeAll(async () => {
   server1Id = server.id;
   const image = await createTestContainerImage(app.prisma, { environmentId: env1Id });
   const service = await createTestService(app.prisma, {
-    serverId: server1Id,
+    environmentId: env1Id,
     containerImageId: image.id,
     name: 'idor-svc',
+    // Legacy: create attached deployment to keep route discovery happy.
+    serverId: server1Id,
   });
   service1Id = service.id;
 
