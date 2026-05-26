@@ -9,6 +9,7 @@ const { mockPrisma } = vi.hoisted(() => ({
     },
     notification: {
       create: vi.fn(),
+      createMany: vi.fn(),
       findFirst: vi.fn(),
       findMany: vi.fn(),
       update: vi.fn(),
@@ -17,6 +18,7 @@ const { mockPrisma } = vi.hoisted(() => ({
     },
     notificationPreference: {
       findUnique: vi.fn(),
+      findMany: vi.fn(),
     },
     user: {
       findUnique: vi.fn(),
@@ -52,12 +54,18 @@ vi.mock('./slack-notifications.js', () => ({
 import {
   initializeNotificationTypes,
   send,
+  sendSystemNotification,
+  processSystemNotificationJob,
   markAsRead,
   markAllAsRead,
   getUnreadCount,
   list,
   NOTIFICATION_TYPES,
 } from './notifications.js';
+import { sendEmail } from './email.js';
+import { dispatchWebhook } from './outgoing-webhooks.js';
+import { dispatchSlackNotification } from './slack-notifications.js';
+import { _resetForTests as resetQueue, size as queueSize } from './notification-queue.js';
 
 describe('notifications', () => {
   beforeEach(() => {
@@ -287,6 +295,260 @@ describe('notifications', () => {
           skip: 0,
         })
       );
+    });
+  });
+
+  describe('sendSystemNotification (enqueue path)', () => {
+    beforeEach(() => {
+      resetQueue();
+    });
+
+    it('returns Promise<void> without touching prisma', async () => {
+      const result = await sendSystemNotification(
+        NOTIFICATION_TYPES.SYSTEM_DEPLOYMENT_SUCCESS,
+        'env-1',
+        { serviceName: 'web', imageTag: 'v1' }
+      );
+
+      expect(result).toBeUndefined();
+      // No DB calls are made during sendSystemNotification itself — fan-out is deferred.
+      expect(mockPrisma.notificationType.findUnique).not.toHaveBeenCalled();
+      expect(mockPrisma.user.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.notificationPreference.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.environment.findUnique).not.toHaveBeenCalled();
+      expect(mockPrisma.notification.createMany).not.toHaveBeenCalled();
+      expect(mockPrisma.notification.create).not.toHaveBeenCalled();
+
+      // The job is sitting in the queue waiting for the consumer.
+      expect(queueSize()).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  describe('processSystemNotificationJob (batched fan-out)', () => {
+    const mockType = {
+      id: 'type-1',
+      code: NOTIFICATION_TYPES.SYSTEM_DEPLOYMENT_SUCCESS,
+      name: 'Deployment Succeeded',
+      template: 'Deployment of "{{serviceName}}" to {{imageTag}} succeeded.',
+      defaultChannels: '["in_app","email"]',
+      severity: 'info',
+      category: 'system',
+      enabled: true,
+    } as const;
+
+    function makeJob(overrides: Partial<{ environmentId: string | null; data: Record<string, unknown> }> = {}) {
+      return {
+        id: 'job-1',
+        typeCode: NOTIFICATION_TYPES.SYSTEM_DEPLOYMENT_SUCCESS,
+        // Use `in` so `environmentId: null` is preserved (vs `??` which would
+        // coerce null back to the default).
+        environmentId: 'environmentId' in overrides ? overrides.environmentId! : 'env-1',
+        data: overrides.data ?? { serviceName: 'web', imageTag: 'v1' },
+        enqueuedAt: Date.now(),
+      };
+    }
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      mockPrisma.notificationType.findUnique.mockResolvedValue(mockType);
+      mockPrisma.environment.findUnique.mockResolvedValue({ name: 'production' });
+      mockPrisma.user.findMany.mockResolvedValue([
+        { id: 'user-1', email: 'a@example.com' },
+        { id: 'user-2', email: 'b@example.com' },
+        { id: 'user-3', email: 'c@example.com' },
+      ]);
+      mockPrisma.notificationPreference.findMany.mockResolvedValue([]);
+      mockPrisma.notification.createMany.mockResolvedValue({ count: 3 });
+      mockPrisma.notification.update.mockResolvedValue({});
+      vi.mocked(sendEmail).mockResolvedValue({ success: true } as any);
+    });
+
+    it('performs batched reads: 1 type findUnique, 1 user findMany, 1 preference findMany, 1 environment findUnique, 1 createMany', async () => {
+      await processSystemNotificationJob(makeJob() as any);
+
+      expect(mockPrisma.notificationType.findUnique).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.user.findMany).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.notificationPreference.findMany).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.environment.findUnique).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.notification.createMany).toHaveBeenCalledTimes(1);
+
+      // Per-user prisma.notification.create MUST NOT be used in the batched path.
+      expect(mockPrisma.notification.create).not.toHaveBeenCalled();
+    });
+
+    it('queries preferences with userId: { in: [...] } shape', async () => {
+      await processSystemNotificationJob(makeJob() as any);
+
+      const prefCall = mockPrisma.notificationPreference.findMany.mock.calls[0][0];
+      expect(prefCall.where.userId).toEqual({ in: ['user-1', 'user-2', 'user-3'] });
+      expect(prefCall.where.typeId).toBe(mockType.id);
+    });
+
+    it('skips environment.findUnique when environmentId is null', async () => {
+      await processSystemNotificationJob(makeJob({ environmentId: null }) as any);
+
+      expect(mockPrisma.environment.findUnique).not.toHaveBeenCalled();
+      // Type + user + preference + createMany still run.
+      expect(mockPrisma.notificationType.findUnique).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.notification.createMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('creates one notification row per recipient in a single createMany call', async () => {
+      await processSystemNotificationJob(makeJob() as any);
+
+      const call = mockPrisma.notification.createMany.mock.calls[0][0];
+      expect(call.data).toHaveLength(3);
+      expect(call.data.map((d: any) => d.userId).sort()).toEqual(['user-1', 'user-2', 'user-3']);
+      // All rows share the same typeId / title / message.
+      for (const row of call.data) {
+        expect(row.typeId).toBe(mockType.id);
+        expect(row.title).toBe('Deployment Succeeded');
+        expect(row.message).toBe('Deployment of "web" to v1 succeeded.');
+        expect(row.environmentId).toBe('env-1');
+      }
+    });
+
+    it('skips users who disabled in-app for this type', async () => {
+      mockPrisma.notificationPreference.findMany.mockResolvedValue([
+        { userId: 'user-2', typeId: mockType.id, inAppEnabled: false, emailEnabled: false, environmentIds: null },
+      ]);
+
+      await processSystemNotificationJob(makeJob() as any);
+
+      const call = mockPrisma.notification.createMany.mock.calls[0][0];
+      expect(call.data.map((d: any) => d.userId).sort()).toEqual(['user-1', 'user-3']);
+    });
+
+    it('honors per-user environment filter', async () => {
+      mockPrisma.notificationPreference.findMany.mockResolvedValue([
+        {
+          userId: 'user-1',
+          typeId: mockType.id,
+          inAppEnabled: true,
+          emailEnabled: false,
+          // user-1 only receives notifications for env-OTHER, not env-1
+          environmentIds: JSON.stringify(['env-OTHER']),
+        },
+      ]);
+
+      await processSystemNotificationJob(makeJob() as any);
+
+      const call = mockPrisma.notification.createMany.mock.calls[0][0];
+      expect(call.data.map((d: any) => d.userId).sort()).toEqual(['user-2', 'user-3']);
+    });
+
+    it('does not call createMany when no users match preferences', async () => {
+      mockPrisma.user.findMany.mockResolvedValue([]);
+      mockPrisma.notificationPreference.findMany.mockResolvedValue([]);
+
+      await processSystemNotificationJob(makeJob() as any);
+
+      expect(mockPrisma.notification.createMany).not.toHaveBeenCalled();
+      expect(mockPrisma.notification.findMany).not.toHaveBeenCalled();
+      expect(sendEmail).not.toHaveBeenCalled();
+    });
+
+    it('does not call createMany when all users disabled in-app', async () => {
+      mockPrisma.notificationPreference.findMany.mockResolvedValue([
+        { userId: 'user-1', typeId: mockType.id, inAppEnabled: false, emailEnabled: false, environmentIds: null },
+        { userId: 'user-2', typeId: mockType.id, inAppEnabled: false, emailEnabled: false, environmentIds: null },
+        { userId: 'user-3', typeId: mockType.id, inAppEnabled: false, emailEnabled: false, environmentIds: null },
+      ]);
+
+      await processSystemNotificationJob(makeJob() as any);
+
+      expect(mockPrisma.notification.createMany).not.toHaveBeenCalled();
+    });
+
+    it('short-circuits when notification type is unknown', async () => {
+      mockPrisma.notificationType.findUnique.mockResolvedValue(null);
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      await processSystemNotificationJob(makeJob() as any);
+
+      expect(mockPrisma.user.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.notification.createMany).not.toHaveBeenCalled();
+      errSpy.mockRestore();
+    });
+
+    it('short-circuits when system notification type is disabled', async () => {
+      mockPrisma.notificationType.findUnique.mockResolvedValue({
+        ...mockType,
+        category: 'system',
+        enabled: false,
+      });
+
+      await processSystemNotificationJob(makeJob() as any);
+
+      expect(mockPrisma.user.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.notification.createMany).not.toHaveBeenCalled();
+    });
+
+    it('isolates email failures: one bad recipient does not block the others', async () => {
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.mocked(sendEmail).mockImplementation(async (opts: any) => {
+        if (opts.to === 'b@example.com') {
+          throw new Error('SMTP down for this recipient');
+        }
+        return { success: true } as any;
+      });
+
+      await processSystemNotificationJob(makeJob() as any);
+
+      // All three recipients still got an in-app row (the bulk insert ran).
+      expect(mockPrisma.notification.createMany).toHaveBeenCalledTimes(1);
+      expect(mockPrisma.notification.createMany.mock.calls[0][0].data).toHaveLength(3);
+
+      // Email dispatch was attempted for all three.
+      expect(sendEmail).toHaveBeenCalledTimes(3);
+
+      // Only successful recipients got emailSentAt updates (1 and 3, not 2).
+      // Notification ids are generated client-side and embedded in the createMany
+      // payload, so match by userId to recover the ids the production code used.
+      const insertedRows = mockPrisma.notification.createMany.mock.calls[0][0].data as Array<{
+        id: string;
+        userId: string;
+      }>;
+      const idByUserId = new Map(insertedRows.map((row) => [row.userId, row.id]));
+      const expectedUpdatedIds = [idByUserId.get('user-1')!, idByUserId.get('user-3')!].sort();
+      const updateCalls = mockPrisma.notification.update.mock.calls;
+      const updatedIds = updateCalls.map((c: any) => c[0].where.id).sort();
+      expect(updatedIds).toEqual(expectedUpdatedIds);
+      // Also assert update was not called for user-2 (the failing recipient).
+      expect(updatedIds).not.toContain(idByUserId.get('user-2'));
+      // Sanity: every inserted row has a non-empty id (client-side cuid).
+      expect(insertedRows.every((row) => typeof row.id === 'string' && row.id.length > 0)).toBe(true);
+
+      // The failure was logged but did not propagate.
+      expect(errSpy).toHaveBeenCalled();
+      errSpy.mockRestore();
+    });
+
+    it('does not let webhook dispatch failures break the rest of the job', async () => {
+      mockPrisma.notificationType.findUnique.mockResolvedValue({
+        ...mockType,
+        defaultChannels: '["in_app","webhook"]',
+      });
+      vi.mocked(dispatchWebhook).mockRejectedValue(new Error('webhook server down'));
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      await expect(processSystemNotificationJob(makeJob() as any)).resolves.toBeUndefined();
+      // In-app rows still inserted.
+      expect(mockPrisma.notification.createMany).toHaveBeenCalledTimes(1);
+      // Slack still attempted after webhook failure.
+      expect(dispatchSlackNotification).toHaveBeenCalledTimes(1);
+      expect(errSpy).toHaveBeenCalled();
+      errSpy.mockRestore();
+    });
+
+    it('does not let Slack dispatch failures break the job', async () => {
+      vi.mocked(dispatchSlackNotification).mockRejectedValue(new Error('slack 500'));
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      await expect(processSystemNotificationJob(makeJob() as any)).resolves.toBeUndefined();
+      expect(mockPrisma.notification.createMany).toHaveBeenCalledTimes(1);
+      expect(errSpy).toHaveBeenCalled();
+      errSpy.mockRestore();
     });
   });
 });
