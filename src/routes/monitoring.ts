@@ -30,6 +30,12 @@ const runHealthChecksSchema = z.object({
   type: z.enum(['all', 'servers', 'services']).optional().default('all'),
 });
 
+// If the cache's lastHealthCheckAt is older than this (or null), the
+// denormalized status is treated as no signal and reported as UNKNOWN.
+// Prevents stale 'success' from sticking forever once retention purges
+// the underlying log rows or the scheduler stops writing updates.
+const STALE_AFTER_MS = 60 * 60 * 1000; // 1h
+
 
 export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> {
   // Get health check logs with filtering and pagination
@@ -736,119 +742,87 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
       const env = await findOrNotFound(prisma.environment.findUnique({ where: { id: envId } }), 'Environment', reply);
       if (!env) return;
 
-      // Get all servers in this environment
-      const servers = await prisma.server.findMany({
-        where: { environmentId: envId },
-        select: { id: true, name: true },
-      });
-
-      // Get all service deployments in this environment.
-      const services = await prisma.serviceDeployment.findMany({
-        where: { service: { environmentId: envId } },
-        select: {
-          id: true,
-          service: { select: { id: true, name: true } },
-          server: { select: { id: true, name: true } },
-        },
-      });
-
-      // Pull the most-recent log per resource in two flat queries (one per
-      // resourceType) and keep only the first occurrence per resourceId.
-      // The `@@index([resourceId, createdAt desc])` on HealthCheckLog makes
-      // the `ORDER BY createdAt DESC` cheap; the previous per-resource
-      // findFirst loop was the N+1 driving p99 to ~200ms.
-      const serverIds = servers.map((s) => s.id);
-      const serviceIds = services.map((s) => s.id);
-      const [serverLogs, serviceLogs] = await Promise.all([
-        serverIds.length === 0
-          ? Promise.resolve([] as Awaited<ReturnType<typeof prisma.healthCheckLog.findMany>>)
-          : prisma.healthCheckLog.findMany({
-              where: {
-                environmentId: envId,
-                resourceType: 'server',
-                resourceId: { in: serverIds },
-              },
-              orderBy: { createdAt: 'desc' },
-              select: {
-                resourceId: true,
-                createdAt: true,
-                checkType: true,
-                durationMs: true,
-                status: true,
-                errorMessage: true,
-              },
-            }),
-        serviceIds.length === 0
-          ? Promise.resolve([] as Awaited<ReturnType<typeof prisma.healthCheckLog.findMany>>)
-          : prisma.healthCheckLog.findMany({
-              where: {
-                environmentId: envId,
-                resourceType: 'service_deployment',
-                resourceId: { in: serviceIds },
-              },
-              orderBy: { createdAt: 'desc' },
-              select: {
-                resourceId: true,
-                createdAt: true,
-                checkType: true,
-                durationMs: true,
-                status: true,
-                errorMessage: true,
-              },
-            }),
+      // Read current health directly from the denormalized lastHealthCheck* columns
+      // on Server / ServiceDeployment. logHealthCheck keeps them atomically in sync
+      // with HealthCheckLog, so we no longer have to scan (and dedupe) the log
+      // table — p99 stays flat regardless of log retention.
+      const [servers, services] = await Promise.all([
+        prisma.server.findMany({
+          where: { environmentId: envId },
+          select: {
+            id: true,
+            name: true,
+            lastHealthCheckStatus: true,
+            lastHealthCheckAt: true,
+            lastHealthCheckType: true,
+            lastHealthCheckDurationMs: true,
+            lastHealthCheckError: true,
+          },
+        }),
+        prisma.serviceDeployment.findMany({
+          where: { service: { environmentId: envId } },
+          select: {
+            id: true,
+            service: { select: { id: true, name: true } },
+            server: { select: { id: true, name: true } },
+            lastHealthCheckStatus: true,
+            lastHealthCheckAt: true,
+            lastHealthCheckType: true,
+            lastHealthCheckDurationMs: true,
+            lastHealthCheckError: true,
+          },
+        }),
       ]);
 
-      const latestByResource = (rows: typeof serverLogs) => {
-        const map = new Map<string, (typeof rows)[number]>();
-        for (const r of rows) if (!map.has(r.resourceId)) map.set(r.resourceId, r);
-        return map;
+      type CacheRow = {
+        lastHealthCheckStatus: string | null;
+        lastHealthCheckAt: Date | null;
+        lastHealthCheckType: string | null;
+        lastHealthCheckDurationMs: number | null;
+        lastHealthCheckError: string | null;
       };
-      const latestServerLog = latestByResource(serverLogs);
-      const latestServiceLog = latestByResource(serviceLogs);
 
-      const toLastCheck = (
-        log: (typeof serverLogs)[number] | undefined
-      ) =>
-        log
+      // toLastCheck returns the raw timestamp regardless of staleness so the UI
+      // can still show "last seen N minutes ago" even when toStatus decays to
+      // UNKNOWN — users want to see *when* the signal went away, not just that
+      // it did.
+      const toLastCheck = (row: CacheRow) =>
+        row.lastHealthCheckAt
           ? {
-              timestamp: log.createdAt.toISOString(),
-              checkType: log.checkType,
-              durationMs: log.durationMs,
-              errorMessage: log.errorMessage,
+              timestamp: row.lastHealthCheckAt.toISOString(),
+              checkType: row.lastHealthCheckType,
+              durationMs: row.lastHealthCheckDurationMs,
+              errorMessage: row.lastHealthCheckError,
             }
           : null;
-      const toStatus = (log: (typeof serverLogs)[number] | undefined): ServerStatus => {
-        if (!log) return SERVER_STATUS.UNKNOWN;
-        return log.status === HEALTH_CHECK_STATUS.SUCCESS
+      const toStatus = (row: CacheRow): ServerStatus => {
+        if (!row.lastHealthCheckStatus || !row.lastHealthCheckAt) return SERVER_STATUS.UNKNOWN;
+        // Decay to UNKNOWN if the cached status is older than STALE_AFTER_MS —
+        // retention purges or a stopped scheduler would otherwise leave a stale
+        // 'success' / 'failure' on the dashboard indefinitely.
+        if (Date.now() - row.lastHealthCheckAt.getTime() > STALE_AFTER_MS) return SERVER_STATUS.UNKNOWN;
+        return row.lastHealthCheckStatus === HEALTH_CHECK_STATUS.SUCCESS
           ? SERVER_STATUS.HEALTHY
           : SERVER_STATUS.UNHEALTHY;
       };
 
-      const serverHealthStatus = servers.map((server) => {
-        const log = latestServerLog.get(server.id);
-        return {
-          id: server.id,
-          name: server.name,
-          type: 'server' as const,
-          status: toStatus(log),
-          lastCheck: toLastCheck(log),
-        };
-      });
+      const serverHealthStatus = servers.map((server) => ({
+        id: server.id,
+        name: server.name,
+        type: 'server' as const,
+        status: toStatus(server),
+        lastCheck: toLastCheck(server),
+      }));
 
-      // services rows are ServiceDeployment shape: { id, service, server }.
-      // Latest-log lookup is keyed by deployment id (the resourceId stored on
-      // health_check audit rows).
-      const serviceHealthStatus = services.map((d) => {
-        const log = latestServiceLog.get(d.id);
-        return {
-          id: d.id,
-          name: d.service.name,
-          type: 'service' as const,
-          status: toStatus(log),
-          serverName: d.server.name,
-          lastCheck: toLastCheck(log),
-        };
-      });
+      // services rows are ServiceDeployment shape: { id, service, server, lastHealthCheck* }.
+      const serviceHealthStatus = services.map((d) => ({
+        id: d.id,
+        name: d.service.name,
+        type: 'service' as const,
+        status: toStatus(d),
+        serverName: d.server.name,
+        lastCheck: toLastCheck(d),
+      }));
 
       // Get all monitored databases in this environment
       const databases = await prisma.database.findMany({

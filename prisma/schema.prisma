@@ -209,6 +209,16 @@ model Server {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
+  // Denormalized last health check cache (best-effort; full audit lives in HealthCheckLog).
+  // Updated atomically by logHealthCheck so GET /:envId/health-status doesn't have to scan logs.
+  // Named lastHealthCheck* to avoid collision with the pre-existing `lastCheckedAt`
+  // (used by metrics collection) — visually near-identical, easy to confuse.
+  lastHealthCheckStatus     String? // "success" | "failure" | "timeout"
+  lastHealthCheckAt         DateTime?
+  lastHealthCheckType       String? // "ssh" | "url" | "container_health" | "discovery"
+  lastHealthCheckDurationMs Int?
+  lastHealthCheckError      String?
+
   // Metrics collection settings
   metricsMode String  @default("disabled") // "ssh" | "agent" | "disabled"
   agentToken  String? // Token for agent authentication
@@ -334,6 +344,16 @@ model ServiceDeployment {
   lastCheckedAt    DateTime?
   lastDiscoveredAt DateTime? // When the container was last seen during discovery
   lastDeployedAt   DateTime? // When this deployment was last successfully deployed
+
+  // Denormalized last health check cache (best-effort; full audit lives in HealthCheckLog).
+  // Updated atomically by logHealthCheck ONLY for resourceType='service_deployment' — container
+  // checks log to HealthCheckLog but don't touch this cache (would clobber URL checks).
+  // Named lastHealthCheck* to avoid collision with the pre-existing `lastCheckedAt`.
+  lastHealthCheckStatus     String? // "success" | "failure" | "timeout"
+  lastHealthCheckAt         DateTime?
+  lastHealthCheckType       String? // "ssh" | "url" | "container_health" | "discovery"
+  lastHealthCheckDurationMs Int?
+  lastHealthCheckError      String?
 
   // Link to the currently deployed image digest (SHA) - per-deployment
   imageDigestId String?

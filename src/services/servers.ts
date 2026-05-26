@@ -116,10 +116,14 @@ export async function getServer(serverId: string): Promise<ServerWithServices | 
   });
 }
 
+// List endpoint omits lastHealthCheckError (potentially multi-KB error blob);
+// detail views still load the full Server when needed.
+export type ServerListItem = Omit<Server, 'lastHealthCheckError'>;
+
 export async function listServers(
   environmentId: string,
   options?: { limit?: number; offset?: number }
-): Promise<{ servers: Server[]; total: number }> {
+): Promise<{ servers: ServerListItem[]; total: number }> {
   const limit = options?.limit ?? 25;
   const offset = options?.offset ?? 0;
   const where = { environmentId };
@@ -128,6 +132,10 @@ export async function listServers(
     prisma.server.findMany({
       where,
       orderBy: { name: 'asc' },
+      // omit lastHealthCheckError: TEXT column may carry multi-KB error
+      // messages and this is a paginated list endpoint that gets polled.
+      // Detail views still load it explicitly when needed.
+      omit: { lastHealthCheckError: true },
       take: limit,
       skip: offset,
     }),
