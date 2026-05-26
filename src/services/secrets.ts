@@ -112,8 +112,25 @@ export async function listSecrets(environmentId: string): Promise<SecretOutput[]
 }
 
 export async function deleteSecret(secretId: string): Promise<void> {
-  await prisma.secret.delete({
-    where: { id: secretId },
+  // Clear SecretUsage rows keyed by the (environmentId, key) pair before
+  // deleting the Secret. Usage rows reference the textual key (not a Secret
+  // FK), so a stale row would otherwise resurface if a new Secret with the
+  // same key were created later.
+  await prisma.$transaction(async (tx) => {
+    const secret = await tx.secret.findUnique({
+      where: { id: secretId },
+      select: { environmentId: true, key: true },
+    });
+    if (!secret) {
+      // Mirror Prisma's behaviour — throw the same not-found error so callers'
+      // existing `catch (404)` paths stay correct.
+      await tx.secret.delete({ where: { id: secretId } });
+      return;
+    }
+    await tx.secretUsage.deleteMany({
+      where: { environmentId: secret.environmentId, secretKey: secret.key },
+    });
+    await tx.secret.delete({ where: { id: secretId } });
   });
 }
 

@@ -449,6 +449,34 @@ model Var {
   @@unique([environmentId, key])
 }
 
+// Tracks which config files reference each Secret key. Maintained on every
+// ConfigFile content write so `GET /api/environments/:envId/secrets` can answer
+// "what's using this secret?" with a join instead of a per-content regex scan.
+// Rows reference the key by string (not FK to Secret.id) so a config file can
+// reference a secret that doesn't exist yet (the UI shows it as a missing ref).
+model SecretUsage {
+  id            String     @id @default(cuid())
+  environmentId String
+  secretKey     String
+  configFileId  String
+  configFile    ConfigFile @relation(fields: [configFileId], references: [id], onDelete: Cascade)
+
+  @@unique([environmentId, secretKey, configFileId])
+  @@index([environmentId, secretKey])
+}
+
+// Mirror of `SecretUsage` for Vars — same shape, different column name.
+model VarUsage {
+  id            String     @id @default(cuid())
+  environmentId String
+  varKey        String
+  configFileId  String
+  configFile    ConfigFile @relation(fields: [configFileId], references: [id], onDelete: Cascade)
+
+  @@unique([environmentId, varKey, configFileId])
+  @@index([environmentId, varKey])
+}
+
 // Config files (compose files, Caddyfile, certificates, etc.)
 model ConfigFile {
   id          String   @id @default(cuid())
@@ -468,6 +496,8 @@ model ConfigFile {
   environment   Environment   @relation(fields: [environmentId], references: [id], onDelete: Cascade)
   services      ServiceFile[]
   history       FileHistory[]
+  secretUsages  SecretUsage[]
+  varUsages     VarUsage[]
 
   @@unique([environmentId, name])
 }

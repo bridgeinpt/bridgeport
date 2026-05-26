@@ -378,13 +378,13 @@ Content-Type: application/json
 
 The Secrets and Vars tabs both show where each key is referenced, so you can understand the impact of changing or deleting an entry before you do it.
 
-For every secret and var, BRIDGEPORT scans all config files in the environment and reports:
+For every secret and var, BRIDGEPORT reports:
 
-- **Config files** that reference the key (by detecting `${KEY}`, `$KEY`, or `{{KEY}}` patterns; vars also match leading `KEY=` lines).
+- **Config files** that reference the key (by detecting `${KEY}`, `$KEY`, `{{KEY}}`, or a leading `KEY=` line).
 - **Services** that those config files are attached to.
 - **Usage count** -- the number of unique services using the key.
 
-This is computed at list time by scanning config file content, not stored separately.
+Usage is maintained by the `SecretUsage` / `VarUsage` join tables: BRIDGEPORT extracts the referenced keys whenever a config file's content changes (create, update, restore-from-history, scan-apply, asset upload) and updates the matching rows. The list endpoints answer "what's using this key?" with a join, not a per-request content scan -- so the cost scales with the number of usages, not the size of every config file in the environment.
 
 ```http
 GET /api/environments/:envId/secrets
