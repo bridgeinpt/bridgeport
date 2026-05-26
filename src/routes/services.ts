@@ -481,14 +481,31 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
 
       try {
         await client.connect();
-        await docker.restartContainer(service.containerName);
+
+        // When a service is deployed via compose, plain `docker restart` only
+        // bounces the existing container — it does not re-read the compose
+        // file or attached config files. Run `compose down` + `compose up
+        // --force-recreate` so a NEW container is created and config files
+        // are re-read. We deliberately do NOT regenerate compose artifacts
+        // here: restart means "down + up with the current on-disk compose".
+        // Use the deploy.ts pattern (composeUp with forceRecreate=true).
+        if (service.composePath) {
+          await docker.composeDown(service.composePath, service.containerName);
+          await docker.composeUp(service.composePath, service.containerName, true);
+        } else {
+          await docker.restartContainer(service.containerName);
+        }
 
         await logAudit({
           action: 'restart',
           resourceType: 'service',
           resourceId: id,
           resourceName: service.name,
-          details: { containerName: service.containerName, serverName: service.server.name },
+          details: {
+            containerName: service.containerName,
+            serverName: service.server.name,
+            mode: service.composePath ? 'compose' : 'docker',
+          },
           ...actorFrom(request),
           environmentId: service.server.environmentId,
         });

@@ -285,6 +285,40 @@ export const resetModuleSettings = (envId: string, module: SettingsModule) =>
     `/environments/${envId}/settings/${module}/reset`
   );
 
+// Per-environment notification settings (Slack channel override).
+export interface EnvNotificationChannel {
+  id: string;
+  name: string;
+  slackChannelName: string | null;
+  isDefault?: boolean;
+}
+
+export interface EnvNotificationSettings {
+  settings: {
+    slackChannelId: string | null;
+    updatedAt: string | null;
+  };
+  channels: EnvNotificationChannel[];
+  defaultChannel: EnvNotificationChannel | null;
+}
+
+export const getEnvNotificationSettings = (envId: string) =>
+  api.get<EnvNotificationSettings>(`/environments/${envId}/settings/notifications`);
+
+export const updateEnvNotificationSettings = (
+  envId: string,
+  data: { slackChannelId: string | null }
+) =>
+  api.patch<{ settings: { slackChannelId: string | null; updatedAt: string | null } }>(
+    `/environments/${envId}/settings/notifications`,
+    data
+  );
+
+export const testEnvNotificationChannel = (envId: string) =>
+  api.post<{ success: boolean; channelId?: string; error?: string }>(
+    `/environments/${envId}/settings/notifications/test`
+  );
+
 export const getSettingsRegistry = (envId: string) =>
   api.get<{ registry: Record<SettingsModule, SettingDefinition[]> }>(
     `/environments/${envId}/settings/registry`
@@ -882,6 +916,7 @@ export interface ConfigFile {
   mimeType: string | null;
   fileSize: number | null;
   autoResync: boolean;
+  language: string;
   createdAt: string;
   updatedAt: string;
   environmentId: string;
@@ -900,6 +935,7 @@ export interface ConfigFileInput {
   mimeType?: string;
   fileSize?: number;
   autoResync?: boolean;
+  language?: string;
 }
 
 export interface ServiceFile {

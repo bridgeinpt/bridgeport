@@ -214,7 +214,7 @@ POST /api/services/:id/restart
 Authorization: Bearer <token>
 ```
 
-Connects to the server and runs `docker restart <container-name>`. The action is logged in the audit trail.
+For compose-managed services (those with a `composePath`), restart runs `docker compose ... rm -f -s <service>` followed by `docker compose ... up -d --force-recreate <service>`. This creates a **new** container so updated compose or config files are picked up. For services without a `composePath`, restart falls back to `docker restart <container-name>`. Restart does not regenerate compose artifacts — it always uses the current on-disk compose file. The action is logged in the audit trail.
 
 **View container logs:**
 ```http

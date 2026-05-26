@@ -134,6 +134,101 @@ describe('config-files routes', () => {
     });
   });
 
+  // ==================== language field round-trip ====================
+
+  describe('language field', () => {
+    it('defaults language from filename when none is supplied on create', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/environments/${envId}/config-files`,
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: {
+          name: 'caddy-config-default-lang',
+          filename: 'caddy.yml',
+          content: 'apps: {}',
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json().configFile.language).toBe('yaml');
+    });
+
+    it('defaults language to dockerfile for Dockerfile name', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/environments/${envId}/config-files`,
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: {
+          name: 'dockerfile-default-lang',
+          filename: 'Dockerfile',
+          content: 'FROM alpine',
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json().configFile.language).toBe('dockerfile');
+    });
+
+    it('falls back to plaintext for unknown extension', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/environments/${envId}/config-files`,
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: {
+          name: 'unknown-default-lang',
+          filename: 'notes.xyz',
+          content: 'just text',
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json().configFile.language).toBe('plaintext');
+    });
+
+    it('keeps an explicitly provided language on create', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/environments/${envId}/config-files`,
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: {
+          name: 'explicit-lang',
+          // filename would normally map to yaml, but the explicit language wins
+          filename: 'mystery.yml',
+          content: 'hello: world',
+          language: 'json',
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json().configFile.language).toBe('json');
+    });
+
+    it('updates language via PATCH', async () => {
+      const created = await app.inject({
+        method: 'POST',
+        url: `/api/environments/${envId}/config-files`,
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: {
+          name: 'patch-lang',
+          filename: 'patch.yml',
+          content: 'foo: bar',
+        },
+      });
+      const fileId = created.json().configFile.id;
+      expect(created.json().configFile.language).toBe('yaml');
+
+      const patched = await app.inject({
+        method: 'PATCH',
+        url: `/api/config-files/${fileId}`,
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { language: 'toml' },
+      });
+
+      expect(patched.statusCode).toBe(200);
+      expect(patched.json().configFile.language).toBe('toml');
+    });
+  });
+
   describe('DELETE /api/config-files/:id', () => {
     it('should delete config file', async () => {
       const file = await app.prisma.configFile.create({

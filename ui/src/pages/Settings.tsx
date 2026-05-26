@@ -7,10 +7,15 @@ import {
   resetModuleSettings,
   getSshStatus,
   listServers,
+  getEnvNotificationSettings,
+  updateEnvNotificationSettings,
+  testEnvNotificationChannel,
   type SettingDefinition,
   type SettingsModule,
   type Server,
   type SshStatus,
+  type EnvNotificationChannel,
+  type EnvNotificationSettings,
 } from '../lib/api';
 import { useToast } from '../components/Toast';
 import { SshKeyModal } from '../components/SshKeyModal';
@@ -24,6 +29,7 @@ const TABS: { key: string; label: string; module?: SettingsModule }[] = [
   { key: 'orchestration', label: 'Orchestration' },
   { key: 'data', label: 'Data', module: 'data' },
   { key: 'configuration', label: 'Configuration', module: 'configuration' },
+  { key: 'notifications', label: 'Notifications' },
 ];
 
 interface TabData {
@@ -221,6 +227,11 @@ export default function Settings() {
         <EmptyState
           icon={SettingsIcon}
           message="No settings configured for this module yet."
+        />
+      ) : activeTab === 'notifications' ? (
+        <NotificationsSection
+          environmentId={selectedEnvironment.id}
+          isUserAdmin={isAdmin(user)}
         />
       ) : loading ? (
         <div className="animate-pulse">
@@ -509,6 +520,181 @@ function EnvironmentInfo({ environment }: { environment: { id: string; name: str
           <dd className="text-slate-400 font-mono text-sm">{environment.id}</dd>
         </div>
       </dl>
+    </div>
+  );
+}
+
+function channelLabel(channel: EnvNotificationChannel | null | undefined): string {
+  if (!channel) return '';
+  if (channel.slackChannelName) {
+    return `${channel.name} (${channel.slackChannelName})`;
+  }
+  return channel.name;
+}
+
+function NotificationsSection({
+  environmentId,
+  isUserAdmin,
+}: {
+  environmentId: string;
+  isUserAdmin: boolean;
+}) {
+  const toast = useToast();
+  const [data, setData] = useState<EnvNotificationSettings | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  // Selection: '' = "Inherit default" (clears the override). A channel id
+  // sets the override to that channel.
+  const [selected, setSelected] = useState<string>('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await getEnvNotificationSettings(environmentId);
+      setData(res);
+      setSelected(res.settings.slackChannelId ?? '');
+    } catch (err) {
+      toast.error('Failed to load notification settings');
+    } finally {
+      setLoading(false);
+    }
+  }, [environmentId, toast]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  if (loading || !data) {
+    return (
+      <div className="animate-pulse space-y-4">
+        <div className="h-16 bg-slate-800 rounded-xl"></div>
+        <div className="h-32 bg-slate-800 rounded-xl"></div>
+      </div>
+    );
+  }
+
+  const currentChannelId = data.settings.slackChannelId;
+  const hasChange = (selected || null) !== currentChannelId;
+  const hasOverride = !!currentChannelId;
+  const noChannelsConfigured = data.channels.length === 0;
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const result = await updateEnvNotificationSettings(environmentId, {
+        slackChannelId: selected ? selected : null,
+      });
+      setData({ ...data, settings: result.settings });
+      setSelected(result.settings.slackChannelId ?? '');
+      toast.success('Notification settings saved');
+    } catch (err) {
+      toast.error('Failed to save notification settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    try {
+      const result = await testEnvNotificationChannel(environmentId);
+      if (result.success) {
+        toast.success('Test message sent to Slack');
+      } else {
+        toast.error(result.error || 'Test failed');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Test failed';
+      toast.error(message);
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="panel">
+        <h3 className="text-sm font-medium text-slate-300 uppercase tracking-wider mb-4">
+          Slack Channel
+        </h3>
+
+        {noChannelsConfigured ? (
+          <div className="p-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-sm text-yellow-200">
+            No Slack channels are configured yet. Add channels under{' '}
+            <span className="font-medium">Admin → Slack</span> to override the default for this
+            environment.
+          </div>
+        ) : (
+          <>
+            <p className="text-sm text-slate-400 mb-4">
+              Pick a Slack channel for notifications from this environment that don't match an
+              explicit routing rule. Leave on <em>Inherit default</em> to use the global default
+              channel.
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm text-slate-300 mb-1" htmlFor="slack-channel">
+                  Channel
+                </label>
+                <select
+                  id="slack-channel"
+                  value={selected}
+                  onChange={(e) => setSelected(e.target.value)}
+                  disabled={!isUserAdmin}
+                  className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-white text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
+                >
+                  <option value="">
+                    Inherit default{data.defaultChannel ? `: ${channelLabel(data.defaultChannel)}` : ''}
+                  </option>
+                  {data.channels.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {channelLabel(c)}
+                      {c.isDefault ? ' — default' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="text-xs">
+                {hasOverride ? (
+                  <span className="inline-block px-2 py-0.5 bg-brand-500/20 text-brand-300 rounded">
+                    Override active
+                  </span>
+                ) : (
+                  <span className="inline-block px-2 py-0.5 bg-slate-700 text-slate-300 rounded">
+                    Using global default
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {isUserAdmin ? (
+              <div className="flex justify-between items-center mt-6 pt-4 border-t border-slate-700">
+                <button
+                  onClick={handleTest}
+                  disabled={testing || saving}
+                  className="btn btn-ghost text-sm"
+                >
+                  {testing ? 'Sending…' : 'Send Test Message'}
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={!hasChange || saving}
+                  className="btn btn-primary text-sm"
+                >
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500 pt-4">
+                Only administrators can modify notification settings.
+              </p>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

@@ -17,6 +17,9 @@ vi.mock('../lib/db.js', () => ({
       deleteMany: vi.fn(),
       delete: vi.fn(),
     },
+    notificationSettings: {
+      findUnique: vi.fn(),
+    },
   },
 }));
 
@@ -308,6 +311,7 @@ describe('slack-notifications', () => {
 
     it('should return empty array when no channels match', async () => {
       mockPrisma.slackTypeRouting.findMany.mockResolvedValue([]);
+      mockPrisma.notificationSettings.findUnique.mockResolvedValue(null);
       mockPrisma.slackChannel.findFirst.mockResolvedValue(null);
 
       const results = await dispatchSlackNotification(
@@ -321,8 +325,9 @@ describe('slack-notifications', () => {
       expect(results).toEqual([]);
     });
 
-    it('should use default channel when no routing matches', async () => {
+    it('should use default channel when no routing matches and no env override', async () => {
       mockPrisma.slackTypeRouting.findMany.mockResolvedValue([]);
+      mockPrisma.notificationSettings.findUnique.mockResolvedValue(null);
       mockPrisma.slackChannel.findFirst.mockResolvedValue({
         id: 'ch-default',
         name: 'general',
@@ -359,6 +364,7 @@ describe('slack-notifications', () => {
           environmentIds: null,
         },
       ] as any);
+      mockPrisma.notificationSettings.findUnique.mockResolvedValue(null);
       mockPrisma.slackChannel.findFirst.mockResolvedValue(null);
 
       const results = await dispatchSlackNotification(
@@ -385,6 +391,7 @@ describe('slack-notifications', () => {
           environmentIds: JSON.stringify(['env-prod']),
         },
       ] as any);
+      mockPrisma.notificationSettings.findUnique.mockResolvedValue(null);
       mockPrisma.slackChannel.findFirst.mockResolvedValue(null);
 
       // env-1 is not in the allowed list
@@ -397,6 +404,163 @@ describe('slack-notifications', () => {
       );
 
       expect(results).toEqual([]);
+    });
+
+    describe('env-channel override (NotificationSettings.slackChannelId)', () => {
+      it('IGNORES env override when an explicit SlackTypeRouting matches', async () => {
+        // Explicit routing wins — env override must NOT be consulted.
+        mockPrisma.slackTypeRouting.findMany.mockResolvedValue([
+          {
+            channel: {
+              id: 'ch-explicit',
+              name: 'explicit-channel',
+              webhookUrl: 'enc-url',
+              webhookUrlNonce: 'nonce',
+              enabled: true,
+            },
+            environmentIds: null,
+          },
+        ] as any);
+        mockFetch.mockResolvedValue({ ok: true });
+
+        const results = await dispatchSlackNotification(
+          mockNotificationType as any,
+          'Title',
+          'Body',
+          {},
+          'env-1'
+        );
+
+        expect(results).toHaveLength(1);
+        expect(results[0].channelName).toBe('explicit-channel');
+        // The env override should not even be looked up.
+        expect(mockPrisma.notificationSettings.findUnique).not.toHaveBeenCalled();
+        // And the global default should not be looked up either.
+        expect(mockPrisma.slackChannel.findFirst).not.toHaveBeenCalled();
+      });
+
+      it('routes to the env override channel when no routing matches and override is enabled', async () => {
+        mockPrisma.slackTypeRouting.findMany.mockResolvedValue([]);
+        mockPrisma.notificationSettings.findUnique.mockResolvedValue({
+          id: 'ns-1',
+          environmentId: 'env-1',
+          slackChannelId: 'ch-override',
+          slackChannel: {
+            id: 'ch-override',
+            name: 'env-override-channel',
+            webhookUrl: 'enc-url',
+            webhookUrlNonce: 'nonce',
+            isDefault: false,
+            enabled: true,
+          },
+        } as any);
+        mockFetch.mockResolvedValue({ ok: true });
+
+        const results = await dispatchSlackNotification(
+          mockNotificationType as any,
+          'Title',
+          'Body',
+          {},
+          'env-1'
+        );
+
+        expect(results).toHaveLength(1);
+        expect(results[0].channelName).toBe('env-override-channel');
+        // Global default must NOT be queried when override applies.
+        expect(mockPrisma.slackChannel.findFirst).not.toHaveBeenCalled();
+        // The notification-settings lookup was scoped by the environment.
+        expect(mockPrisma.notificationSettings.findUnique).toHaveBeenCalledWith(
+          expect.objectContaining({ where: { environmentId: 'env-1' } })
+        );
+      });
+
+      it('falls back to the global default when the override channel is DISABLED', async () => {
+        mockPrisma.slackTypeRouting.findMany.mockResolvedValue([]);
+        mockPrisma.notificationSettings.findUnique.mockResolvedValue({
+          id: 'ns-1',
+          environmentId: 'env-1',
+          slackChannelId: 'ch-override',
+          slackChannel: {
+            id: 'ch-override',
+            name: 'env-override-channel',
+            webhookUrl: 'enc-url',
+            webhookUrlNonce: 'nonce',
+            isDefault: false,
+            enabled: false, // disabled — must NOT be used
+          },
+        } as any);
+        mockPrisma.slackChannel.findFirst.mockResolvedValue({
+          id: 'ch-default',
+          name: 'global-default',
+          webhookUrl: 'enc-url',
+          webhookUrlNonce: 'nonce',
+          isDefault: true,
+          enabled: true,
+        } as any);
+        mockFetch.mockResolvedValue({ ok: true });
+
+        const results = await dispatchSlackNotification(
+          mockNotificationType as any,
+          'Title',
+          'Body',
+          {},
+          'env-1'
+        );
+
+        expect(results).toHaveLength(1);
+        expect(results[0].channelName).toBe('global-default');
+      });
+
+      it('falls back to the global default when no NotificationSettings row exists', async () => {
+        mockPrisma.slackTypeRouting.findMany.mockResolvedValue([]);
+        mockPrisma.notificationSettings.findUnique.mockResolvedValue(null);
+        mockPrisma.slackChannel.findFirst.mockResolvedValue({
+          id: 'ch-default',
+          name: 'global-default',
+          webhookUrl: 'enc-url',
+          webhookUrlNonce: 'nonce',
+          isDefault: true,
+          enabled: true,
+        } as any);
+        mockFetch.mockResolvedValue({ ok: true });
+
+        const results = await dispatchSlackNotification(
+          mockNotificationType as any,
+          'Title',
+          'Body',
+          {},
+          'env-1'
+        );
+
+        expect(results).toHaveLength(1);
+        expect(results[0].channelName).toBe('global-default');
+      });
+
+      it('bypasses env override when environmentId is null (system-wide event)', async () => {
+        mockPrisma.slackTypeRouting.findMany.mockResolvedValue([]);
+        mockPrisma.slackChannel.findFirst.mockResolvedValue({
+          id: 'ch-default',
+          name: 'global-default',
+          webhookUrl: 'enc-url',
+          webhookUrlNonce: 'nonce',
+          isDefault: true,
+          enabled: true,
+        } as any);
+        mockFetch.mockResolvedValue({ ok: true });
+
+        const results = await dispatchSlackNotification(
+          mockNotificationType as any,
+          'System Event',
+          'No environment context',
+          {},
+          null
+        );
+
+        expect(results).toHaveLength(1);
+        expect(results[0].channelName).toBe('global-default');
+        // Env-scoped lookup must be skipped when there's no environment.
+        expect(mockPrisma.notificationSettings.findUnique).not.toHaveBeenCalled();
+      });
     });
   });
 
