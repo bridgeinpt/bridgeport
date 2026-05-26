@@ -74,18 +74,18 @@ describe('health-checks', () => {
       expect(txServerUpdateMany).toHaveBeenCalledWith({
         where: { id: 'srv-1' },
         data: expect.objectContaining({
-          lastCheckStatus: 'success',
-          lastCheckType: 'ssh',
-          lastCheckDurationMs: 150,
-          lastCheckError: null,
+          lastHealthCheckStatus: 'success',
+          lastHealthCheckType: 'ssh',
+          lastHealthCheckDurationMs: 150,
+          lastHealthCheckError: null,
         }),
       });
-      // lastCheckAt must be a Date instance (mapped from createdAt) — the route
-      // serializes it via toISOString() so it cannot be a string or number.
+      // lastHealthCheckAt must be a Date instance (mapped from createdAt) — the
+      // route serializes it via toISOString() so it cannot be a string or number.
       const serverUpdateArg = txServerUpdateMany.mock.calls[0][0] as {
-        data: { lastCheckAt: unknown };
+        data: { lastHealthCheckAt: unknown };
       };
-      expect(serverUpdateArg.data.lastCheckAt).toBeInstanceOf(Date);
+      expect(serverUpdateArg.data.lastHealthCheckAt).toBeInstanceOf(Date);
       expect(txServiceUpdateMany).not.toHaveBeenCalled();
     });
 
@@ -159,9 +159,9 @@ describe('health-checks', () => {
       expect(txServiceUpdateMany).toHaveBeenCalledWith({
         where: { id: 'svc-1' },
         data: expect.objectContaining({
-          lastCheckStatus: 'failure',
-          lastCheckType: 'url',
-          lastCheckError: 'Service unavailable',
+          lastHealthCheckStatus: 'failure',
+          lastHealthCheckType: 'url',
+          lastHealthCheckError: 'Service unavailable',
         }),
       });
       expect(txServerUpdateMany).not.toHaveBeenCalled();
@@ -190,15 +190,18 @@ describe('health-checks', () => {
       expect(txServerUpdateMany).toHaveBeenCalledWith({
         where: { id: 'srv-1' },
         data: expect.objectContaining({
-          lastCheckStatus: 'timeout',
-          lastCheckDurationMs: 60000,
+          lastHealthCheckStatus: 'timeout',
+          lastHealthCheckDurationMs: 60000,
         }),
       });
     });
 
-    it('routes container resourceType to Service cache (containers map to services)', async () => {
+    it('logs container resourceType but does NOT update the Service cache', async () => {
+      // Container runtime checks live in HealthCheckLog for audit, but they must
+      // not touch Service.lastHealthCheck* — that cache reflects the URL/SSH
+      // probe surfaced on the dashboard, and a container_health failure would
+      // otherwise clobber a passing URL probe. See Finding 1 in PR #147.
       txHealthCheckLogCreate.mockResolvedValue({});
-      txServiceUpdateMany.mockResolvedValue({ count: 1 });
 
       await logHealthCheck({
         environmentId: 'env-1',
@@ -209,13 +212,15 @@ describe('health-checks', () => {
         status: 'success',
       });
 
-      expect(txServiceUpdateMany).toHaveBeenCalledWith({
-        where: { id: 'svc-1' },
+      expect(txHealthCheckLogCreate).toHaveBeenCalledWith({
         data: expect.objectContaining({
-          lastCheckStatus: 'success',
-          lastCheckType: 'container_health',
+          resourceType: 'container',
+          resourceId: 'svc-1',
+          checkType: 'container_health',
+          status: 'success',
         }),
       });
+      expect(txServiceUpdateMany).not.toHaveBeenCalled();
       expect(txServerUpdateMany).not.toHaveBeenCalled();
     });
   });

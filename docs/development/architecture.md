@@ -474,8 +474,8 @@ SENTRY_ENABLED=true                     # Kill switch
 User               - Authentication with role (admin/operator/viewer), lastActiveAt, apiTokens
 ApiToken           - Per-user API tokens with hash, expiry, last used tracking
 Environment        - Logical grouping with SSH key, per-module settings (General/Monitoring/Operations/Data/Configuration)
-Server             - Physical/virtual machine with metricsMode, dockerMode (ssh/socket), agent status tracking, denormalized lastCheck* cache
-Service            - Docker container linked to ContainerImage, with dependencies, health config, TCP/cert checks, denormalized lastCheck* cache
+Server             - Physical/virtual machine with metricsMode, dockerMode (ssh/socket), agent status tracking, denormalized lastHealthCheck* cache
+Service            - Docker container linked to ContainerImage, with dependencies, health config, TCP/cert checks, denormalized lastHealthCheck* cache
 Secret             - Encrypted key-value with neverReveal flag
 ConfigFile         - Synced configuration files (text + binary support with isBinary, mimeType)
 FileHistory        - Edit history for config files
@@ -499,7 +499,7 @@ ServiceDatabase    - Links services to databases with connection env var
 # Monitoring & Metrics
 ServerMetrics      - Time-series server metrics (CPU, memory, disk, load, TCP, FDs)
 ServiceMetrics     - Time-series container metrics (CPU, memory, network, block I/O)
-HealthCheckLog     - Append-only health check audit trail (duration, status, response details). The "current" status for dashboards lives in denormalized lastCheck* columns on Server / Service, written atomically by logHealthCheck() in the same transaction as the log row — so GET /:envId/health-status reads the entity tables and never scans the log.
+HealthCheckLog     - Append-only health check audit trail (duration, status, response details). The "current" status for dashboards lives in denormalized lastHealthCheck* columns on Server / Service, written atomically by logHealthCheck() in the same transaction as the log row — so GET /:envId/health-status reads the entity tables and never scans the log. Note: container-resourceType checks log here for audit but do NOT update the cache (would clobber URL probe results). The cache also decays to UNKNOWN after 1h of no updates.
 AgentContainerSnapshot - Agent-reported container discovery data (latest per server)
 AgentProcessSnapshot   - Agent-reported top processes (latest per server)
 AgentEvent         - Agent lifecycle events (deploy, status change, token regen)

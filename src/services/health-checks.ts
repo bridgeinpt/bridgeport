@@ -3,14 +3,18 @@ import { prisma } from '../lib/db.js';
 /**
  * Log a health check result.
  *
- * Writes the full audit row to HealthCheckLog AND updates the denormalized
- * lastCheck* cache columns on the target Server or Service in a single
- * transaction, so GET /:envId/health-status can read current status directly
- * from the entity table instead of scanning the log.
+ * Writes the full audit row to HealthCheckLog AND (for 'server' and 'service'
+ * resourceTypes only) updates the denormalized lastHealthCheck* cache columns
+ * on the target entity in a single transaction, so GET /:envId/health-status
+ * can read current status directly from the entity table instead of scanning
+ * the log.
  *
  * resourceType maps:
- *   - 'server'              -> Server.lastCheck*
- *   - 'service' | 'container' -> Service.lastCheck* (container checks target services)
+ *   - 'server'    -> Server.lastHealthCheck*
+ *   - 'service'   -> Service.lastHealthCheck*
+ *   - 'container' -> log only (NO cache update). Container runtime checks
+ *                    would otherwise clobber the URL probe result the
+ *                    dashboard surfaces — see Finding 1 in PR #147.
  */
 export async function logHealthCheck(params: {
   environmentId: string;
@@ -23,29 +27,36 @@ export async function logHealthCheck(params: {
   httpStatus?: number;
   errorMessage?: string;
 }): Promise<void> {
-  const cacheUpdate = {
-    lastCheckStatus: params.status,
-    lastCheckAt: new Date(),
-    lastCheckType: params.checkType,
-    lastCheckDurationMs: params.durationMs ?? null,
-    lastCheckError: params.errorMessage ?? null,
-  };
-
   await prisma.$transaction(async (tx) => {
     await tx.healthCheckLog.create({ data: params });
+
+    // Build the cache row INSIDE the transaction so `lastHealthCheckAt` reflects
+    // commit-order intent. Capturing `new Date()` before $transaction opens lets
+    // an older capture race ahead of a newer one under overlapping ticks and
+    // overwrite the newer cache value with a stale timestamp.
+    const cacheUpdate = {
+      lastHealthCheckStatus: params.status,
+      lastHealthCheckAt: new Date(),
+      lastHealthCheckType: params.checkType,
+      lastHealthCheckDurationMs: params.durationMs ?? null,
+      lastHealthCheckError: params.errorMessage ?? null,
+    };
 
     if (params.resourceType === 'server') {
       await tx.server.updateMany({
         where: { id: params.resourceId },
         data: cacheUpdate,
       });
-    } else {
-      // Both 'service' and 'container' resourceTypes write to the Service entity.
+    } else if (params.resourceType === 'service') {
       await tx.service.updateMany({
         where: { id: params.resourceId },
         data: cacheUpdate,
       });
     }
+    // 'container' (and any other resourceType) logs to HealthCheckLog but
+    // does NOT touch the denormalized cache — the dashboard reflects the
+    // URL/SSH health check, not the container runtime state, matching the
+    // pre-PR behavior.
   });
 }
 

@@ -210,11 +210,13 @@ model Server {
 
   // Denormalized last health check cache (best-effort; full audit lives in HealthCheckLog).
   // Updated atomically by logHealthCheck so GET /:envId/health-status doesn't have to scan logs.
-  lastCheckStatus     String? // "success" | "failure" | "timeout"
-  lastCheckAt         DateTime?
-  lastCheckType       String? // "ssh" | "url" | "container_health" | "discovery"
-  lastCheckDurationMs Int?
-  lastCheckError      String?
+  // Named lastHealthCheck* to avoid collision with the pre-existing `lastCheckedAt`
+  // (used by metrics collection) — visually near-identical, easy to confuse.
+  lastHealthCheckStatus     String? // "success" | "failure" | "timeout"
+  lastHealthCheckAt         DateTime?
+  lastHealthCheckType       String? // "ssh" | "url" | "container_health" | "discovery"
+  lastHealthCheckDurationMs Int?
+  lastHealthCheckError      String?
 
   // Metrics collection settings
   metricsMode String  @default("disabled") // "ssh" | "agent" | "disabled"
@@ -294,12 +296,14 @@ model Service {
   healthIntervalMs Int @default(5000) // Interval between retries (default 5s)
 
   // Denormalized last health check cache (best-effort; full audit lives in HealthCheckLog).
-  // Updated atomically by logHealthCheck for both 'service' and 'container' resourceTypes.
-  lastCheckStatus     String? // "success" | "failure" | "timeout"
-  lastCheckAt         DateTime?
-  lastCheckType       String? // "ssh" | "url" | "container_health" | "discovery"
-  lastCheckDurationMs Int?
-  lastCheckError      String?
+  // Updated atomically by logHealthCheck ONLY for resourceType='service' — container
+  // checks log to HealthCheckLog but don't touch this cache (would clobber URL checks).
+  // Named lastHealthCheck* to avoid collision with the pre-existing `lastCheckedAt`.
+  lastHealthCheckStatus     String? // "success" | "failure" | "timeout"
+  lastHealthCheckAt         DateTime?
+  lastHealthCheckType       String? // "ssh" | "url" | "container_health" | "discovery"
+  lastHealthCheckDurationMs Int?
+  lastHealthCheckError      String?
 
   // Agent-reported health check results (for services with healthCheckUrl)
   agentHealthSuccess    Boolean? // Last health check result from agent

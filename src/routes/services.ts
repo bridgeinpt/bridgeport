@@ -59,9 +59,13 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     async (request) => {
       const { serverId } = request.params as { serverId: string };
 
+      // omit lastHealthCheckError: the column is TEXT and can carry multi-KB
+      // error messages. Polling after an incident bloats responses unboundedly;
+      // detail views still load it explicitly when needed.
       const services = await prisma.service.findMany({
         where: { serverId },
         orderBy: { name: 'asc' },
+        omit: { lastHealthCheckError: true },
       });
 
       return { services };
@@ -86,6 +90,9 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
             serviceType: true,
             server: { select: { id: true, name: true } },
           },
+          // See note on the per-server list above — keep large error blobs out
+          // of paginated list responses.
+          omit: { lastHealthCheckError: true },
           orderBy: { name: 'asc' },
           take: limit,
           skip: offset,

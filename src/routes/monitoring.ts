@@ -30,6 +30,12 @@ const runHealthChecksSchema = z.object({
   type: z.enum(['all', 'servers', 'services']).optional().default('all'),
 });
 
+// If the cache's lastHealthCheckAt is older than this (or null), the
+// denormalized status is treated as no signal and reported as UNKNOWN.
+// Prevents stale 'success' from sticking forever once retention purges
+// the underlying log rows or the scheduler stops writing updates.
+const STALE_AFTER_MS = 60 * 60 * 1000; // 1h
+
 
 export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> {
   // Get health check logs with filtering and pagination
@@ -728,8 +734,8 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
       const env = await findOrNotFound(prisma.environment.findUnique({ where: { id: envId } }), 'Environment', reply);
       if (!env) return;
 
-      // Read current health directly from the denormalized lastCheck* columns on
-      // Server / Service. logHealthCheck keeps them atomically in sync with
+      // Read current health directly from the denormalized lastHealthCheck* columns
+      // on Server / Service. logHealthCheck keeps them atomically in sync with
       // HealthCheckLog, so we no longer have to scan (and dedupe) the log table —
       // p99 stays flat regardless of log retention.
       const [servers, services] = await Promise.all([
@@ -738,11 +744,11 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
           select: {
             id: true,
             name: true,
-            lastCheckStatus: true,
-            lastCheckAt: true,
-            lastCheckType: true,
-            lastCheckDurationMs: true,
-            lastCheckError: true,
+            lastHealthCheckStatus: true,
+            lastHealthCheckAt: true,
+            lastHealthCheckType: true,
+            lastHealthCheckDurationMs: true,
+            lastHealthCheckError: true,
           },
         }),
         prisma.service.findMany({
@@ -751,35 +757,43 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
             id: true,
             name: true,
             server: { select: { id: true, name: true } },
-            lastCheckStatus: true,
-            lastCheckAt: true,
-            lastCheckType: true,
-            lastCheckDurationMs: true,
-            lastCheckError: true,
+            lastHealthCheckStatus: true,
+            lastHealthCheckAt: true,
+            lastHealthCheckType: true,
+            lastHealthCheckDurationMs: true,
+            lastHealthCheckError: true,
           },
         }),
       ]);
 
       type CacheRow = {
-        lastCheckStatus: string | null;
-        lastCheckAt: Date | null;
-        lastCheckType: string | null;
-        lastCheckDurationMs: number | null;
-        lastCheckError: string | null;
+        lastHealthCheckStatus: string | null;
+        lastHealthCheckAt: Date | null;
+        lastHealthCheckType: string | null;
+        lastHealthCheckDurationMs: number | null;
+        lastHealthCheckError: string | null;
       };
 
+      // toLastCheck returns the raw timestamp regardless of staleness so the UI
+      // can still show "last seen N minutes ago" even when toStatus decays to
+      // UNKNOWN — users want to see *when* the signal went away, not just that
+      // it did.
       const toLastCheck = (row: CacheRow) =>
-        row.lastCheckAt
+        row.lastHealthCheckAt
           ? {
-              timestamp: row.lastCheckAt.toISOString(),
-              checkType: row.lastCheckType,
-              durationMs: row.lastCheckDurationMs,
-              errorMessage: row.lastCheckError,
+              timestamp: row.lastHealthCheckAt.toISOString(),
+              checkType: row.lastHealthCheckType,
+              durationMs: row.lastHealthCheckDurationMs,
+              errorMessage: row.lastHealthCheckError,
             }
           : null;
       const toStatus = (row: CacheRow): ServerStatus => {
-        if (!row.lastCheckStatus) return SERVER_STATUS.UNKNOWN;
-        return row.lastCheckStatus === HEALTH_CHECK_STATUS.SUCCESS
+        if (!row.lastHealthCheckStatus || !row.lastHealthCheckAt) return SERVER_STATUS.UNKNOWN;
+        // Decay to UNKNOWN if the cached status is older than STALE_AFTER_MS —
+        // retention purges or a stopped scheduler would otherwise leave a stale
+        // 'success' / 'failure' on the dashboard indefinitely.
+        if (Date.now() - row.lastHealthCheckAt.getTime() > STALE_AFTER_MS) return SERVER_STATUS.UNKNOWN;
+        return row.lastHealthCheckStatus === HEALTH_CHECK_STATUS.SUCCESS
           ? SERVER_STATUS.HEALTHY
           : SERVER_STATUS.UNHEALTHY;
       };

@@ -239,6 +239,7 @@ describe('servers', () => {
       expect(mockPrisma.server.findMany).toHaveBeenCalledWith({
         where: { environmentId: 'env-1' },
         orderBy: { name: 'asc' },
+        omit: { lastHealthCheckError: true },
         take: 25,
         skip: 0,
       });
@@ -253,6 +254,7 @@ describe('servers', () => {
       expect(mockPrisma.server.findMany).toHaveBeenCalledWith({
         where: { environmentId: 'env-1' },
         orderBy: { name: 'asc' },
+        omit: { lastHealthCheckError: true },
         take: 10,
         skip: 5,
       });
