@@ -12,7 +12,7 @@ import { checkServiceUpdate } from '../lib/scheduler.js';
 import { pruneServerImages } from './servers.js';
 import { sendSystemNotification, NOTIFICATION_TYPES } from './notifications.js';
 import { recordTagDeployment } from './image-management.js';
-import { safeJsonParse } from '../lib/helpers.js';
+import { safeJsonParse, getErrorMessage } from '../lib/helpers.js';
 import { eventBus } from '../lib/event-bus.js';
 import { DEPLOYMENT_STATUS, CONTAINER_STATUS, HISTORY_STATUS, DISCOVERY_STATUS } from '../lib/constants.js';
 import type { Deployment } from '@prisma/client';
@@ -252,7 +252,7 @@ export async function deployService(
 
     // Check for available image updates in background
     checkServiceUpdate(serviceDeploymentId).catch((err) => {
-      console.error(`[Deploy] Failed to check updates for deployment ${serviceDeploymentId}:`, err);
+      console.error('[Deploy] Failed to check updates for deployment', serviceDeploymentId, getErrorMessage(err));
     });
 
     // Auto-prune images if enabled

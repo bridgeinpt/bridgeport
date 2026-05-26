@@ -995,7 +995,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
             updateInfo = { hasUpdate: updateResult.hasUpdate, bestTag: updateResult.bestTag };
           }
         } catch (err) {
-          console.error(`[HealthCheck] Failed to check updates for ${deployment.service.name}:`, err);
+          console.error('[HealthCheck] Failed to check updates for service', deployment.service.name, getErrorMessage(err));
         }
 
         const durationMs = Date.now() - start;

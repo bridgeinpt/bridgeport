@@ -5,6 +5,7 @@ import { getEnvironmentSshKey } from '../routes/environments.js';
 import { parseRegistryFromImage } from '../lib/image-utils.js';
 import { checkServiceUpdate } from '../lib/scheduler.js';
 import { findOrCreateContainerImage } from './image-management.js';
+import { getErrorMessage } from '../lib/helpers.js';
 import { SERVER_STATUS, HEALTH_STATUS, CONTAINER_STATUS, DISCOVERY_STATUS } from '../lib/constants.js';
 import type { Server, Service, ServiceDeployment, RegistryConnection } from '@prisma/client';
 
@@ -498,7 +499,7 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
     // Check for available image updates for discovered deployments.
     for (const sd of discoveredDeployments) {
       checkServiceUpdate(sd.id).catch((err) => {
-        console.error(`[Discovery] Failed to check updates for deployment ${sd.id}:`, err);
+        console.error('[Discovery] Failed to check updates for deployment', sd.id, getErrorMessage(err));
       });
     }
 
