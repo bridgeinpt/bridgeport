@@ -103,32 +103,52 @@ export async function updateServer(
   });
 }
 
-export async function getServer(serverId: string): Promise<ServerWithServices | null> {
-  return prisma.server.findUnique({
-    where: { id: serverId },
-    include: {
-      serviceDeployments: {
-        include: {
-          service: { include: { containerImage: true } },
+export async function getServer(
+  serverId: string,
+  options?: { includeServices?: boolean }
+): Promise<Server | ServerWithServices | null> {
+  // Opt-in: callers that need the full deployment+template tree pass
+  // `includeServices: true`. Default keeps the response thin (just the Server row)
+  // so list/detail callers don't pay the cost of nesting deployments when they
+  // only want the server metadata.
+  if (options?.includeServices) {
+    return prisma.server.findUnique({
+      where: { id: serverId },
+      include: {
+        serviceDeployments: {
+          include: {
+            service: { include: { containerImage: true } },
+          },
         },
       },
-    },
+    });
+  }
+  return prisma.server.findUnique({
+    where: { id: serverId },
   });
 }
 
 // List endpoint omits lastHealthCheckError (potentially multi-KB error blob);
 // detail views still load the full Server when needed.
 export type ServerListItem = Omit<Server, 'lastHealthCheckError'>;
+export type ServerListItemWithServicesCount = ServerListItem & { _count: { services: number } };
 
 export async function listServers(
   environmentId: string,
-  options?: { limit?: number; offset?: number }
-): Promise<{ servers: ServerListItem[]; total: number }> {
+  options?: { limit?: number; offset?: number; includeServicesCount?: boolean }
+): Promise<{ servers: (ServerListItem | ServerListItemWithServicesCount)[]; total: number }> {
   const limit = options?.limit ?? 25;
   const offset = options?.offset ?? 0;
   const where = { environmentId };
 
-  const [servers, total] = await Promise.all([
+  // In 2.0 "services on this server" is the count of per-server ServiceDeployments
+  // (Service is env-scoped, not server-scoped, after the template split).
+  // We expose it to callers as `_count.services` to keep the API contract stable.
+  const include = options?.includeServicesCount
+    ? { _count: { select: { serviceDeployments: true } } }
+    : undefined;
+
+  const [rawServers, total] = await Promise.all([
     prisma.server.findMany({
       where,
       orderBy: { name: 'asc' },
@@ -138,9 +158,20 @@ export async function listServers(
       omit: { lastHealthCheckError: true },
       take: limit,
       skip: offset,
+      ...(include ? { include } : {}),
     }),
     prisma.server.count({ where }),
   ]);
+
+  // Translate the prisma-shaped `_count.serviceDeployments` to the public
+  // `_count.services` shape consumers (UI, CLI) expect.
+  const servers: (ServerListItem | ServerListItemWithServicesCount)[] = options?.includeServicesCount
+    ? rawServers.map((s) => {
+        const withCount = s as ServerListItem & { _count?: { serviceDeployments?: number } };
+        const { _count, ...rest } = withCount;
+        return { ...rest, _count: { services: _count?.serviceDeployments ?? 0 } };
+      })
+    : rawServers;
 
   return { servers, total };
 }

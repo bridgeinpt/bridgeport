@@ -18,8 +18,8 @@
     },
     "environment-detail": {
       "path": "/api/environments/{envId}",
-      "maxP99Ms": 50,
-      "minRps": 500
+      "maxP99Ms": 15,
+      "minRps": 3000
     },
     "servers-list": {
       "path": "/api/environments/{envId}/servers",

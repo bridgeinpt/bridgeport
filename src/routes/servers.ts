@@ -61,34 +61,50 @@ const registerHostSchema = z.object({
 });
 
 export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
-  // List servers for environment
+  // List servers for environment.
+  // Optional `?include=services-count` adds a `_count: { services }` field per server.
   fastify.get(
     '/api/environments/:envId/servers',
     { preHandler: [fastify.authenticate] },
     async (request) => {
       const { envId } = request.params as { envId: string };
-      const { limit, offset } = parsePaginationQuery(request.query as Record<string, unknown>);
+      const query = request.query as Record<string, unknown>;
+      const { limit, offset } = parsePaginationQuery(query);
+      const include = typeof query.include === 'string' ? query.include : '';
       const result = await listServers(envId, {
         limit,
         offset,
+        includeServicesCount: include === 'services-count',
       });
       return result;
     }
   );
 
-  // Get server with services
+  // Get server. By default returns just the server row.
+  // Optional `?include=services` nests services + their containerImage.
   fastify.get(
     '/api/servers/:id',
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const server = await findOrNotFound(getServer(id), 'Server', reply);
+      const query = request.query as Record<string, unknown>;
+      const include = typeof query.include === 'string' ? query.include : '';
+      const wantServices = include === 'services';
+      const server = await findOrNotFound(
+        getServer(id, { includeServices: wantServices }),
+        'Server',
+        reply
+      );
       if (!server) return;
 
-      // Back-compat: expose a flattened `services` array (one entry per deployment)
-      // so legacy UI code that reads server.services keeps working.
-      const services = server.serviceDeployments.map((d) => flattenDeploymentOntoService(d));
-      return { server: { ...server, services } };
+      // Back-compat: when the caller asked for services, expose a flattened
+      // `services` array (one entry per deployment) so legacy UI code that reads
+      // server.services keeps working. Default (thin) response omits it.
+      if (wantServices && 'serviceDeployments' in server) {
+        const services = server.serviceDeployments.map((d) => flattenDeploymentOntoService(d));
+        return { server: { ...server, services } };
+      }
+      return { server };
     }
   );
 

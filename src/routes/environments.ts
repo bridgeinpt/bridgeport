@@ -5,7 +5,7 @@ import { encrypt, decrypt } from '../lib/crypto.js';
 import { logAudit, actorFrom } from '../services/audit.js';
 import { requireAdmin } from '../plugins/authorize.js';
 import { createDefaultSettings } from '../services/environment-settings.js';
-import { safeJsonParse, validateBody, findOrNotFound, getErrorMessage, flattenDeploymentOntoService } from '../lib/helpers.js';
+import { safeJsonParse, validateBody, findOrNotFound, getErrorMessage } from '../lib/helpers.js';
 import { S3Client, ListBucketsCommand } from '@aws-sdk/client-s3';
 
 const createEnvSchema = z.object({
@@ -43,49 +43,34 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
     }
   );
 
-  // Get environment
+  // Get environment (thin shape: row + denormalized counts, no nested children).
+  // Per-resource detail lives on /api/environments/:envId/servers and /api/servers/:id.
   fastify.get(
     '/api/environments/:id',
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const environment = await findOrNotFound(
-        prisma.environment.findUnique({
-          where: { id },
-          include: {
-            servers: {
-              include: {
-                serviceDeployments: {
-                  include: {
-                    service: {
-                      include: {
-                        serviceType: true,
-                        containerImage: true,
-                      },
-                    },
-                  },
-                },
-              },
-            },
-            _count: {
-              select: { secrets: true },
-            },
+      // Thin endpoint: just the env row + denormalized child counts. Per-resource
+      // detail (servers, services, etc.) lives on dedicated endpoints.
+      //
+      // After the 2.0 split, Service is env-scoped (has environmentId directly),
+      // so it can be counted through the standard `_count.services` selector
+      // without traversing a Server join.
+      const environment = await prisma.environment.findUnique({
+        where: { id },
+        include: {
+          _count: {
+            select: { servers: true, services: true, secrets: true, databases: true },
           },
-        }),
-        'Environment',
-        reply
-      );
-      if (!environment) return;
+        },
+      });
 
-      // Back-compat: expose a flattened `services` array per server (one entry per
-      // deployment) so legacy UI code that reads server.services keeps working.
-      const servers = environment.servers.map((s) => ({
-        ...s,
-        services: s.serviceDeployments.map((d) => flattenDeploymentOntoService(d)),
-      }));
+      if (!environment) {
+        return reply.code(404).send({ error: 'Environment not found' });
+      }
 
-      return { environment: { ...environment, servers } };
+      return { environment };
     }
   );
 

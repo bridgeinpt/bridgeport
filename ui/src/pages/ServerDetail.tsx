@@ -155,7 +155,7 @@ export default function ServerDetail() {
     if (id) {
       setLoading(true);
       Promise.all([
-        getServer(id),
+        getServer(id, { includeServices: true }),
         getAgentStatus(id),
         getServerMetrics(id, undefined, undefined, 1),
         getServerProcesses(id),

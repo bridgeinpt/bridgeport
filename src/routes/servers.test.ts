@@ -3,6 +3,8 @@ import { buildTestApp, type TestApp } from '../../tests/helpers/app.js';
 import { createTestUser } from '../../tests/factories/user.js';
 import { createTestEnvironment } from '../../tests/factories/environment.js';
 import { createTestServer } from '../../tests/factories/server.js';
+import { createTestContainerImage } from '../../tests/factories/container-image.js';
+import { createTestService } from '../../tests/factories/service.js';
 import { generateTestToken } from '../../tests/helpers/auth.js';
 
 describe('server routes', () => {
@@ -54,13 +56,97 @@ describe('server routes', () => {
 
       expect(res.statusCode).toBe(401);
     });
+
+    it('should omit _count when ?include=services-count is not passed', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'sc-omit-env' });
+      await createTestServer(app.prisma, { environmentId: env.id, name: 'sc-omit-s' });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/environments/${env.id}/servers`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.servers).toHaveLength(1);
+      expect(body.servers[0]).not.toHaveProperty('_count');
+    });
+
+    it('should include _count.services per server with ?include=services-count', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'sc-on-env' });
+      const sa = await createTestServer(app.prisma, { environmentId: env.id, name: 'sc-on-a' });
+      const sb = await createTestServer(app.prisma, { environmentId: env.id, name: 'sc-on-b' });
+      const img = await createTestContainerImage(app.prisma, {
+        environmentId: env.id,
+        name: 'sc-img',
+      });
+      // sa: 2 deployments, sb: 0 deployments. After the 2.0 split, per-server
+      // "service count" is the number of ServiceDeployments on that server,
+      // surfaced to callers as _count.services for back-compat.
+      await createTestService(app.prisma, {
+        environmentId: env.id,
+        serverId: sa.id,
+        containerImageId: img.id,
+        name: 'sc-svc-1',
+        containerName: 'sc-c-1',
+      });
+      await createTestService(app.prisma, {
+        environmentId: env.id,
+        serverId: sa.id,
+        containerImageId: img.id,
+        name: 'sc-svc-2',
+        containerName: 'sc-c-2',
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/environments/${env.id}/servers?include=services-count`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      const byName = Object.fromEntries(
+        body.servers.map((s: { name: string; _count?: { services: number } }) => [s.name, s])
+      );
+      expect(byName['sc-on-a']._count).toEqual({ services: 2 });
+      expect(byName['sc-on-b']._count).toEqual({ services: 0 });
+    });
+
+    it('should ignore unrecognized include values', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'sc-bad-env' });
+      await createTestServer(app.prisma, { environmentId: env.id, name: 'sc-bad-s' });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/environments/${env.id}/servers?include=does-not-exist`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      // Unknown include value -> no _count is attached (treated as default).
+      expect(res.json().servers[0]).not.toHaveProperty('_count');
+    });
   });
 
   // ==================== GET /api/servers/:id ====================
 
   describe('GET /api/servers/:id', () => {
-    it('should return server with details', async () => {
+    it('should return bare server row without services by default', async () => {
       const server = await createTestServer(app.prisma, { environmentId: envId, name: 'detail-server' });
+      // Seed a service to make sure the default route does NOT eagerly return it.
+      const img = await createTestContainerImage(app.prisma, {
+        environmentId: envId,
+        name: 'detail-img',
+      });
+      await createTestService(app.prisma, {
+        environmentId: envId,
+        serverId: server.id,
+        containerImageId: img.id,
+        name: 'detail-svc',
+        containerName: 'detail-c',
+      });
 
       const res = await app.inject({
         method: 'GET',
@@ -69,16 +155,93 @@ describe('server routes', () => {
       });
 
       expect(res.statusCode).toBe(200);
-      expect(res.json().server).toMatchObject({
+      const body = res.json();
+      expect(body.server).toMatchObject({
         id: server.id,
         name: 'detail-server',
       });
+      // No nested services on the default response shape.
+      expect(body.server).not.toHaveProperty('services');
+    });
+
+    it('should include services (with containerImage) when ?include=services is passed', async () => {
+      const server = await createTestServer(app.prisma, { environmentId: envId, name: 'inc-server' });
+      const img = await createTestContainerImage(app.prisma, {
+        environmentId: envId,
+        name: 'inc-img',
+        imageName: 'registry.example.com/inc-image',
+      });
+      await createTestService(app.prisma, {
+        environmentId: envId,
+        serverId: server.id,
+        containerImageId: img.id,
+        name: 'inc-svc-1',
+        containerName: 'inc-c-1',
+      });
+      await createTestService(app.prisma, {
+        environmentId: envId,
+        serverId: server.id,
+        containerImageId: img.id,
+        name: 'inc-svc-2',
+        containerName: 'inc-c-2',
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/servers/${server.id}?include=services`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.server.services).toHaveLength(2);
+      const names = body.server.services.map((s: { name: string }) => s.name).sort();
+      expect(names).toEqual(['inc-svc-1', 'inc-svc-2']);
+      // containerImage relation must be hydrated for ServerDetail's UI.
+      expect(body.server.services[0].containerImage).toMatchObject({
+        id: img.id,
+        name: 'inc-img',
+      });
+    });
+
+    it('should ignore unrecognized include values and return bare row', async () => {
+      const server = await createTestServer(app.prisma, { environmentId: envId, name: 'badinc-server' });
+      const img = await createTestContainerImage(app.prisma, {
+        environmentId: envId,
+        name: 'badinc-img',
+      });
+      await createTestService(app.prisma, {
+        environmentId: envId,
+        serverId: server.id,
+        containerImageId: img.id,
+        name: 'badinc-svc',
+        containerName: 'badinc-c',
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/servers/${server.id}?include=banana`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json().server).not.toHaveProperty('services');
     });
 
     it('should return 404 for non-existent server', async () => {
       const res = await app.inject({
         method: 'GET',
         url: '/api/servers/nonexistent',
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+
+      expect(res.statusCode).toBe(404);
+    });
+
+    it('should return 404 for non-existent server even with ?include=services', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/servers/nonexistent?include=services',
         headers: { authorization: `Bearer ${viewerToken}` },
       });
 

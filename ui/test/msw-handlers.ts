@@ -86,17 +86,37 @@ export const handlers = [
     });
   }),
 
-  // Servers
-  http.get('/api/environments/:envId/servers', () => {
+  // Env detail returns thin row + denormalized counts (no nested children).
+  http.get('/api/environments/:id', () => {
     return HttpResponse.json({
-      servers: [{ ...mockServer, services: [mockService] }],
+      environment: {
+        ...mockEnvironment,
+        updatedAt: '2024-01-01T00:00:00Z',
+        _count: { servers: 2, services: 5, databases: 1, secrets: 5 },
+      },
+    });
+  }),
+
+  // Servers list (paginated). `?include=services-count` adds `_count: { services }`.
+  http.get('/api/environments/:envId/servers', ({ request }) => {
+    const url = new URL(request.url);
+    const withCount = url.searchParams.get('include') === 'services-count';
+    return HttpResponse.json({
+      servers: [
+        withCount
+          ? { ...mockServer, _count: { services: 1 } }
+          : mockServer,
+      ],
       total: 1,
     });
   }),
 
-  http.get('/api/servers/:id', () => {
+  // Server detail. `?include=services` nests services; default returns bare row.
+  http.get('/api/servers/:id', ({ request }) => {
+    const url = new URL(request.url);
+    const withServices = url.searchParams.get('include') === 'services';
     return HttpResponse.json({
-      server: { ...mockServer, services: [mockService] },
+      server: withServices ? { ...mockServer, services: [mockService] } : mockServer,
     });
   }),
 
