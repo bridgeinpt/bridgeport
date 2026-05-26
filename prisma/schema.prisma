@@ -535,6 +535,8 @@ model AuditLog {
   @@index([environmentId])
   @@index([apiTokenId])
   @@index([serviceAccountId])
+  @@index([environmentId, createdAt(sort: Desc)])
+  @@index([resourceType, createdAt(sort: Desc)])
 }
 
 // Edit history for config files
@@ -652,6 +654,7 @@ model Database {
   metrics  DatabaseMetrics[]
 
   @@unique([environmentId, name])
+  @@index([environmentId, monitoringEnabled])
 }
 
 // Database backup record
@@ -1185,6 +1188,7 @@ model HealthCheckLog {
   @@index([environmentId, createdAt(sort: Desc)])
   @@index([resourceId, createdAt(sort: Desc)])
   @@index([status, createdAt(sort: Desc)])
+  @@index([resourceType, resourceId, createdAt(sort: Desc)])
 }
 
 // ==================== Agent Event History ====================
