@@ -235,4 +235,114 @@ describe('ssh', () => {
       expect(lastCall).toMatch(/^rm -f /);
     });
   });
+
+  describe('DockerSSH.containerLogs', () => {
+    function makeMockClient(): CommandClient & { exec: ReturnType<typeof vi.fn> } {
+      return {
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+        execStream: vi.fn(),
+        exec: vi.fn().mockResolvedValue({ stdout: 'logs out\n', stderr: 'logs err\n', code: 0 }),
+        writeFile: vi.fn().mockResolvedValue(undefined),
+      } as never;
+    }
+
+    it('returns stdout + stderr combined', async () => {
+      const client = makeMockClient();
+      const docker = new DockerSSH(client);
+
+      const out = await docker.containerLogs('my-container');
+      expect(out).toBe('logs out\nlogs err\n');
+    });
+
+    it('shell-escapes the container name', async () => {
+      const client = makeMockClient();
+      const docker = new DockerSSH(client);
+
+      await docker.containerLogs(`evil; rm -rf /`);
+
+      const cmd = client.exec.mock.calls[0][0] as string;
+      expect(cmd).toContain(`'evil; rm -rf /'`);
+      expect(cmd).not.toMatch(/;\s*rm -rf \/\s*$/);
+    });
+
+    it('adds --tail when tail option is set', async () => {
+      const client = makeMockClient();
+      const docker = new DockerSSH(client);
+
+      await docker.containerLogs('my-container', { tail: 100 });
+
+      const cmd = client.exec.mock.calls[0][0] as string;
+      expect(cmd).toContain('--tail 100');
+    });
+
+    it('adds -t when timestamps option is true', async () => {
+      const client = makeMockClient();
+      const docker = new DockerSSH(client);
+
+      await docker.containerLogs('my-container', { timestamps: true });
+
+      const cmd = client.exec.mock.calls[0][0] as string;
+      expect(cmd).toMatch(/\bdocker logs\b.*\s-t\s/);
+    });
+
+    it('omits -t when timestamps option is false or absent', async () => {
+      const client = makeMockClient();
+      const docker = new DockerSSH(client);
+
+      await docker.containerLogs('my-container');
+
+      const cmd = client.exec.mock.calls[0][0] as string;
+      expect(cmd).not.toMatch(/\s-t\s/);
+      expect(cmd).not.toMatch(/\s-t$/);
+    });
+
+    it('adds shell-escaped --until value', async () => {
+      const client = makeMockClient();
+      const docker = new DockerSSH(client);
+
+      await docker.containerLogs('my-container', { until: '2026-05-20T10:00:00Z' });
+
+      const cmd = client.exec.mock.calls[0][0] as string;
+      expect(cmd).toContain(`--until '2026-05-20T10:00:00Z'`);
+    });
+
+    it('shell-escapes a malicious --until value', async () => {
+      const client = makeMockClient();
+      const docker = new DockerSSH(client);
+
+      await docker.containerLogs('my-container', { until: `2026'; rm -rf /; echo '` });
+
+      const cmd = client.exec.mock.calls[0][0] as string;
+      // The single-quote in the value must be escaped using the `'\''` idiom.
+      expect(cmd).toContain(`'\\''`);
+      expect(cmd).not.toMatch(/--until '2026'; rm -rf/);
+    });
+
+    it('throws when docker logs exits non-zero', async () => {
+      const client = makeMockClient();
+      client.exec.mockResolvedValueOnce({ stdout: '', stderr: 'no such container', code: 1 });
+      const docker = new DockerSSH(client);
+
+      await expect(docker.containerLogs('nonexistent')).rejects.toThrow(/Failed to get logs/);
+    });
+
+    it('composes all options in the expected order', async () => {
+      const client = makeMockClient();
+      const docker = new DockerSSH(client);
+
+      await docker.containerLogs('my-container', {
+        tail: 25,
+        follow: true,
+        timestamps: true,
+        until: '2026-05-20T10:00:00Z',
+      });
+
+      const cmd = client.exec.mock.calls[0][0] as string;
+      // Expected order: `docker logs --tail 25 -f -t --until '...' 'my-container'`
+      expect(cmd).toMatch(
+        /docker logs --tail 25 -f -t --until '2026-05-20T10:00:00Z' 'my-container'$/
+      );
+    });
+  });
 });

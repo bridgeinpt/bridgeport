@@ -3,6 +3,14 @@ import { screen, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '../../test/render';
 import { useAppStore } from '../lib/store';
 
+// Mock Toast
+vi.mock('../components/Toast', () => ({
+  useToast: () => ({
+    success: vi.fn(),
+    error: vi.fn(),
+  }),
+}));
+
 // Mock API
 vi.mock('../lib/api', async () => {
   const actual = await vi.importActual('../lib/api');

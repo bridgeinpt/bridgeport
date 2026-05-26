@@ -9,16 +9,18 @@ import { userIdForFk } from '../services/auth.js';
 import { resolveSecretPlaceholders } from '../services/secrets.js';
 import { syncConfigFileToAttachedServices } from '../services/config-file-auto-resync.js';
 import { validateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery } from '../lib/helpers.js';
+import { detectLanguage } from '../lib/config-file-language.js';
 
 const createConfigFileSchema = z.object({
   name: z.string().min(1),
   filename: z.string().min(1),
-  content: z.string(),
+  content: z.string().min(1, 'Content is required'),
   description: z.string().optional(),
   isBinary: z.boolean().optional(),
   mimeType: z.string().optional(),
   fileSize: z.number().int().positive().optional(),
   autoResync: z.boolean().optional(),
+  language: z.string().min(1).optional(),
 });
 
 const updateConfigFileSchema = z.object({
@@ -30,6 +32,7 @@ const updateConfigFileSchema = z.object({
   mimeType: z.string().nullable().optional(),
   fileSize: z.number().int().positive().nullable().optional(),
   autoResync: z.boolean().optional(),
+  language: z.string().min(1).optional(),
 });
 
 const attachFileSchema = z.object({
@@ -59,6 +62,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
             mimeType: true,
             fileSize: true,
             autoResync: true,
+            language: true,
             createdAt: true,
             updatedAt: true,
             _count: { select: { services: true } },
@@ -192,9 +196,16 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
       if (!body) return;
 
       try {
+        // Auto-detect syntax-highlighting language from filename when the
+        // caller didn't supply one. Binary files always fall back to the
+        // model default ("plaintext") since highlighting doesn't apply.
+        const language =
+          body.language ?? (body.isBinary ? undefined : detectLanguage(body.filename));
+
         const configFile = await prisma.configFile.create({
           data: {
             ...body,
+            ...(language !== undefined ? { language } : {}),
             environmentId: envId,
           },
         });
@@ -678,11 +689,22 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
                   stderr = writeErr instanceof Error ? writeErr.message : 'SFTP write failed';
                 }
               } else {
-                const { content: rawContent, missing } = await resolveSecretPlaceholders(
+                const { content: rawContent, missing, templateErrors } = await resolveSecretPlaceholders(
                   sd.server.environmentId,
                   configFile.content
                 );
                 const resolvedContent = rawContent.trimEnd();
+
+                if (templateErrors.length > 0) {
+                  results.push({
+                    file: configFile.name,
+                    targetPath,
+                    serverName: sd.server.name,
+                    success: false,
+                    error: `Template errors: ${templateErrors.join('; ')}`,
+                  });
+                  continue;
+                }
 
                 if (missing.length > 0) {
                   results.push({
@@ -945,11 +967,22 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
                 stderr = writeErr instanceof Error ? writeErr.message : 'SFTP write failed';
               }
             } else {
-              const { content: rawContent, missing } = await resolveSecretPlaceholders(
+              const { content: rawContent, missing, templateErrors } = await resolveSecretPlaceholders(
                 server.environmentId,
                 configFile.content
               );
               const resolvedContent = rawContent.trimEnd();
+
+              if (templateErrors.length > 0) {
+                results.push({
+                  configFileName: configFile.name,
+                  serviceName: service.name,
+                  targetPath: sf.targetPath,
+                  success: false,
+                  error: `Template errors: ${templateErrors.join('; ')}`,
+                });
+                continue;
+              }
 
               if (missing.length > 0) {
                 results.push({

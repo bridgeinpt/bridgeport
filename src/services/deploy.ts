@@ -1,7 +1,7 @@
 import path from 'path';
 import { prisma } from '../lib/db.js';
-import { DockerSSH, shellEscape } from '../lib/ssh.js';
-import { createDockerClientForServer } from '../lib/docker.js';
+import { DockerSSH, shellEscape, type CommandClient } from '../lib/ssh.js';
+import { createDockerClientForServer, type DockerClient } from '../lib/docker.js';
 import { RegistryFactory } from '../lib/registry.js';
 import { getRegistryCredentials } from './registries.js';
 import { extractRepoName, stripRegistryPrefix } from '../lib/image-utils.js';
@@ -13,6 +13,7 @@ import { pruneServerImages } from './servers.js';
 import { sendSystemNotification, NOTIFICATION_TYPES } from './notifications.js';
 import { recordTagDeployment } from './image-management.js';
 import { safeJsonParse, getErrorMessage } from '../lib/helpers.js';
+import { getSystemSettings } from './system-settings.js';
 import { eventBus } from '../lib/event-bus.js';
 import { DEPLOYMENT_STATUS, CONTAINER_STATUS, HISTORY_STATUS, DISCOVERY_STATUS } from '../lib/constants.js';
 import type { Deployment } from '@prisma/client';
@@ -83,6 +84,40 @@ export async function deployService(
     logs.push(`[${timestamp}] ${message}`);
   };
 
+  // Hoisted so the catch block can also capture container logs on failure
+  let dockerClient: DockerClient | null = null;
+  let sshClient: CommandClient | null = null;
+
+  // Tracks whether a successful capture has already happened, so the catch
+  // block doesn't re-invoke against an already-disconnected client and append
+  // a misleading "unavailable" note after the real logs.
+  let containerLogsCaptured = false;
+
+  // Append `docker logs <container>` output (best-effort) so deployment plan view
+  // surfaces internal container output without needing SSH access. Safe to call
+  // when the container doesn't exist — failures are recorded as a note.
+  const captureContainerLogs = async () => {
+    if (!dockerClient) return;
+    if (containerLogsCaptured) return;
+    try {
+      const settings = await getSystemSettings();
+      const tail = settings.defaultLogLines;
+      const containerLogs = await dockerClient.getContainerLogs(deployment.containerName, {
+        tail,
+        timestamps: true,
+      });
+      logs.push(`\n--- container logs (${deployment.containerName}, last ${tail} lines) ---`);
+      logs.push(containerLogs.trim() || '(no output)');
+      // Only mark as captured on the success path so a transient failure can
+      // still be retried from the catch block.
+      containerLogsCaptured = true;
+    } catch (err) {
+      logs.push(
+        `\n--- container logs unavailable (${deployment.containerName}): ${getErrorMessage(err, 'unknown error')} ---`
+      );
+    }
+  };
+
   try {
     await prisma.deployment.update({
       where: { id: deploymentRow.id },
@@ -94,7 +129,7 @@ export async function deployService(
     log(`Starting deployment of ${service.name} on ${deployment.server.name} with tag ${imageTag}`);
 
     // Create appropriate Docker client based on server's dockerMode
-    const { dockerClient, sshClient, error: clientError, mode, needsConnect } = await createDockerClientForServer(
+    const { dockerClient: createdClient, sshClient: createdSsh, error: clientError, mode, needsConnect } = await createDockerClientForServer(
       {
         hostname: deployment.server.hostname,
         dockerMode: deployment.server.dockerMode,
@@ -103,6 +138,9 @@ export async function deployService(
       },
       getEnvironmentSshKey
     );
+
+    dockerClient = createdClient;
+    sshClient = createdSsh;
 
     if (!dockerClient) {
       throw new Error(clientError || 'Failed to create Docker client');
@@ -233,6 +271,9 @@ export async function deployService(
 
     log(`Container ${deployment.containerName} is running`);
 
+    // Capture container output so deploy plan view shows internal logs without SSH
+    await captureContainerLogs();
+
     if (sshClient) {
       sshClient.disconnect();
     }
@@ -320,6 +361,15 @@ export async function deployService(
     const errorMessage = error instanceof Error ? error.message : String(error);
     log(`ERROR: ${errorMessage}`);
 
+    // Capture container output (best-effort) so failed deploys surface internal
+    // logs in the deployment plan view without requiring SSH access.
+    await captureContainerLogs();
+
+    if (sshClient) {
+      try { sshClient.disconnect(); } catch { /* ignore */ }
+    }
+
+    // Record failed deployment in container image history
     const historyEntry = await recordTagDeployment(
       service.containerImage.id,
       imageTag,
@@ -476,7 +526,7 @@ export async function getDeployment(deploymentId: string): Promise<Deployment | 
 
 export async function getContainerLogs(
   serviceDeploymentId: string,
-  tail: number = 100
+  options: { tail?: number; until?: string; timestamps?: boolean } = {}
 ): Promise<string> {
   const deployment = await prisma.serviceDeployment.findUniqueOrThrow({
     where: { id: serviceDeploymentId },
@@ -501,7 +551,11 @@ export async function getContainerLogs(
     if (needsConnect && sshClient) {
       await sshClient.connect();
     }
-    return await dockerClient.getContainerLogs(deployment.containerName, { tail });
+    return await dockerClient.getContainerLogs(deployment.containerName, {
+      tail: options.tail ?? 100,
+      until: options.until,
+      timestamps: options.timestamps,
+    });
   } finally {
     if (sshClient) {
       sshClient.disconnect();

@@ -25,6 +25,9 @@ const { mockPrisma } = vi.hoisted(() => ({
       findMany: vi.fn(),
       create: vi.fn(),
     },
+    environment: {
+      findFirst: vi.fn(),
+    },
   },
 }));
 
@@ -73,6 +76,7 @@ import {
   determineHealthStatus,
   determineOverallStatus,
   discoverContainers,
+  listServersForTemplate,
 } from './servers.js';
 
 describe('servers', () => {
@@ -422,6 +426,111 @@ describe('servers', () => {
       );
       // Missing reports the service's display name (from the nested template).
       expect(result.missing).toEqual(['old-display-name']);
+    });
+  });
+
+  describe('listServersForTemplate', () => {
+    function row(name: string, env: string, tags: string[] = []): Record<string, unknown> {
+      return {
+        id: `id-${name}`,
+        name,
+        hostname: `host-${name}`,
+        publicIp: null,
+        tags: JSON.stringify(tags),
+        environmentId: env,
+      };
+    }
+
+    it('defaults to current environment when no environment filter is given', async () => {
+      mockPrisma.server.findMany.mockResolvedValue([
+        row('web-a', 'env-1', ['web']),
+        row('web-b', 'env-1', ['web']),
+      ]);
+
+      const result = await listServersForTemplate('env-1', {});
+
+      expect(mockPrisma.environment.findFirst).not.toHaveBeenCalled();
+      expect(mockPrisma.server.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { environmentId: 'env-1' } })
+      );
+      expect(result.map((s) => s.name)).toEqual(['web-a', 'web-b']);
+    });
+
+    it('resolves environment filter by name', async () => {
+      mockPrisma.environment.findFirst.mockResolvedValue({ id: 'env-staging-id' });
+      mockPrisma.server.findMany.mockResolvedValue([row('s1', 'env-staging-id')]);
+
+      await listServersForTemplate('env-1', { environment: 'staging' });
+
+      expect(mockPrisma.environment.findFirst).toHaveBeenCalledWith({
+        where: { OR: [{ id: 'staging' }, { name: 'staging' }] },
+        select: { id: true },
+      });
+      expect(mockPrisma.server.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { environmentId: 'env-staging-id' } })
+      );
+    });
+
+    it('resolves environment filter by id', async () => {
+      // The impl checks both name and id, so passing an id works equivalently.
+      mockPrisma.environment.findFirst.mockResolvedValue({ id: 'env-2' });
+      mockPrisma.server.findMany.mockResolvedValue([row('s2', 'env-2')]);
+
+      const result = await listServersForTemplate('env-1', { environment: 'env-2' });
+
+      expect(mockPrisma.environment.findFirst).toHaveBeenCalledWith({
+        where: { OR: [{ id: 'env-2' }, { name: 'env-2' }] },
+        select: { id: true },
+      });
+      expect(result.map((s) => s.name)).toEqual(['s2']);
+    });
+
+    it('returns servers sorted alphabetically by name with parsed tags', async () => {
+      mockPrisma.server.findMany.mockResolvedValue([
+        row('zeta', 'env-1', ['z']),
+        row('alpha', 'env-1', ['a', 'b']),
+        row('mu', 'env-1', []),
+      ]);
+
+      const result = await listServersForTemplate('env-1', {});
+
+      expect(result.map((s) => s.name)).toEqual(['alpha', 'mu', 'zeta']);
+      expect(result.find((s) => s.name === 'alpha')?.tags).toEqual(['a', 'b']);
+      expect(result.find((s) => s.name === 'mu')?.tags).toEqual([]);
+    });
+
+    it('returns empty array (no throw) when environment filter does not match any env', async () => {
+      mockPrisma.environment.findFirst.mockResolvedValue(null);
+
+      const result = await listServersForTemplate('env-1', { environment: 'ghost' });
+
+      expect(result).toEqual([]);
+      // Critically, we should NOT have queried servers at all if the env was unresolved.
+      expect(mockPrisma.server.findMany).not.toHaveBeenCalled();
+    });
+
+    it('applies tag and name filters after loading the env', async () => {
+      mockPrisma.server.findMany.mockResolvedValue([
+        row('api-1', 'env-1', ['web']),
+        row('api-2', 'env-1', ['db']),
+        row('db-1', 'env-1', ['db']),
+      ]);
+
+      const result = await listServersForTemplate('env-1', { tag: 'db', name: 'api-*' });
+
+      // tag="db" AND name="api-*" → only api-2 qualifies.
+      expect(result.map((s) => s.name)).toEqual(['api-2']);
+    });
+
+    it('handles malformed tags JSON without throwing', async () => {
+      mockPrisma.server.findMany.mockResolvedValue([
+        { ...row('a', 'env-1'), tags: 'not-json' },
+      ]);
+
+      const result = await listServersForTemplate('env-1', {});
+
+      expect(result).toHaveLength(1);
+      expect(result[0].tags).toEqual([]);
     });
   });
 });

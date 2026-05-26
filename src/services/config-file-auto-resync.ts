@@ -139,11 +139,23 @@ export async function syncConfigFileToAttachedServices(
               stderr = writeErr instanceof Error ? writeErr.message : 'SFTP write failed';
             }
           } else {
-            const { content: rawContent, missing } = await resolveSecretPlaceholders(
+            const { content: rawContent, missing, templateErrors } = await resolveSecretPlaceholders(
               server.environmentId,
               configFile.content
             );
             const resolvedContent = rawContent.trimEnd();
+
+            if (templateErrors.length > 0) {
+              results.push({
+                serviceId: sf.service.id,
+                serviceName: p.serviceName,
+                serverName: server.name,
+                targetPath: sf.targetPath,
+                success: false,
+                error: `Template errors: ${templateErrors.join('; ')}`,
+              });
+              continue;
+            }
 
             if (missing.length > 0) {
               results.push({

@@ -39,6 +39,7 @@ const {
     operationsSettings: { upsert: vi.fn().mockResolvedValue({}) },
     dataSettings: { upsert: vi.fn().mockResolvedValue({}) },
     configurationSettings: { upsert: vi.fn().mockResolvedValue({}) },
+    notificationSettings: { upsert: vi.fn().mockResolvedValue({}) },
   },
 }));
 
@@ -212,7 +213,7 @@ describe('environment-settings', () => {
   });
 
   describe('createDefaultSettings', () => {
-    it('creates all five setting rows for an environment', async () => {
+    it('creates all setting rows for an environment', async () => {
       await createDefaultSettings('env-1');
 
       expect(mockTx.generalSettings.upsert).toHaveBeenCalled();
@@ -220,6 +221,7 @@ describe('environment-settings', () => {
       expect(mockTx.operationsSettings.upsert).toHaveBeenCalled();
       expect(mockTx.dataSettings.upsert).toHaveBeenCalled();
       expect(mockTx.configurationSettings.upsert).toHaveBeenCalled();
+      expect(mockTx.notificationSettings.upsert).toHaveBeenCalled();
     });
   });
 });

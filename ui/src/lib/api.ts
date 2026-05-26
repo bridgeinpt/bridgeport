@@ -285,6 +285,40 @@ export const resetModuleSettings = (envId: string, module: SettingsModule) =>
     `/environments/${envId}/settings/${module}/reset`
   );
 
+// Per-environment notification settings (Slack channel override).
+export interface EnvNotificationChannel {
+  id: string;
+  name: string;
+  slackChannelName: string | null;
+  isDefault?: boolean;
+}
+
+export interface EnvNotificationSettings {
+  settings: {
+    slackChannelId: string | null;
+    updatedAt: string | null;
+  };
+  channels: EnvNotificationChannel[];
+  defaultChannel: EnvNotificationChannel | null;
+}
+
+export const getEnvNotificationSettings = (envId: string) =>
+  api.get<EnvNotificationSettings>(`/environments/${envId}/settings/notifications`);
+
+export const updateEnvNotificationSettings = (
+  envId: string,
+  data: { slackChannelId: string | null }
+) =>
+  api.patch<{ settings: { slackChannelId: string | null; updatedAt: string | null } }>(
+    `/environments/${envId}/settings/notifications`,
+    data
+  );
+
+export const testEnvNotificationChannel = (envId: string) =>
+  api.post<{ success: boolean; channelId?: string; error?: string }>(
+    `/environments/${envId}/settings/notifications/test`
+  );
+
 export const getSettingsRegistry = (envId: string) =>
   api.get<{ registry: Record<SettingsModule, SettingDefinition[]> }>(
     `/environments/${envId}/settings/registry`
@@ -607,22 +641,38 @@ export const getServiceHistory = (id: string, limit?: number) =>
     `/services/${id}/history${limit ? `?limit=${limit}` : ''}`
   );
 
-// Per-deployment container logs (post-2.0 route).
-export const getServiceDeploymentLogs = (serviceId: string, deploymentId: string, tail?: number) =>
-  api.get<{ logs: string }>(`/services/${serviceId}/deployments/${deploymentId}/logs${tail ? `?tail=${tail}` : ''}`);
+// Per-deployment container logs (post-2.0 route). `before` enables time-based
+// pagination — server-side timestamps are always on, so the UI can request
+// older windows by passing the oldest line's timestamp back here.
+export const getServiceDeploymentLogs = (
+  serviceId: string,
+  deploymentId: string,
+  opts?: { tail?: number; before?: string }
+) => {
+  const params = new URLSearchParams();
+  if (opts?.tail) params.set('tail', String(opts.tail));
+  if (opts?.before) params.set('before', opts.before);
+  const qs = params.toString();
+  return api.get<{ logs: string }>(
+    `/services/${serviceId}/deployments/${deploymentId}/logs${qs ? `?${qs}` : ''}`
+  );
+};
 
 /**
  * Legacy template-scoped alias. Resolves the first deployment of the template
  * and calls the per-deployment logs endpoint. Multi-deployment templates should
  * pass an explicit deployment id via getServiceDeploymentLogs.
  */
-export const getServiceLogs = async (id: string, tail?: number) => {
+export const getServiceLogs = async (
+  id: string,
+  opts?: { tail?: number; before?: string }
+) => {
   const { service } = await getService(id);
   const first = service.serviceDeployments?.[0];
   if (!first) {
     throw new Error('Service has no deployments to fetch logs for');
   }
-  return getServiceDeploymentLogs(id, first.id, tail);
+  return getServiceDeploymentLogs(id, first.id, opts);
 };
 
 // Deployment history (audit-style list) for a Service template. Route renamed
@@ -1086,6 +1136,7 @@ export interface ConfigFile {
   mimeType: string | null;
   fileSize: number | null;
   autoResync: boolean;
+  language: string;
   createdAt: string;
   updatedAt: string;
   environmentId: string;
@@ -1104,6 +1155,7 @@ export interface ConfigFileInput {
   mimeType?: string;
   fileSize?: number;
   autoResync?: boolean;
+  language?: string;
 }
 
 export interface ServiceFile {

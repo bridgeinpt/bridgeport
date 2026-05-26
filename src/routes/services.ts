@@ -747,10 +747,28 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { depId } = request.params as { id: string; depId: string };
-      const { tail } = request.query as { tail?: string };
+      const { tail, before } = request.query as { tail?: string; before?: string };
 
       try {
-        const logs = await getContainerLogs(depId, tail ? parseInt(tail) : 100);
+        // Fall back to admin-configured defaultLogLines when no explicit tail is given
+        // or when the provided tail is unparseable / out of range.
+        // Cap to 10000 to align with the admin setting's upper bound.
+        const MAX_TAIL = 10000;
+        let tailValue: number;
+        const parsedTail = tail !== undefined ? parseInt(tail, 10) : NaN;
+        if (Number.isFinite(parsedTail) && parsedTail >= 1) {
+          tailValue = Math.min(parsedTail, MAX_TAIL);
+        } else {
+          const settings = await getSystemSettings();
+          tailValue = settings.defaultLogLines;
+        }
+
+        // `-t` (timestamps) is always on so the UI can paginate via `before=<timestamp>`
+        const logs = await getContainerLogs(depId, {
+          tail: tailValue,
+          until: before,
+          timestamps: true,
+        });
         return { logs };
       } catch (error) {
         const message = getErrorMessage(error, 'Failed to get logs');
@@ -865,14 +883,31 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
 
       try {
         await client.connect();
-        await docker.restartContainer(deployment.containerName);
+
+        // When a service is deployed via compose, plain `docker restart` only
+        // bounces the existing container — it does not re-read the compose
+        // file or attached config files. Run `compose down` + `compose up
+        // --force-recreate` so a NEW container is created and config files
+        // are re-read. We deliberately do NOT regenerate compose artifacts
+        // here: restart means "down + up with the current on-disk compose".
+        if (deployment.composePath) {
+          await docker.composeDown(deployment.composePath, deployment.containerName);
+          await docker.composeUp(deployment.composePath, deployment.containerName, true);
+        } else {
+          await docker.restartContainer(deployment.containerName);
+        }
 
         await logAudit({
           action: 'restart',
           resourceType: 'service_deployment',
           resourceId: depId,
           resourceName: `${deployment.service.name}@${deployment.server.name}`,
-          details: { containerName: deployment.containerName, serverName: deployment.server.name, serviceId: id },
+          details: {
+            containerName: deployment.containerName,
+            serverName: deployment.server.name,
+            serviceId: id,
+            mode: deployment.composePath ? 'compose' : 'docker',
+          },
           ...actorFrom(request),
           environmentId: deployment.service.environmentId,
         });

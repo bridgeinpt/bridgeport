@@ -12,6 +12,15 @@ const { mockPrisma } = vi.hoisted(() => ({
     var: {
       findMany: vi.fn().mockResolvedValue([]),
     },
+    // server.findMany / environment.findFirst are touched by the template
+    // engine path inside resolveSecretPlaceholders. Default to empty results
+    // so existing tests behave identically to the pre-engine implementation.
+    server: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    environment: {
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
   },
 }));
 
@@ -323,6 +332,145 @@ describe('secrets', () => {
       );
 
       expect(missing).toEqual(['MISSING']);
+    });
+
+    // --- two-stage template-engine + ${KEY} interaction ---
+
+    it('expands {{range}} first, then resolves ${KEY} inside the rendered body', async () => {
+      // Two web servers in env-1; PORT is a var. The template engine emits the
+      // hostnames, then stage 2 substitutes ${PORT}.
+      mockPrisma.server.findMany.mockResolvedValue([
+        { id: 's1', name: 'a', hostname: '10.0.0.1', publicIp: null, tags: '["web"]', environmentId: 'env-1' },
+        { id: 's2', name: 'b', hostname: '10.0.0.2', publicIp: null, tags: '["web"]', environmentId: 'env-1' },
+      ]);
+      mockPrisma.var.findMany.mockResolvedValueOnce([
+        { key: 'PORT', value: '8080' },
+      ]);
+      mockPrisma.secret.findMany.mockResolvedValue([]);
+
+      const { content, missing, templateErrors } = await resolveSecretPlaceholders(
+        'env-1',
+        '{{range servers tag="web"}}{{.hostname}}:${PORT}\n{{end}}'
+      );
+
+      expect(content).toBe('10.0.0.1:8080\n10.0.0.2:8080\n');
+      expect(missing).toEqual([]);
+      expect(templateErrors).toEqual([]);
+    });
+
+    it('reports unknown ${KEY} produced by a range body as missing', async () => {
+      // The engine renders `{{.hostname}}:${PORT}` — PORT is undefined, so it
+      // surfaces as a missing key in stage 2.
+      mockPrisma.server.findMany.mockResolvedValue([
+        { id: 's1', name: 'a', hostname: '10.0.0.1', publicIp: null, tags: '["web"]', environmentId: 'env-1' },
+      ]);
+      mockPrisma.var.findMany.mockResolvedValue([]);
+      mockPrisma.secret.findMany.mockResolvedValue([]);
+
+      const { content, missing, templateErrors } = await resolveSecretPlaceholders(
+        'env-1',
+        '{{range servers tag="web"}}{{.hostname}}:${PORT} {{end}}'
+      );
+
+      expect(content).toBe('10.0.0.1:${PORT} ');
+      expect(missing).toEqual(['PORT']);
+      expect(templateErrors).toEqual([]);
+    });
+
+    it('surfaces templateErrors from the engine to the caller', async () => {
+      mockPrisma.server.findMany.mockResolvedValue([]);
+      mockPrisma.var.findMany.mockResolvedValue([]);
+      mockPrisma.secret.findMany.mockResolvedValue([]);
+
+      // Unknown filter key → engine records a templateError.
+      const { templateErrors, missing } = await resolveSecretPlaceholders(
+        'env-1',
+        '{{range servers region="eu"}}{{.name}}{{end}}'
+      );
+      expect(templateErrors.length).toBeGreaterThan(0);
+      expect(templateErrors.some((e) => /Unknown filter/.test(e))).toBe(true);
+      expect(missing).toEqual([]);
+    });
+
+    it('returns no errors and empty missing for empty content', async () => {
+      mockPrisma.secret.findMany.mockResolvedValue([]);
+      mockPrisma.var.findMany.mockResolvedValue([]);
+
+      const { content, missing, templateErrors } = await resolveSecretPlaceholders('env-1', '');
+      expect(content).toBe('');
+      expect(missing).toEqual([]);
+      expect(templateErrors).toEqual([]);
+    });
+
+    it('behaves identically to pre-engine code path when content has no {{range}}', async () => {
+      // Regression guard: the secrets-only pipeline must still resolve ${KEY}
+      // exactly as before, with no spurious templateErrors.
+      mockPrisma.secret.findMany.mockResolvedValue([
+        { key: 'API_KEY', encryptedValue: 'enc1', nonce: 'n1' },
+      ]);
+      vi.mocked(decrypt).mockReturnValue('abc123');
+
+      const { content, missing, templateErrors } = await resolveSecretPlaceholders(
+        'env-1',
+        'token=${API_KEY} and {{NOT_A_RANGE}} stays'
+      );
+
+      expect(content).toBe('token=abc123 and {{NOT_A_RANGE}} stays');
+      expect(missing).toEqual([]);
+      expect(templateErrors).toEqual([]);
+    });
+
+    it('does not interpret $ patterns in var values as replacement metacharacters', async () => {
+      mockPrisma.server.findMany.mockResolvedValue([]);
+      mockPrisma.var.findMany.mockResolvedValueOnce([
+        { key: 'DB_PASS', value: 'pa$$word' },
+      ]);
+      mockPrisma.secret.findMany.mockResolvedValue([]);
+
+      const { content } = await resolveSecretPlaceholders(
+        'env-1',
+        'password: ${DB_PASS}'
+      );
+
+      // Without the function-replacement form, `$$` becomes `$` and the value
+      // is mangled to `pa$word`. Verify the literal preservation.
+      expect(content).toBe('password: pa$$word');
+    });
+
+    it('does not interpret $& or $1 patterns in secret values', async () => {
+      mockPrisma.server.findMany.mockResolvedValue([]);
+      mockPrisma.var.findMany.mockResolvedValue([]);
+      mockPrisma.secret.findMany.mockResolvedValue([
+        { key: 'TRICKY', encryptedValue: 'enc-tricky', nonce: 'n1' },
+      ]);
+      vi.mocked(decrypt).mockReturnValue('a$&b$1c');
+
+      const { content } = await resolveSecretPlaceholders(
+        'env-1',
+        'value=${TRICKY}'
+      );
+
+      expect(content).toBe('value=a$&b$1c');
+    });
+
+    it('resolves vars alongside server iteration without spurious missing', async () => {
+      // Realistic mix: range emits hostnames, vars supplies the port — no errors.
+      mockPrisma.server.findMany.mockResolvedValue([
+        { id: 's1', name: 'web-a', hostname: '10.0.0.1', publicIp: null, tags: '["web"]', environmentId: 'env-1' },
+      ]);
+      mockPrisma.var.findMany.mockResolvedValueOnce([
+        { key: 'PORT', value: '9090' },
+      ]);
+      mockPrisma.secret.findMany.mockResolvedValue([]);
+
+      const { content, missing, templateErrors } = await resolveSecretPlaceholders(
+        'env-1',
+        'upstreams = {{range servers tag="web"}}{{.hostname}}:${PORT} {{end}}'
+      );
+
+      expect(content).toBe('upstreams = 10.0.0.1:9090 ');
+      expect(missing).toEqual([]);
+      expect(templateErrors).toEqual([]);
     });
   });
 });

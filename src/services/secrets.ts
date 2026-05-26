@@ -1,5 +1,7 @@
 import { prisma } from '../lib/db.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
+import { renderTemplate } from './template-engine.js';
+import { listServersForTemplate } from './servers.js';
 
 export interface SecretInput {
   key: string;
@@ -148,34 +150,48 @@ export async function getVarsForEnv(
 }
 
 /**
- * Resolve ${KEY} placeholders in content with actual secret and var values.
- * Vars are resolved first, then secrets (secrets take precedence for same key).
- * Returns the resolved content and any missing keys.
+ * Resolve placeholders in a config-file template:
+ *   1. Server iteration: `{{range servers ...}}...{{end}}` blocks render first.
+ *   2. Variable / secret substitution: `${KEY}` then replaces (vars first,
+ *      secrets win on conflict).
+ *
+ * Returns the rendered content, any missing `${KEY}` references, and any
+ * template-engine errors (malformed range, unknown filter, unknown field,
+ * unclosed/nested range, etc).
  */
 export async function resolveSecretPlaceholders(
   environmentId: string,
   content: string
-): Promise<{ content: string; missing: string[] }> {
+): Promise<{ content: string; missing: string[]; templateErrors: string[] }> {
+  // Stage 1: server iteration. Pure function over the content + a server lookup.
+  const { content: templateContent, errors: templateErrors } = await renderTemplate(content, {
+    currentEnvironmentId: environmentId,
+    listServers: (filters) => listServersForTemplate(environmentId, filters),
+  });
+
+  // Stage 2: ${KEY} substitution. Same semantics as before.
   const [secrets, vars] = await Promise.all([
     getSecretsForEnv(environmentId),
     getVarsForEnv(environmentId),
   ]);
 
-  let resolvedContent = content;
+  let resolvedContent = templateContent;
 
-  // Resolve vars first
+  // Resolve vars first. Use the function-replacement form so `$`, `$&`, `$1`
+  // etc. in the value are preserved literally instead of being interpreted as
+  // String.replace replacement patterns (e.g. a secret like `pa$$word`).
   for (const [key, value] of Object.entries(vars)) {
-    resolvedContent = resolvedContent.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), value);
+    resolvedContent = resolvedContent.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), () => value);
   }
 
   // Then resolve secrets (overrides vars if same key)
   for (const [key, value] of Object.entries(secrets)) {
-    resolvedContent = resolvedContent.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), value);
+    resolvedContent = resolvedContent.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), () => value);
   }
 
   // Find any remaining unresolved placeholders
   const unresolved = resolvedContent.match(/\$\{[A-Z_][A-Z0-9_]*\}/g) || [];
   const missing = [...new Set(unresolved)].map((p) => p.slice(2, -1)); // Remove ${ and }
 
-  return { content: resolvedContent, missing };
+  return { content: resolvedContent, missing, templateErrors };
 }

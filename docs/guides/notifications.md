@@ -211,6 +211,16 @@ Example setup:
 
 If no routing matches, the notification goes to the **default channel** (if one is set and enabled).
 
+### Per-Environment Default Channel
+
+You can override the global default channel for a single environment without touching type-routing rules:
+
+1. Go to **Settings > Notifications** in the environment.
+2. Pick a channel (or **Inherit default** to clear the override).
+3. Click **Send Test Message** to verify the chosen channel is reachable.
+
+When set, the override only replaces the global default fallback — explicit `SlackTypeRouting` matches still win.
+
 ### Slack Message Format
 
 BRIDGEPORT sends rich Slack messages using Block Kit:

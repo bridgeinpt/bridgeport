@@ -185,7 +185,8 @@ Content-Type: application/json
 4. If `pullImage` is true, pulls the image (`docker pull <image>:<tag>`).
 5. Runs `docker compose up` (compose mode) or `docker restart` (direct mode).
 6. Verifies the container is running.
-7. Updates the deployment record to `success` or `failed` with logs and duration.
+7. Appends container output (`docker logs <container>`, last `defaultLogLines` lines with timestamps) to the deployment log. This runs on both the success and failure paths so a container that crashes immediately surfaces its internal error in the deployment plan view without needing SSH access. If the container does not exist (for example, `docker compose up` failed before creating it), a `--- container logs unavailable: <reason> ---` note is appended instead.
+8. Updates the deployment record to `success` or `failed` with logs and duration.
 
 **Response:**
 ```json
@@ -247,15 +248,20 @@ POST /api/services/:id/restart
 Authorization: Bearer <token>
 ```
 
-Connects to the server and runs `docker restart <container-name>`. The action is logged in the audit trail.
+For compose-managed services (those with a `composePath`), restart runs `docker compose ... rm -f -s <service>` followed by `docker compose ... up -d --force-recreate <service>`. This creates a **new** container so updated compose or config files are picked up. For services without a `composePath`, restart falls back to `docker restart <container-name>`. Restart does not regenerate compose artifacts — it always uses the current on-disk compose file. The action is logged in the audit trail.
 
 **View container logs:**
 ```http
-GET /api/services/:id/logs?tail=100
+GET /api/services/:id/logs?tail=100&before=2026-05-25T10:23:45Z
 Authorization: Bearer <token>
 ```
 
-Returns the last N lines of container logs. Default tail is 100.
+Returns container logs with timestamps. Query params:
+
+- `tail` (optional): number of lines to return. When omitted, falls back to the `defaultLogLines` system setting.
+- `before` (optional): ISO-8601 timestamp. When set, the endpoint returns up to `tail` lines whose timestamps are at or before this value — used by the service detail logs viewer to page back ("Load older").
+
+Output always includes Docker timestamps (`docker logs -t`), so the client can extract the oldest line's timestamp and request the next page with `before=<that timestamp>`.
 
 **Stream container logs (SSE):**
 ```http

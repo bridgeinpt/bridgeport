@@ -10,6 +10,7 @@ Config files let you store, version, and sync configuration to your servers via 
 - [Attaching Files to Services](#attaching-files-to-services)
 - [Syncing Files to Servers](#syncing-files-to-servers)
 - [Secret and Variable Placeholders](#secret-and-variable-placeholders)
+- [Iterating Over Servers](#iterating-over-servers)
 - [Edit History and Rollback](#edit-history-and-rollback)
 - [Sync Status](#sync-status)
 - [Auto Re-sync on Value Change](#auto-re-sync-on-value-change)
@@ -68,9 +69,14 @@ flowchart LR
 | **Name** | Yes | Display name (e.g., "App API .env"). Must be unique per environment. |
 | **Filename** | Yes | Target filename on the server (e.g., `.env`, `nginx.conf`, `docker-compose.yml`) |
 | **Content** | Yes | File content. Use `${SECRET_KEY}` for secret placeholders. |
+| **Language** | No | Syntax-highlighting hint for the editor. Auto-detected from **Filename** on save when omitted (e.g., `*.yml` → `yaml`, `Dockerfile` → `dockerfile`, `Caddyfile` → `nginx`). Override via the **Language** dropdown next to the editor. Stored on the row and reused for the read-only viewer and history diffs. |
 | **Description** | No | Optional documentation |
 
 4. Click **Create**.
+
+The content editor uses CodeMirror with syntax highlighting. Supported language values:
+`plaintext`, `yaml`, `json`, `env`, `toml`, `ini`, `conf`, `sh`, `dockerfile`, `nginx`, `sql`.
+Unknown filenames fall back to `plaintext`.
 
 ### Text Files (API)
 
@@ -268,6 +274,79 @@ DEBUG=false
 
 ---
 
+## Iterating Over Servers
+
+In addition to `${KEY}` substitution, config files can enumerate the servers in an environment using a Go-style range block. This is useful for generating reverse-proxy upstreams, cluster member lists, or any output where the body repeats once per matching server.
+
+### Syntax
+
+```
+{{range servers <filter>="<value>" [<filter>="<value>"]...}}<body>{{end}}
+```
+
+- `<body>` is rendered once per matching server.
+- Inside the body, `{{.field}}` interpolates a per-server attribute.
+- The empty set renders to an empty string -- no error is raised.
+- Servers are emitted in a **stable alphabetical order by name** so the rendered output is deterministic (this matters because it feeds into SHA-256 checksums used for deployment-artifact change detection).
+
+### Filters
+
+| Filter | Description |
+|--------|-------------|
+| `tag="web"` | Server's `tags` array contains the exact value `web`. |
+| `name="api-*"` | Glob match against server name. Supports `*` (any chars) and `?` (single char). |
+| `environment="staging"` | Match servers in another environment by name or id. Defaults to the config file's environment when omitted. |
+
+Filters combine with logical AND.
+
+### Per-server fields
+
+| Field | Source |
+|-------|--------|
+| `.name` | Server name (e.g., `api-1`). |
+| `.hostname` | Server hostname / private address. |
+| `.privateIp` | Alias of `.hostname`. |
+| `.publicIp` | Reserved public IP, or empty string if not set. |
+| `.id` | Internal server id. |
+| `.tags` | Comma-joined tag list (e.g., `web,api`). |
+
+Referencing an unknown field (e.g., `{{.bogus}}`) emits empty and records a template error during sync.
+
+### Example: Caddyfile upstream
+
+```caddyfile
+api.example.com {
+  reverse_proxy {{range servers tag="web"}}{{.privateIp}}:8000 {{end}}
+}
+```
+
+After sync (with two `web`-tagged servers `api-1` and `api-2`):
+
+```caddyfile
+api.example.com {
+  reverse_proxy 10.0.0.1:8000 10.0.0.2:8000
+}
+```
+
+### Example: Cluster member list with secret
+
+```yaml
+# Servers iterated, then ${CLUSTER_SECRET} substituted in stage 2.
+peers:
+{{range servers tag="cluster"}}  - id: {{.id}}
+    addr: {{.privateIp}}:7000
+    name: {{.name}}
+{{end}}cluster_secret: ${CLUSTER_SECRET}
+```
+
+### Limitations
+
+- **No nesting.** A `{{range}}` block cannot contain another `{{range}}` block; this is reported as a template error during sync.
+- **`{{range}}` and `{{end}}` are the only interpreted directives.** Any other `{{...}}` content passes through verbatim, so existing literal usages are unaffected.
+- **Unclosed `{{range}}` blocks** are reported as a template error and the unterminated content is left in place.
+
+---
+
 ## Edit History and Rollback
 
 Every content edit to a config file creates a history entry with the previous content, who made the edit, and when.
@@ -437,6 +516,7 @@ Any text-based configuration file can be managed through BRIDGEPORT. Sync cronta
 | `mimeType` | string | null | MIME type for binary files |
 | `fileSize` | integer | null | Size in bytes (for binary files) |
 | `autoResync` | boolean | true | Auto re-sync attached services when a referenced `${KEY}` secret or var changes (see [Auto Re-sync on Value Change](#auto-re-sync-on-value-change)) |
+| `language` | string | `plaintext` | Syntax-highlighting hint (`yaml`, `json`, `env`, `toml`, `ini`, `conf`, `sh`, `dockerfile`, `nginx`, `sql`, `plaintext`). Auto-detected from `filename` on create when omitted. |
 
 ### Service Attachment Fields
 
@@ -460,6 +540,9 @@ Any text-based configuration file can be managed through BRIDGEPORT. Sync cronta
 
 **"Missing secrets: KEY1, KEY2" during sync**
 The config file references secrets that do not exist in this environment. Create the missing secrets at Configuration > Secrets, then retry the sync.
+
+**"Template errors: ..." during sync**
+The config file uses `{{range servers ...}}` syntax but the template is malformed (unknown filter, unknown field, nested range, unclosed range, etc.). The error message lists the specific issue(s). See [Iterating Over Servers](#iterating-over-servers) for the supported syntax.
 
 **"Failed to write file" during sync**
 The SSH connection succeeded but writing to the target path failed. Common causes:

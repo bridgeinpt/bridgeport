@@ -124,6 +124,7 @@ beforeEach(() => {
   vi.mocked(resolveSecretPlaceholders).mockResolvedValue({
     content: 'upstream { server 1.2.3.4; }',
     missing: [],
+    templateErrors: [],
   });
 });
 
@@ -362,6 +363,7 @@ describe('syncConfigFileToAttachedServices', () => {
     vi.mocked(resolveSecretPlaceholders).mockResolvedValue({
       content: 'upstream { server ${SECRET_A}; }',
       missing: ['SECRET_A'],
+      templateErrors: [],
     });
 
     const result = await syncConfigFileToAttachedServices('cf-1');
