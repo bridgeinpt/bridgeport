@@ -17,6 +17,7 @@ import {
 } from '../services/metrics.js';
 import { checkDueBackups } from '../services/database-backup.js';
 import { sendSystemNotification, NOTIFICATION_TYPES, cleanupOldNotifications } from '../services/notifications.js';
+import { drain as drainNotificationQueue } from '../services/notification-queue.js';
 import pLimit from 'p-limit';
 import { recordFailure, recordSuccess } from '../services/bounce-tracker.js';
 import { buildDeploymentPlan, executePlan } from '../services/orchestration.js';
@@ -934,6 +935,15 @@ export function startScheduler(config: Partial<GlobalSchedulerConfig> = {}): voi
   timers.set('auditLogCleanup', setInterval(runAuditLogCleanup, 24 * 60 * 60 * 1000)); // Daily
   timers.set('digestCleanup', setInterval(runDigestCleanup, 24 * 60 * 60 * 1000)); // Daily
   timers.set('imagePrune', setInterval(runImagePrune, 7 * 24 * 60 * 60 * 1000)); // Weekly
+
+  // Notification queue drain — safety net in case the setImmediate kick on
+  // enqueue is missed (e.g. process under heavy load). Most drains happen on
+  // enqueue; this interval is a no-op when the queue is empty.
+  timers.set('notificationQueue', setInterval(() => {
+    drainNotificationQueue().catch((err) => {
+      console.error('[Scheduler] Notification queue drain failed:', err);
+    });
+  }, 250));
 }
 
 /**

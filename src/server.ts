@@ -35,6 +35,7 @@ import { webhookAdminRoutes } from './routes/admin/webhooks.js';
 import { slackAdminRoutes } from './routes/admin/slack.js';
 import { sentryAdminRoutes } from './routes/admin/sentry.js';
 import { initializeNotificationTypes } from './services/notifications.js';
+import { flushNotificationQueue } from './services/notification-queue.js';
 import { syncPlugins } from './services/plugin-loader.js';
 import { containerImageRoutes } from './routes/container-images.js';
 import { serviceDependencyRoutes } from './routes/service-dependencies.js';
@@ -263,6 +264,10 @@ async function buildServer() {
     stopScheduler();
     sshPool.shutdown();
     await fastify.close();
+    // Drain any pending notification fan-out jobs (bounded so a stuck consumer
+    // doesn't block shutdown). Must run before disconnectDatabase() because
+    // the consumer writes notification rows.
+    await flushNotificationQueue(5000);
     await disconnectDatabase();
     await flushSentry();
     process.exit(0);
