@@ -128,12 +128,15 @@ export async function getServer(
   });
 }
 
-export type ServerWithServicesCount = Server & { _count: { services: number } };
+// List endpoint omits lastHealthCheckError (potentially multi-KB error blob);
+// detail views still load the full Server when needed.
+export type ServerListItem = Omit<Server, 'lastHealthCheckError'>;
+export type ServerListItemWithServicesCount = ServerListItem & { _count: { services: number } };
 
 export async function listServers(
   environmentId: string,
   options?: { limit?: number; offset?: number; includeServicesCount?: boolean }
-): Promise<{ servers: (Server | ServerWithServicesCount)[]; total: number }> {
+): Promise<{ servers: (ServerListItem | ServerListItemWithServicesCount)[]; total: number }> {
   const limit = options?.limit ?? 25;
   const offset = options?.offset ?? 0;
   const where = { environmentId };
@@ -149,6 +152,10 @@ export async function listServers(
     prisma.server.findMany({
       where,
       orderBy: { name: 'asc' },
+      // omit lastHealthCheckError: TEXT column may carry multi-KB error
+      // messages and this is a paginated list endpoint that gets polled.
+      // Detail views still load it explicitly when needed.
+      omit: { lastHealthCheckError: true },
       take: limit,
       skip: offset,
       ...(include ? { include } : {}),
@@ -158,9 +165,9 @@ export async function listServers(
 
   // Translate the prisma-shaped `_count.serviceDeployments` to the public
   // `_count.services` shape consumers (UI, CLI) expect.
-  const servers: (Server | ServerWithServicesCount)[] = options?.includeServicesCount
+  const servers: (ServerListItem | ServerListItemWithServicesCount)[] = options?.includeServicesCount
     ? rawServers.map((s) => {
-        const withCount = s as Server & { _count?: { serviceDeployments?: number } };
+        const withCount = s as ServerListItem & { _count?: { serviceDeployments?: number } };
         const { _count, ...rest } = withCount;
         return { ...rest, _count: { services: _count?.serviceDeployments ?? 0 } };
       })

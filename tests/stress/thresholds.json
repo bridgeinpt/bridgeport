@@ -73,13 +73,13 @@
     },
     "secrets-list": {
       "path": "/api/environments/{envId}/secrets",
-      "maxP99Ms": 50,
-      "minRps": 500
+      "maxP99Ms": 15,
+      "minRps": 3000
     },
     "vars-list": {
       "path": "/api/environments/{envId}/vars",
-      "maxP99Ms": 50,
-      "minRps": 500
+      "maxP99Ms": 15,
+      "minRps": 3000
     },
     "audit-logs": {
       "path": "/api/audit-logs?envId={envId}&limit=50",
