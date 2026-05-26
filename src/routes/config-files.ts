@@ -10,6 +10,7 @@ import { resolveSecretPlaceholders } from '../services/secrets.js';
 import { syncConfigFileToAttachedServices } from '../services/config-file-auto-resync.js';
 import { validateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery } from '../lib/helpers.js';
 import { detectLanguage } from '../lib/config-file-language.js';
+import { syncUsageForConfigFile } from '../lib/key-usage-extraction.js';
 
 const createConfigFileSchema = z.object({
   name: z.string().min(1),
@@ -210,6 +211,11 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           },
         });
 
+        // Populate Secret/VarUsage rows so the secrets/vars list endpoints can
+        // resolve "where is this key used?" via a join instead of scanning
+        // content. Binary files skip extraction inside the helper.
+        await syncUsageForConfigFile(prisma, configFile);
+
         await logAudit({
           action: 'create',
           resourceType: 'config_file',
@@ -263,6 +269,12 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           where: { id },
           data: body,
         });
+
+        // Re-sync Secret/VarUsage rows whenever the content or isBinary flag
+        // could have changed. Cheap when nothing changed (single findMany).
+        if (body.content !== undefined || body.isBinary !== undefined) {
+          await syncUsageForConfigFile(prisma, configFile);
+        }
 
         await logAudit({
           action: 'update',
@@ -350,6 +362,9 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         where: { id },
         data: { content: historyEntry.content },
       });
+
+      // Re-sync usage rows for the restored content.
+      await syncUsageForConfigFile(prisma, updated);
 
       await logAudit({
         action: 'restore',
@@ -1147,6 +1162,10 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
             environmentId: envId,
           },
         });
+
+        // Binary assets produce no usage; the helper still no-ops cleanly so
+        // we call it for consistency with the other write paths.
+        await syncUsageForConfigFile(prisma, configFile);
 
         await logAudit({
           action: 'create',

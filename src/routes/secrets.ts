@@ -38,7 +38,11 @@ const updateVarSchema = z.object({
 });
 
 export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
-  // List secrets (without values) with usage information
+  // List secrets (without values) with usage information.
+  //
+  // Usage is resolved via the SecretUsage join table (maintained on every
+  // ConfigFile content write) — replaces the previous per-content regex scan
+  // that was O(secrets × configFiles × content size).
   fastify.get(
     '/api/environments/:envId/secrets',
     { preHandler: [fastify.authenticate] },
@@ -46,21 +50,24 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
       const { envId } = request.params as { envId: string };
       const secrets = await listSecrets(envId);
 
-      // Get all config files for this environment to check for secret usage
-      const configFiles = await prisma.configFile.findMany({
-        where: { environmentId: envId },
+      const usages = await prisma.secretUsage.findMany({
+        where: { environmentId: envId, secretKey: { in: secrets.map((s) => s.key) } },
         select: {
-          id: true,
-          name: true,
-          filename: true,
-          content: true,
-          services: {
+          secretKey: true,
+          configFile: {
             select: {
-              service: {
+              id: true,
+              name: true,
+              filename: true,
+              services: {
                 select: {
-                  id: true,
-                  name: true,
-                  serviceDeployments: { select: { server: { select: { id: true, name: true } } } },
+                  service: {
+                    select: {
+                      id: true,
+                      name: true,
+                      serviceDeployments: { select: { server: { select: { id: true, name: true } } } },
+                    },
+                  },
                 },
               },
             },
@@ -68,45 +75,31 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
         },
       });
 
-      // Build usage map for each secret
+      // Group rows by secretKey so we can attach them to the matching secret
+      // when building the response — preserves the prior `usedByConfigFiles`
+      // / `usedByServices` / `usageCount` shape exactly.
+      const usagesByKey = new Map<string, typeof usages>();
+      for (const row of usages) {
+        const list = usagesByKey.get(row.secretKey);
+        if (list) list.push(row);
+        else usagesByKey.set(row.secretKey, [row]);
+      }
+
       const secretsWithUsage = secrets.map((secret) => {
-        // Look for patterns like ${SECRET_KEY}, $SECRET_KEY, or {{SECRET_KEY}}
-        const keyPatterns = [
-          `\${${secret.key}}`,
-          `$${secret.key}`,
-          `{{${secret.key}}}`,
-          // Also look for the key in .env file format: KEY=
-          new RegExp(`^${secret.key}=`, 'm'),
-        ];
+        const rows = usagesByKey.get(secret.key) ?? [];
 
-        const usedByConfigFiles: Array<{
-          id: string;
-          name: string;
-          filename: string;
-          services: Array<{ id: string; name: string; serverName: string }>;
-        }> = [];
-
-        for (const file of configFiles) {
-          const contentMatches = keyPatterns.some((pattern) => {
-            if (pattern instanceof RegExp) {
-              return pattern.test(file.content);
-            }
-            return file.content.includes(pattern);
-          });
-
-          if (contentMatches) {
-            usedByConfigFiles.push({
-              id: file.id,
-              name: file.name,
-              filename: file.filename,
-              services: file.services.flatMap((sf) => sf.service.serviceDeployments.map((sd) => ({
-                id: sf.service.id,
-                name: sf.service.name,
-                serverName: sd.server.name,
-              }))),
-            });
-          }
-        }
+        const usedByConfigFiles = rows.map((row) => ({
+          id: row.configFile.id,
+          name: row.configFile.name,
+          filename: row.configFile.filename,
+          services: row.configFile.services.flatMap((sf) =>
+            sf.service.serviceDeployments.map((sd) => ({
+              id: sf.service.id,
+              name: sf.service.name,
+              serverName: sd.server.name,
+            }))
+          ),
+        }));
 
         // Derive unique services that use this secret
         const usedByServices = new Map<string, { id: string; name: string; serverName: string }>();
@@ -313,7 +306,10 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
 
   // ── Var endpoints ──────────────────────────────────────────────────────
 
-  // List vars with usage information
+  // List vars with usage information.
+  //
+  // Mirrors the secrets list: usage is resolved via the VarUsage join table
+  // instead of re-scanning every ConfigFile's content per request.
   fastify.get(
     '/api/environments/:envId/vars',
     { preHandler: [fastify.authenticate] },
@@ -333,21 +329,24 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
         orderBy: { key: 'asc' },
       });
 
-      // Get all config files for this environment to check for var usage
-      const configFiles = await prisma.configFile.findMany({
-        where: { environmentId: envId },
+      const usages = await prisma.varUsage.findMany({
+        where: { environmentId: envId, varKey: { in: vars.map((v) => v.key) } },
         select: {
-          id: true,
-          name: true,
-          filename: true,
-          content: true,
-          services: {
+          varKey: true,
+          configFile: {
             select: {
-              service: {
+              id: true,
+              name: true,
+              filename: true,
+              services: {
                 select: {
-                  id: true,
-                  name: true,
-                  serviceDeployments: { select: { server: { select: { id: true, name: true } } } },
+                  service: {
+                    select: {
+                      id: true,
+                      name: true,
+                      serviceDeployments: { select: { server: { select: { id: true, name: true } } } },
+                    },
+                  },
                 },
               },
             },
@@ -355,43 +354,28 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
         },
       });
 
-      // Build usage map for each var
+      const usagesByKey = new Map<string, typeof usages>();
+      for (const row of usages) {
+        const list = usagesByKey.get(row.varKey);
+        if (list) list.push(row);
+        else usagesByKey.set(row.varKey, [row]);
+      }
+
       const varsWithUsage = vars.map((v) => {
-        const keyPatterns = [
-          `\${${v.key}}`,
-          `$${v.key}`,
-          `{{${v.key}}}`,
-          new RegExp(`^${v.key}=`, 'm'),
-        ];
+        const rows = usagesByKey.get(v.key) ?? [];
 
-        const usedByConfigFiles: Array<{
-          id: string;
-          name: string;
-          filename: string;
-          services: Array<{ id: string; name: string; serverName: string }>;
-        }> = [];
-
-        for (const file of configFiles) {
-          const contentMatches = keyPatterns.some((pattern) => {
-            if (pattern instanceof RegExp) {
-              return pattern.test(file.content);
-            }
-            return file.content.includes(pattern);
-          });
-
-          if (contentMatches) {
-            usedByConfigFiles.push({
-              id: file.id,
-              name: file.name,
-              filename: file.filename,
-              services: file.services.flatMap((sf) => sf.service.serviceDeployments.map((sd) => ({
-                id: sf.service.id,
-                name: sf.service.name,
-                serverName: sd.server.name,
-              }))),
-            });
-          }
-        }
+        const usedByConfigFiles = rows.map((row) => ({
+          id: row.configFile.id,
+          name: row.configFile.name,
+          filename: row.configFile.filename,
+          services: row.configFile.services.flatMap((sf) =>
+            sf.service.serviceDeployments.map((sd) => ({
+              id: sf.service.id,
+              name: sf.service.name,
+              serverName: sd.server.name,
+            }))
+          ),
+        }));
 
         const usedByServices = new Map<string, { id: string; name: string; serverName: string }>();
         for (const file of usedByConfigFiles) {

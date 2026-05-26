@@ -19,6 +19,7 @@ import {
   createTestImageDigest,
   createTestService,
 } from '../factories/index.js';
+import { syncUsageForConfigFile } from '../../src/lib/key-usage-extraction.js';
 
 export interface StressSeedOptions {
   /** Number of servers per environment (drives N for ServerMetrics N+1). */
@@ -50,8 +51,12 @@ export const DEFAULT_SEED: StressSeedOptions = {
   metricIntervalMin: 5,
   containerImages: 15,
   digestsPerImage: 4,
-  secrets: 20,
-  configFiles: 6,
+  // Bumped (100 secrets × 30 config files × ~50 KB content) to exercise the
+  // new SecretUsage/VarUsage join-table read path under realistic load. The
+  // tighter threshold for `secrets-list` / `vars-list` rejects any regression
+  // back to the old content-scan implementation.
+  secrets: 100,
+  configFiles: 30,
   auditLogs: 200,
   healthLogsPerResource: 5,
 };
@@ -82,10 +87,12 @@ const SECRET_KEYS = [
 ];
 
 function compose(env: string, vars: string[]): string {
-  // A modestly-sized compose-style config file that references many secrets,
-  // so the secrets/vars usage-scan has real work to do per render.
+  // A compose-style config file that references many secrets, padded out to
+  // roughly 50 KB so the read path has realistic content sizes to scan. The
+  // old (regex-per-key) implementation slows quadratically here — the join
+  // table makes it O(usage-rows), independent of file size.
   const refs = vars.map((v, i) => `      - ${v}=\${${v}}\n      - APP_${i}_VAR=\$${v}`).join('\n');
-  return [
+  const body = [
     'version: "3.9"',
     'services:',
     `  app-${env}:`,
@@ -95,6 +102,11 @@ function compose(env: string, vars: string[]): string {
     '    ports:',
     '      - "8080:8080"',
   ].join('\n');
+  // Repeat the body until it's ~50 KB. Keeps the placeholder references the
+  // same (so usage counts stay deterministic) while growing total file size.
+  const targetBytes = 50_000;
+  const repeats = Math.max(1, Math.ceil(targetBytes / Math.max(1, body.length)));
+  return Array.from({ length: repeats }, () => body).join('\n# ---\n');
 }
 
 export async function seedStressData(
@@ -244,6 +256,10 @@ export async function seedStressData(
         environmentId: env.id,
       },
     });
+    // Populate SecretUsage/VarUsage rows so the secrets/vars list endpoints
+    // can resolve usage without scanning content (matches what the API does
+    // on a real config-file create).
+    await syncUsageForConfigFile(prisma, file);
     configFileIds.push(file.id);
   }
 

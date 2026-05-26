@@ -7,6 +7,7 @@ import { userIdForFk } from '../services/auth.js';
 import { validateBody, getErrorMessage } from '../lib/helpers.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
 import { extractKeyValues, substituteFullValue } from '../lib/config-scan-parsing.js';
+import { syncUsageForConfigFile } from '../lib/key-usage-extraction.js';
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -481,10 +482,14 @@ export async function configScanRoutes(fastify: FastifyInstance): Promise<void> 
           });
 
           // Update file content
-          await prisma.configFile.update({
+          const updated = await prisma.configFile.update({
             where: { id: file.id },
             data: { content: newContent },
           });
+
+          // Content changed — re-sync Secret/VarUsage rows so the secrets/vars
+          // list endpoints see the newly-substituted placeholder.
+          await syncUsageForConfigFile(prisma, updated);
 
           await logAudit({
             action: 'update',

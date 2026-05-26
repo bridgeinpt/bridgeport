@@ -502,6 +502,9 @@ Environment        - Logical grouping with SSH key, per-module settings (General
 Server             - Physical/virtual machine with metricsMode, dockerMode (ssh/socket), agent status tracking
 Service            - Docker container linked to ContainerImage, with dependencies, health config, TCP/cert checks
 Secret             - Encrypted key-value with neverReveal flag
+SecretUsage        - Join table: which config files reference each secret key (maintained on every ConfigFile write)
+Var                - Plaintext key-value (non-sensitive) for templating config files
+VarUsage           - Join table: which config files reference each var key
 ConfigFile         - Synced configuration files (text + binary support with isBinary, mimeType)
 FileHistory        - Edit history for config files
 Deployment         - Deployment record with logs, duration, linked to ContainerImageHistory
