@@ -69,9 +69,14 @@ flowchart LR
 | **Name** | Yes | Display name (e.g., "App API .env"). Must be unique per environment. |
 | **Filename** | Yes | Target filename on the server (e.g., `.env`, `nginx.conf`, `docker-compose.yml`) |
 | **Content** | Yes | File content. Use `${SECRET_KEY}` for secret placeholders. |
+| **Language** | No | Syntax-highlighting hint for the editor. Auto-detected from **Filename** on save when omitted (e.g., `*.yml` → `yaml`, `Dockerfile` → `dockerfile`, `Caddyfile` → `nginx`). Override via the **Language** dropdown next to the editor. Stored on the row and reused for the read-only viewer and history diffs. |
 | **Description** | No | Optional documentation |
 
 4. Click **Create**.
+
+The content editor uses CodeMirror with syntax highlighting. Supported language values:
+`plaintext`, `yaml`, `json`, `env`, `toml`, `ini`, `conf`, `sh`, `dockerfile`, `nginx`, `sql`.
+Unknown filenames fall back to `plaintext`.
 
 ### Text Files (API)
 
@@ -511,6 +516,7 @@ Any text-based configuration file can be managed through BRIDGEPORT. Sync cronta
 | `mimeType` | string | null | MIME type for binary files |
 | `fileSize` | integer | null | Size in bytes (for binary files) |
 | `autoResync` | boolean | true | Auto re-sync attached services when a referenced `${KEY}` secret or var changes (see [Auto Re-sync on Value Change](#auto-re-sync-on-value-change)) |
+| `language` | string | `plaintext` | Syntax-highlighting hint (`yaml`, `json`, `env`, `toml`, `ini`, `conf`, `sh`, `dockerfile`, `nginx`, `sql`, `plaintext`). Auto-detected from `filename` on create when omitted. |
 
 ### Service Attachment Fields
 

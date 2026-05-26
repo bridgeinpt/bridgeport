@@ -974,4 +974,23 @@ export class DockerSSH {
       throw new Error(`Failed to pull compose images: ${stderr}`);
     }
   }
+
+  /**
+   * Stop and remove containers defined in a compose file. When `serviceName`
+   * is provided we use `rm -f -s <service>` so only that service is torn down
+   * (leaving sibling services in the same compose project alone). Without a
+   * service name we run a full `down`.
+   */
+  async composeDown(composePath: string, serviceName?: string): Promise<void> {
+    const compose = await this.getComposeCommand();
+    const escapedPath = shellEscape(composePath);
+    const cmd = serviceName
+      ? `${compose} -f ${escapedPath} rm -f -s ${shellEscape(serviceName)}`
+      : `${compose} -f ${escapedPath} down`;
+
+    const { code, stderr } = await this.client.exec(this.pathPrefix + cmd);
+    if (code !== 0) {
+      throw new Error(`Failed to run compose down: ${stderr}`);
+    }
+  }
 }

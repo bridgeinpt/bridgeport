@@ -11,6 +11,7 @@ Every environment in BRIDGEPORT has per-environment settings organized into five
 - [Operations Settings](#operations-settings)
 - [Data Settings](#data-settings)
 - [Configuration Settings](#configuration-settings)
+- [Notification Settings](#notification-settings)
 - [Related Docs](#related-docs)
 
 ---
@@ -192,6 +193,26 @@ Controls sensitivity of the [config file scanner](../guides/secrets.md#config-fi
 |---------|------|---------|-------|-------------|
 | `scanMinLength` | `integer` | `6` | 1 -- 100 | Minimum value length to consider. Shorter values are ignored. |
 | `scanEntropyThreshold` | `integer` | `25` | 0 -- 80 | Shannon entropy threshold stored as ×10 (25 = 2.5 bits/char). Values below this are filtered out as low-entropy. |
+
+---
+
+## Notification Settings
+
+Per-environment notification routing. Lives outside the module registry because the channel options are dynamic (Slack channels are defined in **Admin > Slack**). Configured under **Settings > Notifications** for each environment.
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `slackChannelId` | `string \| null` | `null` (inherit) | Override the global default Slack channel for unrouted notifications in this environment. When `null`, notifications fall back to the global default channel (the one marked `isDefault`). Explicit `SlackTypeRouting` rules still take precedence over this override. |
+
+**API:**
+
+```bash
+GET    /api/environments/:envId/settings/notifications
+PATCH  /api/environments/:envId/settings/notifications     # { "slackChannelId": "<id>" | null }
+POST   /api/environments/:envId/settings/notifications/test
+```
+
+`GET` returns `{ settings, channels, defaultChannel }` — `channels` is the list of enabled Slack channels (so the UI can render a dropdown), and `defaultChannel` is the global default (so the UI can show "Inherits default: #channel-name"). The `test` endpoint sends a Slack test message through the resolved channel (override if set, otherwise the global default).
 
 ---
 

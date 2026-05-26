@@ -316,6 +316,15 @@ export default function ServiceDetail() {
     setRestarting(true);
     try {
       await restartService(id);
+      // Refetch the service so container ID, uptime, and status reflect the
+      // freshly recreated container (compose-managed services get a new
+      // container on restart, not just a bounce of the old one).
+      const [{ service: refreshed }, { logs: history }] = await Promise.all([
+        getService(id),
+        getServiceHistory(id, 20),
+      ]);
+      setService(refreshed);
+      setActionHistory(history);
     } finally {
       setRestarting(false);
     }

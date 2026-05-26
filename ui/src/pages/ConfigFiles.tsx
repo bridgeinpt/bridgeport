@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { useAppStore } from '../lib/store.js';
 import { usePaginatedFetch } from '../hooks/usePaginatedFetch.js';
 import {
@@ -24,6 +25,7 @@ import Pagination from '../components/Pagination.js';
 import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { OperationResultsModal, type OperationResult } from '../components/OperationResultsModal.js';
+import { ConfigFileEditor, SUPPORTED_LANGUAGES } from '../components/ConfigFileEditor.js';
 
 interface ServiceOption {
   id: string;
@@ -74,11 +76,14 @@ export default function ConfigFiles() {
   const [newContent, setNewContent] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [newAutoResync, setNewAutoResync] = useState(true);
+  const [newLanguage, setNewLanguage] = useState<string>('plaintext');
+  const [newLanguageDirty, setNewLanguageDirty] = useState(false);
   const [creating, setCreating] = useState(false);
   const [editingFile, setEditingFile] = useState<ConfigFile | null>(null);
   const [editContent, setEditContent] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editAutoResync, setEditAutoResync] = useState(true);
+  const [editLanguage, setEditLanguage] = useState<string>('plaintext');
   const [viewingFile, setViewingFile] = useState<(ConfigFile & { services: Array<{ targetPath: string; service: { id: string; name: string; server: { id: string; name: string } } }> }) | null>(null);
   const [historyFile, setHistoryFile] = useState<ConfigFile | null>(null);
   const [history, setHistory] = useState<FileHistoryEntry[]>([]);
@@ -105,6 +110,9 @@ export default function ConfigFiles() {
         content: newContent,
         description: newDescription || undefined,
         autoResync: newAutoResync,
+        // Only send `language` when the user explicitly chose one — otherwise
+        // let the server auto-detect from `filename`.
+        ...(newLanguageDirty ? { language: newLanguage } : {}),
       });
       reload();
       setShowCreate(false);
@@ -113,6 +121,8 @@ export default function ConfigFiles() {
       setNewContent('');
       setNewDescription('');
       setNewAutoResync(true);
+      setNewLanguage('plaintext');
+      setNewLanguageDirty(false);
     } finally {
       setCreating(false);
     }
@@ -124,6 +134,7 @@ export default function ConfigFiles() {
       content: editContent,
       description: editDescription || undefined,
       autoResync: editAutoResync,
+      language: editLanguage,
     });
     setEditingFile(null);
     setEditContent('');
@@ -175,6 +186,7 @@ export default function ConfigFiles() {
     setEditContent(file.content || '');
     setEditDescription(file.description || '');
     setEditAutoResync(file.autoResync ?? true);
+    setEditLanguage(file.language || 'plaintext');
   };
 
   const handleViewHistory = async (file: ConfigFile) => {
@@ -330,15 +342,40 @@ export default function ConfigFiles() {
             />
           </div>
           <div>
-            <label className="block text-sm text-slate-400 mb-1">Content</label>
-            <textarea
+            <div className="flex items-end justify-between mb-1 gap-3">
+              <label className="block text-sm text-slate-400">Content</label>
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-slate-500" htmlFor="new-language">
+                  Language
+                </label>
+                <select
+                  id="new-language"
+                  value={newLanguage}
+                  onChange={(e) => {
+                    setNewLanguage(e.target.value);
+                    setNewLanguageDirty(true);
+                  }}
+                  className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-white"
+                >
+                  {SUPPORTED_LANGUAGES.map((lang) => (
+                    <option key={lang} value={lang}>
+                      {lang}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <ConfigFileEditor
               value={newContent}
-              onChange={(e) => setNewContent(e.target.value)}
-              placeholder="Paste file content here..."
-              rows={15}
-              className="input font-mono text-sm"
-              required
+              onChange={setNewContent}
+              language={newLanguage}
+              height="22rem"
             />
+            {!newLanguageDirty && (
+              <p className="text-xs text-slate-500 mt-1">
+                Language is auto-detected from the filename on save.
+              </p>
+            )}
           </div>
           <div>
             <label className="flex items-center gap-2 text-sm text-slate-300">
@@ -363,6 +400,8 @@ export default function ConfigFiles() {
                 setNewContent('');
                 setNewDescription('');
                 setNewAutoResync(true);
+                setNewLanguage('plaintext');
+                setNewLanguageDirty(false);
               }}
               className="btn btn-ghost"
             >
@@ -493,7 +532,28 @@ export default function ConfigFiles() {
             />
           </div>
           <div>
-            <label className="block text-sm text-slate-400 mb-1">Content</label>
+            <div className="flex items-end justify-between mb-1 gap-3">
+              <label className="block text-sm text-slate-400">Content</label>
+              {!editingFile?.isBinary && (
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-slate-500" htmlFor="edit-language">
+                    Language
+                  </label>
+                  <select
+                    id="edit-language"
+                    value={editLanguage}
+                    onChange={(e) => setEditLanguage(e.target.value)}
+                    className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-white"
+                  >
+                    {SUPPORTED_LANGUAGES.map((lang) => (
+                      <option key={lang} value={lang}>
+                        {lang}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
             {editingFile?.isBinary ? (
               <div className="p-4 bg-slate-800/50 rounded-lg border border-slate-700">
                 <div className="flex items-center gap-3 text-slate-400">
@@ -512,11 +572,11 @@ export default function ConfigFiles() {
                 </div>
               </div>
             ) : (
-              <textarea
+              <ConfigFileEditor
                 value={editContent}
-                onChange={(e) => setEditContent(e.target.value)}
-                rows={20}
-                className="input font-mono text-sm"
+                onChange={setEditContent}
+                language={editLanguage}
+                height="28rem"
                 autoFocus
               />
             )}
@@ -575,7 +635,12 @@ export default function ConfigFiles() {
                     <div key={sf.service.id} className="flex items-center gap-2 text-sm">
                       <span className="text-white">{sf.service.server.name}</span>
                       <span className="text-slate-500">/</span>
-                      <span className="text-primary-400">{sf.service.name}</span>
+                      <Link
+                        to={`/services/${sf.service.id}`}
+                        className="text-primary-400 hover:text-primary-300 hover:underline"
+                      >
+                        {sf.service.name}
+                      </Link>
                       <span className="text-slate-500">→</span>
                       <code className="text-green-400 text-xs">{sf.targetPath}</code>
                       {sf.syncStatus && (
@@ -605,9 +670,13 @@ export default function ConfigFiles() {
                 </div>
               </div>
             ) : (
-              <pre className="flex-1 overflow-auto p-4 bg-slate-950 rounded-lg text-sm font-mono text-slate-300">
-                {viewingFile.content || ''}
-              </pre>
+              <ConfigFileEditor
+                value={viewingFile.content || ''}
+                language={viewingFile.language || 'plaintext'}
+                readOnly
+                height="60vh"
+                className="flex-1"
+              />
             )}
 
             <div className="mt-4 flex justify-end gap-2">
@@ -708,9 +777,13 @@ export default function ConfigFiles() {
                       Binary file — content not available
                     </div>
                   ) : (
-                    <pre className="flex-1 overflow-auto p-4 bg-slate-950 rounded-lg text-sm font-mono text-slate-300">
-                      {selectedHistoryEntry.content || ''}
-                    </pre>
+                    <ConfigFileEditor
+                      value={selectedHistoryEntry.content || ''}
+                      language={historyFile?.language || 'plaintext'}
+                      readOnly
+                      height="100%"
+                      className="flex-1"
+                    />
                   )}
                 </>
               ) : (

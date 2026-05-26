@@ -471,15 +471,33 @@ export async function dispatchSlackNotification(
     return true;
   });
 
-  // If no specific routings match, use default channel
+  // If no specific routings match, use default channel — but allow a
+  // per-environment override (NotificationSettings.slackChannelId) to take
+  // precedence over the global default. Explicit SlackTypeRouting matches
+  // above are NOT overridden here.
   let channelsToNotify: SlackChannel[] = matchingRoutings.map((r) => r.channel);
 
   if (channelsToNotify.length === 0) {
-    const defaultChannel = await prisma.slackChannel.findFirst({
-      where: { isDefault: true, enabled: true },
-    });
-    if (defaultChannel) {
-      channelsToNotify = [defaultChannel];
+    let overrideChannel: SlackChannel | null = null;
+    if (environmentId) {
+      const envSettings = await prisma.notificationSettings.findUnique({
+        where: { environmentId },
+        include: { slackChannel: true },
+      });
+      if (envSettings?.slackChannel && envSettings.slackChannel.enabled) {
+        overrideChannel = envSettings.slackChannel;
+      }
+    }
+
+    if (overrideChannel) {
+      channelsToNotify = [overrideChannel];
+    } else {
+      const defaultChannel = await prisma.slackChannel.findFirst({
+        where: { isDefault: true, enabled: true },
+      });
+      if (defaultChannel) {
+        channelsToNotify = [defaultChannel];
+      }
     }
   }
 
