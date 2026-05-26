@@ -101,4 +101,106 @@ describe('monitoring routes', () => {
       expect(res.json()).toHaveProperty('agents');
     });
   });
+
+  describe('GET /api/environments/:envId/metrics/history', () => {
+    it('buckets server metrics back into the right server (regression: BRIDGEPORT-BE-2)', async () => {
+      // Two servers, two points each, with distinct CPU values so we can
+      // verify the batched query is correctly grouped by serverId.
+      const otherServer = await createTestServer(app.prisma, {
+        environmentId: envId,
+        name: 'mon-server-2',
+      });
+      const now = Date.now();
+      await app.prisma.serverMetrics.createMany({
+        data: [
+          { serverId, collectedAt: new Date(now - 60_000), cpuPercent: 11, source: 'agent' },
+          { serverId, collectedAt: new Date(now - 30_000), cpuPercent: 12, source: 'agent' },
+          { serverId: otherServer.id, collectedAt: new Date(now - 60_000), cpuPercent: 21, source: 'agent' },
+          { serverId: otherServer.id, collectedAt: new Date(now - 30_000), cpuPercent: 22, source: 'agent' },
+        ],
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/environments/${envId}/metrics/history?hours=6&metric=cpu`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { servers: Array<{ id: string; data: Array<{ cpu: number }> }> };
+
+      const byId = new Map(body.servers.map((s) => [s.id, s.data]));
+      expect(byId.get(serverId)?.map((d) => d.cpu)).toEqual([11, 12]);
+      expect(byId.get(otherServer.id)?.map((d) => d.cpu)).toEqual([21, 22]);
+    });
+
+    it('returns an empty data array for servers with no metrics in window', async () => {
+      const lonely = await createTestServer(app.prisma, {
+        environmentId: envId,
+        name: 'lonely-server',
+      });
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/environments/${envId}/metrics/history?hours=6`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { servers: Array<{ id: string; data: unknown[] }> };
+      const entry = body.servers.find((s) => s.id === lonely.id);
+      expect(entry).toBeDefined();
+      expect(entry!.data).toEqual([]);
+    });
+  });
+
+  describe('GET /api/environments/:envId/services/metrics/history', () => {
+    it('buckets service metrics back into the right service (regression: BRIDGEPORT-BE-5)', async () => {
+      const image = await createTestContainerImage(app.prisma, { environmentId: envId });
+      const svcA = await createTestService(app.prisma, {
+        environmentId: envId,
+        serverId,
+        containerImageId: image.id,
+        name: 'svc-a',
+      });
+      const svcB = await createTestService(app.prisma, {
+        environmentId: envId,
+        serverId,
+        containerImageId: image.id,
+        name: 'svc-b',
+      });
+      // Metrics are per-deployment in 2.0; resolve the deployment ids the
+      // factory created when serverId was passed.
+      const [depA, depB] = await Promise.all([
+        app.prisma.serviceDeployment.findFirstOrThrow({ where: { serviceId: svcA.id } }),
+        app.prisma.serviceDeployment.findFirstOrThrow({ where: { serviceId: svcB.id } }),
+      ]);
+      // The discovery filter on the route only surfaces FOUND deployments —
+      // flip both fixtures so they appear in the response.
+      await app.prisma.serviceDeployment.updateMany({
+        where: { id: { in: [depA.id, depB.id] } },
+        data: { discoveryStatus: 'found' },
+      });
+      const now = Date.now();
+      await app.prisma.serviceMetrics.createMany({
+        data: [
+          { serviceDeploymentId: depA.id, collectedAt: new Date(now - 60_000), cpuPercent: 1.1 },
+          { serviceDeploymentId: depA.id, collectedAt: new Date(now - 30_000), cpuPercent: 1.2 },
+          { serviceDeploymentId: depB.id, collectedAt: new Date(now - 60_000), cpuPercent: 2.1 },
+          { serviceDeploymentId: depB.id, collectedAt: new Date(now - 30_000), cpuPercent: 2.2 },
+        ],
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/environments/${envId}/services/metrics/history?hours=6`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { services: Array<{ id: string; data: Array<{ cpu: number }> }> };
+
+      const byId = new Map(body.services.map((s) => [s.id, s.data]));
+      expect(byId.get(svcA.id)?.map((d) => d.cpu)).toEqual([1.1, 1.2]);
+      expect(byId.get(svcB.id)?.map((d) => d.cpu)).toEqual([2.1, 2.2]);
+      // svc with no metrics in window — original fixture from beforeAll — should still appear.
+      expect(byId.get(serviceId)).toEqual([]);
+    });
+  });
 });

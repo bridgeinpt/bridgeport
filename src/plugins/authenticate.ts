@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import fp from 'fastify-plugin';
 import { validateApiToken, getUserById, type AuthUser } from '../services/auth.js';
 import { prisma } from '../lib/db.js';
+import { userLastActiveThrottle } from '../lib/last-active-throttle.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -113,11 +114,16 @@ async function authenticatePlugin(fastify: FastifyInstance) {
             if (fullUser) {
               if (!enforceRoleForMethod(fullUser, request, reply)) return;
               request.authUser = fullUser;
-              // Update lastActiveAt in background (don't await)
-              prisma.user.update({
-                where: { id: fullUser.id },
-                data: { lastActiveAt: new Date() },
-              }).catch(() => {}); // Ignore errors
+              // Update lastActiveAt in background (don't await), but throttle
+              // per-user so we don't pound the SQLite writer lock on every
+              // authenticated request — the timestamp only needs minute
+              // granularity. See lib/last-active-throttle for rationale.
+              if (userLastActiveThrottle.shouldWrite(fullUser.id)) {
+                prisma.user.update({
+                  where: { id: fullUser.id },
+                  data: { lastActiveAt: new Date() },
+                }).catch(() => {}); // Ignore errors
+              }
               return;
             }
           } catch {

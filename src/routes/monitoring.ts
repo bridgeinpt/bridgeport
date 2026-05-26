@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/db.js';
 import { checkServerHealth } from '../services/servers.js';
 import { checkServiceHealth } from '../services/services.js';
@@ -285,116 +286,126 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         return reply.code(400).send({ error: 'Invalid query', details: query.error.issues });
       }
 
-      const env = await findOrNotFound(prisma.environment.findUnique({ where: { id: envId } }), 'Environment', reply);
-      if (!env) return;
-
       const { hours, metric } = query.data;
       const since = new Date();
       since.setHours(since.getHours() - hours);
 
-      // Get servers in this environment
-      const servers = await prisma.server.findMany({
-        where: { environmentId: envId },
-        select: { id: true, name: true, tags: true },
+      // Parallelize env existence check + servers load (no dependency).
+      const [env, servers] = await Promise.all([
+        prisma.environment.findUnique({ where: { id: envId }, select: { id: true } }),
+        prisma.server.findMany({
+          where: { environmentId: envId },
+          select: { id: true, name: true, tags: true },
+        }),
+      ]);
+      if (!env) {
+        return reply.code(404).send({ error: 'Environment not found' });
+      }
+
+      // Fetch all metrics in one query, then bucket by serverId.
+      // Sentry BRIDGEPORT-BE-2 was an N+1 here when this loop ran per-server.
+      const serverIds = servers.map((s) => s.id);
+      const rows =
+        serverIds.length === 0
+          ? []
+          : await prisma.serverMetrics.findMany({
+              where: {
+                serverId: { in: serverIds },
+                collectedAt: { gte: since },
+              },
+              orderBy: { collectedAt: 'asc' },
+              select: {
+                serverId: true,
+                cpuPercent: true,
+                memoryUsedMb: true,
+                memoryTotalMb: true,
+                swapUsedMb: true,
+                swapTotalMb: true,
+                diskUsedGb: true,
+                diskTotalGb: true,
+                loadAvg1: true,
+                loadAvg5: true,
+                loadAvg15: true,
+                openFds: true,
+                maxFds: true,
+                tcpEstablished: true,
+                tcpListen: true,
+                tcpTimeWait: true,
+                tcpCloseWait: true,
+                tcpTotal: true,
+                collectedAt: true,
+              },
+            });
+
+      const byServer = new Map<string, typeof rows>();
+      for (const id of serverIds) byServer.set(id, []);
+      for (const row of rows) byServer.get(row.serverId)?.push(row);
+
+      const serverMetrics = servers.map((server) => {
+        const metrics = byServer.get(server.id) ?? [];
+        const data = metrics.map((m) => {
+          const base = { time: m.collectedAt.toISOString() };
+
+          if (!metric) {
+            const memPercent =
+              m.memoryUsedMb && m.memoryTotalMb
+                ? (m.memoryUsedMb / m.memoryTotalMb) * 100
+                : null;
+            const swapPercent =
+              m.swapUsedMb && m.swapTotalMb && m.swapTotalMb > 0
+                ? (m.swapUsedMb / m.swapTotalMb) * 100
+                : null;
+            const diskPercent =
+              m.diskUsedGb && m.diskTotalGb ? (m.diskUsedGb / m.diskTotalGb) * 100 : null;
+            return {
+              ...base,
+              cpu: m.cpuPercent,
+              memory: memPercent,
+              memoryUsedMb: m.memoryUsedMb,
+              swap: swapPercent,
+              swapUsedMb: m.swapUsedMb,
+              disk: diskPercent,
+              diskUsedGb: m.diskUsedGb,
+              load1: m.loadAvg1,
+              load5: m.loadAvg5,
+              load15: m.loadAvg15,
+              openFds: m.openFds,
+              maxFds: m.maxFds,
+              tcpEstablished: m.tcpEstablished,
+              tcpListen: m.tcpListen,
+              tcpTimeWait: m.tcpTimeWait,
+              tcpCloseWait: m.tcpCloseWait,
+              tcpTotal: m.tcpTotal,
+            };
+          }
+          if (metric === 'cpu') {
+            return { ...base, cpu: m.cpuPercent };
+          }
+          if (metric === 'memory') {
+            const memPercent =
+              m.memoryUsedMb && m.memoryTotalMb
+                ? (m.memoryUsedMb / m.memoryTotalMb) * 100
+                : null;
+            return { ...base, memory: memPercent, memoryUsedMb: m.memoryUsedMb };
+          }
+          if (metric === 'disk') {
+            const diskPercent =
+              m.diskUsedGb && m.diskTotalGb ? (m.diskUsedGb / m.diskTotalGb) * 100 : null;
+            return { ...base, disk: diskPercent, diskUsedGb: m.diskUsedGb };
+          }
+          if (metric === 'load') {
+            return { ...base, load1: m.loadAvg1, load5: m.loadAvg5, load15: m.loadAvg15 };
+          }
+          return base;
+        });
+
+        return {
+          id: server.id,
+          name: server.name,
+          tags: server.tags,
+          data,
+        };
       });
-
-      // Get metrics for each server
-      const serverMetrics = await Promise.all(
-        servers.map(async (server) => {
-          const metrics = await prisma.serverMetrics.findMany({
-            where: {
-              serverId: server.id,
-              collectedAt: { gte: since },
-            },
-            orderBy: { collectedAt: 'asc' },
-            select: {
-              cpuPercent: true,
-              memoryUsedMb: true,
-              memoryTotalMb: true,
-              swapUsedMb: true,
-              swapTotalMb: true,
-              diskUsedGb: true,
-              diskTotalGb: true,
-              loadAvg1: true,
-              loadAvg5: true,
-              loadAvg15: true,
-              openFds: true,
-              maxFds: true,
-              tcpEstablished: true,
-              tcpListen: true,
-              tcpTimeWait: true,
-              tcpCloseWait: true,
-              tcpTotal: true,
-              collectedAt: true,
-            },
-          });
-
-          // Transform metrics based on requested metric type
-          const data = metrics.map((m) => {
-            const base = { time: m.collectedAt.toISOString() };
-
-            // If no specific metric requested, return all metrics
-            if (!metric) {
-              const memPercent =
-                m.memoryUsedMb && m.memoryTotalMb
-                  ? (m.memoryUsedMb / m.memoryTotalMb) * 100
-                  : null;
-              const swapPercent =
-                m.swapUsedMb && m.swapTotalMb && m.swapTotalMb > 0
-                  ? (m.swapUsedMb / m.swapTotalMb) * 100
-                  : null;
-              const diskPercent =
-                m.diskUsedGb && m.diskTotalGb ? (m.diskUsedGb / m.diskTotalGb) * 100 : null;
-              return {
-                ...base,
-                cpu: m.cpuPercent,
-                memory: memPercent,
-                memoryUsedMb: m.memoryUsedMb,
-                swap: swapPercent,
-                swapUsedMb: m.swapUsedMb,
-                disk: diskPercent,
-                diskUsedGb: m.diskUsedGb,
-                load1: m.loadAvg1,
-                load5: m.loadAvg5,
-                load15: m.loadAvg15,
-                openFds: m.openFds,
-                maxFds: m.maxFds,
-                tcpEstablished: m.tcpEstablished,
-                tcpListen: m.tcpListen,
-                tcpTimeWait: m.tcpTimeWait,
-                tcpCloseWait: m.tcpCloseWait,
-                tcpTotal: m.tcpTotal,
-              };
-            }
-            if (metric === 'cpu') {
-              return { ...base, cpu: m.cpuPercent };
-            }
-            if (metric === 'memory') {
-              const memPercent =
-                m.memoryUsedMb && m.memoryTotalMb
-                  ? (m.memoryUsedMb / m.memoryTotalMb) * 100
-                  : null;
-              return { ...base, memory: memPercent, memoryUsedMb: m.memoryUsedMb };
-            }
-            if (metric === 'disk') {
-              const diskPercent =
-                m.diskUsedGb && m.diskTotalGb ? (m.diskUsedGb / m.diskTotalGb) * 100 : null;
-              return { ...base, disk: diskPercent, diskUsedGb: m.diskUsedGb };
-            }
-            if (metric === 'load') {
-              return { ...base, load1: m.loadAvg1, load5: m.loadAvg5, load15: m.loadAvg15 };
-            }
-            return base;
-          });
-
-          return {
-            id: server.id,
-            name: server.name,
-            tags: server.tags,
-            data,
-          };
-        })
-      );
 
       return { servers: serverMetrics };
     }
@@ -412,65 +423,103 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         return reply.code(400).send({ error: 'Invalid query', details: query.error.issues });
       }
 
-      const env = await findOrNotFound(prisma.environment.findUnique({ where: { id: envId } }), 'Environment', reply);
-      if (!env) return;
-
       const { hours } = query.data;
       const since = new Date();
       since.setHours(since.getHours() - hours);
 
-      // Get deployments in this environment (metrics are per-deployment now).
-      const deployments = await prisma.serviceDeployment.findMany({
-        where: {
-          service: { environmentId: envId },
-          discoveryStatus: DISCOVERY_STATUS.FOUND,
-        },
-        select: {
-          id: true,
-          service: { select: { id: true, name: true } },
-          server: { select: { id: true, name: true } },
-        },
-      });
+      // Parallelize the env existence check with the server load. Deployment
+      // load happens after because filtering deployments by
+      // `serverId IN [...]` beats the `where: { server: { environmentId } }`
+      // EXISTS subquery when N=deployments is large (avoids correlated
+      // lookups into Server).
+      const [env, envServers] = await Promise.all([
+        prisma.environment.findUnique({ where: { id: envId }, select: { id: true } }),
+        prisma.server.findMany({
+          where: { environmentId: envId },
+          select: { id: true, name: true },
+        }),
+      ]);
+      if (!env) {
+        return reply.code(404).send({ error: 'Environment not found' });
+      }
 
-      const serviceMetrics = await Promise.all(
-        deployments.map(async (sd) => {
-          const metrics = await prisma.serviceMetrics.findMany({
+      const envServerIds = envServers.map((s) => s.id);
+      const serverNameById = new Map(envServers.map((s) => [s.id, s.name]));
+
+      // Metrics are per-deployment in 2.0. Each row pairs the runtime with
+      // its template name so the chart legend can show "<service> @ <server>".
+      const deployments = envServerIds.length === 0
+        ? []
+        : (await prisma.serviceDeployment.findMany({
             where: {
-              serviceDeploymentId: sd.id,
-              collectedAt: { gte: since },
+              serverId: { in: envServerIds },
+              discoveryStatus: DISCOVERY_STATUS.FOUND,
             },
-            orderBy: { collectedAt: 'asc' },
             select: {
-              cpuPercent: true,
-              memoryUsedMb: true,
-              memoryLimitMb: true,
-              networkRxMb: true,
-              networkTxMb: true,
-              restartCount: true,
-              collectedAt: true,
+              id: true,
+              serverId: true,
+              service: { select: { id: true, name: true } },
             },
-          });
-
-          const data = metrics.map((m) => ({
-            time: m.collectedAt.toISOString(),
-            cpu: m.cpuPercent,
-            memory: m.memoryUsedMb,
-            memoryLimit: m.memoryLimitMb,
-            networkRx: m.networkRxMb,
-            networkTx: m.networkTxMb,
-            restartCount: m.restartCount,
+          })).map((d) => ({
+            id: d.id,
+            serviceId: d.service.id,
+            serviceName: d.service.name,
+            server: { id: d.serverId, name: serverNameById.get(d.serverId) ?? '' },
           }));
 
-          return {
-            id: sd.service.id,
-            deploymentId: sd.id,
-            name: sd.service.name,
-            serverName: sd.server.name,
-            serverId: sd.server.id,
-            data,
-          };
-        })
-      );
+      // Fetch all metrics in one query, then bucket by deployment.
+      // Sentry BRIDGEPORT-BE-5 was an N+1 here when this loop ran per-row.
+      // We use $queryRaw to bypass Prisma's full row hydration — at 90
+      // deployments × 12+ points = 1k+ rows per request, hydration is a real
+      // cost we don't need to pay for chart data.
+      const deploymentIds = deployments.map((d) => d.id);
+      interface MetricRow {
+        serviceDeploymentId: string;
+        cpuPercent: number | null;
+        memoryUsedMb: number | null;
+        memoryLimitMb: number | null;
+        networkRxMb: number | null;
+        networkTxMb: number | null;
+        restartCount: number | null;
+        collectedAt: Date;
+      }
+      const rows: MetricRow[] =
+        deploymentIds.length === 0
+          ? []
+          : await prisma.$queryRaw<MetricRow[]>`
+              SELECT "serviceDeploymentId", "cpuPercent", "memoryUsedMb", "memoryLimitMb",
+                     "networkRxMb", "networkTxMb", "restartCount", "collectedAt"
+              FROM "ServiceMetrics"
+              WHERE "serviceDeploymentId" IN (${Prisma.join(deploymentIds)})
+                AND "collectedAt" >= ${since}
+              ORDER BY "collectedAt" ASC
+            `;
+
+      const byDeployment = new Map<string, MetricRow[]>();
+      for (const id of deploymentIds) byDeployment.set(id, []);
+      for (const row of rows) byDeployment.get(row.serviceDeploymentId)?.push(row);
+
+      const serviceMetrics = deployments.map((d) => {
+        const metrics = byDeployment.get(d.id) ?? [];
+        const data = metrics.map((m) => ({
+          time: m.collectedAt instanceof Date ? m.collectedAt.toISOString() : new Date(m.collectedAt).toISOString(),
+          cpu: m.cpuPercent,
+          memory: m.memoryUsedMb,
+          memoryLimit: m.memoryLimitMb,
+          networkRx: m.networkRxMb,
+          networkTx: m.networkTxMb,
+          restartCount: m.restartCount,
+        }));
+
+        return {
+          id: d.serviceId,
+          deploymentId: d.id,
+          name: d.serviceName,
+          serverName: d.server.name,
+          serverId: d.server.id,
+          data,
+        };
+      });
 
       return { services: serviceMetrics };
     }
@@ -703,88 +752,103 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         },
       });
 
-      // Get most recent health check log for each server
-      const serverHealthStatus = await Promise.all(
-        servers.map(async (server) => {
-          const lastLog = await prisma.healthCheckLog.findFirst({
-            where: {
-              environmentId: envId,
-              resourceType: 'server',
-              resourceId: server.id,
-            },
-            orderBy: { createdAt: 'desc' },
-            select: {
-              createdAt: true,
-              checkType: true,
-              durationMs: true,
-              status: true,
-              errorMessage: true,
-            },
-          });
+      // Pull the most-recent log per resource in two flat queries (one per
+      // resourceType) and keep only the first occurrence per resourceId.
+      // The `@@index([resourceId, createdAt desc])` on HealthCheckLog makes
+      // the `ORDER BY createdAt DESC` cheap; the previous per-resource
+      // findFirst loop was the N+1 driving p99 to ~200ms.
+      const serverIds = servers.map((s) => s.id);
+      const serviceIds = services.map((s) => s.id);
+      const [serverLogs, serviceLogs] = await Promise.all([
+        serverIds.length === 0
+          ? Promise.resolve([] as Awaited<ReturnType<typeof prisma.healthCheckLog.findMany>>)
+          : prisma.healthCheckLog.findMany({
+              where: {
+                environmentId: envId,
+                resourceType: 'server',
+                resourceId: { in: serverIds },
+              },
+              orderBy: { createdAt: 'desc' },
+              select: {
+                resourceId: true,
+                createdAt: true,
+                checkType: true,
+                durationMs: true,
+                status: true,
+                errorMessage: true,
+              },
+            }),
+        serviceIds.length === 0
+          ? Promise.resolve([] as Awaited<ReturnType<typeof prisma.healthCheckLog.findMany>>)
+          : prisma.healthCheckLog.findMany({
+              where: {
+                environmentId: envId,
+                resourceType: 'service_deployment',
+                resourceId: { in: serviceIds },
+              },
+              orderBy: { createdAt: 'desc' },
+              select: {
+                resourceId: true,
+                createdAt: true,
+                checkType: true,
+                durationMs: true,
+                status: true,
+                errorMessage: true,
+              },
+            }),
+      ]);
 
-          let status: ServerStatus = SERVER_STATUS.UNKNOWN;
-          if (lastLog) {
-            status = lastLog.status === HEALTH_CHECK_STATUS.SUCCESS ? SERVER_STATUS.HEALTHY : SERVER_STATUS.UNHEALTHY;
-          }
+      const latestByResource = (rows: typeof serverLogs) => {
+        const map = new Map<string, (typeof rows)[number]>();
+        for (const r of rows) if (!map.has(r.resourceId)) map.set(r.resourceId, r);
+        return map;
+      };
+      const latestServerLog = latestByResource(serverLogs);
+      const latestServiceLog = latestByResource(serviceLogs);
 
-          return {
-            id: server.id,
-            name: server.name,
-            type: 'server' as const,
-            status,
-            lastCheck: lastLog
-              ? {
-                  timestamp: lastLog.createdAt.toISOString(),
-                  checkType: lastLog.checkType,
-                  durationMs: lastLog.durationMs,
-                  errorMessage: lastLog.errorMessage,
-                }
-              : null,
-          };
-        })
-      );
+      const toLastCheck = (
+        log: (typeof serverLogs)[number] | undefined
+      ) =>
+        log
+          ? {
+              timestamp: log.createdAt.toISOString(),
+              checkType: log.checkType,
+              durationMs: log.durationMs,
+              errorMessage: log.errorMessage,
+            }
+          : null;
+      const toStatus = (log: (typeof serverLogs)[number] | undefined): ServerStatus => {
+        if (!log) return SERVER_STATUS.UNKNOWN;
+        return log.status === HEALTH_CHECK_STATUS.SUCCESS
+          ? SERVER_STATUS.HEALTHY
+          : SERVER_STATUS.UNHEALTHY;
+      };
 
-      // Get most recent health check log for each deployment.
-      const serviceHealthStatus = await Promise.all(
-        services.map(async (sd) => {
-          const lastLog = await prisma.healthCheckLog.findFirst({
-            where: {
-              environmentId: envId,
-              resourceType: 'service_deployment',
-              resourceId: sd.id,
-            },
-            orderBy: { createdAt: 'desc' },
-            select: {
-              createdAt: true,
-              checkType: true,
-              durationMs: true,
-              status: true,
-              errorMessage: true,
-            },
-          });
+      const serverHealthStatus = servers.map((server) => {
+        const log = latestServerLog.get(server.id);
+        return {
+          id: server.id,
+          name: server.name,
+          type: 'server' as const,
+          status: toStatus(log),
+          lastCheck: toLastCheck(log),
+        };
+      });
 
-          let status: ServerStatus = SERVER_STATUS.UNKNOWN;
-          if (lastLog) {
-            status = lastLog.status === HEALTH_CHECK_STATUS.SUCCESS ? SERVER_STATUS.HEALTHY : SERVER_STATUS.UNHEALTHY;
-          }
-
-          return {
-            id: sd.id,
-            name: sd.service.name,
-            type: 'service' as const,
-            status,
-            serverName: sd.server.name,
-            lastCheck: lastLog
-              ? {
-                  timestamp: lastLog.createdAt.toISOString(),
-                  checkType: lastLog.checkType,
-                  durationMs: lastLog.durationMs,
-                  errorMessage: lastLog.errorMessage,
-                }
-              : null,
-          };
-        })
-      );
+      // services rows are ServiceDeployment shape: { id, service, server }.
+      // Latest-log lookup is keyed by deployment id (the resourceId stored on
+      // health_check audit rows).
+      const serviceHealthStatus = services.map((d) => {
+        const log = latestServiceLog.get(d.id);
+        return {
+          id: d.id,
+          name: d.service.name,
+          type: 'service' as const,
+          status: toStatus(log),
+          serverName: d.server.name,
+          lastCheck: toLastCheck(log),
+        };
+      });
 
       // Get all monitored databases in this environment
       const databases = await prisma.database.findMany({

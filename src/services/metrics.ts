@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/db.js';
 import { SSHClient, LocalClient, DockerSSH, isLocalhost, type CommandClient } from '../lib/ssh.js';
 import { createDockerClientForServer, type DockerClient } from '../lib/docker.js';
@@ -215,22 +216,118 @@ export async function cleanupOldMetrics(retentionDays: number = 7): Promise<numb
   return serverResult.count + serviceResult.count;
 }
 
+interface ServerLatestRow {
+  id: string;
+  serverId: string;
+  cpuPercent: number | null;
+  memoryUsedMb: number | null;
+  memoryTotalMb: number | null;
+  swapUsedMb: number | null;
+  swapTotalMb: number | null;
+  diskUsedGb: number | null;
+  diskTotalGb: number | null;
+  loadAvg1: number | null;
+  loadAvg5: number | null;
+  loadAvg15: number | null;
+  openFds: number | null;
+  maxFds: number | null;
+  tcpEstablished: number | null;
+  tcpListen: number | null;
+  tcpTimeWait: number | null;
+  tcpCloseWait: number | null;
+  tcpTotal: number | null;
+  collectedAt: Date;
+}
+interface ServiceLatestRow {
+  id: string;
+  serviceDeploymentId: string;
+  cpuPercent: number | null;
+  memoryUsedMb: number | null;
+  memoryLimitMb: number | null;
+  networkRxMb: number | null;
+  networkTxMb: number | null;
+  restartCount: number | null;
+  collectedAt: Date;
+}
+
 export async function getEnvironmentMetricsSummary(environmentId: string) {
-  const servers = await prisma.server.findMany({
-    where: { environmentId },
-    include: {
-      metrics: {
-        orderBy: { collectedAt: 'desc' },
-        take: 1,
+  // Sentry flagged this transaction at p99=8s in production (count=76 / 14d).
+  // Root cause: server.findMany with nested `include: { metrics take 1,
+  // services: { include: { metrics take 1 } } }` made Prisma emit a
+  // correlated subquery per child row — quadratic over server×service.
+  //
+  // New shape: parallel queries for server/service rows + two raw SQL window
+  // queries that read the latest ServerMetrics / ServiceMetrics per id in a
+  // single index scan. better-sqlite3 ships SQLite 3.46+ which supports
+  // ROW_NUMBER() OVER (PARTITION BY ... ORDER BY ...). The
+  // `@@index([serverId, collectedAt(sort: Desc)])` index on each metrics
+  // table makes this almost free.
+  const [servers, deployments] = await Promise.all([
+    prisma.server.findMany({
+      where: { environmentId },
+      select: {
+        id: true,
+        name: true,
+        hostname: true,
+        tags: true,
+        metricsMode: true,
       },
-      serviceDeployments: {
-        include: {
-          service: { select: { id: true, name: true } },
-          metrics: { orderBy: { collectedAt: 'desc' }, take: 1 },
-        },
+    }),
+    // Service.server moved to ServiceDeployment in 2.0. Each row here is one
+    // (service, server) pair carrying the runtime containerName that
+    // ServiceMetrics is keyed against.
+    prisma.serviceDeployment.findMany({
+      where: { server: { environmentId } },
+      select: {
+        id: true,
+        serverId: true,
+        containerName: true,
+        service: { select: { id: true, name: true } },
       },
-    },
-  });
+    }),
+  ]);
+
+  const serverIds = servers.map((s) => s.id);
+  const deploymentIds = deployments.map((d) => d.id);
+
+  const [serverLatest, serviceLatest] = await Promise.all([
+    serverIds.length === 0
+      ? Promise.resolve([] as ServerLatestRow[])
+      : prisma.$queryRaw<ServerLatestRow[]>`
+          SELECT id, "serverId", "cpuPercent", "memoryUsedMb", "memoryTotalMb",
+                 "swapUsedMb", "swapTotalMb", "diskUsedGb", "diskTotalGb",
+                 "loadAvg1", "loadAvg5", "loadAvg15",
+                 "openFds", "maxFds",
+                 "tcpEstablished", "tcpListen", "tcpTimeWait", "tcpCloseWait", "tcpTotal",
+                 "collectedAt"
+          FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY "serverId" ORDER BY "collectedAt" DESC) AS rn
+            FROM "ServerMetrics"
+            WHERE "serverId" IN (${Prisma.join(serverIds)})
+          ) WHERE rn = 1
+        `,
+    deploymentIds.length === 0
+      ? Promise.resolve([] as ServiceLatestRow[])
+      : prisma.$queryRaw<ServiceLatestRow[]>`
+          SELECT id, "serviceDeploymentId", "cpuPercent", "memoryUsedMb", "memoryLimitMb",
+                 "networkRxMb", "networkTxMb", "restartCount", "collectedAt"
+          FROM (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY "serviceDeploymentId" ORDER BY "collectedAt" DESC) AS rn
+            FROM "ServiceMetrics"
+            WHERE "serviceDeploymentId" IN (${Prisma.join(deploymentIds)})
+          ) WHERE rn = 1
+        `,
+  ]);
+
+  const serverMetricById = new Map(serverLatest.map((m) => [m.serverId, m]));
+  const serviceMetricByDeployment = new Map(serviceLatest.map((m) => [m.serviceDeploymentId, m]));
+
+  const deploymentsByServer = new Map<string, typeof deployments>();
+  for (const d of deployments) {
+    const arr = deploymentsByServer.get(d.serverId) ?? [];
+    arr.push(d);
+    deploymentsByServer.set(d.serverId, arr);
+  }
 
   return servers.map((server) => ({
     id: server.id,
@@ -238,13 +335,13 @@ export async function getEnvironmentMetricsSummary(environmentId: string) {
     hostname: server.hostname,
     tags: server.tags,
     metricsMode: server.metricsMode,
-    latestMetrics: server.metrics[0] || null,
-    services: server.serviceDeployments.map((sd) => ({
-      id: sd.service.id,
-      deploymentId: sd.id,
-      name: sd.service.name,
-      containerName: sd.containerName,
-      latestMetrics: sd.metrics[0] || null,
+    latestMetrics: serverMetricById.get(server.id) ?? null,
+    services: (deploymentsByServer.get(server.id) ?? []).map((d) => ({
+      id: d.service.id,
+      deploymentId: d.id,
+      name: d.service.name,
+      containerName: d.containerName,
+      latestMetrics: serviceMetricByDeployment.get(d.id) ?? null,
     })),
   }));
 }

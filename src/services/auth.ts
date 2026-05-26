@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/db.js';
 import { generateApiToken, hashToken } from '../lib/crypto.js';
 import { hasMinimumRole } from '../plugins/authorize.js';
+import { apiTokenLastUsedThrottle } from '../lib/last-active-throttle.js';
 import type { User, ApiToken } from '@prisma/client';
 
 const SALT_ROUNDS = 12;
@@ -216,13 +217,17 @@ export async function validateApiToken(token: string): Promise<AuthUser | null> 
   if (!ownerRole) return null;
   const effectiveRole: UserRole = hasMinimumRole(ownerRole, tokenRole) ? tokenRole : ownerRole;
 
-  // Update last used (fire-and-forget; don't block auth)
-  prisma.apiToken
-    .update({
-      where: { id: tokenRecord.id },
-      data: { lastUsedAt: new Date() },
-    })
-    .catch(() => {});
+  // Update last used (fire-and-forget; don't block auth). Throttled per
+  // tokenId — at 500+ RPS this write would otherwise hammer SQLite's
+  // writer lock and spill latency into every authenticated read.
+  if (apiTokenLastUsedThrottle.shouldWrite(tokenRecord.id)) {
+    prisma.apiToken
+      .update({
+        where: { id: tokenRecord.id },
+        data: { lastUsedAt: new Date() },
+      })
+      .catch(() => {});
+  }
 
   const scope = {
     allEnvironments: tokenRecord.allEnvironments,
