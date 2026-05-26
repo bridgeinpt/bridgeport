@@ -160,6 +160,16 @@ export async function buildDeploymentPlan(options: BuildPlanOptions): Promise<De
     throw new Error('No services found for deployment');
   }
 
+  // Refuse to build a plan when any selected service has zero ServiceDeployments.
+  // Otherwise the plan would have no steps, executePlan would mark it COMPLETED,
+  // and CI/release automation would believe the rollout shipped.
+  const empty = services.filter((s) => s.serviceDeployments.length === 0).map((s) => s.name);
+  if (empty.length > 0) {
+    throw new Error(
+      `Cannot build deployment plan — the following services have no deployments attached: ${empty.join(', ')}. Add at least one server before deploying.`
+    );
+  }
+
   const orderedLevels = resolveDependencyOrder(services);
 
   const serviceNames = services.map((s) => s.name).slice(0, 3);

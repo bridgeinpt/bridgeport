@@ -296,33 +296,63 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           return reply.code(400).send({ error: 'Container image must be in the same environment' });
         }
 
-        const service = await prisma.service.create({
-          data: {
-            name: body.name,
-            containerImageId: body.containerImageId,
-            imageTag: body.imageTag,
-            composeTemplate: body.composeTemplate ?? null,
-            healthCheckUrl: body.healthCheckUrl ?? null,
-            baseEnv: body.baseEnv ? JSON.stringify(body.baseEnv) : null,
-            deployStrategy: body.deployStrategy ?? 'sequential',
-            environmentId: server.environmentId,
-          },
+        // Legacy CLI flow attaches the same service name to multiple servers:
+        //   bridgeport services create --server A --name redis ...
+        //   bridgeport services create --server B --name redis ...
+        // Post-2.0 the unique constraint is (environmentId, name) at the
+        // template level, so the second call would explode. If a template with
+        // this name already exists in the environment with a MATCHING
+        // containerImageId, attach a new ServiceDeployment to it instead of
+        // creating a duplicate template. If the existing template uses a
+        // different image, fail with 409 — the caller must reconcile.
+        const existingService = await prisma.service.findUnique({
+          where: { environmentId_name: { environmentId: server.environmentId, name: body.name } },
         });
 
-        await prisma.serviceDeployment.create({
+        let service = existingService;
+        if (existingService) {
+          if (existingService.containerImageId !== body.containerImageId) {
+            return reply.code(409).send({
+              error: `A service named "${body.name}" already exists in this environment with a different container image. Use a different name or update the existing service.`,
+            });
+          }
+        } else {
+          service = await prisma.service.create({
+            data: {
+              name: body.name,
+              containerImageId: body.containerImageId,
+              imageTag: body.imageTag,
+              composeTemplate: body.composeTemplate ?? null,
+              healthCheckUrl: body.healthCheckUrl ?? null,
+              baseEnv: body.baseEnv ? JSON.stringify(body.baseEnv) : null,
+              deployStrategy: body.deployStrategy ?? 'sequential',
+              environmentId: server.environmentId,
+            },
+          });
+        }
+
+        const newDeployment = await prisma.serviceDeployment.create({
           data: {
-            serviceId: service.id,
+            serviceId: service!.id,
             serverId: server.id,
             containerName: body.containerName ?? body.name,
+            // First-time CLI attach: not deployed yet — keep it out of
+            // scheduler health checks until the first deploy runs.
+            discoveryStatus: DISCOVERY_STATUS.PENDING,
           },
         });
 
         await logAudit({
-          action: 'create',
+          action: existingService ? 'attach_deployment' : 'create',
           resourceType: 'service',
-          resourceId: service.id,
-          resourceName: service.name,
-          details: { containerImageId: service.containerImageId, serverId: server.id },
+          resourceId: service!.id,
+          resourceName: service!.name,
+          details: {
+            containerImageId: service!.containerImageId,
+            serverId: server.id,
+            serviceDeploymentId: newDeployment.id,
+            reusedExistingTemplate: !!existingService,
+          },
           ...actorFrom(request),
           environmentId: server.environmentId,
         });
@@ -438,6 +468,12 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
             containerName: body.containerName,
             composePath: body.composePath ?? null,
             envOverrides: serializeJsonField(body.envOverrides) ?? null,
+            // Newly attached deployments haven't been deployed yet. Mark them
+            // pending so the scheduler's `discoveryStatus='found'` filter skips
+            // them — otherwise we'd health-check a non-existent container and
+            // fire false SYSTEM_CONTAINER_CRASH alerts. Flips to 'found' after
+            // the first successful deploy or container discovery.
+            discoveryStatus: DISCOVERY_STATUS.PENDING,
           },
         });
 
@@ -565,6 +601,23 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
             strategy: body.strategy,
           }
         );
+
+        // Surface zero-deployment template error as a 400 so CI/release
+        // automation doesn't treat a no-op rollout as success.
+        if (outcome.error) {
+          await logAudit({
+            action: 'deploy',
+            resourceType: 'service',
+            resourceId: id,
+            resourceName: service.name,
+            details: { imageTag: body.imageTag },
+            success: false,
+            error: outcome.error,
+            ...actorFrom(request),
+            environmentId: service.environmentId,
+          });
+          return reply.code(400).send({ error: outcome.error });
+        }
 
         await logAudit({
           action: 'deploy',
@@ -833,6 +886,9 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           resourceType: 'service_deployment',
           resourceId: depId,
           resourceName: `${deployment.service.name}@${deployment.server.name}`,
+          // serviceId is needed by /services/:id/history so failure entries
+          // appear in the per-template audit view.
+          details: { serviceId: id },
           success: false,
           error: message,
           ...actorFrom(request),
@@ -997,6 +1053,9 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           resourceType: 'service_deployment',
           resourceId: depId,
           resourceName: deployment.service.name,
+          // serviceId is needed by /services/:id/history so failure entries
+          // appear in the per-template audit view.
+          details: { serviceId: id },
           success: false,
           error: message,
           ...actorFrom(request),

@@ -102,6 +102,11 @@ export function flattenDeploymentOntoService(deployment: any): any {
   const { service, ...d } = deployment;
   return {
     ...service,
+    // The flattened object's `id` stays the Service template id (back-compat).
+    // `deploymentId` exposes the underlying ServiceDeployment id so callers can
+    // drive per-deployment endpoints (deploy, restart, health, logs) from the
+    // flattened shape.
+    deploymentId: d.id,
     // Runtime / per-server fields
     containerName: d.containerName,
     composePath: d.composePath,

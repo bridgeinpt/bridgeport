@@ -105,6 +105,18 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
         environmentId: environment.id,
       });
 
+      // Treat template-level error (e.g. zero deployments) as a 400 — the
+      // caller didn't trigger any actual deploy, so reporting success=true would
+      // mislead CI/release automation.
+      if (outcome.error) {
+        return reply.code(400).send({
+          success: false,
+          error: outcome.error,
+          deploymentCount: 0,
+          halted: outcome.halted,
+        });
+      }
+
       const firstFailure = outcome.results.find((r) => !r.result || r.result.deployment.status !== DEPLOYMENT_STATUS.SUCCESS);
       return {
         success: !firstFailure,
@@ -194,7 +206,9 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
             environmentId: serviceRow?.environmentId,
           });
 
-          const anyFailed = outcome.results.some((r) => !r.result || r.result.deployment.status !== DEPLOYMENT_STATUS.SUCCESS);
+          const anyFailed = outcome.error
+            ? true
+            : outcome.results.some((r) => !r.result || r.result.deployment.status !== DEPLOYMENT_STATUS.SUCCESS);
           results.push({
             service: service.name,
             status: anyFailed ? DEPLOYMENT_STATUS.FAILED : DEPLOYMENT_STATUS.SUCCESS,

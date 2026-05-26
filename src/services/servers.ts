@@ -405,24 +405,59 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
         });
         discoveredDeployments.push(updated);
       } else {
-        // Locate or create a Service template by (environmentId, containerName).
-        // If the same container name is already mapped to a template in this env,
-        // we attach a new ServiceDeployment to it; otherwise we create a fresh
-        // template plus a deployment.
+        // Locate or create a Service template. Reuse an existing template only
+        // when (environmentId, name, containerImageId) all match — otherwise
+        // attaching a new deployment to a template that points at a DIFFERENT
+        // image would cause deployServiceTemplate(template) to push the wrong
+        // image to this server. When the image differs, mint a fresh template
+        // with a suffixed name.
         const existingTemplate = await prisma.service.findUnique({
           where: { environmentId_name: { environmentId: server.environmentId, name: container.name } },
         });
 
-        const service =
-          existingTemplate ??
-          (await prisma.service.create({
+        let service;
+        if (existingTemplate && existingTemplate.containerImageId === containerImage.id) {
+          service = existingTemplate;
+        } else if (existingTemplate) {
+          // Same name but a different image is in use on another server. Pick
+          // a unique name so we don't accidentally collapse two distinct services
+          // (and clobber the other server's image on the next template deploy).
+          let suffix = 2;
+          let candidate = `${container.name}-${server.name}`;
+          // Probe for a free name; if a row with that name exists with a
+          // DIFFERENT image, walk a numeric suffix.
+          // eslint-disable-next-line no-constant-condition
+          while (true) {
+            const probe = await prisma.service.findUnique({
+              where: { environmentId_name: { environmentId: server.environmentId, name: candidate } },
+            });
+            if (!probe) break;
+            if (probe.containerImageId === containerImage.id) {
+              service = probe;
+              break;
+            }
+            candidate = `${container.name}-${server.name}-${suffix++}`;
+          }
+          service =
+            service ??
+            (await prisma.service.create({
+              data: {
+                name: candidate,
+                imageTag,
+                environmentId: server.environmentId,
+                containerImageId: containerImage.id,
+              },
+            }));
+        } else {
+          service = await prisma.service.create({
             data: {
               name: container.name,
               imageTag,
               environmentId: server.environmentId,
               containerImageId: containerImage.id,
             },
-          }));
+          });
+        }
 
         const created = await prisma.serviceDeployment.create({
           data: {

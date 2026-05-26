@@ -482,7 +482,8 @@ async function runMetricsCollection(): Promise<void> {
       include: {
         serviceDeployments: {
           where: { discoveryStatus: DISCOVERY_STATUS.FOUND },
-          select: { id: true, containerName: true },
+          // serviceId needed to deep-link notifications to the parent Service page.
+          select: { id: true, containerName: true, serviceId: true },
         },
       },
     });
@@ -569,7 +570,7 @@ async function runMetricsCollection(): Promise<void> {
               notifyAsync(
                 NOTIFICATION_TYPES.SYSTEM_CONTAINER_CRASH,
                 server.environmentId,
-                { containerName: sd.containerName, serverName: server.name }
+                { containerName: sd.containerName, serverName: server.name, serviceId: sd.serviceId, resourceType: 'service_deployment', resourceId: sd.id }
               );
             }
           } else if (isRunning && wasCrashed) {
@@ -578,7 +579,7 @@ async function runMetricsCollection(): Promise<void> {
               notifyAsync(
                 NOTIFICATION_TYPES.SYSTEM_CONTAINER_RECOVERED,
                 server.environmentId,
-                { containerName: sd.containerName, serverName: server.name }
+                { containerName: sd.containerName, serverName: server.name, serviceId: sd.serviceId, resourceType: 'service_deployment', resourceId: sd.id }
               );
             }
           }
@@ -591,7 +592,11 @@ async function runMetricsCollection(): Promise<void> {
                 NOTIFICATION_TYPES.SYSTEM_HEALTH_CHECK_FAILED,
                 server.environmentId,
                 {
-                  resourceType: 'Service',
+                  resourceType: 'service_deployment',
+                  resourceId: sd.id,
+                  // serviceId lets Slack/UI deep-link to the parent Service page,
+                  // which is the route the UI actually has for "view this".
+                  serviceId: sd.serviceId,
                   resourceName: sd.containerName,
                   error: 'Health check failed',
                 }
@@ -603,7 +608,12 @@ async function runMetricsCollection(): Promise<void> {
               notifyAsync(
                 NOTIFICATION_TYPES.SYSTEM_HEALTH_CHECK_RECOVERED,
                 server.environmentId,
-                { resourceType: 'Service', resourceName: sd.containerName }
+                {
+                  resourceType: 'service_deployment',
+                  resourceId: sd.id,
+                  serviceId: sd.serviceId,
+                  resourceName: sd.containerName,
+                }
               );
             }
           }

@@ -384,13 +384,18 @@ describe('deployServiceTemplate', () => {
     });
   });
 
-  it('returns an empty result set when the template has no deployments', async () => {
+  it('refuses to deploy a template with zero deployments and surfaces an error', async () => {
+    // Zero-deployment templates used to "succeed" silently — see code-review
+    // finding #6. The fan-out now refuses and returns a typed error so callers
+    // (webhooks, deploy plans, CI release automation) treat the no-op rollout
+    // as a failure instead of a green deploy.
     mockTemplate([], 'sequential');
 
     const out = await deployServiceTemplate('svc-1', 'user@test.com', 'user-1');
 
-    expect(out.halted).toBe(false);
+    expect(out.halted).toBe(true);
     expect(out.results).toEqual([]);
+    expect(out.error).toMatch(/no deployments/i);
   });
 });
 

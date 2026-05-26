@@ -81,9 +81,12 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
           where: { ...summaryWhere, resourceType: 'server' },
           _count: true,
         }),
+        // Health-check writers now use 'service_deployment' (post-2.0 split). The
+        // UI still consumes a `service` summary key so we filter on the new
+        // resourceType but keep the response key for back-compat.
         prisma.healthCheckLog.groupBy({
           by: ['status'],
-          where: { ...summaryWhere, resourceType: 'service' },
+          where: { ...summaryWhere, resourceType: 'service_deployment' },
           _count: true,
         }),
         prisma.healthCheckLog.groupBy({

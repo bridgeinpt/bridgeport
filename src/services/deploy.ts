@@ -14,13 +14,19 @@ import { sendSystemNotification, NOTIFICATION_TYPES } from './notifications.js';
 import { recordTagDeployment } from './image-management.js';
 import { safeJsonParse } from '../lib/helpers.js';
 import { eventBus } from '../lib/event-bus.js';
-import { DEPLOYMENT_STATUS, CONTAINER_STATUS, HISTORY_STATUS } from '../lib/constants.js';
+import { DEPLOYMENT_STATUS, CONTAINER_STATUS, HISTORY_STATUS, DISCOVERY_STATUS } from '../lib/constants.js';
 import type { Deployment } from '@prisma/client';
 
 export interface DeployOptions {
   imageTag?: string;
   generateArtifacts?: boolean;  // Generate compose, env, config files
   pullImage?: boolean;
+  /**
+   * Override the `previousTag` recorded on the new Deployment row. Used by
+   * deployServiceTemplate to ensure every fan-out deployment records the same
+   * pre-rollout tag, instead of seeing the updated tag from earlier siblings.
+   */
+  previousTagOverride?: string | null;
 }
 
 export interface DeployResult {
@@ -52,7 +58,10 @@ export async function deployService(
 
   const service = deployment.service;
   const imageTag = options.imageTag || service.imageTag;
-  const previousTag = service.imageTag;
+  // When fanning out via deployServiceTemplate, the caller passes in the
+  // template-level imageTag captured BEFORE any deployment ran so every
+  // fan-out Deployment row records the same pre-rollout tag for rollback.
+  const previousTag = options.previousTagOverride !== undefined ? options.previousTagOverride : service.imageTag;
   const logs: string[] = [];
 
   // Create deployment record. Denormalize serviceId so historical UI queries
@@ -228,11 +237,14 @@ export async function deployService(
       sshClient.disconnect();
     }
 
-    // Update deployment record - lastDeployedAt and runtime status.
+    // Update deployment record - lastDeployedAt and runtime status. Flip
+    // discoveryStatus to 'found' so the scheduler's health-check filter picks
+    // it up (manually-created deployments start as 'pending').
     await prisma.serviceDeployment.update({
       where: { id: serviceDeploymentId },
       data: {
         status: CONTAINER_STATUS.RUNNING,
+        discoveryStatus: DISCOVERY_STATUS.FOUND,
         lastCheckedAt: new Date(),
         lastDeployedAt: new Date(),
       },
@@ -359,6 +371,11 @@ export interface DeployServiceTemplateOptions extends DeployOptions {
 export interface DeployServiceTemplateResult {
   results: Array<{ serviceDeploymentId: string; result: DeployResult | null; error?: string }>;
   halted: boolean;
+  /**
+   * Set when the template-level deploy refused to run (e.g. zero deployments
+   * attached). When present, callers MUST treat the rollout as a failure.
+   */
+  error?: string;
 }
 
 export async function deployServiceTemplate(
@@ -372,8 +389,28 @@ export async function deployServiceTemplate(
     include: { serviceDeployments: { select: { id: true } } },
   });
 
+  // Zero-deployment templates are a user-error state: deploying a template with
+  // no servers attached silently "succeeds" otherwise, which CI/release
+  // automation interprets as a green rollout.
+  if (service.serviceDeployments.length === 0) {
+    return {
+      results: [],
+      halted: true,
+      error: 'Service has no deployments — add at least one server before deploying',
+    };
+  }
+
   const strategy: 'sequential' | 'parallel' =
     options.strategy ?? (service.deployStrategy as 'sequential' | 'parallel');
+
+  // Capture the template's pre-rollout tag ONCE so every fan-out Deployment row
+  // records the same previousTag. deployService updates Service.imageTag mid-flight,
+  // so re-reading it per iteration would yield the new tag for later deployments.
+  const originalTag = service.imageTag;
+  const perDeployOptions: DeployOptions = {
+    ...options,
+    previousTagOverride: originalTag,
+  };
 
   const results: DeployServiceTemplateResult['results'] = [];
   let halted = false;
@@ -381,7 +418,7 @@ export async function deployServiceTemplate(
   if (strategy === 'parallel') {
     const settled = await Promise.allSettled(
       service.serviceDeployments.map((sd) =>
-        deployService(sd.id, triggeredBy, userId, options).then(
+        deployService(sd.id, triggeredBy, userId, perDeployOptions).then(
           (result) => ({ serviceDeploymentId: sd.id, result }),
           (err) => ({ serviceDeploymentId: sd.id, result: null, error: err instanceof Error ? err.message : String(err) })
         )
@@ -397,7 +434,7 @@ export async function deployServiceTemplate(
   } else {
     for (const sd of service.serviceDeployments) {
       try {
-        const result = await deployService(sd.id, triggeredBy, userId, options);
+        const result = await deployService(sd.id, triggeredBy, userId, perDeployOptions);
         results.push({ serviceDeploymentId: sd.id, result });
         if (result.deployment.status !== DEPLOYMENT_STATUS.SUCCESS) {
           // Sequential strategy halts on first failure with a clear rollback hint

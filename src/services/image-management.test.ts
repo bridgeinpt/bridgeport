@@ -34,6 +34,11 @@ const { mockPrisma } = vi.hoisted(() => ({
       findMany: vi.fn(),
       count: vi.fn(),
     },
+    // linkServiceToContainerImage wraps its writes in $transaction([...]) so a
+    // failure between the two updates can't leave inconsistent state. The mock
+    // resolves each promise in the array — Prisma's real $transaction has the
+    // same observable behavior for our purposes.
+    $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
   },
 }));
 

@@ -430,6 +430,12 @@ export interface ServiceWithServerName extends Service {
   /** @deprecated Use serviceDeployments[*].server */
   server?: { id: string; name: string };
   serviceDeployments?: (ServiceDeployment & { server: { id: string; name: string } })[];
+  /**
+   * Underlying ServiceDeployment id when this row was flattened from a deployment
+   * (see flattenDeploymentOntoService). `id` remains the Service template id.
+   * Use this to drive per-deployment endpoints (deploy/restart/health/logs).
+   */
+  deploymentId?: string;
   /** @deprecated Use serviceDeployments[*].serverId */
   serverId?: string;
   /** @deprecated Use serviceDeployments[*].containerName */
@@ -507,25 +513,50 @@ export const checkServiceDeploymentHealth = (serviceId: string, deploymentId: st
   }>(`/services/${serviceId}/deployments/${deploymentId}/health`);
 
 // Legacy alias: existing UI components call `checkServiceHealth(serviceId)` expecting
-// the single-deployment shape. Resolve the first deployment of the template and check it.
+// the single-deployment shape. Fan out to every deployment in parallel so a
+// multi-deployment template doesn't leave [1..] stale, then return the first
+// deployment's result for back-compat.
 export const checkServiceHealth = async (serviceId: string) => {
   const { service } = await getService(serviceId);
-  const first = service.serviceDeployments?.[0];
-  if (!first) {
+  const deployments = service.serviceDeployments ?? [];
+  if (deployments.length === 0) {
     throw new Error('Service has no deployments to health-check');
   }
-  return checkServiceDeploymentHealth(serviceId, first.id);
+  const results = await Promise.all(
+    deployments.map((d) =>
+      checkServiceDeploymentHealth(serviceId, d.id).catch((err) => {
+        // Don't let one deployment's failure mask the rest — log and continue.
+        console.error(`[checkServiceHealth] deployment ${d.id} failed:`, err);
+        return null;
+      })
+    )
+  );
+  // Return the first non-null result so the existing single-deployment UI shape
+  // keeps working. The other deployments have already been refreshed server-side.
+  const first = results.find((r) => r !== null);
+  if (!first) {
+    throw new Error('All deployments failed health check');
+  }
+  return first;
 };
 
-// Legacy alias: existing UI calls `restartService(id)` (template-level). Restart the
-// first deployment of the template.
+// Legacy alias: existing UI calls `restartService(id)` (template-level). Fan out
+// across every deployment so a multi-deployment template isn't half-restarted.
 export const restartService = async (serviceId: string) => {
   const { service } = await getService(serviceId);
-  const first = service.serviceDeployments?.[0];
-  if (!first) {
+  const deployments = service.serviceDeployments ?? [];
+  if (deployments.length === 0) {
     throw new Error('Service has no deployments to restart');
   }
-  return restartServiceDeployment(serviceId, first.id);
+  await Promise.all(
+    deployments.map((d) =>
+      restartServiceDeployment(serviceId, d.id).catch((err) => {
+        console.error(`[restartService] deployment ${d.id} failed:`, err);
+        return { success: false };
+      })
+    )
+  );
+  return { success: true };
 };
 
 // --- ServiceDeployment CRUD ---
@@ -576,11 +607,29 @@ export const getServiceHistory = (id: string, limit?: number) =>
     `/services/${id}/history${limit ? `?limit=${limit}` : ''}`
   );
 
-export const getServiceLogs = (id: string, tail?: number) =>
-  api.get<{ logs: string }>(`/services/${id}/logs${tail ? `?tail=${tail}` : ''}`);
+// Per-deployment container logs (post-2.0 route).
+export const getServiceDeploymentLogs = (serviceId: string, deploymentId: string, tail?: number) =>
+  api.get<{ logs: string }>(`/services/${serviceId}/deployments/${deploymentId}/logs${tail ? `?tail=${tail}` : ''}`);
 
+/**
+ * Legacy template-scoped alias. Resolves the first deployment of the template
+ * and calls the per-deployment logs endpoint. Multi-deployment templates should
+ * pass an explicit deployment id via getServiceDeploymentLogs.
+ */
+export const getServiceLogs = async (id: string, tail?: number) => {
+  const { service } = await getService(id);
+  const first = service.serviceDeployments?.[0];
+  if (!first) {
+    throw new Error('Service has no deployments to fetch logs for');
+  }
+  return getServiceDeploymentLogs(id, first.id, tail);
+};
+
+// Deployment history (audit-style list) for a Service template. Route renamed
+// to /deployments-history in 2.0 because /deployments is now the
+// per-deployment CRUD collection.
 export const getDeploymentHistory = (id: string, limit?: number) =>
-  api.get<{ deployments: Deployment[] }>(`/services/${id}/deployments${limit ? `?limit=${limit}` : ''}`);
+  api.get<{ deployments: Deployment[] }>(`/services/${id}/deployments-history${limit ? `?limit=${limit}` : ''}`);
 
 // Secrets
 export const listSecrets = (envId: string) =>

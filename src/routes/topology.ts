@@ -277,11 +277,13 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
         lines.push(`  subgraph ${safeName}["${label}"]`);
 
         for (const sd of server.serviceDeployments) {
-          // Mermaid nodes are per-Service; ports live on the deployment in 2.0.
-          const svcId = sanitizeMermaidId(`svc_${sd.service.id}`);
+          // Mermaid nodes are per-deployment so a template fanning out to N servers
+          // produces N distinct nodes (one inside each server's subgraph). Using
+          // svc_${sd.service.id} would emit duplicate node ids across subgraphs.
+          const depId = sanitizeMermaidId(`dep_${sd.id}`);
           const portSuffix = getServicePrimaryPort(sd.exposedPorts);
           const svcLabel = escapeMermaidLabel(sd.service.name) + (portSuffix ? ` (${portSuffix})` : '');
-          lines.push(`    ${svcId}["${svcLabel}"]`);
+          lines.push(`    ${depId}["${svcLabel}"]`);
         }
 
         // Databases on this server
@@ -306,19 +308,39 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
         }
       }
 
+      // Build a map: Service.id -> [deployment node ids] so service-typed
+      // connections can fan out across all deployments of the referenced service.
+      const deploymentNodesByService = new Map<string, string[]>();
+      for (const server of servers) {
+        for (const sd of server.serviceDeployments) {
+          const list = deploymentNodesByService.get(sd.service.id) ?? [];
+          list.push(sanitizeMermaidId(`dep_${sd.id}`));
+          deploymentNodesByService.set(sd.service.id, list);
+        }
+      }
+
+      const resolveEndpoints = (type: string, id: string): string[] => {
+        if (type === 'service') {
+          // Fall back to a synthetic svc node only when the service has no
+          // deployments (rare, but keeps the diagram valid).
+          return deploymentNodesByService.get(id) ?? [sanitizeMermaidId(`svc_${id}`)];
+        }
+        return [sanitizeMermaidId(`db_${id}`)];
+      };
+
       // Connections
       for (const conn of connections) {
-        const sourceId = sanitizeMermaidId(
-          conn.sourceType === 'service' ? `svc_${conn.sourceId}` : `db_${conn.sourceId}`
-        );
-        const targetId = sanitizeMermaidId(
-          conn.targetType === 'service' ? `svc_${conn.targetId}` : `db_${conn.targetId}`
-        );
+        const sources = resolveEndpoints(conn.sourceType, conn.sourceId);
+        const targets = resolveEndpoints(conn.targetType, conn.targetId);
 
         const arrow = conn.direction === 'forward' ? '-->' : '---';
         const label = conn.label ? `|${escapeMermaidLabel(conn.label)}|` : '';
 
-        lines.push(`  ${sourceId} ${arrow}${label} ${targetId}`);
+        for (const sourceId of sources) {
+          for (const targetId of targets) {
+            lines.push(`  ${sourceId} ${arrow}${label} ${targetId}`);
+          }
+        }
       }
 
       return { mermaid: lines.join('\n') };

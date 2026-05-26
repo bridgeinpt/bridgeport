@@ -436,6 +436,23 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
       const body = validateBody(attachFileSchema, request, reply);
       if (!body) return;
 
+      // The @@unique([serviceId, configFileId, serviceDeploymentId]) constraint
+      // treats NULL values as distinct in SQLite, so it does NOT prevent two
+      // base attachments (serviceDeploymentId = NULL) for the same (service,
+      // configFile). Pre-check here to enforce uniqueness at the application
+      // layer.
+      const existingBaseAttachment = await prisma.serviceFile.findFirst({
+        where: {
+          serviceId: id,
+          configFileId: body.configFileId,
+          serviceDeploymentId: null,
+        },
+        select: { id: true },
+      });
+      if (existingBaseAttachment) {
+        return reply.code(409).send({ error: 'File already attached to this service' });
+      }
+
       try {
         const serviceFile = await prisma.serviceFile.create({
           data: {

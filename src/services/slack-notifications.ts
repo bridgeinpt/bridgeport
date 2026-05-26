@@ -362,11 +362,24 @@ export function buildSlackMessage(
         text: { type: 'plain_text', text: 'View Service', emoji: true },
         url: `${bridgeportUrl}/services/${data.serviceId}`,
       });
-    } else if (typeCode.includes('health') && data.resourceType === 'service' && data.resourceId) {
+    } else if (
+      typeCode.includes('health') &&
+      typeof data.resourceType === 'string' &&
+      ['service', 'service_deployment', 'Service', 'ServiceDeployment'].includes(data.resourceType) &&
+      data.resourceId
+    ) {
+      // For 'service_deployment' resources the UI doesn't have a per-deployment
+      // route — link to the parent Service Detail page when serviceId is in
+      // the payload, otherwise fall back to the deployment id (still routes
+      // through the services list).
+      const target =
+        (data.resourceType === 'service_deployment' || data.resourceType === 'ServiceDeployment') && data.serviceId
+          ? data.serviceId
+          : data.resourceId;
       buttons.push({
         type: 'button',
         text: { type: 'plain_text', text: 'View Service', emoji: true },
-        url: `${bridgeportUrl}/services/${data.resourceId}`,
+        url: `${bridgeportUrl}/services/${target}`,
       });
     } else if (typeCode.includes('health') && data.resourceType === 'server' && data.resourceId) {
       buttons.push({

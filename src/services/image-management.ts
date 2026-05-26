@@ -169,19 +169,25 @@ export async function linkServiceToContainerImage(
   }
 
   // imageDigestId now lives on ServiceDeployment, not Service. Update all
-  // deployments of this service to point at the latest digest.
-  await prisma.serviceDeployment.updateMany({
-    where: { serviceId },
-    data: { imageDigestId: latestDigest?.id ?? null },
-  });
+  // deployments of this service to point at the latest digest AND update the
+  // Service template atomically — otherwise a failure between the two writes
+  // would leave deployments pointing at a digest that no longer matches the
+  // service's containerImageId.
+  const [, service] = await prisma.$transaction([
+    prisma.serviceDeployment.updateMany({
+      where: { serviceId },
+      data: { imageDigestId: latestDigest?.id ?? null },
+    }),
+    prisma.service.update({
+      where: { id: serviceId },
+      data: {
+        containerImageId,
+        imageTag: bestTag,
+      },
+    }),
+  ]);
 
-  return prisma.service.update({
-    where: { id: serviceId },
-    data: {
-      containerImageId,
-      imageTag: bestTag,
-    },
-  });
+  return service;
 }
 
 /**
