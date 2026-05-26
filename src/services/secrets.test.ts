@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { mockPrisma } = vi.hoisted(() => ({
-  mockPrisma: {
+const { mockPrisma } = vi.hoisted(() => {
+  const base = {
     secret: {
       create: vi.fn(),
       update: vi.fn(),
+      findUnique: vi.fn(),
       findUniqueOrThrow: vi.fn(),
       findMany: vi.fn(),
       delete: vi.fn(),
@@ -21,8 +22,17 @@ const { mockPrisma } = vi.hoisted(() => ({
     environment: {
       findFirst: vi.fn().mockResolvedValue(null),
     },
-  },
-}));
+    // SecretUsage rows must be cleared on Secret delete (see #142 C5 fix).
+    secretUsage: {
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    // Interactive transactions just hand the same mock straight back — the
+    // unit tests don't model isolation, only call shape.
+    $transaction: vi.fn(),
+  };
+  base.$transaction.mockImplementation(async (fn: (tx: typeof base) => Promise<unknown>) => fn(base));
+  return { mockPrisma: base };
+});
 
 vi.mock('../lib/db.js', () => ({
   prisma: mockPrisma,
@@ -243,13 +253,37 @@ describe('secrets', () => {
   });
 
   describe('deleteSecret', () => {
-    it('deletes a secret', async () => {
+    it('deletes a secret and clears matching SecretUsage rows', async () => {
+      mockPrisma.secret.findUnique.mockResolvedValue({
+        environmentId: 'env-1',
+        key: 'DB_PASSWORD',
+      });
       mockPrisma.secret.delete.mockResolvedValue({});
 
       await deleteSecret('sec-1');
 
+      // Usage rows for the (env, key) pair are cleared before deletion so
+      // stale references don't resurface when a secret with the same key
+      // is re-created (#142 C5 regression).
+      expect(mockPrisma.secretUsage.deleteMany).toHaveBeenCalledWith({
+        where: { environmentId: 'env-1', secretKey: 'DB_PASSWORD' },
+      });
       expect(mockPrisma.secret.delete).toHaveBeenCalledWith({
         where: { id: 'sec-1' },
+      });
+    });
+
+    it('still calls secret.delete when the secret is missing (preserves 404 path)', async () => {
+      mockPrisma.secret.findUnique.mockResolvedValue(null);
+      mockPrisma.secret.delete.mockResolvedValue({});
+
+      await deleteSecret('missing');
+
+      // No SecretUsage cleanup possible without env/key context — but the
+      // delete itself must still run so callers' catch (404) paths fire.
+      expect(mockPrisma.secretUsage.deleteMany).not.toHaveBeenCalled();
+      expect(mockPrisma.secret.delete).toHaveBeenCalledWith({
+        where: { id: 'missing' },
       });
     });
   });

@@ -75,6 +75,17 @@ describe('extractReferencedKeys', () => {
     const keys = extractReferencedKeys(content);
     expect(Array.from(keys).sort()).toEqual(['BAR', 'BAZ', 'FOO', 'QUX']);
   });
+
+  // Regression: SQLite LIKE treats `_` as a single-char wildcard, so a backfill
+  // that used `LIKE '%${' || key || '}%'` would have matched `${DBXURL}` for a
+  // secret keyed `DB_URL`. The runtime extractor uses a literal regex match,
+  // so the underscore is matched literally — and the (rewritten) migration
+  // uses GLOB to mirror that semantics. This test pins the extractor's
+  // behaviour so any future regex change is caught.
+  it('matches the underscore literally (DB_URL is NOT matched by DBXURL)', () => {
+    expect(extractReferencedKeys('${DB_URL}').has('DB_URL')).toBe(true);
+    expect(extractReferencedKeys('${DBXURL}').has('DB_URL')).toBe(false);
+  });
 });
 
 describe('syncSecretUsageForConfigFile', () => {

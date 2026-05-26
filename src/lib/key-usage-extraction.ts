@@ -18,6 +18,19 @@ import type { Prisma, PrismaClient } from '@prisma/client';
 /** Prisma client or transactional client — both expose `secretUsage`/`varUsage`. */
 type Db = PrismaClient | Prisma.TransactionClient;
 
+/**
+ * Detect a Prisma unique-constraint violation (P2002) without depending on
+ * `Prisma.PrismaClientKnownRequestError` (which would require importing the
+ * runtime class — kept loose to play nicely with the better-sqlite3 adapter).
+ */
+function isUniqueConstraintError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = (error as { code?: unknown }).code;
+  if (code === 'P2002') return true;
+  const message = (error as { message?: unknown }).message;
+  return typeof message === 'string' && message.includes('Unique constraint');
+}
+
 /** Stable shape passed to the sync helpers. */
 export interface ConfigFileForUsage {
   id: string;
@@ -112,9 +125,28 @@ export async function syncSecretUsageForConfigFile(
   }
 
   if (toCreate.length > 0) {
-    await db.secretUsage.createMany({
-      data: toCreate.map((secretKey) => ({ environmentId, secretKey, configFileId })),
-    });
+    // Race protection: two concurrent writes to the same configFile can both
+    // pass the diff check and collide on the @@unique(env, key, file) index.
+    // Prisma 7 + better-sqlite3 doesn't expose `skipDuplicates` on createMany,
+    // so on P2002 we re-read existing rows and retry with the filtered set.
+    try {
+      await db.secretUsage.createMany({
+        data: toCreate.map((secretKey) => ({ environmentId, secretKey, configFileId })),
+      });
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) throw error;
+      const afterRace = await db.secretUsage.findMany({
+        where: { configFileId },
+        select: { secretKey: true },
+      });
+      const nowExisting = new Set(afterRace.map((row) => row.secretKey));
+      const retry = toCreate.filter((key) => !nowExisting.has(key));
+      if (retry.length > 0) {
+        await db.secretUsage.createMany({
+          data: retry.map((secretKey) => ({ environmentId, secretKey, configFileId })),
+        });
+      }
+    }
   }
 }
 
@@ -149,9 +181,26 @@ export async function syncVarUsageForConfigFile(
   }
 
   if (toCreate.length > 0) {
-    await db.varUsage.createMany({
-      data: toCreate.map((varKey) => ({ environmentId, varKey, configFileId })),
-    });
+    // See syncSecretUsageForConfigFile — mirror race protection for the
+    // VarUsage @@unique(env, varKey, file) index.
+    try {
+      await db.varUsage.createMany({
+        data: toCreate.map((varKey) => ({ environmentId, varKey, configFileId })),
+      });
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) throw error;
+      const afterRace = await db.varUsage.findMany({
+        where: { configFileId },
+        select: { varKey: true },
+      });
+      const nowExisting = new Set(afterRace.map((row) => row.varKey));
+      const retry = toCreate.filter((key) => !nowExisting.has(key));
+      if (retry.length > 0) {
+        await db.varUsage.createMany({
+          data: retry.map((varKey) => ({ environmentId, varKey, configFileId })),
+        });
+      }
+    }
   }
 }
 

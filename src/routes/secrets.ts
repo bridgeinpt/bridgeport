@@ -516,7 +516,16 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
         const v = await findOrNotFound(prisma.var.findUnique({ where: { id } }), 'Var', reply);
         if (!v) return;
 
-        await prisma.var.delete({ where: { id } });
+        // Clear VarUsage rows keyed by the (environmentId, key) pair before
+        // deleting the Var. Usage rows reference the textual key (not a Var
+        // FK), so a stale row would otherwise resurface if a new Var with
+        // the same key were created later.
+        await prisma.$transaction(async (tx) => {
+          await tx.varUsage.deleteMany({
+            where: { environmentId: v.environmentId, varKey: v.key },
+          });
+          await tx.var.delete({ where: { id } });
+        });
 
         await logAudit({
           action: 'delete',

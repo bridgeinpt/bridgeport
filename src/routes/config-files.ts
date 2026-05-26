@@ -203,18 +203,23 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         const language =
           body.language ?? (body.isBinary ? undefined : detectLanguage(body.filename));
 
-        const configFile = await prisma.configFile.create({
-          data: {
-            ...body,
-            ...(language !== undefined ? { language } : {}),
-            environmentId: envId,
-          },
+        // Wrap content write + usage sync in a transaction so they commit or
+        // roll back together — otherwise a sync failure would leave the file
+        // saved with no usage rows tracked.
+        const configFile = await prisma.$transaction(async (tx) => {
+          const cf = await tx.configFile.create({
+            data: {
+              ...body,
+              ...(language !== undefined ? { language } : {}),
+              environmentId: envId,
+            },
+          });
+          // Populate Secret/VarUsage rows so the secrets/vars list endpoints
+          // can resolve "where is this key used?" via a join instead of
+          // scanning content. Binary files skip extraction inside the helper.
+          await syncUsageForConfigFile(tx, cf);
+          return cf;
         });
-
-        // Populate Secret/VarUsage rows so the secrets/vars list endpoints can
-        // resolve "where is this key used?" via a join instead of scanning
-        // content. Binary files skip extraction inside the helper.
-        await syncUsageForConfigFile(prisma, configFile);
 
         await logAudit({
           action: 'create',
@@ -265,16 +270,20 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           });
         }
 
-        const configFile = await prisma.configFile.update({
-          where: { id },
-          data: body,
+        // Wrap content write + usage sync in a single transaction so both
+        // commit or roll back together.
+        const configFile = await prisma.$transaction(async (tx) => {
+          const cf = await tx.configFile.update({
+            where: { id },
+            data: body,
+          });
+          // Re-sync Secret/VarUsage rows whenever the content or isBinary flag
+          // could have changed. Cheap when nothing changed (single findMany).
+          if (body.content !== undefined || body.isBinary !== undefined) {
+            await syncUsageForConfigFile(tx, cf);
+          }
+          return cf;
         });
-
-        // Re-sync Secret/VarUsage rows whenever the content or isBinary flag
-        // could have changed. Cheap when nothing changed (single findMany).
-        if (body.content !== undefined || body.isBinary !== undefined) {
-          await syncUsageForConfigFile(prisma, configFile);
-        }
 
         await logAudit({
           action: 'update',
@@ -357,14 +366,17 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         },
       });
 
-      // Restore content from history
-      const updated = await prisma.configFile.update({
-        where: { id },
-        data: { content: historyEntry.content },
+      // Restore content from history. Wrap restore + usage sync in a
+      // transaction so both commit or roll back together.
+      const updated = await prisma.$transaction(async (tx) => {
+        const cf = await tx.configFile.update({
+          where: { id },
+          data: { content: historyEntry.content },
+        });
+        // Re-sync usage rows for the restored content.
+        await syncUsageForConfigFile(tx, cf);
+        return cf;
       });
-
-      // Re-sync usage rows for the restored content.
-      await syncUsageForConfigFile(prisma, updated);
 
       await logAudit({
         action: 'restore',
@@ -1150,22 +1162,27 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
       const mimeType = data.mimetype || 'application/octet-stream';
 
       try {
-        const configFile = await prisma.configFile.create({
-          data: {
-            name,
-            filename,
-            content,
-            description: description || null,
-            isBinary: true,
-            mimeType,
-            fileSize,
-            environmentId: envId,
-          },
+        // Wrap content write + usage sync in a transaction so both commit or
+        // roll back together. (For binary assets the helper no-ops, but the
+        // transaction keeps the contract consistent with the other paths.)
+        const configFile = await prisma.$transaction(async (tx) => {
+          const cf = await tx.configFile.create({
+            data: {
+              name,
+              filename,
+              content,
+              description: description || null,
+              isBinary: true,
+              mimeType,
+              fileSize,
+              environmentId: envId,
+            },
+          });
+          // Binary assets produce no usage; the helper still no-ops cleanly so
+          // we call it for consistency with the other write paths.
+          await syncUsageForConfigFile(tx, cf);
+          return cf;
         });
-
-        // Binary assets produce no usage; the helper still no-ops cleanly so
-        // we call it for consistency with the other write paths.
-        await syncUsageForConfigFile(prisma, configFile);
 
         await logAudit({
           action: 'create',

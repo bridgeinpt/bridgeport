@@ -481,15 +481,17 @@ export async function configScanRoutes(fastify: FastifyInstance): Promise<void> 
             },
           });
 
-          // Update file content
-          const updated = await prisma.configFile.update({
-            where: { id: file.id },
-            data: { content: newContent },
+          // Wrap content write + usage sync in a transaction so the file
+          // update and the join-table refresh commit (or roll back) together.
+          await prisma.$transaction(async (tx) => {
+            const updated = await tx.configFile.update({
+              where: { id: file.id },
+              data: { content: newContent },
+            });
+            // Content changed — re-sync Secret/VarUsage rows so the
+            // secrets/vars list endpoints see the newly-substituted placeholder.
+            await syncUsageForConfigFile(tx, updated);
           });
-
-          // Content changed — re-sync Secret/VarUsage rows so the secrets/vars
-          // list endpoints see the newly-substituted placeholder.
-          await syncUsageForConfigFile(prisma, updated);
 
           await logAudit({
             action: 'update',

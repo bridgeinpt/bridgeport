@@ -33,16 +33,30 @@ CREATE UNIQUE INDEX "VarUsage_environmentId_varKey_configFileId_key" ON "VarUsag
 -- INSERT OR IGNORE so the migration is idempotent and safe to re-run if the
 -- entrypoint retries it. Ids are random 24-char hex (Prisma uses cuid going
 -- forward; format doesn't matter — only uniqueness inside the table).
+--
+-- IMPORTANT: We use GLOB instead of LIKE because:
+--   1. LIKE treats `_` as a single-char wildcard — so a key `DB_URL` would
+--      match `${DBXURL}` (false positive). GLOB treats `_` literally.
+--   2. LIKE is ASCII-case-insensitive by default in SQLite — key `PATH` would
+--      match `$path`. GLOB is case-sensitive, matching the runtime extractor
+--      which uses `[A-Z]` regex (src/lib/key-usage-extraction.ts).
+--   3. For bare `$KEY` we need a non-word boundary after the key (otherwise
+--      `KEY` matches `$KEYBOARD`). GLOB's `[!A-Z0-9_]` negative class gives
+--      us that — with a separate end-of-content equality for `$KEY` at EOF.
+--   4. GLOB has no anchoring (no `^`/`$`), so for `^KEY=` (env-file style) we
+--      check (a) start-of-content via substr equality and (b) after-newline
+--      via instr(content, '\nKEY=').
 INSERT OR IGNORE INTO "SecretUsage" ("id", "environmentId", "secretKey", "configFileId")
 SELECT lower(hex(randomblob(12))), cf."environmentId", s."key", cf."id"
 FROM "ConfigFile" cf
 JOIN "Secret" s ON s."environmentId" = cf."environmentId"
 WHERE cf."isBinary" = 0 AND (
-    cf."content" LIKE '%${' || s."key" || '}%' OR
-    cf."content" LIKE '%$' || s."key" || '%' OR
-    cf."content" LIKE '%{{' || s."key" || '}}%' OR
-    cf."content" LIKE s."key" || '=%' OR
-    cf."content" LIKE '%' || char(10) || s."key" || '=%'
+    cf."content" GLOB ('*${' || s."key" || '}*') OR
+    cf."content" GLOB ('*$' || s."key" || '[!A-Z0-9_]*') OR
+    substr(cf."content", length(cf."content") - length(s."key")) = ('$' || s."key") OR
+    cf."content" GLOB ('*{{' || s."key" || '}}*') OR
+    substr(cf."content", 1, length(s."key") + 1) = (s."key" || '=') OR
+    instr(cf."content", char(10) || s."key" || '=') > 0
 );
 
 INSERT OR IGNORE INTO "VarUsage" ("id", "environmentId", "varKey", "configFileId")
@@ -50,9 +64,10 @@ SELECT lower(hex(randomblob(12))), cf."environmentId", v."key", cf."id"
 FROM "ConfigFile" cf
 JOIN "Var" v ON v."environmentId" = cf."environmentId"
 WHERE cf."isBinary" = 0 AND (
-    cf."content" LIKE '%${' || v."key" || '}%' OR
-    cf."content" LIKE '%$' || v."key" || '%' OR
-    cf."content" LIKE '%{{' || v."key" || '}}%' OR
-    cf."content" LIKE v."key" || '=%' OR
-    cf."content" LIKE '%' || char(10) || v."key" || '=%'
+    cf."content" GLOB ('*${' || v."key" || '}*') OR
+    cf."content" GLOB ('*$' || v."key" || '[!A-Z0-9_]*') OR
+    substr(cf."content", length(cf."content") - length(v."key")) = ('$' || v."key") OR
+    cf."content" GLOB ('*{{' || v."key" || '}}*') OR
+    substr(cf."content", 1, length(v."key") + 1) = (v."key" || '=') OR
+    instr(cf."content", char(10) || v."key" || '=') > 0
 );

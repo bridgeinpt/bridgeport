@@ -483,4 +483,121 @@ describe('secrets/vars usage tracking', () => {
       expect(afterRestore.map((r) => r.secretKey)).toEqual(['RESTORE_A']);
     });
   });
+
+  // ── 8. Secret/Var DELETE clears matching usage rows (C5 regression) ─────
+
+  describe('Secret DELETE clears matching SecretUsage rows', () => {
+    it('does not resurface stale rows when a secret with the same key is re-created', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'secret-delete-env' });
+      const localEnvId = env.id;
+
+      // Seed a secret + a config file that references it.
+      const secret = await createSecret(localEnvId, { key: 'RECREATE_ME', value: 'v1' });
+      const file = await app.prisma.configFile.create({
+        data: {
+          name: 'recreate-file',
+          filename: 'r.env',
+          content: 'X=${RECREATE_ME}',
+          environmentId: localEnvId,
+        },
+      });
+      await app.prisma.secretUsage.create({
+        data: { environmentId: localEnvId, secretKey: 'RECREATE_ME', configFileId: file.id },
+      });
+
+      // Sanity: one usage row exists.
+      expect(
+        await app.prisma.secretUsage.count({
+          where: { environmentId: localEnvId, secretKey: 'RECREATE_ME' },
+        })
+      ).toBe(1);
+
+      // Delete the secret via the HTTP route.
+      const del = await app.inject({
+        method: 'DELETE',
+        url: `/api/secrets/${secret.id}`,
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+      expect(del.statusCode).toBe(200);
+
+      // The usage row must be gone — even though the config file still
+      // references the key textually, no Secret with that id exists anymore.
+      expect(
+        await app.prisma.secretUsage.count({
+          where: { environmentId: localEnvId, secretKey: 'RECREATE_ME' },
+        })
+      ).toBe(0);
+
+      // Re-create a secret with the same key. Listing it must report an
+      // empty `usedByConfigFiles` — i.e. no stale row resurfaced.
+      await createSecret(localEnvId, { key: 'RECREATE_ME', value: 'v2' });
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/environments/${localEnvId}/secrets`,
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+      expect(res.statusCode).toBe(200);
+      const recreated = res
+        .json()
+        .secrets.find((s: { key: string }) => s.key === 'RECREATE_ME');
+      expect(recreated).toBeDefined();
+      expect(recreated.usedByConfigFiles).toEqual([]);
+    });
+  });
+
+  describe('Var DELETE clears matching VarUsage rows', () => {
+    it('does not resurface stale rows when a var with the same key is re-created', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'var-delete-env' });
+      const localEnvId = env.id;
+
+      const v = await app.prisma.var.create({
+        data: { key: 'RECREATE_VAR', value: 'v1', environmentId: localEnvId },
+      });
+      const file = await app.prisma.configFile.create({
+        data: {
+          name: 'recreate-var-file',
+          filename: 'r.env',
+          content: 'X=${RECREATE_VAR}',
+          environmentId: localEnvId,
+        },
+      });
+      await app.prisma.varUsage.create({
+        data: { environmentId: localEnvId, varKey: 'RECREATE_VAR', configFileId: file.id },
+      });
+
+      expect(
+        await app.prisma.varUsage.count({
+          where: { environmentId: localEnvId, varKey: 'RECREATE_VAR' },
+        })
+      ).toBe(1);
+
+      const del = await app.inject({
+        method: 'DELETE',
+        url: `/api/vars/${v.id}`,
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+      expect(del.statusCode).toBe(200);
+
+      expect(
+        await app.prisma.varUsage.count({
+          where: { environmentId: localEnvId, varKey: 'RECREATE_VAR' },
+        })
+      ).toBe(0);
+
+      await app.prisma.var.create({
+        data: { key: 'RECREATE_VAR', value: 'v2', environmentId: localEnvId },
+      });
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/environments/${localEnvId}/vars`,
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+      expect(res.statusCode).toBe(200);
+      const recreated = res
+        .json()
+        .vars.find((vv: { key: string }) => vv.key === 'RECREATE_VAR');
+      expect(recreated).toBeDefined();
+      expect(recreated.usedByConfigFiles).toEqual([]);
+    });
+  });
 });
