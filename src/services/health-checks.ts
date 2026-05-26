@@ -5,7 +5,7 @@ import { prisma } from '../lib/db.js';
  */
 export async function logHealthCheck(params: {
   environmentId: string;
-  resourceType: 'server' | 'service' | 'container';
+  resourceType: 'server' | 'service' | 'service_deployment' | 'container';
   resourceId: string;
   resourceName: string;
   checkType: 'ssh' | 'url' | 'container_health' | 'discovery';

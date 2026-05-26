@@ -82,8 +82,12 @@ export async function getContainerImage(id: string): Promise<ContainerImage & { 
     include: {
       services: {
         include: {
-          server: { select: { id: true, name: true, hostname: true, environmentId: true } },
-          imageDigest: { select: { id: true, manifestDigest: true, tags: true } },
+          serviceDeployments: {
+            include: {
+              server: { select: { id: true, name: true, hostname: true, environmentId: true } },
+              imageDigest: { select: { id: true, manifestDigest: true, tags: true } },
+            },
+          },
         },
       },
       registryConnection: true,
@@ -113,7 +117,9 @@ export async function listContainerImages(
       include: {
         services: {
           include: {
-            server: true,
+            serviceDeployments: {
+              include: { server: true },
+            },
           },
         },
         registryConnection: true,
@@ -162,12 +168,18 @@ export async function linkServiceToContainerImage(
     bestTag = getBestTag(digestTags, tagFilterPatterns) || bestTag;
   }
 
+  // imageDigestId now lives on ServiceDeployment, not Service. Update all
+  // deployments of this service to point at the latest digest.
+  await prisma.serviceDeployment.updateMany({
+    where: { serviceId },
+    data: { imageDigestId: latestDigest?.id ?? null },
+  });
+
   return prisma.service.update({
     where: { id: serviceId },
     data: {
       containerImageId,
       imageTag: bestTag,
-      imageDigestId: latestDigest?.id ?? null,
     },
   });
 }
@@ -212,10 +224,10 @@ export async function recordTagDeployment(
       },
     });
 
-    // Update all linked services' imageDigestId
+    // Update all linked service deployments' imageDigestId (imageDigest moved from Service to ServiceDeployment)
     if (imageDigestId) {
-      await prisma.service.updateMany({
-        where: { containerImageId },
+      await prisma.serviceDeployment.updateMany({
+        where: { service: { containerImageId } },
         data: { imageDigestId },
       });
     }
@@ -244,10 +256,10 @@ export interface EnhancedHistoryEntry extends ContainerImageHistory {
     service: {
       id: string;
       name: string;
-      server: {
-        id: string;
-        name: string;
-      };
+    } | null;
+    serviceDeployment: {
+      id: string;
+      server: { id: string; name: string };
     } | null;
     user: {
       id: string;
@@ -285,12 +297,12 @@ export async function getTagHistory(
           startedAt: true,
           completedAt: true,
           service: {
+            select: { id: true, name: true },
+          },
+          serviceDeployment: {
             select: {
               id: true,
-              name: true,
-              server: {
-                select: { id: true, name: true },
-              },
+              server: { select: { id: true, name: true } },
             },
           },
           user: {
@@ -313,7 +325,7 @@ export async function getTagHistory(
       .map((d) => ({
         id: d.service!.id,
         name: d.service!.name,
-        serverName: d.service!.server.name,
+        serverName: d.serviceDeployment?.server.name ?? '',
       }))
       // Remove duplicates
       .filter((s, i, arr) => arr.findIndex((x) => x.id === s.id) === i);
@@ -351,7 +363,7 @@ export async function getLinkedServicesWithDependencies(
   return prisma.service.findMany({
     where: { containerImageId },
     include: {
-      server: true,
+      serviceDeployments: { include: { server: true } },
       dependencies: {
         include: {
           dependsOn: true,
@@ -578,7 +590,7 @@ export async function cleanupOldImageDigests(retentionDays: number = 90): Promis
   const deleted = await prisma.imageDigest.deleteMany({
     where: {
       discoveredAt: { lt: cutoff },
-      services: { none: {} },
+      serviceDeployments: { none: {} },
       historyEntries: { none: {} },
     },
   });
@@ -589,7 +601,13 @@ export async function getImageDigest(digestId: string) {
   return prisma.imageDigest.findUnique({
     where: { id: digestId },
     include: {
-      services: { select: { id: true, name: true } },
+      serviceDeployments: {
+        select: {
+          id: true,
+          server: { select: { id: true, name: true } },
+          service: { select: { id: true, name: true } },
+        },
+      },
       containerImage: { select: { id: true, tagFilter: true } },
     },
   });

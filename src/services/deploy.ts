@@ -1,7 +1,7 @@
 import path from 'path';
 import { prisma } from '../lib/db.js';
-import { DockerSSH, createClientForServer, shellEscape, type CommandClient } from '../lib/ssh.js';
-import { createDockerClientForServer, type DockerClient } from '../lib/docker.js';
+import { DockerSSH, shellEscape } from '../lib/ssh.js';
+import { createDockerClientForServer } from '../lib/docker.js';
 import { RegistryFactory } from '../lib/registry.js';
 import { getRegistryCredentials } from './registries.js';
 import { extractRepoName, stripRegistryPrefix } from '../lib/image-utils.js';
@@ -15,7 +15,7 @@ import { recordTagDeployment } from './image-management.js';
 import { safeJsonParse } from '../lib/helpers.js';
 import { eventBus } from '../lib/event-bus.js';
 import { DEPLOYMENT_STATUS, CONTAINER_STATUS, HISTORY_STATUS } from '../lib/constants.js';
-import type { Deployment, Service } from '@prisma/client';
+import type { Deployment } from '@prisma/client';
 
 export interface DeployOptions {
   imageTag?: string;
@@ -29,36 +29,42 @@ export interface DeployResult {
   previousTag: string | null;
 }
 
+/**
+ * Deploy a single ServiceDeployment (per-server).
+ * The `imageTag` ultimately lives on the parent Service (shared across all deployments
+ * in 2.0). `options.imageTag` updates the template's tag before deploying.
+ */
 export async function deployService(
-  serviceId: string,
+  serviceDeploymentId: string,
   triggeredBy: string,
   userId: string | null,
   options: DeployOptions = {}
 ): Promise<DeployResult> {
-  const startTime = Date.now(); // Track deployment duration
+  const startTime = Date.now();
 
-  const service = await prisma.service.findUniqueOrThrow({
-    where: { id: serviceId },
+  const deployment = await prisma.serviceDeployment.findUniqueOrThrow({
+    where: { id: serviceDeploymentId },
     include: {
-      server: {
-        include: { environment: true },
-      },
-      containerImage: true,
+      server: { include: { environment: true } },
+      service: { include: { containerImage: true } },
     },
   });
 
+  const service = deployment.service;
   const imageTag = options.imageTag || service.imageTag;
-  const previousTag = service.imageTag; // Store previous tag for rollback
+  const previousTag = service.imageTag;
   const logs: string[] = [];
 
-  // Create deployment record with previousTag for rollback support
-  const deployment = await prisma.deployment.create({
+  // Create deployment record. Denormalize serviceId so historical UI queries
+  // don't need a 3-way join through ServiceDeployment.
+  const deploymentRow = await prisma.deployment.create({
     data: {
       imageTag,
       previousTag,
       status: DEPLOYMENT_STATUS.PENDING,
       triggeredBy,
-      serviceId,
+      serviceId: service.id,
+      serviceDeploymentId,
       userId,
     },
   });
@@ -70,21 +76,21 @@ export async function deployService(
 
   try {
     await prisma.deployment.update({
-      where: { id: deployment.id },
+      where: { id: deploymentRow.id },
       data: { status: DEPLOYMENT_STATUS.DEPLOYING },
     });
 
-    eventBus.emitEvent({ type: 'deployment_progress', data: { deploymentId: deployment.id, serviceId, status: DEPLOYMENT_STATUS.DEPLOYING, environmentId: service.server.environmentId } });
+    eventBus.emitEvent({ type: 'deployment_progress', data: { deploymentId: deploymentRow.id, serviceId: service.id, status: DEPLOYMENT_STATUS.DEPLOYING, environmentId: deployment.server.environmentId } });
 
-    log(`Starting deployment of ${service.name} with tag ${imageTag}`);
+    log(`Starting deployment of ${service.name} on ${deployment.server.name} with tag ${imageTag}`);
 
     // Create appropriate Docker client based on server's dockerMode
     const { dockerClient, sshClient, error: clientError, mode, needsConnect } = await createDockerClientForServer(
       {
-        hostname: service.server.hostname,
-        dockerMode: service.server.dockerMode,
-        serverType: service.server.serverType,
-        environmentId: service.server.environmentId,
+        hostname: deployment.server.hostname,
+        dockerMode: deployment.server.dockerMode,
+        serverType: deployment.server.serverType,
+        environmentId: deployment.server.environmentId,
       },
       getEnvironmentSshKey
     );
@@ -93,20 +99,18 @@ export async function deployService(
       throw new Error(clientError || 'Failed to create Docker client');
     }
 
-    // Connect SSH client if needed (for file operations or SSH-mode Docker)
     if (needsConnect && sshClient) {
       await sshClient.connect();
     }
 
     // For compose operations, we still need the DockerSSH wrapper (uses SSH for compose commands)
-    // TODO: In the future, could add compose support to socket mode
     const dockerSSH = sshClient ? new DockerSSH(sshClient) : null;
 
-    log(`Connected to ${service.server.name} (${mode} mode)`);
+    log(`Connected to ${deployment.server.name} (${mode} mode)`);
 
-    // Determine deploy directory (use path.dirname to properly handle any path)
-    const deployDir = service.composePath
-      ? path.dirname(service.composePath)
+    // Determine deploy directory
+    const deployDir = deployment.composePath
+      ? path.dirname(deployment.composePath)
       : `/opt/${service.name}`;
 
     // File operations require SSH client (even in socket mode)
@@ -118,22 +122,24 @@ export async function deployService(
     if (options.generateArtifacts !== false && sshClient) {
       log('Generating deployment artifacts...');
 
-      // Temporarily update the image tag for artifact generation
-      await prisma.service.update({
-        where: { id: serviceId },
-        data: { imageTag },
-      });
+      // Sync the image tag onto the template before generating artifacts.
+      // imageTag is shared across all deployments in 2.0.
+      if (imageTag !== service.imageTag) {
+        await prisma.service.update({
+          where: { id: service.id },
+          data: { imageTag },
+        });
+      }
 
-      const artifacts = await generateDeploymentArtifacts(serviceId);
+      const artifacts = await generateDeploymentArtifacts(serviceDeploymentId);
 
       // Upload compose file (preserve existing path if set, otherwise use generated name)
-      const composePath = service.composePath || `${deployDir}/${artifacts.compose.name}`;
+      const composePath = deployment.composePath || `${deployDir}/${artifacts.compose.name}`;
       log(`Writing compose file to ${composePath}`);
       await sshClient.exec(`cat > ${shellEscape(composePath)} << 'COMPOSEEOF'\n${artifacts.compose.content}\nCOMPOSEEOF`);
 
       // Upload config files to their configured target paths
       for (const cf of artifacts.configFiles) {
-        // Use the configured mountPath (targetPath) for the file
         const cfPath = cf.mountPath;
 
         // Ensure target directory exists
@@ -143,11 +149,10 @@ export async function deployService(
         log(`Writing config file: ${cf.name} -> ${cfPath}`);
 
         if (cf.isBinary) {
-          // Binary files: use SFTP for reliable transfer of large files
+          // Binary files: use SFTP for reliable transfer
           const fileBuffer = Buffer.from(cf.content, 'base64');
           await sshClient.writeFile(cfPath, fileBuffer);
         } else {
-          // Text files: use heredoc
           await sshClient.exec(`cat > ${shellEscape(cfPath)} << 'CFEOF'\n${cf.content}\nCFEOF`);
         }
 
@@ -157,29 +162,26 @@ export async function deployService(
         }
       }
 
-      // Save artifacts to database
-      await saveDeploymentArtifacts(deployment.id, artifacts);
+      await saveDeploymentArtifacts(deploymentRow.id, artifacts);
       log('Artifacts saved');
 
-      // Update service compose path only if it wasn't already set
-      if (!service.composePath) {
-        await prisma.service.update({
-          where: { id: serviceId },
+      // Update service deployment compose path only if it wasn't already set
+      if (!deployment.composePath) {
+        await prisma.serviceDeployment.update({
+          where: { id: serviceDeploymentId },
           data: { composePath },
         });
-        service.composePath = composePath;
+        deployment.composePath = composePath;
       }
     }
 
-    // Ensure registry auth is in place before any pull. SSH-mode persists auth
-    // via `docker login` on the remote box (covers both `docker pull` and the
-    // later `docker compose pull`). Socket-mode passes auth in-process to dockerode.
+    // Ensure registry auth
     const registryConnectionId = service.containerImage.registryConnectionId;
     let socketAuth: Awaited<ReturnType<typeof getSocketAuthConfig>> = null;
     if (registryConnectionId) {
       if (dockerSSH) {
         const result = await ensureRegistryLogin(
-          service.server.id,
+          deployment.server.id,
           registryConnectionId,
           dockerSSH
         );
@@ -191,7 +193,7 @@ export async function deployService(
       }
     }
 
-    // Pull new image (get imageName from containerImage)
+    // Pull new image
     if (options.pullImage !== false) {
       const imageName = service.containerImage.imageName;
       const fullImage = `${imageName}:${imageTag}`;
@@ -201,57 +203,56 @@ export async function deployService(
     }
 
     // Deploy using compose or direct container
-    if (service.composePath && dockerSSH) {
-      // Compose operations still require SSH (docker compose commands)
-      log(`Running docker compose up for ${service.composePath}`);
-      await dockerSSH.composePull(service.composePath, service.containerName);
-      await dockerSSH.composeUp(service.composePath, service.containerName);
+    if (deployment.composePath && dockerSSH) {
+      log(`Running docker compose up for ${deployment.composePath}`);
+      await dockerSSH.composePull(deployment.composePath, deployment.containerName);
+      await dockerSSH.composeUp(deployment.composePath, deployment.containerName);
       log('Compose up completed');
     } else {
-      log(`Restarting container: ${service.containerName}`);
-      await dockerClient.restartContainer(service.containerName);
+      log(`Restarting container: ${deployment.containerName}`);
+      await dockerClient.restartContainer(deployment.containerName);
       log('Container restarted');
     }
 
     // Verify container is running
     const containers = await dockerClient.listContainers();
-    const container = containers.find((c) => c.name === service.containerName);
+    const container = containers.find((c) => c.name === deployment.containerName);
 
     if (!container || container.state !== CONTAINER_STATUS.RUNNING) {
-      throw new Error(`Container ${service.containerName} is not running after deploy`);
+      throw new Error(`Container ${deployment.containerName} is not running after deploy`);
     }
 
-    log(`Container ${service.containerName} is running`);
+    log(`Container ${deployment.containerName} is running`);
 
     if (sshClient) {
       sshClient.disconnect();
     }
 
-    // Update service record
-    await prisma.service.update({
-      where: { id: serviceId },
+    // Update deployment record - lastDeployedAt and runtime status.
+    await prisma.serviceDeployment.update({
+      where: { id: serviceDeploymentId },
       data: {
-        imageTag,
         status: CONTAINER_STATUS.RUNNING,
         lastCheckedAt: new Date(),
+        lastDeployedAt: new Date(),
       },
     });
 
-    // Check for available image updates in background (don't block deploy)
-    checkServiceUpdate(serviceId).catch((err) => {
-      console.error(`[Deploy] Failed to check updates for service ${serviceId}:`, err);
+    // Check for available image updates in background
+    checkServiceUpdate(serviceDeploymentId).catch((err) => {
+      console.error(`[Deploy] Failed to check updates for deployment ${serviceDeploymentId}:`, err);
     });
 
-    // Auto-prune images if enabled for this environment (non-blocking)
+    // Auto-prune images if enabled
     prisma.operationsSettings.findUnique({
-      where: { environmentId: service.server.environmentId },
+      where: { environmentId: deployment.server.environmentId },
       select: { autoPruneImages: true, pruneImagesMode: true },
     }).then((opSettings) => {
       if (opSettings?.autoPruneImages) {
         const mode = (opSettings.pruneImagesMode as 'dangling' | 'all') ?? 'dangling';
-        pruneServerImages(service.server, mode)
+        pruneServerImages(deployment.server, mode)
           .then(({ spaceReclaimedBytes }) => {
-            if (spaceReclaimedBytes > 0) log(`[Auto-prune] Freed ${spaceReclaimedBytes} bytes on ${service.server.name}`);
+            if (spaceReclaimedBytes > 0) log(`[Auto-prune] Freed ${spaceReclaimedBytes} bytes on ${deployment.server.name}`);
           })
           .catch(err => console.error('[Deploy] Auto-prune failed:', err));
       }
@@ -269,7 +270,7 @@ export async function deployService(
     // Mark deployment as successful and link to history entry
     const durationMs = Date.now() - startTime;
     const finalDeployment = await prisma.deployment.update({
-      where: { id: deployment.id },
+      where: { id: deploymentRow.id },
       data: {
         status: DEPLOYMENT_STATUS.SUCCESS,
         logs: logs.join('\n'),
@@ -279,7 +280,7 @@ export async function deployService(
       },
     });
 
-    eventBus.emitEvent({ type: 'deployment_progress', data: { deploymentId: deployment.id, serviceId, status: DEPLOYMENT_STATUS.SUCCESS, environmentId: service.server.environmentId } });
+    eventBus.emitEvent({ type: 'deployment_progress', data: { deploymentId: deploymentRow.id, serviceId: service.id, status: DEPLOYMENT_STATUS.SUCCESS, environmentId: deployment.server.environmentId } });
 
     // Collect all tags for the deployed digest to include in notification
     let imageTags: string[] = [];
@@ -291,15 +292,14 @@ export async function deployService(
       imageTags = safeJsonParse(digest?.tags as string, [] as string[]);
     }
 
-    // Send success notification
     await sendSystemNotification(
       NOTIFICATION_TYPES.SYSTEM_DEPLOYMENT_SUCCESS,
-      service.server.environmentId,
+      deployment.server.environmentId,
       {
         serviceName: service.name,
         imageTag,
         imageTags,
-        serverName: service.server.name,
+        serverName: deployment.server.name,
       }
     );
 
@@ -308,7 +308,6 @@ export async function deployService(
     const errorMessage = error instanceof Error ? error.message : String(error);
     log(`ERROR: ${errorMessage}`);
 
-    // Record failed deployment in container image history
     const historyEntry = await recordTagDeployment(
       service.containerImage.id,
       imageTag,
@@ -319,7 +318,7 @@ export async function deployService(
 
     const durationMs = Date.now() - startTime;
     const failedDeployment = await prisma.deployment.update({
-      where: { id: deployment.id },
+      where: { id: deploymentRow.id },
       data: {
         status: DEPLOYMENT_STATUS.FAILED,
         logs: logs.join('\n'),
@@ -329,23 +328,96 @@ export async function deployService(
       },
     });
 
-    eventBus.emitEvent({ type: 'deployment_progress', data: { deploymentId: deployment.id, serviceId, status: DEPLOYMENT_STATUS.FAILED, environmentId: service.server.environmentId } });
+    eventBus.emitEvent({ type: 'deployment_progress', data: { deploymentId: deploymentRow.id, serviceId: service.id, status: DEPLOYMENT_STATUS.FAILED, environmentId: deployment.server.environmentId } });
 
-    // Send failure notification
     await sendSystemNotification(
       NOTIFICATION_TYPES.SYSTEM_DEPLOYMENT_FAILED,
-      service.server.environmentId,
+      deployment.server.environmentId,
       {
         serviceName: service.name,
         serviceId: service.id,
         imageTag,
-        serverName: service.server.name,
+        serverName: deployment.server.name,
         error: errorMessage,
       }
     );
 
     return { deployment: failedDeployment, logs: logs.join('\n'), previousTag };
   }
+}
+
+/**
+ * Deploy a Service template across all its ServiceDeployments.
+ * Strategy:
+ *  - 'sequential' (default): deploy one at a time, halt on first failure.
+ *  - 'parallel': fan out concurrently to all servers.
+ */
+export interface DeployServiceTemplateOptions extends DeployOptions {
+  strategy?: 'sequential' | 'parallel';
+}
+
+export interface DeployServiceTemplateResult {
+  results: Array<{ serviceDeploymentId: string; result: DeployResult | null; error?: string }>;
+  halted: boolean;
+}
+
+export async function deployServiceTemplate(
+  serviceId: string,
+  triggeredBy: string,
+  userId: string | null,
+  options: DeployServiceTemplateOptions = {}
+): Promise<DeployServiceTemplateResult> {
+  const service = await prisma.service.findUniqueOrThrow({
+    where: { id: serviceId },
+    include: { serviceDeployments: { select: { id: true } } },
+  });
+
+  const strategy: 'sequential' | 'parallel' =
+    options.strategy ?? (service.deployStrategy as 'sequential' | 'parallel');
+
+  const results: DeployServiceTemplateResult['results'] = [];
+  let halted = false;
+
+  if (strategy === 'parallel') {
+    const settled = await Promise.allSettled(
+      service.serviceDeployments.map((sd) =>
+        deployService(sd.id, triggeredBy, userId, options).then(
+          (result) => ({ serviceDeploymentId: sd.id, result }),
+          (err) => ({ serviceDeploymentId: sd.id, result: null, error: err instanceof Error ? err.message : String(err) })
+        )
+      )
+    );
+    for (const r of settled) {
+      if (r.status === 'fulfilled') {
+        results.push(r.value);
+      } else {
+        results.push({ serviceDeploymentId: 'unknown', result: null, error: String(r.reason) });
+      }
+    }
+  } else {
+    for (const sd of service.serviceDeployments) {
+      try {
+        const result = await deployService(sd.id, triggeredBy, userId, options);
+        results.push({ serviceDeploymentId: sd.id, result });
+        if (result.deployment.status !== DEPLOYMENT_STATUS.SUCCESS) {
+          // Sequential strategy halts on first failure with a clear rollback hint
+          // emitted in the deployment logs (see deployService failure branch).
+          halted = true;
+          break;
+        }
+      } catch (err) {
+        results.push({
+          serviceDeploymentId: sd.id,
+          result: null,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        halted = true;
+        break;
+      }
+    }
+  }
+
+  return { results, halted };
 }
 
 export async function getDeploymentHistory(
@@ -366,21 +438,20 @@ export async function getDeployment(deploymentId: string): Promise<Deployment | 
 }
 
 export async function getContainerLogs(
-  serviceId: string,
+  serviceDeploymentId: string,
   tail: number = 100
 ): Promise<string> {
-  const service = await prisma.service.findUniqueOrThrow({
-    where: { id: serviceId },
+  const deployment = await prisma.serviceDeployment.findUniqueOrThrow({
+    where: { id: serviceDeploymentId },
     include: { server: true },
   });
 
-  // Create appropriate Docker client based on server's dockerMode
   const { dockerClient, sshClient, error: clientError, needsConnect } = await createDockerClientForServer(
     {
-      hostname: service.server.hostname,
-      dockerMode: service.server.dockerMode,
-      serverType: service.server.serverType,
-      environmentId: service.server.environmentId,
+      hostname: deployment.server.hostname,
+      dockerMode: deployment.server.dockerMode,
+      serverType: deployment.server.serverType,
+      environmentId: deployment.server.environmentId,
     },
     getEnvironmentSshKey
   );
@@ -393,7 +464,7 @@ export async function getContainerLogs(
     if (needsConnect && sshClient) {
       await sshClient.connect();
     }
-    return await dockerClient.getContainerLogs(service.containerName, { tail });
+    return await dockerClient.getContainerLogs(deployment.containerName, { tail });
   } finally {
     if (sshClient) {
       sshClient.disconnect();

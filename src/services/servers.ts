@@ -1,12 +1,12 @@
 import { prisma } from '../lib/db.js';
-import { SSHClient, LocalClient, DockerSSH, isLocalhost, createClientForServer } from '../lib/ssh.js';
+import { SSHClient, LocalClient, isLocalhost } from '../lib/ssh.js';
 import { createDockerClientForServer } from '../lib/docker.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 import { parseRegistryFromImage } from '../lib/image-utils.js';
 import { checkServiceUpdate } from '../lib/scheduler.js';
 import { findOrCreateContainerImage } from './image-management.js';
 import { SERVER_STATUS, HEALTH_STATUS, CONTAINER_STATUS, DISCOVERY_STATUS } from '../lib/constants.js';
-import type { Server, Service, RegistryConnection } from '@prisma/client';
+import type { Server, Service, ServiceDeployment, RegistryConnection } from '@prisma/client';
 
 /**
  * Find a matching registry for an image or create a new one
@@ -60,7 +60,7 @@ export interface ServerInput {
 }
 
 export interface ServerWithServices extends Server {
-  services: Service[];
+  serviceDeployments: (ServiceDeployment & { service: Service })[];
 }
 
 export async function createServer(
@@ -100,9 +100,9 @@ export async function getServer(serverId: string): Promise<ServerWithServices | 
   return prisma.server.findUnique({
     where: { id: serverId },
     include: {
-      services: {
+      serviceDeployments: {
         include: {
-          containerImage: true,
+          service: { include: { containerImage: true } },
         },
       },
     },
@@ -237,7 +237,7 @@ export async function checkServerHealth(serverId: string): Promise<{
 }
 
 export interface DiscoverResult {
-  services: Service[];
+  serviceDeployments: ServiceDeployment[];
   missing: string[];
 }
 
@@ -298,7 +298,10 @@ export function determineOverallStatus(
 export async function discoverContainers(serverId: string): Promise<DiscoverResult> {
   const server = await prisma.server.findUniqueOrThrow({
     where: { id: serverId },
-    include: { environment: true, services: true },
+    include: {
+      environment: true,
+      serviceDeployments: { include: { service: { select: { name: true, environmentId: true } } } },
+    },
   });
 
   // Get existing registries for this environment
@@ -332,7 +335,7 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
     const containers = await dockerClient.listContainers();
     console.log(`[Discover] Found ${containers.length} containers`);
 
-    const services: Service[] = [];
+    const discoveredDeployments: ServiceDeployment[] = [];
     const foundContainerNames = new Set<string>();
 
     for (const container of containers) {
@@ -340,17 +343,6 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
 
       // Get comprehensive container info including ports
       const containerInfo = await dockerClient.getContainerInfo(container.name);
-
-      // Check if service already exists. Match on containerName — the user-facing
-      // `name` is editable, so it can drift from the Docker container name.
-      const existing = await prisma.service.findUnique({
-        where: {
-          serverId_containerName: {
-            serverId,
-            containerName: container.name,
-          },
-        },
-      });
 
       // Parse full image path and extract just the name
       const fullImagePath = containerInfo.image || container.image;
@@ -360,7 +352,6 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
       const containerStatus = containerInfo.state || container.state;
       const healthStatus = determineHealthStatus(containerInfo.health, containerInfo.running);
 
-      // Serialize ports to JSON
       const exposedPorts = containerInfo.ports.length > 0
         ? JSON.stringify(containerInfo.ports)
         : null;
@@ -383,51 +374,80 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
         registryConnectionId
       );
 
-      if (existing) {
-        // Update status, ports, mark as found
-        const updated = await prisma.service.update({
-          where: { id: existing.id },
-          data: {
-            status: containerStatus, // Keep for backwards compatibility
-            containerStatus,
-            healthStatus,
-            exposedPorts,
-            imageTag, // Update to current running tag
-            discoveryStatus: DISCOVERY_STATUS.FOUND,
-            lastCheckedAt: new Date(),
-            lastDiscoveredAt: new Date(),
-            // Update containerImageId if changed or not set
-            containerImageId: containerImage.id,
-          },
-        });
-        services.push(updated);
-      } else {
-        const created = await prisma.service.create({
-          data: {
-            name: container.name,
-            containerName: container.name,
-            imageTag,
-            status: containerStatus, // Keep for backwards compatibility
-            containerStatus,
-            healthStatus,
-            exposedPorts,
-            discoveryStatus: DISCOVERY_STATUS.FOUND,
-            lastCheckedAt: new Date(),
-            lastDiscoveredAt: new Date(),
+      // Check if a ServiceDeployment already exists for this (server, containerName).
+      const existingDeployment = await prisma.serviceDeployment.findUnique({
+        where: {
+          serverId_containerName: {
             serverId,
-            containerImageId: containerImage.id,
+            containerName: container.name,
+          },
+        },
+      });
+
+      if (existingDeployment) {
+        // Keep tag in sync at the template level (imageTag lives on Service in 2.0).
+        await prisma.service.update({
+          where: { id: existingDeployment.serviceId },
+          data: { imageTag, containerImageId: containerImage.id },
+        });
+
+        const updated = await prisma.serviceDeployment.update({
+          where: { id: existingDeployment.id },
+          data: {
+            status: containerStatus,
+            containerStatus,
+            healthStatus,
+            exposedPorts,
+            discoveryStatus: DISCOVERY_STATUS.FOUND,
+            lastCheckedAt: new Date(),
+            lastDiscoveredAt: new Date(),
           },
         });
-        services.push(created);
+        discoveredDeployments.push(updated);
+      } else {
+        // Locate or create a Service template by (environmentId, containerName).
+        // If the same container name is already mapped to a template in this env,
+        // we attach a new ServiceDeployment to it; otherwise we create a fresh
+        // template plus a deployment.
+        const existingTemplate = await prisma.service.findUnique({
+          where: { environmentId_name: { environmentId: server.environmentId, name: container.name } },
+        });
+
+        const service =
+          existingTemplate ??
+          (await prisma.service.create({
+            data: {
+              name: container.name,
+              imageTag,
+              environmentId: server.environmentId,
+              containerImageId: containerImage.id,
+            },
+          }));
+
+        const created = await prisma.serviceDeployment.create({
+          data: {
+            serviceId: service.id,
+            serverId,
+            containerName: container.name,
+            status: containerStatus,
+            containerStatus,
+            healthStatus,
+            exposedPorts,
+            discoveryStatus: DISCOVERY_STATUS.FOUND,
+            lastCheckedAt: new Date(),
+            lastDiscoveredAt: new Date(),
+          },
+        });
+        discoveredDeployments.push(created);
       }
     }
 
-    // Mark services as missing if they weren't found (instead of deleting)
+    // Mark deployments as missing if not found (don't delete).
     const missing: string[] = [];
-    for (const existingService of server.services) {
-      if (!foundContainerNames.has(existingService.containerName)) {
-        await prisma.service.update({
-          where: { id: existingService.id },
+    for (const existing of server.serviceDeployments) {
+      if (!foundContainerNames.has(existing.containerName)) {
+        await prisma.serviceDeployment.update({
+          where: { id: existing.id },
           data: {
             discoveryStatus: DISCOVERY_STATUS.MISSING,
             status: CONTAINER_STATUS.STOPPED,
@@ -436,20 +456,18 @@ export async function discoverContainers(serverId: string): Promise<DiscoverResu
             lastCheckedAt: new Date(),
           },
         });
-        missing.push(existingService.name);
+        missing.push(existing.service.name);
       }
     }
 
-    // Check for available image updates for discovered services
-    // The containerImage now has the registry connection
-    for (const service of services) {
-      // Run in background, don't block discovery
-      checkServiceUpdate(service.id).catch((err) => {
-        console.error(`[Discovery] Failed to check updates for ${service.name}:`, err);
+    // Check for available image updates for discovered deployments.
+    for (const sd of discoveredDeployments) {
+      checkServiceUpdate(sd.id).catch((err) => {
+        console.error(`[Discovery] Failed to check updates for deployment ${sd.id}:`, err);
       });
     }
 
-    return { services, missing };
+    return { serviceDeployments: discoveredDeployments, missing };
   } finally {
     if (sshClient) {
       sshClient.disconnect();
@@ -546,34 +564,50 @@ export async function importFromTerraform(
           });
         }
 
-        const existingService = await prisma.service.findFirst({
-          where: {
-            serverId: server.id,
-            name: serviceData.name,
-          },
+        // Find or create the Service template by (environmentId, name).
+        const existingService = await prisma.service.findUnique({
+          where: { environmentId_name: { environmentId, name: serviceData.name } },
         });
 
-        if (existingService) {
-          await prisma.service.update({
-            where: { id: existingService.id },
+        const service = existingService
+          ? await prisma.service.update({
+              where: { id: existingService.id },
+              data: {
+                containerImageId: containerImage.id,
+                imageTag: serviceData.image_tag ?? 'latest',
+                healthCheckUrl: serviceData.health_check_url,
+              },
+            })
+          : await prisma.service.create({
+              data: {
+                name: serviceData.name,
+                environmentId,
+                containerImageId: containerImage.id,
+                imageTag: serviceData.image_tag ?? 'latest',
+                healthCheckUrl: serviceData.health_check_url,
+              },
+            });
+
+        // Find or create the per-server ServiceDeployment for this template.
+        const existingDeployment = await prisma.serviceDeployment.findUnique({
+          where: { serviceId_serverId: { serviceId: service.id, serverId: server.id } },
+        });
+
+        if (existingDeployment) {
+          await prisma.serviceDeployment.update({
+            where: { id: existingDeployment.id },
             data: {
               containerName: serviceData.container_name,
-              containerImageId: containerImage.id,
-              imageTag: serviceData.image_tag ?? 'latest',
               composePath: serviceData.compose_path,
-              healthCheckUrl: serviceData.health_check_url,
             },
           });
         } else {
-          await prisma.service.create({
+          await prisma.serviceDeployment.create({
             data: {
-              name: serviceData.name,
-              containerName: serviceData.container_name,
-              containerImageId: containerImage.id,
-              imageTag: serviceData.image_tag ?? 'latest',
-              composePath: serviceData.compose_path,
-              healthCheckUrl: serviceData.health_check_url,
+              serviceId: service.id,
               serverId: server.id,
+              containerName: serviceData.container_name,
+              composePath: serviceData.compose_path,
             },
           });
         }

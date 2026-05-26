@@ -7,6 +7,7 @@ import { requireOperator } from '../plugins/authorize.js';
 import { logAudit, actorFrom } from '../services/audit.js';
 import { userIdForFk } from '../services/auth.js';
 import { resolveSecretPlaceholders } from '../services/secrets.js';
+import { syncConfigFileToAttachedServices } from '../services/config-file-auto-resync.js';
 import { validateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery } from '../lib/helpers.js';
 
 const createConfigFileSchema = z.object({
@@ -66,12 +67,17 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
                 id: true,
                 targetPath: true,
                 lastSyncedAt: true,
+                kind: true,
+                serviceDeploymentId: true,
                 service: {
                   select: {
                     id: true,
                     name: true,
-                    server: { select: { id: true, name: true } },
+                    serviceDeployments: { select: { id: true, server: { select: { id: true, name: true } } } },
                   },
+                },
+                serviceDeployment: {
+                  select: { id: true, server: { select: { id: true, name: true } } },
                 },
               },
             },
@@ -142,7 +148,10 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
             services: {
               include: {
                 service: {
-                  select: { id: true, name: true, server: { select: { id: true, name: true } } },
+                  select: { id: true, name: true, serviceDeployments: { select: { id: true, server: { select: { id: true, name: true } } } } },
+                },
+                serviceDeployment: {
+                  select: { id: true, server: { select: { id: true, name: true } } },
                 },
               },
             },
@@ -451,7 +460,6 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
 
         const service = await prisma.service.findUnique({
           where: { id },
-          include: { server: true },
         });
 
         await logAudit({
@@ -461,7 +469,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           resourceName: `${serviceFile.configFile.name} -> ${service?.name}`,
           details: { targetPath: body.targetPath },
           ...actorFrom(request),
-          environmentId: service?.server.environmentId,
+          environmentId: service?.environmentId,
         });
 
         return { serviceFile };
@@ -482,10 +490,10 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
       try {
         const serviceFile = await findOrNotFound(
           prisma.serviceFile.findFirst({
-            where: { serviceId, configFileId: fileId },
+            where: { serviceId, configFileId: fileId, serviceDeploymentId: null },
             include: {
               configFile: { select: { name: true } },
-              service: { include: { server: true } },
+              service: true,
             },
           }),
           'File attachment',
@@ -501,7 +509,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           resourceId: serviceFile.id,
           resourceName: `${serviceFile.configFile.name} -> ${serviceFile.service.name}`,
           ...actorFrom(request),
-          environmentId: serviceFile.service.server.environmentId,
+          environmentId: serviceFile.service.environmentId,
         });
 
         return { success: true };
@@ -526,10 +534,10 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
       try {
         const serviceFile = await findOrNotFound(
           prisma.serviceFile.findFirst({
-            where: { serviceId, configFileId: fileId },
+            where: { serviceId, configFileId: fileId, serviceDeploymentId: null },
             include: {
               configFile: { select: { name: true } },
-              service: { include: { server: true } },
+              service: true,
             },
           }),
           'File attachment',
@@ -562,7 +570,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           resourceName: `${serviceFile.configFile.name} -> ${serviceFile.service.name}`,
           details: { oldTargetPath: serviceFile.targetPath, newTargetPath: body.targetPath },
           ...actorFrom(request),
-          environmentId: serviceFile.service.server.environmentId,
+          environmentId: serviceFile.service.environmentId,
         });
 
         return { serviceFile: updated };
@@ -575,7 +583,8 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
     }
   );
 
-  // Sync files to server (copy all attached files to their target paths)
+  // Sync files for a service template across all its deployments.
+  // Fans out per ServiceDeployment, picking override files where present and falling back to base.
   fastify.post(
     '/api/services/:id/sync-files',
     { preHandler: [fastify.authenticate, requireOperator] },
@@ -586,10 +595,8 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         prisma.service.findUnique({
           where: { id },
           include: {
-            server: true,
-            files: {
-              include: { configFile: true },
-            },
+            serviceDeployments: { include: { server: true } },
+            files: { include: { configFile: true } },
           },
         }),
         'Service',
@@ -600,100 +607,105 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
       if (service.files.length === 0) {
         return reply.code(400).send({ error: 'No files attached to this service' });
       }
-
-      // Create appropriate client based on hostname
-      const { client, error: clientError } = await createClientForServer(
-        service.server.hostname,
-        service.server.environmentId,
-        getEnvironmentSshKey,
-        { serverType: service.server.serverType }
-      );
-      if (!client) {
-        return reply.code(400).send({ error: clientError });
+      if (service.serviceDeployments.length === 0) {
+        return reply.code(400).send({ error: 'Service has no deployments to sync to' });
       }
 
-      const results: Array<{ file: string; targetPath: string; success: boolean; error?: string }> = [];
+      const results: Array<{ file: string; targetPath: string; serverName: string; success: boolean; error?: string }> = [];
 
-      try {
-        await client.connect();
-
-        for (const serviceFile of service.files) {
-          const { configFile, targetPath } = serviceFile;
-
-          try {
-            // Ensure target directory exists
-            const targetDir = targetPath.substring(0, targetPath.lastIndexOf('/'));
-            await client.exec(`mkdir -p ${shellEscape(targetDir)}`);
-
-            let code: number;
-            let stderr: string;
-
-            if (configFile.isBinary) {
-              // Binary files: use SFTP for reliable transfer of large files
-              const fileBuffer = Buffer.from(configFile.content, 'base64');
-              try {
-                await client.writeFile(targetPath, fileBuffer);
-                code = 0;
-                stderr = '';
-              } catch (writeErr) {
-                code = 1;
-                stderr = writeErr instanceof Error ? writeErr.message : 'SFTP write failed';
-              }
-            } else {
-              // Text files: resolve ${SECRET_KEY} placeholders and trim trailing empty lines
-              const { content: rawContent, missing } = await resolveSecretPlaceholders(
-                service.server.environmentId,
-                configFile.content
-              );
-              const resolvedContent = rawContent.trimEnd();
-
-              if (missing.length > 0) {
-                results.push({
-                  file: configFile.name,
-                  targetPath,
-                  success: false,
-                  error: `Missing secrets: ${missing.join(', ')}`,
-                });
-                continue;
-              }
-
-              // Write file content using heredoc with quoted delimiter to prevent shell expansion
-              ({ code, stderr } = await client.exec(
-                `cat > ${shellEscape(targetPath)} << 'CONFIGFILE_EOF'\n${resolvedContent}\nCONFIGFILE_EOF`
-              ));
-            }
-
-            if (code !== 0) {
-              results.push({
-                file: configFile.name,
-                targetPath,
-                success: false,
-                error: stderr || 'Failed to write file',
-              });
-            } else {
-              // Update lastSyncedAt timestamp for successful sync
-              await prisma.serviceFile.update({
-                where: { id: serviceFile.id },
-                data: { lastSyncedAt: new Date() },
-              });
-              results.push({ file: configFile.name, targetPath, success: true });
-            }
-          } catch (err) {
-            results.push({
-              file: configFile.name,
-              targetPath,
-              success: false,
-              error: getErrorMessage(err, 'Unknown error'),
-            });
+      for (const sd of service.serviceDeployments) {
+        // Per-deployment: prefer override (serviceDeploymentId === sd.id) over base (null).
+        const filesByConfig = new Map<string, typeof service.files[number]>();
+        for (const sf of service.files) {
+          if (sf.serviceDeploymentId === sd.id) {
+            filesByConfig.set(sf.configFileId, sf);
+          } else if (sf.serviceDeploymentId === null && !filesByConfig.has(sf.configFileId)) {
+            filesByConfig.set(sf.configFileId, sf);
           }
         }
-      } catch (error) {
-        return reply.code(500).send({ error: getErrorMessage(error, 'Connection failed') });
-      } finally {
-        client.disconnect();
+
+        const { client, error: clientError } = await createClientForServer(
+          sd.server.hostname,
+          sd.server.environmentId,
+          getEnvironmentSshKey,
+          { serverType: sd.server.serverType }
+        );
+        if (!client) {
+          for (const sf of filesByConfig.values()) {
+            results.push({ file: sf.configFile.name, targetPath: sf.targetPath, serverName: sd.server.name, success: false, error: clientError || 'Failed to create client' });
+          }
+          continue;
+        }
+
+        try {
+          await client.connect();
+
+          for (const serviceFile of filesByConfig.values()) {
+            const { configFile, targetPath } = serviceFile;
+
+            try {
+              const targetDir = targetPath.substring(0, targetPath.lastIndexOf('/'));
+              await client.exec(`mkdir -p ${shellEscape(targetDir)}`);
+
+              let code: number;
+              let stderr: string;
+
+              if (configFile.isBinary) {
+                const fileBuffer = Buffer.from(configFile.content, 'base64');
+                try {
+                  await client.writeFile(targetPath, fileBuffer);
+                  code = 0;
+                  stderr = '';
+                } catch (writeErr) {
+                  code = 1;
+                  stderr = writeErr instanceof Error ? writeErr.message : 'SFTP write failed';
+                }
+              } else {
+                const { content: rawContent, missing } = await resolveSecretPlaceholders(
+                  sd.server.environmentId,
+                  configFile.content
+                );
+                const resolvedContent = rawContent.trimEnd();
+
+                if (missing.length > 0) {
+                  results.push({
+                    file: configFile.name,
+                    targetPath,
+                    serverName: sd.server.name,
+                    success: false,
+                    error: `Missing secrets: ${missing.join(', ')}`,
+                  });
+                  continue;
+                }
+
+                ({ code, stderr } = await client.exec(
+                  `cat > ${shellEscape(targetPath)} << 'CONFIGFILE_EOF'\n${resolvedContent}\nCONFIGFILE_EOF`
+                ));
+              }
+
+              if (code !== 0) {
+                results.push({ file: configFile.name, targetPath, serverName: sd.server.name, success: false, error: stderr || 'Failed to write file' });
+              } else {
+                await prisma.serviceFile.update({
+                  where: { id: serviceFile.id },
+                  data: { lastSyncedAt: new Date() },
+                });
+                results.push({ file: configFile.name, targetPath, serverName: sd.server.name, success: true });
+              }
+            } catch (err) {
+              results.push({ file: configFile.name, targetPath, serverName: sd.server.name, success: false, error: getErrorMessage(err, 'Unknown error') });
+            }
+          }
+        } catch (error) {
+          for (const sf of filesByConfig.values()) {
+            results.push({ file: sf.configFile.name, targetPath: sf.targetPath, serverName: sd.server.name, success: false, error: getErrorMessage(error, 'Connection failed') });
+          }
+        } finally {
+          client.disconnect();
+        }
       }
 
-      const allSuccess = results.every((r) => r.success);
+      const allSuccess = results.length > 0 && results.every((r) => r.success);
 
       await logAudit({
         action: 'sync_files',
@@ -703,7 +715,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         details: { results, allSuccess },
         success: allSuccess,
         ...actorFrom(request),
-        environmentId: service.server.environmentId,
+        environmentId: service.environmentId,
       });
 
       return { results, success: allSuccess };
@@ -721,16 +733,15 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         prisma.server.findUnique({
           where: { id: serverId },
           include: {
-            services: {
+            serviceDeployments: {
               include: {
-                files: {
+                service: {
                   include: {
-                    configFile: {
-                      select: {
-                        id: true,
-                        name: true,
-                        filename: true,
-                        updatedAt: true,
+                    files: {
+                      include: {
+                        configFile: {
+                          select: { id: true, name: true, filename: true, updatedAt: true },
+                        },
                       },
                     },
                   },
@@ -744,7 +755,6 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
       );
       if (!server) return;
 
-      // Build config file status list
       const configFilesMap = new Map<string, {
         id: string;
         name: string;
@@ -760,8 +770,17 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         }>;
       }>();
 
-      for (const service of server.services) {
-        for (const sf of service.files) {
+      // Walk deployments on this server; for each, pick base + override files of the parent template.
+      for (const sd of server.serviceDeployments) {
+        const filesByConfig = new Map<string, typeof sd.service.files[number]>();
+        for (const sf of sd.service.files) {
+          if (sf.serviceDeploymentId === sd.id) {
+            filesByConfig.set(sf.configFileId, sf);
+          } else if (sf.serviceDeploymentId === null && !filesByConfig.has(sf.configFileId)) {
+            filesByConfig.set(sf.configFileId, sf);
+          }
+        }
+        for (const sf of filesByConfig.values()) {
           const cf = sf.configFile;
           if (!configFilesMap.has(cf.id)) {
             configFilesMap.set(cf.id, {
@@ -780,8 +799,8 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
 
           configFilesMap.get(cf.id)!.attachments.push({
             serviceFileId: sf.id,
-            serviceId: service.id,
-            serviceName: service.name,
+            serviceId: sd.service.id,
+            serviceName: sd.service.name,
             targetPath: sf.targetPath,
             lastSyncedAt: sf.lastSyncedAt,
             syncStatus,
@@ -830,11 +849,9 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         prisma.server.findUnique({
           where: { id: serverId },
           include: {
-            services: {
+            serviceDeployments: {
               include: {
-                files: {
-                  include: { configFile: true },
-                },
+                service: { include: { files: { include: { configFile: true } } } },
               },
             },
           },
@@ -844,15 +861,21 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
       );
       if (!server) return;
 
-      // Collect all service files that need syncing
-      const serviceFilesToSync: Array<{
-        serviceFile: typeof server.services[0]['files'][0];
-        service: typeof server.services[0];
-      }> = [];
+      // Resolve effective files per deployment (override -> base) and flatten for syncing.
+      type FileTuple = { serviceFile: typeof server.serviceDeployments[0]['service']['files'][0]; service: typeof server.serviceDeployments[0]['service'] };
+      const serviceFilesToSync: FileTuple[] = [];
 
-      for (const service of server.services) {
-        for (const sf of service.files) {
-          serviceFilesToSync.push({ serviceFile: sf, service });
+      for (const sd of server.serviceDeployments) {
+        const filesByConfig = new Map<string, typeof sd.service.files[number]>();
+        for (const sf of sd.service.files) {
+          if (sf.serviceDeploymentId === sd.id) {
+            filesByConfig.set(sf.configFileId, sf);
+          } else if (sf.serviceDeploymentId === null && !filesByConfig.has(sf.configFileId)) {
+            filesByConfig.set(sf.configFileId, sf);
+          }
+        }
+        for (const sf of filesByConfig.values()) {
+          serviceFilesToSync.push({ serviceFile: sf, service: sd.service });
         }
       }
 
@@ -980,187 +1003,31 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
     }
   );
 
-  // Sync a config file to all attached services
+  // Sync a config file to every (service, server) attachment.
+  // Now delegates to the shared helper which already handles per-deployment fan-out.
   fastify.post(
     '/api/config-files/:id/sync-all',
     { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const configFile = await findOrNotFound(
-        prisma.configFile.findUnique({
-          where: { id },
-          include: {
-            services: {
-              include: {
-                service: {
-                  include: { server: true },
-                },
-              },
-            },
-          },
-        }),
-        'Config file',
-        reply
-      );
-      if (!configFile) return;
-
-      if (configFile.services.length === 0) {
-        return reply.code(400).send({ error: 'Config file is not attached to any services' });
+      const outcome = await syncConfigFileToAttachedServices(id);
+      if (!outcome) {
+        return reply.code(400).send({ error: 'Config file not found or not attached to any services' });
       }
-
-      const results: Array<{
-        serviceId: string;
-        serviceName: string;
-        serverName: string;
-        targetPath: string;
-        success: boolean;
-        error?: string;
-      }> = [];
-
-      // Group services by server to minimize SSH connections
-      const serverGroups = new Map<string, typeof configFile.services>();
-      for (const sf of configFile.services) {
-        const serverId = sf.service.server.id;
-        if (!serverGroups.has(serverId)) {
-          serverGroups.set(serverId, []);
-        }
-        serverGroups.get(serverId)!.push(sf);
-      }
-
-      for (const [, serviceFiles] of serverGroups) {
-        const server = serviceFiles[0].service.server;
-
-        const { client, error: clientError } = await createClientForServer(
-          server.hostname,
-          server.environmentId,
-          getEnvironmentSshKey,
-          { serverType: server.serverType }
-        );
-
-        if (!client) {
-          for (const sf of serviceFiles) {
-            results.push({
-              serviceId: sf.service.id,
-              serviceName: sf.service.name,
-              serverName: server.name,
-              targetPath: sf.targetPath,
-              success: false,
-              error: clientError || 'Failed to create SSH client',
-            });
-          }
-          continue;
-        }
-
-        try {
-          await client.connect();
-
-          for (const sf of serviceFiles) {
-            try {
-              // Ensure target directory exists
-              const targetDir = sf.targetPath.substring(0, sf.targetPath.lastIndexOf('/'));
-              await client.exec(`mkdir -p ${shellEscape(targetDir)}`);
-
-              let code: number;
-              let stderr: string;
-
-              if (configFile.isBinary) {
-                const fileBuffer = Buffer.from(configFile.content, 'base64');
-                try {
-                  await client.writeFile(sf.targetPath, fileBuffer);
-                  code = 0;
-                  stderr = '';
-                } catch (writeErr) {
-                  code = 1;
-                  stderr = writeErr instanceof Error ? writeErr.message : 'SFTP write failed';
-                }
-              } else {
-                const { content: rawContent, missing } = await resolveSecretPlaceholders(
-                  server.environmentId,
-                  configFile.content
-                );
-                const resolvedContent = rawContent.trimEnd();
-
-                if (missing.length > 0) {
-                  results.push({
-                    serviceId: sf.service.id,
-                    serviceName: sf.service.name,
-                    serverName: server.name,
-                    targetPath: sf.targetPath,
-                    success: false,
-                    error: `Missing secrets: ${missing.join(', ')}`,
-                  });
-                  continue;
-                }
-
-                ({ code, stderr } = await client.exec(
-                  `cat > ${shellEscape(sf.targetPath)} << 'CONFIGFILE_EOF'\n${resolvedContent}\nCONFIGFILE_EOF`
-                ));
-              }
-
-              if (code !== 0) {
-                results.push({
-                  serviceId: sf.service.id,
-                  serviceName: sf.service.name,
-                  serverName: server.name,
-                  targetPath: sf.targetPath,
-                  success: false,
-                  error: stderr || 'Failed to write file',
-                });
-              } else {
-                await prisma.serviceFile.update({
-                  where: { id: sf.id },
-                  data: { lastSyncedAt: new Date() },
-                });
-                results.push({
-                  serviceId: sf.service.id,
-                  serviceName: sf.service.name,
-                  serverName: server.name,
-                  targetPath: sf.targetPath,
-                  success: true,
-                });
-              }
-            } catch (err) {
-              results.push({
-                serviceId: sf.service.id,
-                serviceName: sf.service.name,
-                serverName: server.name,
-                targetPath: sf.targetPath,
-                success: false,
-                error: getErrorMessage(err, 'Unknown error'),
-              });
-            }
-          }
-        } catch (error) {
-          for (const sf of serviceFiles) {
-            results.push({
-              serviceId: sf.service.id,
-              serviceName: sf.service.name,
-              serverName: server.name,
-              targetPath: sf.targetPath,
-              success: false,
-              error: getErrorMessage(error, 'Connection failed'),
-            });
-          }
-        } finally {
-          client.disconnect();
-        }
-      }
-
-      const allSuccess = results.every((r) => r.success);
 
       await logAudit({
         action: 'sync_files',
         resourceType: 'config_file',
-        resourceId: configFile.id,
-        resourceName: configFile.name,
-        details: { results, allSuccess, syncedTo: results.length },
-        success: allSuccess,
+        resourceId: id,
+        resourceName: outcome.configFileName,
+        details: { results: outcome.results, allSuccess: outcome.success, syncedTo: outcome.results.length },
+        success: outcome.success,
         ...actorFrom(request),
-        environmentId: configFile.environmentId,
+        environmentId: outcome.environmentId,
       });
 
-      return { results, success: allSuccess };
+      return { results: outcome.results, success: outcome.success };
     }
   );
 

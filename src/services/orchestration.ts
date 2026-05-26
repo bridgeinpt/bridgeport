@@ -1,11 +1,10 @@
 import { prisma } from '../lib/db.js';
-import { deployService, type DeployResult } from './deploy.js';
-import { verifyServiceHealth, type HealthVerificationResult } from './health-verification.js';
-import { recordTagDeployment } from './image-management.js';
+import { deployService } from './deploy.js';
+import { verifyServiceHealth } from './health-verification.js';
 import { sendSystemNotification, NOTIFICATION_TYPES } from './notifications.js';
 import { eventBus } from '../lib/event-bus.js';
 import { DEPLOYMENT_STATUS, PLAN_STATUS, STEP_STATUS } from '../lib/constants.js';
-import type { DeploymentPlan, DeploymentPlanStep, Server, Service, ServiceDependency } from '@prisma/client';
+import type { DeploymentPlan, DeploymentPlanStep, Server, Service, ServiceDependency, ServiceDeployment } from '@prisma/client';
 
 export interface BuildPlanOptions {
   environmentId: string;
@@ -22,7 +21,7 @@ export interface BuildPlanOptions {
 type ServiceWithDeps = Service & {
   dependencies: (ServiceDependency & { dependsOn: Service })[];
   dependents: (ServiceDependency & { dependent: Service })[];
-  server: { name: string; hostname: string };
+  serviceDeployments: (ServiceDeployment & { server: { name: string; hostname: string } })[];
 };
 
 /**
@@ -66,7 +65,6 @@ function detectCycle(
 export function resolveDependencyOrder(services: ServiceWithDeps[]): ServiceWithDeps[][] {
   if (services.length === 0) return [];
 
-  // Build adjacency list and in-degree map
   const serviceMap = new Map<string, ServiceWithDeps>();
   const inDegree = new Map<string, number>();
   const adjacencyList = new Map<string, string[]>();
@@ -77,10 +75,8 @@ export function resolveDependencyOrder(services: ServiceWithDeps[]): ServiceWith
     adjacencyList.set(service.id, []);
   }
 
-  // Count incoming edges (dependencies)
   for (const service of services) {
     for (const dep of service.dependencies) {
-      // Only consider dependencies that are part of this deployment
       if (serviceMap.has(dep.dependsOnId)) {
         inDegree.set(service.id, (inDegree.get(service.id) || 0) + 1);
         const adj = adjacencyList.get(dep.dependsOnId) || [];
@@ -90,7 +86,6 @@ export function resolveDependencyOrder(services: ServiceWithDeps[]): ServiceWith
     }
   }
 
-  // Detect cycles
   const visited = new Set<string>();
   const recursionStack = new Set<string>();
   for (const service of services) {
@@ -102,7 +97,6 @@ export function resolveDependencyOrder(services: ServiceWithDeps[]): ServiceWith
     }
   }
 
-  // Kahn's algorithm with level tracking
   const levels: ServiceWithDeps[][] = [];
   let queue = services.filter((s) => inDegree.get(s.id) === 0);
 
@@ -125,7 +119,6 @@ export function resolveDependencyOrder(services: ServiceWithDeps[]): ServiceWith
     queue = nextQueue;
   }
 
-  // Check if all services were processed (should be, since we already checked for cycles)
   const processedCount = levels.reduce((sum, level) => sum + level.length, 0);
   if (processedCount !== services.length) {
     throw new Error('Dependency resolution failed: not all services could be ordered');
@@ -135,27 +128,26 @@ export function resolveDependencyOrder(services: ServiceWithDeps[]): ServiceWith
 }
 
 /**
- * Build a deployment plan from the given options
+ * Build a deployment plan. Plan steps now target individual ServiceDeployments;
+ * each Service template fans out to one step per deployment.
  */
 export async function buildDeploymentPlan(options: BuildPlanOptions): Promise<DeploymentPlan> {
   let services: ServiceWithDeps[];
 
   if (options.containerImageId) {
-    // Get all services linked to this container image
     services = await prisma.service.findMany({
       where: { containerImageId: options.containerImageId },
       include: {
-        server: { select: { name: true, hostname: true } },
+        serviceDeployments: { include: { server: { select: { name: true, hostname: true } } } },
         dependencies: { include: { dependsOn: true } },
         dependents: { include: { dependent: true } },
       },
     });
   } else if (options.serviceIds && options.serviceIds.length > 0) {
-    // Get specified services
     services = await prisma.service.findMany({
       where: { id: { in: options.serviceIds } },
       include: {
-        server: { select: { name: true, hostname: true } },
+        serviceDeployments: { include: { server: { select: { name: true, hostname: true } } } },
         dependencies: { include: { dependsOn: true } },
         dependents: { include: { dependent: true } },
       },
@@ -168,16 +160,13 @@ export async function buildDeploymentPlan(options: BuildPlanOptions): Promise<De
     throw new Error('No services found for deployment');
   }
 
-  // Resolve deployment order
   const orderedLevels = resolveDependencyOrder(services);
 
-  // Generate plan name
   const serviceNames = services.map((s) => s.name).slice(0, 3);
   const planName = options.containerImageId
     ? `Deploy ${options.imageTag}`
     : `Deploy ${serviceNames.join(', ')}${services.length > 3 ? '...' : ''}`;
 
-  // Create the deployment plan
   const plan = await prisma.deploymentPlan.create({
     data: {
       name: planName,
@@ -193,11 +182,11 @@ export async function buildDeploymentPlan(options: BuildPlanOptions): Promise<De
     },
   });
 
-  // Build all steps then batch-insert them
   let stepOrder = 0;
   const stepsToCreate: {
     deploymentPlanId: string;
     serviceId: string;
+    serviceDeploymentId: string;
     order: number;
     action: string;
     targetTag: string;
@@ -206,29 +195,31 @@ export async function buildDeploymentPlan(options: BuildPlanOptions): Promise<De
 
   for (const level of orderedLevels) {
     for (const service of level) {
-      // Check if this service has health_before dependencies
       const hasHealthDependency = service.dependencies.some((d) => d.type === 'health_before');
 
-      // Add deploy step
-      stepsToCreate.push({
-        deploymentPlanId: plan.id,
-        serviceId: service.id,
-        order: stepOrder++,
-        action: 'deploy',
-        targetTag: options.imageTag,
-        previousTag: service.imageTag,
-      });
-
-      // Add health check step if needed
-      if (hasHealthDependency || service.healthCheckUrl) {
+      // One deploy/health-check step per ServiceDeployment.
+      for (const sd of service.serviceDeployments) {
         stepsToCreate.push({
           deploymentPlanId: plan.id,
           serviceId: service.id,
+          serviceDeploymentId: sd.id,
           order: stepOrder++,
-          action: 'health_check',
+          action: 'deploy',
           targetTag: options.imageTag,
           previousTag: service.imageTag,
         });
+
+        if (hasHealthDependency || service.healthCheckUrl) {
+          stepsToCreate.push({
+            deploymentPlanId: plan.id,
+            serviceId: service.id,
+            serviceDeploymentId: sd.id,
+            order: stepOrder++,
+            action: 'health_check',
+            targetTag: options.imageTag,
+            previousTag: service.imageTag,
+          });
+        }
       }
     }
   }
@@ -241,13 +232,15 @@ export async function buildDeploymentPlan(options: BuildPlanOptions): Promise<De
   });
 }
 
-/**
- * Group steps by their order (dependency level) for parallel execution
- */
+type StepWithDeployment = DeploymentPlanStep & {
+  service: Service | null;
+  serviceDeployment: (ServiceDeployment & { server: Server; service: Service }) | null;
+};
+
 function groupStepsByLevel(
-  steps: (DeploymentPlanStep & { service: (Service & { server: Server }) | null })[]
-): Map<number, (DeploymentPlanStep & { service: (Service & { server: Server }) | null })[]> {
-  const levels = new Map<number, (DeploymentPlanStep & { service: (Service & { server: Server }) | null })[]>();
+  steps: StepWithDeployment[]
+): Map<number, StepWithDeployment[]> {
+  const levels = new Map<number, StepWithDeployment[]>();
 
   for (const step of steps) {
     const level = step.order;
@@ -269,7 +262,10 @@ export async function executePlan(planId: string): Promise<void> {
     include: {
       steps: {
         orderBy: { order: 'asc' },
-        include: { service: { include: { server: true } } },
+        include: {
+          service: true,
+          serviceDeployment: { include: { server: true, service: true } },
+        },
       },
       containerImage: true,
       environment: true,
@@ -280,13 +276,11 @@ export async function executePlan(planId: string): Promise<void> {
     throw new Error(`Plan is already ${plan.status}`);
   }
 
-  // Mark plan as running
   await prisma.deploymentPlan.update({
     where: { id: planId },
     data: { status: PLAN_STATUS.RUNNING, startedAt: new Date() },
   });
 
-  // Emit progress events for all services in the plan
   for (const step of plan.steps) {
     if (step.service && step.action === 'deploy') {
       eventBus.emitEvent({ type: 'deployment_progress', data: { planId, serviceId: step.service.id, status: PLAN_STATUS.RUNNING, environmentId: plan.environmentId } });
@@ -303,53 +297,51 @@ export async function executePlan(planId: string): Promise<void> {
 
   try {
     if (plan.parallelExecution) {
-      // Parallel execution: group steps by level and run each level in parallel
       const levelGroups = groupStepsByLevel(plan.steps);
       const sortedLevels = Array.from(levelGroups.keys()).sort((a, b) => a - b);
 
       for (const level of sortedLevels) {
         const levelSteps = levelGroups.get(level)!;
-
-        // Filter out steps without services
-        const validSteps = levelSteps.filter((step) => step.service);
+        const validSteps = levelSteps.filter((step) => step.serviceDeployment);
         if (validSteps.length === 0) continue;
 
         log(`Executing level ${level}: ${validSteps.length} step(s) in parallel`);
 
-        // Execute all steps in this level in parallel
         const results = await Promise.all(
           validSteps.map(async (step) => {
-            // Mark step as running
             await prisma.deploymentPlanStep.update({
               where: { id: step.id },
               data: { status: STEP_STATUS.RUNNING, startedAt: new Date() },
             });
 
-            log(`  Starting ${step.action} ${step.service!.name}`);
+            const svcName = step.serviceDeployment!.service.name;
+            log(`  Starting ${step.action} ${svcName}`);
 
             if (step.action === 'deploy') {
-              await executeDeployStep(step, plan, (msg) => log(`    [${step.service!.name}] ${msg}`));
+              await executeDeployStep(step, plan, (msg) => log(`    [${svcName}] ${msg}`));
             } else if (step.action === 'health_check') {
-              await executeHealthCheckStep(step, plan, (msg) => log(`    [${step.service!.name}] ${msg}`));
+              await executeHealthCheckStep(step, plan, (msg) => log(`    [${svcName}] ${msg}`));
             }
 
-            // Return the step result
             return prisma.deploymentPlanStep.findUniqueOrThrow({
               where: { id: step.id },
-              include: { service: { include: { server: true } } },
+              include: {
+                service: true,
+                serviceDeployment: { include: { server: true, service: true } },
+              },
             });
           })
         );
 
-        // Check if any step in this level failed
         const failedStep = results.find((s) => s.status === STEP_STATUS.FAILED);
         if (failedStep) {
+          const failedSvc = failedStep.serviceDeployment?.service ?? failedStep.service;
           if (plan.autoRollback) {
-            log(`Level ${level} failed (${failedStep.service?.name}), initiating rollback...`);
+            log(`Level ${level} failed (${failedSvc?.name}), initiating rollback...`);
             await rollbackPlan(planId, log);
             return;
           } else {
-            log(`Level ${level} failed (${failedStep.service?.name}), auto-rollback disabled`);
+            log(`Level ${level} failed (${failedSvc?.name}), auto-rollback disabled`);
             await prisma.deploymentPlan.update({
               where: { id: planId },
               data: {
@@ -365,9 +357,9 @@ export async function executePlan(planId: string): Promise<void> {
               plan.environmentId,
               {
                 planName: plan.name,
-                serviceName: failedStep.service?.name,
-                serviceId: failedStep.service?.id,
-                serverName: failedStep.service?.server?.name,
+                serviceName: failedSvc?.name,
+                serviceId: failedSvc?.id,
+                serverName: failedStep.serviceDeployment?.server?.name,
                 imageTag: failedStep.targetTag,
                 error: failedStep.error,
               }
@@ -377,20 +369,20 @@ export async function executePlan(planId: string): Promise<void> {
         }
       }
     } else {
-      // Sequential execution (original behavior)
+      // Sequential execution: halt on first failure with rollback hint.
       for (const step of plan.steps) {
-        if (!step.service) {
-          log(`Skipping step ${step.order}: no service associated`);
+        if (!step.serviceDeployment) {
+          log(`Skipping step ${step.order}: no service deployment associated`);
           continue;
         }
 
-        // Mark step as running
         await prisma.deploymentPlanStep.update({
           where: { id: step.id },
           data: { status: STEP_STATUS.RUNNING, startedAt: new Date() },
         });
 
-        log(`Executing step ${step.order}: ${step.action} ${step.service.name}`);
+        const svcName = step.serviceDeployment.service.name;
+        log(`Executing step ${step.order}: ${step.action} ${svcName}`);
 
         if (step.action === 'deploy') {
           await executeDeployStep(step, plan, log);
@@ -398,18 +390,17 @@ export async function executePlan(planId: string): Promise<void> {
           await executeHealthCheckStep(step, plan, log);
         }
 
-        // Check if step failed and we need to rollback
         const updatedStep = await prisma.deploymentPlanStep.findUniqueOrThrow({
           where: { id: step.id },
         });
 
         if (updatedStep.status === STEP_STATUS.FAILED) {
           if (plan.autoRollback) {
-            log(`Step ${step.order} failed, initiating rollback...`);
+            log(`Step ${step.order} failed, initiating rollback (sequential strategy halts on first failure)...`);
             await rollbackPlan(planId, log);
             return;
           } else {
-            log(`Step ${step.order} failed, auto-rollback disabled`);
+            log(`Step ${step.order} failed, sequential strategy halted; auto-rollback disabled (rollback hint: re-deploy previous tag manually)`);
             await prisma.deploymentPlan.update({
               where: { id: planId },
               data: {
@@ -420,15 +411,14 @@ export async function executePlan(planId: string): Promise<void> {
               },
             });
 
-            // Send failure notification
             await sendSystemNotification(
               NOTIFICATION_TYPES.SYSTEM_DEPLOYMENT_FAILED,
               plan.environmentId,
               {
                 planName: plan.name,
-                serviceName: step.service.name,
-                serviceId: step.service.id,
-                serverName: step.service.server?.name,
+                serviceName: svcName,
+                serviceId: step.serviceDeployment.service.id,
+                serverName: step.serviceDeployment.server?.name,
                 imageTag: step.targetTag,
                 error: updatedStep.error,
               }
@@ -439,11 +429,7 @@ export async function executePlan(planId: string): Promise<void> {
       }
     }
 
-    // All steps completed successfully
     log('Deployment plan completed successfully');
-
-    // Note: Individual deployService calls now record history entries,
-    // so we don't need to record here for containerImage
 
     await prisma.deploymentPlan.update({
       where: { id: planId },
@@ -454,14 +440,11 @@ export async function executePlan(planId: string): Promise<void> {
       },
     });
 
-    // Emit completion events for all deploy steps
     for (const step of plan.steps) {
       if (step.service && step.action === 'deploy') {
         eventBus.emitEvent({ type: 'deployment_progress', data: { planId, serviceId: step.service.id, status: PLAN_STATUS.COMPLETED, environmentId: plan.environmentId } });
       }
     }
-
-    // Note: per-service success notifications are already sent by deploy.ts
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     log(`ERROR: ${errorMessage}`);
@@ -476,7 +459,6 @@ export async function executePlan(planId: string): Promise<void> {
       },
     });
 
-    // Emit failure events for all deploy steps
     for (const step of plan.steps) {
       if (step.service && step.action === 'deploy') {
         eventBus.emitEvent({ type: 'deployment_progress', data: { planId, serviceId: step.service.id, status: PLAN_STATUS.FAILED, environmentId: plan.environmentId } });
@@ -490,17 +472,19 @@ export async function executePlan(planId: string): Promise<void> {
 }
 
 async function executeDeployStep(
-  step: DeploymentPlanStep & { service: (Service & { server: Server }) | null },
+  step: StepWithDeployment,
   plan: DeploymentPlan,
   log: (msg: string) => void
 ): Promise<void> {
-  if (!step.service || !step.targetTag) {
-    throw new Error('Invalid deploy step: missing service or target tag');
+  if (!step.serviceDeployment || !step.targetTag) {
+    throw new Error('Invalid deploy step: missing service deployment or target tag');
   }
+
+  const svcName = step.serviceDeployment.service.name;
 
   try {
     const result = await deployService(
-      step.service.id,
+      step.serviceDeployment.id,
       plan.triggeredBy || 'deployment-plan',
       plan.userId,
       {
@@ -511,7 +495,7 @@ async function executeDeployStep(
     );
 
     if (result.deployment.status === DEPLOYMENT_STATUS.SUCCESS) {
-      log(`Deploy ${step.service.name}: success`);
+      log(`Deploy ${svcName}: success`);
       await prisma.deploymentPlanStep.update({
         where: { id: step.id },
         data: {
@@ -522,7 +506,7 @@ async function executeDeployStep(
         },
       });
     } else {
-      log(`Deploy ${step.service.name}: failed - ${result.logs}`);
+      log(`Deploy ${svcName}: failed - ${result.logs}`);
       await prisma.deploymentPlanStep.update({
         where: { id: step.id },
         data: {
@@ -536,7 +520,7 @@ async function executeDeployStep(
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    log(`Deploy ${step.service.name}: error - ${errorMessage}`);
+    log(`Deploy ${svcName}: error - ${errorMessage}`);
     await prisma.deploymentPlanStep.update({
       where: { id: step.id },
       data: {
@@ -549,21 +533,23 @@ async function executeDeployStep(
 }
 
 async function executeHealthCheckStep(
-  step: DeploymentPlanStep & { service: (Service & { server: Server }) | null },
+  step: StepWithDeployment,
   plan: DeploymentPlan,
   log: (msg: string) => void
 ): Promise<void> {
-  if (!step.service) {
-    throw new Error('Invalid health check step: missing service');
+  if (!step.serviceDeployment) {
+    throw new Error('Invalid health check step: missing service deployment');
   }
+
+  const svcName = step.serviceDeployment.service.name;
 
   try {
     const result = await verifyServiceHealth({
-      serviceId: step.service.id,
+      serviceDeploymentId: step.serviceDeployment.id,
     });
 
     if (result.healthy) {
-      log(`Health check ${step.service.name}: healthy`);
+      log(`Health check ${svcName}: healthy`);
       await prisma.deploymentPlanStep.update({
         where: { id: step.id },
         data: {
@@ -580,7 +566,7 @@ async function executeHealthCheckStep(
         },
       });
     } else {
-      log(`Health check ${step.service.name}: unhealthy after ${result.attempts} attempts`);
+      log(`Health check ${svcName}: unhealthy after ${result.attempts} attempts`);
       await prisma.deploymentPlanStep.update({
         where: { id: step.id },
         data: {
@@ -600,7 +586,7 @@ async function executeHealthCheckStep(
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    log(`Health check ${step.service.name}: error - ${errorMessage}`);
+    log(`Health check ${svcName}: error - ${errorMessage}`);
     await prisma.deploymentPlanStep.update({
       where: { id: step.id },
       data: {
@@ -614,7 +600,7 @@ async function executeHealthCheckStep(
 }
 
 /**
- * Rollback all services in a failed deployment plan
+ * Rollback all deployments in a failed plan back to their previousTag.
  */
 export async function rollbackPlan(
   planId: string,
@@ -624,8 +610,11 @@ export async function rollbackPlan(
     where: { id: planId },
     include: {
       steps: {
-        orderBy: { order: 'desc' }, // Reverse order for rollback
-        include: { service: { include: { server: true } } },
+        orderBy: { order: 'desc' },
+        include: {
+          service: true,
+          serviceDeployment: { include: { server: true, service: true } },
+        },
       },
     },
   });
@@ -638,22 +627,23 @@ export async function rollbackPlan(
 
   log('Starting rollback...');
 
-  // Find all deploy steps that succeeded and need rollback
   const stepsToRollback = plan.steps.filter(
     (step) =>
       step.action === 'deploy' &&
+      step.serviceDeployment &&
       (step.status === STEP_STATUS.SUCCESS || step.status === STEP_STATUS.RUNNING) &&
       step.previousTag
   );
 
   for (const step of stepsToRollback) {
-    if (!step.service || !step.previousTag) continue;
+    if (!step.serviceDeployment || !step.previousTag) continue;
 
-    log(`Rolling back ${step.service.name} to ${step.previousTag}`);
+    const svcName = step.serviceDeployment.service.name;
+    log(`Rolling back ${svcName} to ${step.previousTag}`);
 
     try {
       const result = await deployService(
-        step.service.id,
+        step.serviceDeployment.id,
         'rollback',
         plan.userId,
         {
@@ -664,23 +654,22 @@ export async function rollbackPlan(
       );
 
       if (result.deployment.status === DEPLOYMENT_STATUS.SUCCESS) {
-        log(`Rollback ${step.service.name}: success`);
+        log(`Rollback ${svcName}: success`);
         await prisma.deploymentPlanStep.update({
           where: { id: step.id },
           data: { status: STEP_STATUS.ROLLED_BACK },
         });
       } else {
-        log(`Rollback ${step.service.name}: failed`);
+        log(`Rollback ${svcName}: failed`);
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      log(`Rollback ${step.service.name}: error - ${errorMessage}`);
+      log(`Rollback ${svcName}: error - ${errorMessage}`);
     }
   }
 
   log('Rollback completed');
 
-  // Get current logs and append rollback logs
   const currentPlan = await prisma.deploymentPlan.findUniqueOrThrow({
     where: { id: planId },
   });
@@ -698,18 +687,17 @@ export async function rollbackPlan(
     },
   });
 
-  // Find the step that triggered the rollback to include in notification
   const failedStep = plan.steps.find((s) => s.status === STEP_STATUS.FAILED);
+  const failedSvc = failedStep?.serviceDeployment?.service ?? failedStep?.service;
 
-  // Send rollback notification
   await sendSystemNotification(
     NOTIFICATION_TYPES.SYSTEM_DEPLOYMENT_FAILED,
     plan.environmentId,
     {
       planName: plan.name,
-      serviceName: failedStep?.service?.name,
-      serviceId: failedStep?.service?.id,
-      serverName: failedStep?.service?.server?.name,
+      serviceName: failedSvc?.name,
+      serviceId: failedSvc?.id,
+      serverName: failedStep?.serviceDeployment?.server?.name,
       imageTag: failedStep?.targetTag,
       error: 'Deployment rolled back due to failure',
       rollback: true,
@@ -717,9 +705,6 @@ export async function rollbackPlan(
   );
 }
 
-/**
- * Cancel a pending or running deployment plan
- */
 export async function cancelPlan(planId: string): Promise<void> {
   const plan = await prisma.deploymentPlan.findUniqueOrThrow({
     where: { id: planId },
@@ -729,7 +714,6 @@ export async function cancelPlan(planId: string): Promise<void> {
     throw new Error(`Cannot cancel plan with status: ${plan.status}`);
   }
 
-  // Mark all pending steps as skipped
   await prisma.deploymentPlanStep.updateMany({
     where: {
       deploymentPlanId: planId,
@@ -747,9 +731,6 @@ export async function cancelPlan(planId: string): Promise<void> {
   });
 }
 
-/**
- * Get deployment plan with all details
- */
 export async function getDeploymentPlan(planId: string) {
   return prisma.deploymentPlan.findUnique({
     where: { id: planId },
@@ -757,9 +738,11 @@ export async function getDeploymentPlan(planId: string) {
       steps: {
         orderBy: { order: 'asc' },
         include: {
-          service: {
+          service: true,
+          serviceDeployment: {
             include: {
               server: { select: { name: true } },
+              service: { select: { id: true, name: true } },
             },
           },
           deployment: true,
@@ -772,9 +755,6 @@ export async function getDeploymentPlan(planId: string) {
   });
 }
 
-/**
- * List deployment plans for an environment
- */
 export async function listDeploymentPlans(
   environmentId: string,
   limit: number = 50
@@ -790,6 +770,7 @@ export async function listDeploymentPlans(
           status: true,
           action: true,
           service: { select: { id: true, name: true } },
+          serviceDeployment: { select: { id: true, server: { select: { name: true } } } },
         },
       },
       containerImage: { select: { id: true, name: true } },

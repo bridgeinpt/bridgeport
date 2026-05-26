@@ -24,7 +24,7 @@ describe('monitoring routes', () => {
     const server = await createTestServer(app.prisma, { environmentId: envId, name: 'mon-server' });
     serverId = server.id;
     const image = await createTestContainerImage(app.prisma, { environmentId: envId });
-    const service = await createTestService(app.prisma, { serverId: server.id, containerImageId: image.id });
+    const service = await createTestService(app.prisma, { environmentId: envId, containerImageId: image.id, serverId: server.id });
     serviceId = service.id;
   });
 

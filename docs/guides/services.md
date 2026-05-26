@@ -1,6 +1,9 @@
 # Services
 
-A service is BRIDGEPORT's representation of a Docker container running on a server -- linked to a container image for centralized tag management, deployment, and health monitoring.
+A **service** in BRIDGEPORT is an **environment-scoped template** that describes _what_ to run (image, tag, health checks, compose template, base env). Where it actually runs is captured by one or more **service deployments**, each pinning the template to a specific server with its own container name, env overrides, and runtime status.
+
+> [!NOTE]
+> **2.0 split.** Earlier versions tied a Service directly to a single Server. As of v2.0, a Service is a reusable template and a `ServiceDeployment` row stores per-server runtime state (status, health, container name, exposed ports, last discovered, etc.). The auto-migration creates exactly one `ServiceDeployment` per pre-existing service so nothing is lost.
 
 ## Table of Contents
 
@@ -41,30 +44,39 @@ Get a service deployed in 3 steps:
 
 ## How It Works
 
-Every service in BRIDGEPORT is a Docker container linked to a `ContainerImage`. The container image is the central entity that tracks the image name, current tag, available tags from the registry, and deployment history. One container image can be shared across multiple services.
+A service has two layers:
+
+1. **Service template** -- environment-scoped. Holds the image, tag, compose template, health checks, base env, and **deploy strategy** (`sequential` or `parallel`). One template can have many deployments.
+2. **Service deployment** -- one row per (template, server). Holds the container name, env overrides, runtime status (`status`, `containerStatus`, `healthStatus`, `discoveryStatus`), exposed ports, and last-checked / last-discovered timestamps.
+
+Every template is linked to a `ContainerImage`. The container image is the central entity that tracks the image name, available tags from the registry, and deployment history. One container image can be linked to many templates.
 
 ```mermaid
 flowchart LR
-    CI[ContainerImage<br>myapp:latest] --> S1[Service: app-web-1<br>Server: web-prod-1]
-    CI --> S2[Service: app-web-2<br>Server: web-prod-2]
-    CI --> S3[Service: app-staging<br>Server: staging-1]
+    CI[ContainerImage<br>myapp:latest] --> S[Service template: app-web<br>imageTag: v2.1.0]
+    S --> D1[ServiceDeployment<br>Server: web-prod-1<br>container: app-web]
+    S --> D2[ServiceDeployment<br>Server: web-prod-2<br>container: app-web]
+    S --> D3[ServiceDeployment<br>Server: web-prod-3<br>container: app-web]
     REG[Registry] -->|tag updates| CI
-    CI -->|deploy tag| S1
-    CI -->|deploy tag| S2
-    CI -->|deploy tag| S3
 
     style CI fill:#4f46e5,color:#fff
+    style S fill:#0ea5e9,color:#fff
     style REG fill:#374151,color:#fff
 ```
 
-When you deploy a tag to a service, BRIDGEPORT:
+When you deploy a tag to a service template, BRIDGEPORT:
 
-1. Creates a deployment record (status: `pending`).
-2. Generates deployment artifacts (compose file, config files) if applicable.
-3. Pulls the new image on the target server.
-4. Runs `docker compose up` (if compose path is set) or restarts the container.
-5. Verifies the container is running.
-6. Records success or failure in deployment history and container image tag history.
+1. Looks at the template's `deployStrategy` (`sequential` or `parallel`) and the list of `serviceDeployments`.
+2. For each deployment (one per server), creates a `Deployment` record (status: `pending`).
+3. Generates deployment artifacts (compose file, config files) per deployment if applicable.
+4. Pulls the new image on each target server.
+5. Runs `docker compose up` (if compose path is set) or restarts the container, in sequence or in parallel depending on the strategy.
+6. Verifies each container is running.
+7. Records success or failure per deployment in deployment history and container image tag history.
+
+**Sequential vs parallel:**
+- `sequential` (default) -- one deployment at a time. Useful when downstream services depend on a hot single instance, or when you want to bail out early on the first failure.
+- `parallel` -- all deployments at once. Faster for stateless replicas behind a load balancer.
 
 ---
 
@@ -85,9 +97,26 @@ Each discovered container gets:
 
 #### Manual Creation
 
-Create a service before deploying its container, or for containers that are not yet running.
+Create a service template before deploying its container, or for containers that are not yet running.
 
-**API:**
+**Recommended (template-only) API:**
+```http
+POST /api/environments/:envId/services
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{
+  "name": "app-api",
+  "containerImageId": "climg...",
+  "imageTag": "v2.1.0",
+  "composeTemplate": null,
+  "deployStrategy": "sequential"
+}
+```
+
+This creates the **template only** -- with zero deployments. Attach servers afterwards by creating `ServiceDeployment` rows via the deployment endpoints.
+
+**Legacy (create template + first deployment in one call):**
 ```http
 POST /api/servers/:serverId/services
 Authorization: Bearer <token>
@@ -97,19 +126,24 @@ Content-Type: application/json
   "name": "app-api",
   "containerName": "app-api",
   "containerImageId": "climg...",
-  "imageTag": "v2.1.0",
-  "composePath": "/opt/app-api/docker-compose.yml"
+  "imageTag": "v2.1.0"
 }
 ```
 
-**Required fields:**
-- `name` -- service display name (unique per server). Free-form — rename anytime without breaking discovery.
-- `containerName` -- Docker container name (unique per server). Discovery matches services to running containers via this field, so it must match the `container_name:` value in your compose file.
-- `containerImageId` -- ID of an existing `ContainerImage` in the same environment
+This endpoint is preserved for the CLI and pre-2.0 UI flows. It creates the env-scoped Service plus a single `ServiceDeployment` bound to the specified server.
+
+**Required template fields:**
+- `name` -- service display name (unique per environment). Free-form — rename anytime without breaking discovery.
+- `containerImageId` -- ID of an existing `ContainerImage` in the same environment.
+
+**Required deployment fields (for legacy server-scoped create):**
+- `containerName` -- Docker container name (unique per server). Discovery matches deployments to running containers via this field, so it must match the `container_name:` value in your compose file.
 
 **Optional fields:**
-- `imageTag` -- defaults to `latest`
-- `composePath` -- path to the docker-compose file on the server
+- `imageTag` -- defaults to `latest`.
+- `composeTemplate` -- template Compose file (the rendered file is uploaded per-deployment to each server's compose path).
+- `deployStrategy` -- `sequential` (default) or `parallel`; controls how multi-server deploys roll out.
+- `baseEnv` -- JSON object of env vars applied to every deployment. Per-deployment env overrides take precedence.
 
 > [!NOTE]
 > Every service must be linked to a `ContainerImage`. Create the image first (via the Container Images page or API) if one does not exist for your image.
@@ -494,19 +528,34 @@ Authorization: Bearer <token>
 
 ## Configuration Options
 
-### Service-Level Settings
+### Service Template Settings (env-scoped, shared across deployments)
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
+| `imageTag` | string | `'latest'` | Tag deployed across all deployments of this template |
+| `composeTemplate` | string | `null` | Custom compose template (null = auto-generated) |
+| `baseEnv` | JSON string | `null` | Env vars applied to every deployment (overrides win per-deployment) |
+| `deployStrategy` | enum | `'sequential'` | `sequential` or `parallel` -- how multi-server deploys roll out |
 | `healthCheckUrl` | string | `null` | URL to check for HTTP health |
 | `healthWaitMs` | int | `30000` | Wait after deploy before checking health |
 | `healthRetries` | int | `3` | Number of health check attempts |
 | `healthIntervalMs` | int | `5000` | Interval between health check retries |
 | `serviceTypeId` | string | `null` | Service type for predefined commands |
-| `composeTemplate` | string | `null` | Custom compose template (null = auto-generated) |
-| `composePath` | string | `null` | Path to compose file on server |
 | `tcpChecks` | JSON string | `null` | TCP port checks (agent-required) |
 | `certChecks` | JSON string | `null` | TLS certificate checks (agent-required) |
+
+### Service Deployment Settings (per-server)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `serverId` | string | required | Target server for this deployment |
+| `containerName` | string | required | Docker container name on the server (unique per server) |
+| `composePath` | string | `null` | Path to compose file on the server |
+| `envOverrides` | JSON string | `null` | Per-deployment env vars (override the template `baseEnv`) |
+| `exposedPorts` | JSON string | `null` | Discovered exposed ports (managed by discovery) |
+| `status` / `containerStatus` / `healthStatus` | string | derived | Per-deployment runtime status, updated by health checks and the agent |
+| `discoveryStatus` | string | `'unknown'` | `found` / `missing` / `unknown` -- last discovery result |
+| `lastCheckedAt` / `lastDiscoveredAt` / `lastDeployedAt` | datetime | `null` | Per-deployment timestamps |
 
 ### Environment-Level Settings (Affect All Services)
 

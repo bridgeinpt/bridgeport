@@ -19,8 +19,8 @@ const WELL_KNOWN_PORTS: Record<number, string> = {
   27017: 'mongodb',
 };
 
-function parseExposedPorts(portsJson: string | null): ExposedPort[] {
-  return safeJsonParse(portsJson, [] as ExposedPort[]);
+function parseExposedPorts(portsJson: string | null | undefined): ExposedPort[] {
+  return safeJsonParse(portsJson ?? null, [] as ExposedPort[]);
 }
 
 /**

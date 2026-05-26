@@ -47,9 +47,8 @@ export async function syncConfigFileToAttachedServices(
     include: {
       services: {
         include: {
-          service: {
-            include: { server: true },
-          },
+          service: { include: { serviceDeployments: { include: { server: true } } } },
+          serviceDeployment: { include: { server: true } },
         },
       },
     },
@@ -61,18 +60,40 @@ export async function syncConfigFileToAttachedServices(
 
   const results: AutoResyncResult[] = [];
 
-  // Group services by server to minimize SSH connections
-  const serverGroups = new Map<string, typeof configFile.services>();
+  // Expand each ServiceFile to one or more (serviceFile, server) pairs:
+  //  - kind=override row: applies to exactly that ServiceDeployment's server.
+  //  - kind=base   row:   applies to every deployment of the parent service that doesn't have an override.
+  type Pair = { sf: typeof configFile.services[number]; serviceDeploymentId: string; server: typeof configFile.services[number]['service']['serviceDeployments'][number]['server']; serviceName: string };
+  const pairs: Pair[] = [];
+
+  // First pass: collect override rows and remember which deployments they cover.
+  const overrideCovered = new Map<string, Set<string>>(); // configFileId -> serviceDeploymentIds covered
   for (const sf of configFile.services) {
-    const serverId = sf.service.server.id;
-    if (!serverGroups.has(serverId)) {
-      serverGroups.set(serverId, []);
+    if (sf.serviceDeployment) {
+      pairs.push({ sf, serviceDeploymentId: sf.serviceDeployment.id, server: sf.serviceDeployment.server, serviceName: sf.service.name });
+      if (!overrideCovered.has(sf.configFileId)) overrideCovered.set(sf.configFileId, new Set());
+      overrideCovered.get(sf.configFileId)!.add(sf.serviceDeployment.id);
     }
-    serverGroups.get(serverId)!.push(sf);
+  }
+  // Second pass: base rows fan out to every deployment of their service not already overridden.
+  for (const sf of configFile.services) {
+    if (sf.serviceDeployment) continue;
+    const covered = overrideCovered.get(sf.configFileId) ?? new Set<string>();
+    for (const sd of sf.service.serviceDeployments) {
+      if (covered.has(sd.id)) continue;
+      pairs.push({ sf, serviceDeploymentId: sd.id, server: sd.server, serviceName: sf.service.name });
+    }
   }
 
-  for (const [, serviceFiles] of serverGroups) {
-    const server = serviceFiles[0].service.server;
+  // Group pairs by server to minimize SSH connections
+  const serverGroups = new Map<string, Pair[]>();
+  for (const p of pairs) {
+    if (!serverGroups.has(p.server.id)) serverGroups.set(p.server.id, []);
+    serverGroups.get(p.server.id)!.push(p);
+  }
+
+  for (const [, group] of serverGroups) {
+    const server = group[0].server;
 
     const { client, error: clientError } = await createClientForServer(
       server.hostname,
@@ -82,12 +103,12 @@ export async function syncConfigFileToAttachedServices(
     );
 
     if (!client) {
-      for (const sf of serviceFiles) {
+      for (const p of group) {
         results.push({
-          serviceId: sf.service.id,
-          serviceName: sf.service.name,
+          serviceId: p.sf.service.id,
+          serviceName: p.serviceName,
           serverName: server.name,
-          targetPath: sf.targetPath,
+          targetPath: p.sf.targetPath,
           success: false,
           error: clientError || 'Failed to create SSH client',
         });
@@ -98,7 +119,8 @@ export async function syncConfigFileToAttachedServices(
     try {
       await client.connect();
 
-      for (const sf of serviceFiles) {
+      for (const p of group) {
+        const sf = p.sf;
         try {
           const targetDir = sf.targetPath.substring(0, sf.targetPath.lastIndexOf('/'));
           await client.exec(`mkdir -p ${shellEscape(targetDir)}`);
@@ -126,7 +148,7 @@ export async function syncConfigFileToAttachedServices(
             if (missing.length > 0) {
               results.push({
                 serviceId: sf.service.id,
-                serviceName: sf.service.name,
+                serviceName: p.serviceName,
                 serverName: server.name,
                 targetPath: sf.targetPath,
                 success: false,
@@ -143,7 +165,7 @@ export async function syncConfigFileToAttachedServices(
           if (code !== 0) {
             results.push({
               serviceId: sf.service.id,
-              serviceName: sf.service.name,
+              serviceName: p.serviceName,
               serverName: server.name,
               targetPath: sf.targetPath,
               success: false,
@@ -156,7 +178,7 @@ export async function syncConfigFileToAttachedServices(
             });
             results.push({
               serviceId: sf.service.id,
-              serviceName: sf.service.name,
+              serviceName: p.serviceName,
               serverName: server.name,
               targetPath: sf.targetPath,
               success: true,
@@ -165,7 +187,7 @@ export async function syncConfigFileToAttachedServices(
         } catch (err) {
           results.push({
             serviceId: sf.service.id,
-            serviceName: sf.service.name,
+            serviceName: p.serviceName,
             serverName: server.name,
             targetPath: sf.targetPath,
             success: false,
@@ -174,12 +196,12 @@ export async function syncConfigFileToAttachedServices(
         }
       }
     } catch (error) {
-      for (const sf of serviceFiles) {
+      for (const p of group) {
         results.push({
-          serviceId: sf.service.id,
-          serviceName: sf.service.name,
+          serviceId: p.sf.service.id,
+          serviceName: p.serviceName,
           serverName: server.name,
-          targetPath: sf.targetPath,
+          targetPath: p.sf.targetPath,
           success: false,
           error: getErrorMessage(error, 'Connection failed'),
         });

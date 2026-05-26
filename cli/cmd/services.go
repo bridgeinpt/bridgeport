@@ -71,8 +71,8 @@ func runServices(cmd *cobra.Command, args []string) error {
 			table.Append([]string{
 				svc.Name,
 				output.StatusColor(svc.Status),
-				output.HealthColor(svc.Health),
-				svc.ImageName,
+				output.HealthColor(svc.Health()),
+				svc.ImageName(),
 				svc.ImageTag,
 			})
 		}
@@ -132,8 +132,8 @@ func runServices(cmd *cobra.Command, args []string) error {
 				server: srv.Name,
 				name:   svc.Name,
 				status: svc.Status,
-				health: svc.Health,
-				image:  svc.ImageName,
+				health: svc.Health(),
+				image:  svc.ImageName(),
 				tag:    svc.ImageTag,
 			})
 		}

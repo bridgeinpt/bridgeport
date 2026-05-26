@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, lazy, Suspense } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAppStore, useAuthStore, isAdmin } from '../lib/store.js';
-import { listServices, deployService, checkServiceHealth, deleteService, getDependencyGraph, type Service, type ExposedPort, type DependencyGraphNode, type DependencyGraphEdge } from '../lib/api.js';
+import { listServices, deployService, checkServiceHealth, deleteService, getDependencyGraph, type ServiceWithServerName, type ExposedPort, type DependencyGraphNode, type DependencyGraphEdge } from '../lib/api.js';
 import { usePaginatedFetch } from '../hooks/usePaginatedFetch.js';
 import { formatDistanceToNow } from 'date-fns';
 import { getContainerStatusColor, getHealthStatusColor } from '../lib/status.js';
@@ -19,9 +19,8 @@ const DependencyFlow = lazy(() =>
   import('../components/DependencyFlow').then((m) => ({ default: m.DependencyFlow }))
 );
 
-interface ServiceWithServer extends Service {
+interface ServiceWithServer extends ServiceWithServerName {
   serverName: string;
-  server?: { id: string; name: string };
 }
 
 function parseExposedPorts(portsJson: string | null): ExposedPort[] {
@@ -104,9 +103,13 @@ export default function Services() {
     }
   }, [selectedEnvironment?.id]);
 
-  // Services with available updates (memoized)
+  // Services with available updates (memoized).
+  // After the 2.0 template split, update detection lives on the linked ContainerImage.
   const servicesWithUpdates = useMemo(
-    () => services.filter((s) => s.latestAvailableTag && s.latestAvailableTag !== s.imageTag),
+    () =>
+      services.filter(
+        (s) => s.containerImage?.updateAvailable && s.containerImage?.bestTag && s.containerImage.bestTag !== s.imageTag
+      ),
     [services]
   );
 
@@ -124,28 +127,29 @@ export default function Services() {
     setShowDeployResults(true);
 
     // Deploy all services in parallel using Promise.all
-    const deployPromises = servicesWithUpdates.map((service) =>
-      deployService(service.id, {
-        imageTag: service.latestAvailableTag!,
+    const deployPromises = servicesWithUpdates.map((service) => {
+      const targetTag = service.containerImage?.bestTag ?? service.imageTag;
+      return deployService(service.id, {
+        imageTag: targetTag,
         pullImage: true,
       }).then(
         (): OperationResult => ({
           id: service.id,
           label: service.name,
           sublabel: service.serverName,
-          detail: service.latestAvailableTag!,
+          detail: targetTag,
           success: true,
         }),
         (err): OperationResult => ({
           id: service.id,
           label: service.name,
           sublabel: service.serverName,
-          detail: service.latestAvailableTag!,
+          detail: targetTag,
           success: false,
           error: err instanceof Error ? err.message : 'Deploy failed',
         })
-      )
-    );
+      );
+    });
 
     const results = await Promise.all(deployPromises);
     setDeployResults(results);
@@ -312,11 +316,16 @@ export default function Services() {
         {filteredServices.length > 0 ? (
           <>
             {filteredServices.map((service) => {
-              const ports = parseExposedPorts(service.exposedPorts);
-              const hasUpdate = service.latestAvailableTag && service.latestAvailableTag !== service.imageTag;
+              const ports = parseExposedPorts(service.exposedPorts ?? null);
+              const deploymentCount = service.serviceDeployments?.length ?? (service.serverId ? 1 : 0);
+              const targetTag = service.containerImage?.bestTag ?? null;
+              const hasUpdate = !!(
+                service.containerImage?.updateAvailable && targetTag && targetTag !== service.imageTag
+              );
               const depNode = dependencyNodes.get(service.id);
               const hasDependencies = depNode && (depNode.dependencyCount > 0 || depNode.dependentCount > 0);
               const hasContainerImage = depNode?.containerImage;
+              const containerStatus = service.containerStatus ?? service.status ?? 'unknown';
               return (
                 <div key={service.id} className={`panel ${hasUpdate ? 'border-green-500/30' : ''}`}>
                   <div className="flex items-start justify-between">
@@ -333,8 +342,8 @@ export default function Services() {
                           >
                             {service.name}
                           </Link>
-                          <span className={`badge text-xs ${getContainerStatusColor(service.containerStatus || service.status)}`}>
-                            {service.containerStatus || service.status}
+                          <span className={`badge text-xs ${getContainerStatusColor(containerStatus)}`}>
+                            {containerStatus}
                           </span>
                           <span className={`badge text-xs ${getHealthStatusColor(service.healthStatus || 'unknown')}`}>
                             {service.healthStatus || 'unknown'}
@@ -364,12 +373,16 @@ export default function Services() {
                         </div>
                         {/* Row 2: Server + Type + Image */}
                         <p className="text-slate-400 text-sm mt-1">
-                          <Link
-                            to={`/servers/${service.serverId}`}
-                            className="hover:text-primary-400"
-                          >
-                            {service.serverName}
-                          </Link>
+                          {service.serverId ? (
+                            <Link
+                              to={`/servers/${service.serverId}`}
+                              className="hover:text-primary-400"
+                            >
+                              {service.serverName}
+                            </Link>
+                          ) : (
+                            <span>{deploymentCount > 0 ? `${deploymentCount} deployment${deploymentCount === 1 ? '' : 's'}` : 'No deployments'}</span>
+                          )}
                           <span className="text-slate-500"> · </span>
                           <span>{service.serviceType?.displayName || 'Generic'}</span>
                           <span className="text-slate-500"> · </span>
@@ -380,14 +393,14 @@ export default function Services() {
                           {hasUpdate && (
                             <>
                               <span className="text-slate-500"> → </span>
-                              <span className="font-mono text-green-400">{service.latestAvailableTag}</span>
+                              <span className="font-mono text-green-400">{targetTag}</span>
                             </>
                           )}
                         </p>
                         {/* Row 3: Ports + Container + Last checked */}
                         <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
                           {ports.length > 0 && <span>Ports: {formatPorts(ports)}</span>}
-                          <span className="font-mono">{service.containerName}</span>
+                          {service.containerName && <span className="font-mono">{service.containerName}</span>}
                           <span>
                             {service.lastCheckedAt
                               ? `Checked ${formatDistanceToNow(new Date(service.lastCheckedAt), { addSuffix: true })}`
@@ -398,14 +411,14 @@ export default function Services() {
                     </div>
                     {/* Actions - hybrid pattern */}
                     <div className="flex items-center gap-2">
-                      {hasUpdate && (
+                      {hasUpdate && targetTag && (
                         <button
                           onClick={() => {
                             deployService(service.id, {
-                              imageTag: service.latestAvailableTag!,
+                              imageTag: targetTag,
                               pullImage: true,
                             }).then(() => {
-                              toast.success(`Deployed ${service.name} to ${service.latestAvailableTag}`);
+                              toast.success(`Deployed ${service.name} to ${targetTag}`);
                               reload();
                             }).catch((err) => {
                               toast.error(err instanceof Error ? err.message : 'Deploy failed');
@@ -413,7 +426,7 @@ export default function Services() {
                           }}
                           className="btn btn-primary text-sm"
                         >
-                          Deploy {service.latestAvailableTag}
+                          Deploy {targetTag}
                         </button>
                       )}
                       <button

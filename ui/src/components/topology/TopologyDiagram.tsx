@@ -162,7 +162,7 @@ const SERVER_HEADER_HEIGHT = 40;
 const SERVER_GAP = 40;
 const DATABASE_STANDALONE_X_OFFSET = 50;
 
-function parseExposedPorts(portsJson: string | null): ExposedPort[] {
+function parseExposedPorts(portsJson: string | null | undefined): ExposedPort[] {
   return safeJsonParse(portsJson, [] as ExposedPort[]);
 }
 
@@ -248,9 +248,12 @@ function buildNodes(
           data: {
             label: service.name,
             serviceId: service.id,
-            status: service.status,
-            healthStatus: service.healthStatus,
-            containerStatus: service.containerStatus,
+            // Per-server runtime fields now live on ServiceDeployment; the back-compat
+            // surface exposes them as optional on the flattened service row, so we
+            // fall back to 'unknown' for templates that don't yet have a deployment.
+            status: service.status ?? 'unknown',
+            healthStatus: service.healthStatus ?? 'unknown',
+            containerStatus: service.containerStatus ?? 'unknown',
             image: service.containerImage
               ? `${service.containerImage.imageName}:${service.imageTag}`
               : service.imageTag,

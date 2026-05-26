@@ -70,7 +70,7 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
       if (data.sourceType === 'service') {
         const service = await findOrNotFound(
           prisma.service.findFirst({
-            where: { id: data.sourceId, server: { environmentId: data.environmentId } },
+            where: { id: data.sourceId, environmentId: data.environmentId },
           }),
           'Source service in this environment',
           reply
@@ -91,7 +91,7 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
       if (data.targetType === 'service') {
         const service = await findOrNotFound(
           prisma.service.findFirst({
-            where: { id: data.targetId, server: { environmentId: data.environmentId } },
+            where: { id: data.targetId, environmentId: data.environmentId },
           }),
           'Target service in this environment',
           reply
@@ -254,7 +254,7 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
       const [servers, databases, connections] = await Promise.all([
         prisma.server.findMany({
           where: { environmentId },
-          include: { services: true },
+          include: { serviceDeployments: { include: { service: true } } },
         }),
         prisma.database.findMany({
           where: { environmentId },
@@ -276,10 +276,11 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
         const label = escapeMermaidLabel(server.name);
         lines.push(`  subgraph ${safeName}["${label}"]`);
 
-        for (const service of server.services) {
-          const svcId = sanitizeMermaidId(`svc_${service.id}`);
-          const portSuffix = getServicePrimaryPort(service.exposedPorts);
-          const svcLabel = escapeMermaidLabel(service.name) + (portSuffix ? ` (${portSuffix})` : '');
+        for (const sd of server.serviceDeployments) {
+          // Mermaid nodes are per-Service; ports live on the deployment in 2.0.
+          const svcId = sanitizeMermaidId(`svc_${sd.service.id}`);
+          const portSuffix = getServicePrimaryPort(sd.exposedPorts);
+          const svcLabel = escapeMermaidLabel(sd.service.name) + (portSuffix ? ` (${portSuffix})` : '');
           lines.push(`    ${svcId}["${svcLabel}"]`);
         }
 

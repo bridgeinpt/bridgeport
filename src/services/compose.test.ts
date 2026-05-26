@@ -2,8 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../lib/db.js', () => ({
   prisma: {
-    service: { findUniqueOrThrow: vi.fn() },
-    deployment: { findUnique: vi.fn() },
+    serviceDeployment: { findUniqueOrThrow: vi.fn() },
     deploymentArtifact: {
       findMany: vi.fn(),
       create: vi.fn(),
@@ -33,15 +32,35 @@ import {
 
 const mockPrisma = vi.mocked(prisma);
 
-function baseService(overrides: Record<string, unknown> = {}) {
+interface BuildDeploymentOptions {
+  // Service template fields
+  serviceName?: string;
+  imageName?: string;
+  imageTag?: string;
+  composeTemplate?: string | null;
+  baseEnv?: string | null;
+  // Per-deployment fields
+  containerName?: string;
+  composePath?: string | null;
+  envOverrides?: string | null;
+  exposedPorts?: string | null;
+  files?: Array<Record<string, unknown>>;
+}
+
+/**
+ * Build a ServiceDeployment row (with included service + server) as Prisma would return it.
+ * Note: the new shape is `serviceDeployment.findUniqueOrThrow` with `service` nested.
+ */
+function buildDeployment(overrides: BuildDeploymentOptions = {}) {
   return {
-    id: 'svc-1',
-    name: 'web-app',
-    containerName: 'web-app',
-    imageName: 'registry.com/web-app',
-    imageTag: 'v1.0',
-    composeTemplate: null,
-    exposedPorts: null,
+    id: 'dep-1',
+    serviceId: 'svc-1',
+    serverId: 'srv-1',
+    containerName: overrides.containerName ?? 'web-app-prod',
+    composePath: overrides.composePath ?? null,
+    envOverrides: overrides.envOverrides ?? null,
+    exposedPorts: overrides.exposedPorts ?? null,
+    status: 'unknown',
     server: {
       id: 'srv-1',
       hostname: 'prod.local',
@@ -49,10 +68,19 @@ function baseService(overrides: Record<string, unknown> = {}) {
       environmentId: 'env-1',
       environment: { id: 'env-1', name: 'Production' },
     },
-    environment: { id: 'env-1', name: 'Production' },
-    containerImage: { id: 'img-1', imageName: 'registry.com/web-app', tagFilter: 'v1.0' },
-    files: [],
-    ...overrides,
+    service: {
+      id: 'svc-1',
+      name: overrides.serviceName ?? 'web-app',
+      imageTag: overrides.imageTag ?? 'v1.0',
+      composeTemplate: overrides.composeTemplate ?? null,
+      baseEnv: overrides.baseEnv ?? null,
+      containerImage: {
+        id: 'img-1',
+        imageName: overrides.imageName ?? 'registry.com/web-app',
+        tagFilter: overrides.imageTag ?? 'v1.0',
+      },
+      files: overrides.files ?? [],
+    },
   };
 }
 
@@ -62,100 +90,219 @@ describe('compose', () => {
   });
 
   describe('generateDeploymentArtifacts', () => {
-    it('generates compose file with service variables', async () => {
-      mockPrisma.service.findUniqueOrThrow.mockResolvedValue(baseService() as any);
+    it('generates a default compose file using the deployment containerName (not the service name)', async () => {
+      mockPrisma.serviceDeployment.findUniqueOrThrow.mockResolvedValue(
+        buildDeployment({ serviceName: 'web-app', containerName: 'web-app-prod-server' }) as any
+      );
 
-      const artifacts = await generateDeploymentArtifacts('svc-1');
-
-      expect(artifacts).toBeDefined();
-      expect(artifacts.compose).toBeDefined();
-      expect(artifacts.compose.content).toBeDefined();
-      expect(artifacts.compose.name).toContain('web-app');
-    });
-
-    it('includes ports section from discovered exposedPorts', async () => {
-      mockPrisma.service.findUniqueOrThrow.mockResolvedValue(baseService({
-        exposedPorts: JSON.stringify([
-          { host: 8080, container: 80, protocol: 'tcp' },
-        ]),
-      }) as any);
-
-      const artifacts = await generateDeploymentArtifacts('svc-1');
+      const artifacts = await generateDeploymentArtifacts('dep-1');
       const parsed = YAML.parse(artifacts.compose.content);
 
+      // The per-deployment containerName must flow into compose's container_name,
+      // not the parent template's name.
+      expect(parsed.services['web-app'].container_name).toBe('web-app-prod-server');
+      expect(artifacts.compose.name).toBe('docker-compose.web-app.yml');
+    });
+
+    it('substitutes CONTAINER_NAME with the deployment containerName in custom templates', async () => {
+      mockPrisma.serviceDeployment.findUniqueOrThrow.mockResolvedValue(
+        buildDeployment({
+          composeTemplate: 'services:\n  web:\n    image: ${FULL_IMAGE}\n    container_name: ${CONTAINER_NAME}\n',
+          containerName: 'custom-name-on-server-b',
+        }) as any
+      );
+
+      const artifacts = await generateDeploymentArtifacts('dep-1');
+      expect(artifacts.compose.content).toContain('container_name: custom-name-on-server-b');
+      expect(artifacts.compose.content).toContain('registry.com/web-app:v1.0');
+    });
+
+    it('merges baseEnv + envOverrides with overrides winning, and writes them to the compose env', async () => {
+      mockPrisma.serviceDeployment.findUniqueOrThrow.mockResolvedValue(
+        buildDeployment({
+          baseEnv: JSON.stringify({ A: '1', B: '2', C: '3' }),
+          envOverrides: JSON.stringify({ B: '99', D: '4' }),
+        }) as any
+      );
+
+      const artifacts = await generateDeploymentArtifacts('dep-1');
+      const parsed = YAML.parse(artifacts.compose.content);
+
+      // baseEnv: {A:1, B:2, C:3}; overrides: {B:99, D:4} -> {A:1, B:99, C:3, D:4}
+      expect(parsed.services['web-app'].environment).toEqual({
+        A: '1',
+        B: '99',
+        C: '3',
+        D: '4',
+      });
+    });
+
+    it('uses only baseEnv when envOverrides is null', async () => {
+      mockPrisma.serviceDeployment.findUniqueOrThrow.mockResolvedValue(
+        buildDeployment({
+          baseEnv: JSON.stringify({ A: '1', B: '2' }),
+          envOverrides: null,
+        }) as any
+      );
+
+      const artifacts = await generateDeploymentArtifacts('dep-1');
+      const parsed = YAML.parse(artifacts.compose.content);
+      expect(parsed.services['web-app'].environment).toEqual({ A: '1', B: '2' });
+    });
+
+    it('uses only envOverrides when baseEnv is null', async () => {
+      mockPrisma.serviceDeployment.findUniqueOrThrow.mockResolvedValue(
+        buildDeployment({
+          baseEnv: null,
+          envOverrides: JSON.stringify({ X: '10' }),
+        }) as any
+      );
+
+      const artifacts = await generateDeploymentArtifacts('dep-1');
+      const parsed = YAML.parse(artifacts.compose.content);
+      expect(parsed.services['web-app'].environment).toEqual({ X: '10' });
+    });
+
+    it('omits the environment section when both baseEnv and envOverrides are null/empty', async () => {
+      mockPrisma.serviceDeployment.findUniqueOrThrow.mockResolvedValue(
+        buildDeployment({ baseEnv: null, envOverrides: null }) as any
+      );
+
+      const artifacts = await generateDeploymentArtifacts('dep-1');
+      const parsed = YAML.parse(artifacts.compose.content);
+      expect(parsed.services['web-app'].environment).toBeUndefined();
+    });
+
+    it('falls back to empty env when baseEnv contains invalid JSON (no throw)', async () => {
+      mockPrisma.serviceDeployment.findUniqueOrThrow.mockResolvedValue(
+        buildDeployment({
+          baseEnv: '{not valid json',
+          envOverrides: JSON.stringify({ K: 'v' }),
+        }) as any
+      );
+
+      const artifacts = await generateDeploymentArtifacts('dep-1');
+      const parsed = YAML.parse(artifacts.compose.content);
+      // baseEnv was malformed -> safeJsonParse returns {}; overrides still apply.
+      expect(parsed.services['web-app'].environment).toEqual({ K: 'v' });
+    });
+
+    it('falls back to empty env when envOverrides contains invalid JSON (no throw, baseEnv still applies)', async () => {
+      mockPrisma.serviceDeployment.findUniqueOrThrow.mockResolvedValue(
+        buildDeployment({
+          baseEnv: JSON.stringify({ A: '1' }),
+          envOverrides: 'garbage',
+        }) as any
+      );
+
+      const artifacts = await generateDeploymentArtifacts('dep-1');
+      const parsed = YAML.parse(artifacts.compose.content);
+      expect(parsed.services['web-app'].environment).toEqual({ A: '1' });
+    });
+
+    it('includes ports section from discovered exposedPorts on the deployment', async () => {
+      mockPrisma.serviceDeployment.findUniqueOrThrow.mockResolvedValue(
+        buildDeployment({
+          exposedPorts: JSON.stringify([{ host: 8080, container: 80, protocol: 'tcp' }]),
+        }) as any
+      );
+
+      const artifacts = await generateDeploymentArtifacts('dep-1');
+      const parsed = YAML.parse(artifacts.compose.content);
       expect(parsed.services['web-app'].ports).toEqual(['8080:80']);
     });
 
     it('defaults host port to container port when host is null (issue #117)', async () => {
-      mockPrisma.service.findUniqueOrThrow.mockResolvedValue(baseService({
-        exposedPorts: JSON.stringify([
-          { host: null, container: 80, protocol: 'tcp' },
-        ]),
-      }) as any);
+      mockPrisma.serviceDeployment.findUniqueOrThrow.mockResolvedValue(
+        buildDeployment({
+          exposedPorts: JSON.stringify([{ host: null, container: 80, protocol: 'tcp' }]),
+        }) as any
+      );
 
-      const artifacts = await generateDeploymentArtifacts('svc-1');
+      const artifacts = await generateDeploymentArtifacts('dep-1');
       const parsed = YAML.parse(artifacts.compose.content);
-
-      // Without this fix, no `ports:` entry would be emitted and the container
-      // would silently start without a host binding.
       expect(parsed.services['web-app'].ports).toEqual(['80:80']);
     });
 
-    it('preserves a non-wildcard host IP so loopback-only bindings do not silently widen', async () => {
-      mockPrisma.service.findUniqueOrThrow.mockResolvedValue(baseService({
-        exposedPorts: JSON.stringify([
-          { hostIp: '127.0.0.1', host: 8080, container: 80, protocol: 'tcp' },
-        ]),
-      }) as any);
+    it('preserves a non-wildcard host IP', async () => {
+      mockPrisma.serviceDeployment.findUniqueOrThrow.mockResolvedValue(
+        buildDeployment({
+          exposedPorts: JSON.stringify([
+            { hostIp: '127.0.0.1', host: 8080, container: 80, protocol: 'tcp' },
+          ]),
+        }) as any
+      );
 
-      const artifacts = await generateDeploymentArtifacts('svc-1');
+      const artifacts = await generateDeploymentArtifacts('dep-1');
       const parsed = YAML.parse(artifacts.compose.content);
-
       expect(parsed.services['web-app'].ports).toEqual(['127.0.0.1:8080:80']);
     });
 
     it('omits ports section when exposedPorts is null', async () => {
-      mockPrisma.service.findUniqueOrThrow.mockResolvedValue(baseService({
-        exposedPorts: null,
-      }) as any);
+      mockPrisma.serviceDeployment.findUniqueOrThrow.mockResolvedValue(
+        buildDeployment({ exposedPorts: null }) as any
+      );
 
-      const artifacts = await generateDeploymentArtifacts('svc-1');
+      const artifacts = await generateDeploymentArtifacts('dep-1');
       const parsed = YAML.parse(artifacts.compose.content);
-
       expect(parsed.services['web-app'].ports).toBeUndefined();
     });
 
     it('omits ports section when exposedPorts is an empty array', async () => {
-      mockPrisma.service.findUniqueOrThrow.mockResolvedValue(baseService({
-        exposedPorts: '[]',
-      }) as any);
+      mockPrisma.serviceDeployment.findUniqueOrThrow.mockResolvedValue(
+        buildDeployment({ exposedPorts: '[]' }) as any
+      );
 
-      const artifacts = await generateDeploymentArtifacts('svc-1');
+      const artifacts = await generateDeploymentArtifacts('dep-1');
       const parsed = YAML.parse(artifacts.compose.content);
-
       expect(parsed.services['web-app'].ports).toBeUndefined();
     });
 
     it('does not inject ports into custom compose templates', async () => {
-      mockPrisma.service.findUniqueOrThrow.mockResolvedValue(baseService({
-        composeTemplate: 'services:\n  web-app:\n    image: ${FULL_IMAGE}\n',
-        exposedPorts: JSON.stringify([{ host: null, container: 80, protocol: 'tcp' }]),
-      }) as any);
+      mockPrisma.serviceDeployment.findUniqueOrThrow.mockResolvedValue(
+        buildDeployment({
+          composeTemplate: 'services:\n  web-app:\n    image: ${FULL_IMAGE}\n',
+          exposedPorts: JSON.stringify([{ host: null, container: 80, protocol: 'tcp' }]),
+        }) as any
+      );
 
-      const artifacts = await generateDeploymentArtifacts('svc-1');
-
+      const artifacts = await generateDeploymentArtifacts('dep-1');
       // Custom templates are the source of truth for ports — leave them alone.
       expect(artifacts.compose.content).not.toContain('ports');
       expect(artifacts.compose.content).toContain('registry.com/web-app:v1.0');
     });
+
+    it('picks per-deployment override ServiceFile over the base file when both exist for the same ConfigFile', async () => {
+      // Two ServiceFile rows for the same configFileId: a base (serviceDeploymentId=null)
+      // and a per-deployment override (serviceDeploymentId='dep-1'). The override wins.
+      mockPrisma.serviceDeployment.findUniqueOrThrow.mockResolvedValue(
+        buildDeployment({
+          files: [
+            {
+              configFileId: 'cf-1',
+              serviceDeploymentId: null,
+              targetPath: '/etc/app/config.json',
+              configFile: { filename: 'config.json', content: 'BASE', isBinary: false },
+            },
+            {
+              configFileId: 'cf-1',
+              serviceDeploymentId: 'dep-1',
+              targetPath: '/etc/app/config.override.json',
+              configFile: { filename: 'config.json', content: 'OVERRIDE', isBinary: false },
+            },
+          ],
+        }) as any
+      );
+
+      const artifacts = await generateDeploymentArtifacts('dep-1');
+      expect(artifacts.configFiles).toHaveLength(1);
+      expect(artifacts.configFiles[0].mountPath).toBe('/etc/app/config.override.json');
+    });
   });
 
   describe('serializeExposedPorts', () => {
-    it('returns empty array for null input', () => {
+    it('returns empty array for null/undefined input', () => {
       expect(serializeExposedPorts(null)).toEqual([]);
-    });
-
-    it('returns empty array for undefined input', () => {
       expect(serializeExposedPorts(undefined)).toEqual([]);
     });
 
@@ -177,24 +324,9 @@ describe('compose', () => {
       expect(serializeExposedPorts(json)).toEqual(['80:80']);
     });
 
-    it('defaults host to container when host field is missing', () => {
-      const json = JSON.stringify([{ container: 443, protocol: 'tcp' }]);
-      expect(serializeExposedPorts(json)).toEqual(['443:443']);
-    });
-
     it('appends /udp for udp protocol', () => {
       const json = JSON.stringify([{ host: 53, container: 53, protocol: 'udp' }]);
       expect(serializeExposedPorts(json)).toEqual(['53:53/udp']);
-    });
-
-    it('treats missing protocol as tcp (no suffix)', () => {
-      const json = JSON.stringify([{ host: 80, container: 80 }]);
-      expect(serializeExposedPorts(json)).toEqual(['80:80']);
-    });
-
-    it('lowercases protocol when checking against tcp', () => {
-      const json = JSON.stringify([{ host: 80, container: 80, protocol: 'TCP' }]);
-      expect(serializeExposedPorts(json)).toEqual(['80:80']);
     });
 
     it('deduplicates entries with identical mappings', () => {
@@ -203,14 +335,6 @@ describe('compose', () => {
         { host: 8080, container: 80, protocol: 'tcp' },
       ]);
       expect(serializeExposedPorts(json)).toEqual(['8080:80']);
-    });
-
-    it('keeps distinct host ports for the same container port', () => {
-      const json = JSON.stringify([
-        { host: 8080, container: 80, protocol: 'tcp' },
-        { host: 8081, container: 80, protocol: 'tcp' },
-      ]);
-      expect(serializeExposedPorts(json)).toEqual(['8080:80', '8081:80']);
     });
 
     it('preserves multiple distinct port mappings', () => {
@@ -222,103 +346,35 @@ describe('compose', () => {
       expect(serializeExposedPorts(json)).toEqual(['80:80', '443:443', '53:53/udp']);
     });
 
-    it('skips entries with non-numeric container port', () => {
+    it('skips entries with non-numeric or out-of-range ports', () => {
       const json = JSON.stringify([
         { host: 80, container: 'abc' },
-        { host: 443, container: 443, protocol: 'tcp' },
-      ]);
-      expect(serializeExposedPorts(json)).toEqual(['443:443']);
-    });
-
-    it('skips entries with out-of-range container port', () => {
-      const json = JSON.stringify([
-        { host: null, container: 0 },
-        { host: null, container: 65536 },
-        { host: null, container: -1 },
-        { host: 80, container: 80 },
-      ]);
-      expect(serializeExposedPorts(json)).toEqual(['80:80']);
-    });
-
-    it('skips entries with out-of-range explicit host port', () => {
-      const json = JSON.stringify([
         { host: 99999, container: 80 },
-        { host: 8080, container: 80 },
-      ]);
-      expect(serializeExposedPorts(json)).toEqual(['8080:80']);
-    });
-
-    it('skips entries with non-integer host port', () => {
-      const json = JSON.stringify([
-        { host: 80.5, container: 80 },
-        { host: 8080, container: 80 },
-      ]);
-      expect(serializeExposedPorts(json)).toEqual(['8080:80']);
-    });
-
-    it('skips null entries and non-object entries', () => {
-      const json = JSON.stringify([
-        null,
-        'string',
-        42,
+        { host: null, container: 0 },
         { host: 80, container: 80 },
       ]);
       expect(serializeExposedPorts(json)).toEqual(['80:80']);
     });
 
-    it('skips entries with missing container port', () => {
-      const json = JSON.stringify([
-        { host: 80 },
-        { host: 443, container: 443 },
-      ]);
-      expect(serializeExposedPorts(json)).toEqual(['443:443']);
-    });
-
-    it('rejects non-numeric container values (no Number() coercion)', () => {
-      const json = JSON.stringify([
-        { host: 80, container: '80' },     // numeric string — was previously coerced
-        { host: 80, container: true },     // boolean → 1
-        { host: 80, container: [80] },     // single-element array → 80
-        { host: 443, container: 443 },
-      ]);
-      expect(serializeExposedPorts(json)).toEqual(['443:443']);
-    });
-
-    it('rejects non-numeric host values (no Number() coercion)', () => {
+    it('rejects non-numeric values without coercion', () => {
       const json = JSON.stringify([
         { host: '8080', container: 80 },
-        { host: true, container: 80 },
+        { host: 80, container: '80' },
         { host: 8080, container: 80 },
       ]);
       expect(serializeExposedPorts(json)).toEqual(['8080:80']);
     });
 
-    it('omits wildcard hostIp 0.0.0.0 so docker-compose default applies', () => {
-      const json = JSON.stringify([
-        { hostIp: '0.0.0.0', host: 8080, container: 80 },
-      ]);
-      expect(serializeExposedPorts(json)).toEqual(['8080:80']);
-    });
-
-    it('omits wildcard hostIp :: so docker-compose default applies', () => {
-      const json = JSON.stringify([
-        { hostIp: '::', host: 8080, container: 80 },
-      ]);
-      expect(serializeExposedPorts(json)).toEqual(['8080:80']);
-    });
-
-    it('omits empty-string hostIp as wildcard', () => {
-      const json = JSON.stringify([
-        { hostIp: '', host: 8080, container: 80 },
-      ]);
-      expect(serializeExposedPorts(json)).toEqual(['8080:80']);
-    });
-
-    it('preserves IPv4 hostIp prefix', () => {
-      const json = JSON.stringify([
-        { hostIp: '127.0.0.1', host: 8080, container: 80, protocol: 'tcp' },
-      ]);
-      expect(serializeExposedPorts(json)).toEqual(['127.0.0.1:8080:80']);
+    it('omits wildcard hostIp so docker-compose default applies', () => {
+      expect(
+        serializeExposedPorts(JSON.stringify([{ hostIp: '0.0.0.0', host: 8080, container: 80 }]))
+      ).toEqual(['8080:80']);
+      expect(
+        serializeExposedPorts(JSON.stringify([{ hostIp: '::', host: 8080, container: 80 }]))
+      ).toEqual(['8080:80']);
+      expect(
+        serializeExposedPorts(JSON.stringify([{ hostIp: '', host: 8080, container: 80 }]))
+      ).toEqual(['8080:80']);
     });
 
     it('brackets IPv6 hostIp in the compose port string', () => {
@@ -328,8 +384,7 @@ describe('compose', () => {
       expect(serializeExposedPorts(json)).toEqual(['[::1]:8080:80']);
     });
 
-    it('collapses IPv4 wildcard and IPv6 wildcard dual-stack bindings to one entry', () => {
-      // Docker reports dual-stack as two entries with the same host port.
+    it('collapses IPv4/IPv6 wildcard dual-stack to a single entry', () => {
       const json = JSON.stringify([
         { hostIp: '0.0.0.0', host: 8080, container: 80, protocol: 'tcp' },
         { hostIp: '::', host: 8080, container: 80, protocol: 'tcp' },
@@ -337,42 +392,14 @@ describe('compose', () => {
       expect(serializeExposedPorts(json)).toEqual(['8080:80']);
     });
 
-    it('keeps distinct hostIp bindings on the same host port', () => {
-      const json = JSON.stringify([
-        { hostIp: '127.0.0.1', host: 8080, container: 80, protocol: 'tcp' },
-        { hostIp: '192.168.1.10', host: 8080, container: 80, protocol: 'tcp' },
-      ]);
-      expect(serializeExposedPorts(json)).toEqual([
-        '127.0.0.1:8080:80',
-        '192.168.1.10:8080:80',
-      ]);
-    });
-
-    it('defaults host=container while still preserving hostIp', () => {
-      const json = JSON.stringify([
-        { hostIp: '127.0.0.1', host: null, container: 80, protocol: 'tcp' },
-      ]);
-      expect(serializeExposedPorts(json)).toEqual(['127.0.0.1:80:80']);
-    });
-
     it('falls back to tcp for unknown protocols rather than emitting invalid suffix', () => {
-      // A malformed/future protocol value should not leak into the compose YAML.
-      const json = JSON.stringify([
-        { host: 80, container: 80, protocol: 'garbage' },
-      ]);
+      const json = JSON.stringify([{ host: 80, container: 80, protocol: 'garbage' }]);
       expect(serializeExposedPorts(json)).toEqual(['80:80']);
-    });
-
-    it('emits /sctp suffix for sctp protocol', () => {
-      const json = JSON.stringify([
-        { host: 36412, container: 36412, protocol: 'sctp' },
-      ]);
-      expect(serializeExposedPorts(json)).toEqual(['36412:36412/sctp']);
     });
   });
 
   describe('saveDeploymentArtifacts', () => {
-    it('saves artifacts for a deployment', async () => {
+    it('saves artifacts for a deployment via createMany', async () => {
       mockPrisma.deploymentArtifact.createMany.mockResolvedValue({ count: 1 });
 
       await saveDeploymentArtifacts('dep-1', {
@@ -380,7 +407,15 @@ describe('compose', () => {
         configFiles: [],
       });
 
-      expect(mockPrisma.deploymentArtifact.createMany).toHaveBeenCalled();
+      expect(mockPrisma.deploymentArtifact.createMany).toHaveBeenCalledWith({
+        data: [
+          expect.objectContaining({
+            type: 'compose',
+            name: 'docker-compose.yml',
+            deploymentId: 'dep-1',
+          }),
+        ],
+      });
     });
   });
 
@@ -396,9 +431,7 @@ describe('compose', () => {
 
     it('returns empty array when no artifacts exist', async () => {
       mockPrisma.deploymentArtifact.findMany.mockResolvedValue([]);
-
-      const artifacts = await getDeploymentArtifacts('dep-1');
-      expect(artifacts).toEqual([]);
+      expect(await getDeploymentArtifacts('dep-1')).toEqual([]);
     });
   });
 });

@@ -117,32 +117,46 @@ export function serializeExposedPorts(exposedPortsJson: string | null | undefine
 }
 
 /**
- * Generate all deployment artifacts for a service
+ * Generate all deployment artifacts for a ServiceDeployment.
+ * Resolves per-deployment env overrides on top of the Service template's baseEnv,
+ * and per-deployment override files on top of the template's base files.
  */
 export async function generateDeploymentArtifacts(
-  serviceId: string
+  serviceDeploymentId: string
 ): Promise<GeneratedArtifacts> {
-  const service = await prisma.service.findUniqueOrThrow({
-    where: { id: serviceId },
+  const deployment = await prisma.serviceDeployment.findUniqueOrThrow({
+    where: { id: serviceDeploymentId },
     include: {
-      server: {
-        include: { environment: true },
+      server: { include: { environment: true } },
+      service: {
+        include: {
+          files: { include: { configFile: true } },
+          containerImage: true,
+        },
       },
-      files: {
-        include: { configFile: true },
-      },
-      containerImage: true,
     },
   });
 
-  const environmentId = service.server.environmentId;
+  const service = deployment.service;
+  const environmentId = deployment.server.environmentId;
   const artifacts: GeneratedArtifacts = {
     compose: { name: '', content: '', checksum: '' },
     configFiles: [],
   };
 
-  // Load config files and resolve secret placeholders (skip for binary files)
+  // Pick the ServiceFile for each ConfigFile: prefer per-deployment override
+  // (serviceDeploymentId match) over the template base (serviceDeploymentId null).
+  const filesByConfigId = new Map<string, typeof service.files[number]>();
   for (const sf of service.files) {
+    if (sf.serviceDeploymentId === deployment.id) {
+      filesByConfigId.set(sf.configFileId, sf);
+    } else if (sf.serviceDeploymentId === null && !filesByConfigId.has(sf.configFileId)) {
+      filesByConfigId.set(sf.configFileId, sf);
+    }
+  }
+
+  // Load config files and resolve secret placeholders (skip for binary files)
+  for (const sf of filesByConfigId.values()) {
     const isBinary = sf.configFile.isBinary;
     let content: string;
 
@@ -174,6 +188,11 @@ export async function generateDeploymentArtifacts(
   // Get imageName from containerImage
   const imageName = service.containerImage.imageName;
 
+  // Resolve env: merge Service.baseEnv over ServiceDeployment.envOverrides (overrides win).
+  const baseEnv = safeJsonParse<Record<string, string>>(service.baseEnv, {});
+  const envOverrides = safeJsonParse<Record<string, string>>(deployment.envOverrides, {});
+  const mergedEnv: Record<string, string> = { ...baseEnv, ...envOverrides };
+
   if (service.composeTemplate) {
     // Use custom compose template with variable substitution
     composeContent = service.composeTemplate;
@@ -181,7 +200,7 @@ export async function generateDeploymentArtifacts(
     // Substitute variables
     const vars: Record<string, string> = {
       SERVICE_NAME: service.name,
-      CONTAINER_NAME: service.containerName,
+      CONTAINER_NAME: deployment.containerName,
       IMAGE_NAME: imageName,
       IMAGE_TAG: service.imageTag,
       FULL_IMAGE: `${imageName}:${service.imageTag}`,
@@ -202,13 +221,18 @@ export async function generateDeploymentArtifacts(
       services: {
         [service.name]: {
           image: `${imageName}:${service.imageTag}`,
-          container_name: service.containerName,
+          container_name: deployment.containerName,
           restart: 'unless-stopped',
         },
       },
     };
 
     const svc = composeConfig.services[service.name];
+
+    // Inject merged env vars (base + per-deployment overrides) into the compose service.
+    if (Object.keys(mergedEnv).length > 0) {
+      svc.environment = mergedEnv;
+    }
 
     // Add volume mounts for config files (use absolute paths since files are written to their target paths)
     if (artifacts.configFiles.length > 0) {
@@ -217,11 +241,11 @@ export async function generateDeploymentArtifacts(
       );
     }
 
-    // Add `ports:` entries derived from the service's discovered exposedPorts.
+    // Add `ports:` entries derived from the deployment's discovered exposedPorts.
     // Without this, regenerating compose for a service that previously had
     // explicit port bindings would drop them and the container would come up
     // unreachable (issue #117).
-    const ports = serializeExposedPorts(service.exposedPorts);
+    const ports = serializeExposedPorts(deployment.exposedPorts);
     if (ports.length > 0) {
       svc.ports = ports;
     }
@@ -283,6 +307,6 @@ export async function getDeploymentArtifacts(deploymentId: string) {
 /**
  * Preview generated artifacts without saving
  */
-export async function previewDeploymentArtifacts(serviceId: string) {
-  return generateDeploymentArtifacts(serviceId);
+export async function previewDeploymentArtifacts(serviceDeploymentId: string) {
+  return generateDeploymentArtifacts(serviceDeploymentId);
 }

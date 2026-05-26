@@ -376,7 +376,11 @@ export const checkServerHealth = (id: string) =>
   api.post<{ status: string; error?: string }>(`/servers/${id}/health`);
 
 export const discoverContainers = (id: string) =>
-  api.post<{ services: Service[] }>(`/servers/${id}/discover`);
+  api.post<{
+    services: ServiceWithServer[];
+    serviceDeployments: ServiceDeployment[];
+    missing: string[];
+  }>(`/servers/${id}/discover`);
 
 export interface CreateServiceInput {
   name: string;
@@ -417,8 +421,35 @@ export const pruneServerImages = (id: string, mode: 'dangling' | 'all' = 'dangli
   api.post<{ success: boolean; spaceReclaimedBytes: number; spaceReclaimedHuman: string }>(`/servers/${id}/prune-images`, { mode });
 
 // Services
+/**
+ * Service template enriched with the first deployment's runtime + server
+ * (back-compat surface used by list pages built before the 2.0 split).
+ * Prefer `serviceDeployments` for any new code.
+ */
 export interface ServiceWithServerName extends Service {
-  server: { id: string; name: string };
+  /** @deprecated Use serviceDeployments[*].server */
+  server?: { id: string; name: string };
+  serviceDeployments?: (ServiceDeployment & { server: { id: string; name: string } })[];
+  /** @deprecated Use serviceDeployments[*].serverId */
+  serverId?: string;
+  /** @deprecated Use serviceDeployments[*].containerName */
+  containerName?: string;
+  /** @deprecated Use serviceDeployments[*].composePath */
+  composePath?: string | null;
+  /** @deprecated Use serviceDeployments[*].status */
+  status?: string;
+  /** @deprecated Use serviceDeployments[*].containerStatus */
+  containerStatus?: string;
+  /** @deprecated Use serviceDeployments[*].healthStatus */
+  healthStatus?: string;
+  /** @deprecated Use serviceDeployments[*].exposedPorts */
+  exposedPorts?: string | null;
+  /** @deprecated Use serviceDeployments[*].discoveryStatus */
+  discoveryStatus?: string;
+  /** @deprecated Use serviceDeployments[*].lastCheckedAt */
+  lastCheckedAt?: string | null;
+  /** @deprecated Use serviceDeployments[*].lastDiscoveredAt */
+  lastDiscoveredAt?: string | null;
 }
 
 export const listServices = (envId: string, options?: { limit?: number; offset?: number }) => {
@@ -432,16 +463,38 @@ export const listServices = (envId: string, options?: { limit?: number; offset?:
 export const getService = (id: string) =>
   api.get<{ service: ServiceWithServer }>(`/services/${id}`);
 
-export const deployService = (id: string, options: DeployOptions) =>
-  api.post<{ deployment: Deployment; logs: string }>(`/services/${id}/deploy`, options);
+/**
+ * Deploy a service template across all its deployments.
+ * Strategy defaults to the template's deployStrategy field.
+ */
+export interface DeployServiceTemplateOptions extends DeployOptions {
+  strategy?: 'sequential' | 'parallel';
+}
 
-export const restartService = (id: string) =>
-  api.post<{ success: boolean }>(`/services/${id}/restart`);
+export interface DeployServiceTemplateResult {
+  results: Array<{ serviceDeploymentId: string; result: { deployment: Deployment; logs: string; previousTag: string | null } | null; error?: string }>;
+  halted: boolean;
+}
+
+export const deployService = (id: string, options: DeployServiceTemplateOptions) =>
+  api.post<DeployServiceTemplateResult>(`/services/${id}/deploy`, options);
+
+// Deploy a single service deployment (per-server).
+export const deployServiceDeployment = (serviceId: string, deploymentId: string, options: DeployOptions) =>
+  api.post<{ deployment: Deployment; logs: string; previousTag: string | null }>(
+    `/services/${serviceId}/deployments/${deploymentId}/deploy`,
+    options
+  );
+
+// Restart a specific deployment's container.
+export const restartServiceDeployment = (serviceId: string, deploymentId: string) =>
+  api.post<{ success: boolean }>(`/services/${serviceId}/deployments/${deploymentId}/restart`);
 
 export const deleteService = (id: string) =>
   api.delete<{ success: boolean }>(`/services/${id}`);
 
-export const checkServiceHealth = (id: string) =>
+// Health check a single deployment.
+export const checkServiceDeploymentHealth = (serviceId: string, deploymentId: string) =>
   api.post<{
     status: string;
     containerStatus: string;
@@ -451,7 +504,53 @@ export const checkServiceHealth = (id: string) =>
     exposedPorts: ExposedPort[];
     imageTag: string;
     lastCheckedAt: string;
-  }>(`/services/${id}/health`);
+  }>(`/services/${serviceId}/deployments/${deploymentId}/health`);
+
+// Legacy alias: existing UI components call `checkServiceHealth(serviceId)` expecting
+// the single-deployment shape. Resolve the first deployment of the template and check it.
+export const checkServiceHealth = async (serviceId: string) => {
+  const { service } = await getService(serviceId);
+  const first = service.serviceDeployments?.[0];
+  if (!first) {
+    throw new Error('Service has no deployments to health-check');
+  }
+  return checkServiceDeploymentHealth(serviceId, first.id);
+};
+
+// Legacy alias: existing UI calls `restartService(id)` (template-level). Restart the
+// first deployment of the template.
+export const restartService = async (serviceId: string) => {
+  const { service } = await getService(serviceId);
+  const first = service.serviceDeployments?.[0];
+  if (!first) {
+    throw new Error('Service has no deployments to restart');
+  }
+  return restartServiceDeployment(serviceId, first.id);
+};
+
+// --- ServiceDeployment CRUD ---
+
+export interface CreateServiceDeploymentInput {
+  serverId: string;
+  containerName: string;
+  composePath?: string | null;
+  envOverrides?: Record<string, string>;
+}
+
+export interface UpdateServiceDeploymentInput {
+  containerName?: string;
+  composePath?: string | null;
+  envOverrides?: Record<string, string> | null;
+}
+
+export const addServiceDeployment = (serviceId: string, data: CreateServiceDeploymentInput) =>
+  api.post<{ deployment: ServiceDeployment }>(`/services/${serviceId}/deployments`, data);
+
+export const updateServiceDeployment = (serviceId: string, deploymentId: string, data: UpdateServiceDeploymentInput) =>
+  api.patch<{ deployment: ServiceDeployment }>(`/services/${serviceId}/deployments/${deploymentId}`, data);
+
+export const removeServiceDeployment = (serviceId: string, deploymentId: string) =>
+  api.delete<{ success: boolean }>(`/services/${serviceId}/deployments/${deploymentId}`);
 
 export interface ServiceHistoryEntry {
   id: string;
@@ -559,7 +658,14 @@ export interface Server {
 }
 
 export interface ServerWithServices extends Server {
-  services: Service[];
+  /**
+   * Back-compat: one synthetic row per ServiceDeployment, with deployment runtime
+   * fields (status, healthStatus, containerName, exposedPorts, etc.) flattened
+   * onto the underlying Service template. New code should prefer
+   * `serviceDeployments` and look up the service template through `.service`.
+   */
+  services: ServiceWithServer[];
+  serviceDeployments?: (ServiceDeployment & { service: Service })[];
 }
 
 export interface ExposedPort {
@@ -604,34 +710,21 @@ export interface CertCheckResult {
   error?: string;
 }
 
+/**
+ * Service template (decoupled from servers as of 2.0). Per-server runtime state
+ * lives on ServiceDeployment.
+ */
 export interface Service {
   id: string;
   name: string;
-  containerName: string;
-  imageTag: string;
-  composePath: string | null;
+  imageTag: string; // Shared across all deployments in 2.0
+  composeTemplate: string | null;
   healthCheckUrl: string | null;
-  status: string;
-  containerStatus: string; // running, stopped, exited, created, restarting, paused, dead, not_found
-  healthStatus: string; // healthy, unhealthy, unknown, none
-  exposedPorts: string | null; // JSON array of ExposedPort
-  discoveryStatus: string; // 'found' | 'missing'
-  lastCheckedAt: string | null;
-  lastDiscoveredAt: string | null;
-  serverId: string;
-  // Auto-update fields
-  autoUpdate: boolean;
-  latestAvailableTag: string | null;
-  latestAvailableDigest: string | null;
-  lastUpdateCheckAt: string | null;
-  // Container image (central entity for image management)
+  baseEnv: string | null; // JSON object of env vars applied to every deployment
+  deployStrategy: 'sequential' | 'parallel';
+  environmentId: string;
   containerImageId: string;
   containerImage?: ContainerImage | null;
-  // Orchestration fields
-  healthWaitMs: number;
-  healthRetries: number;
-  healthIntervalMs: number;
-  // Service type for predefined commands
   serviceTypeId: string | null;
   serviceType?: {
     id: string;
@@ -645,18 +738,88 @@ export interface Service {
       description: string | null;
     }>;
   } | null;
-  // Agent-performed health checks
-  tcpChecks: string | null; // JSON array of TCPCheckConfig
-  agentTcpCheckResults: string | null; // JSON array of TCPCheckResult
-  agentTcpCheckedAt: string | null;
-  certChecks: string | null; // JSON array of CertCheckConfig
-  agentCertCheckResults: string | null; // JSON array of CertCheckResult
-  agentCertCheckedAt: string | null;
+  healthWaitMs: number;
+  healthRetries: number;
+  healthIntervalMs: number;
+  tcpChecks: string | null;
+  certChecks: string | null;
+  createdAt: string;
   updatedAt: string;
+  // Optional eagerly-loaded deployments
+  serviceDeployments?: ServiceDeployment[];
+}
+
+/**
+ * Per-server runtime + overrides for a Service template.
+ */
+export interface ServiceDeployment {
+  id: string;
+  serviceId: string;
+  serverId: string;
+  containerName: string;
+  composePath: string | null;
+  envOverrides: string | null; // JSON object
+  exposedPorts: string | null; // JSON array of ExposedPort
+  status: string;
+  containerStatus: string;
+  healthStatus: string;
+  discoveryStatus: string;
+  lastCheckedAt: string | null;
+  lastDiscoveredAt: string | null;
+  lastDeployedAt: string | null;
+  imageDigestId: string | null;
+  agentHealthSuccess: boolean | null;
+  agentHealthStatusCode: number | null;
+  agentHealthDurationMs: number | null;
+  agentHealthCheckedAt: string | null;
+  agentTcpCheckResults: string | null;
+  agentTcpCheckedAt: string | null;
+  agentCertCheckResults: string | null;
+  agentCertCheckedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  server?: { id: string; name: string; hostname?: string };
 }
 
 export interface ServiceWithServer extends Service {
-  server: Server & { environment: Environment };
+  environment?: Environment;
+  serviceDeployments: (ServiceDeployment & { server: { id: string; name: string; hostname?: string } })[];
+  // --- Back-compat surface for legacy UI code that pre-dates the template/deployment split ---
+  // These reflect the FIRST deployment of the template (most services still have exactly one).
+  // New UI code should use `serviceDeployments` directly.
+  /** @deprecated Use serviceDeployments[*].containerName */
+  containerName?: string;
+  /** @deprecated Use serviceDeployments[*].composePath */
+  composePath?: string | null;
+  /** @deprecated Use serviceDeployments[*].status */
+  status?: string;
+  /** @deprecated Use serviceDeployments[*].containerStatus */
+  containerStatus?: string;
+  /** @deprecated Use serviceDeployments[*].healthStatus */
+  healthStatus?: string;
+  /** @deprecated Use serviceDeployments[*].exposedPorts */
+  exposedPorts?: string | null;
+  /** @deprecated Use serviceDeployments[*].discoveryStatus */
+  discoveryStatus?: string;
+  /** @deprecated Use serviceDeployments[*].lastCheckedAt */
+  lastCheckedAt?: string | null;
+  /** @deprecated Use serviceDeployments[*].lastDiscoveredAt */
+  lastDiscoveredAt?: string | null;
+  /** @deprecated Use serviceDeployments[*].serverId */
+  serverId?: string;
+  /** @deprecated Use containerImage update flags */
+  latestAvailableTag?: string | null;
+  /** @deprecated Use containerImage update flags */
+  autoUpdate?: boolean;
+  /** @deprecated */
+  lastUpdateCheckAt?: string | null;
+  /** @deprecated Use serviceDeployments[*].server */
+  server?: { id: string; name: string; environmentId?: string; hostname?: string };
+  /** @deprecated Use serviceDeployments[*].agentTcpCheckResults */
+  agentTcpCheckResults?: string | null;
+  agentTcpCheckedAt?: string | null;
+  agentCertCheckResults?: string | null;
+  agentCertCheckedAt?: string | null;
 }
 
 export interface Deployment {

@@ -26,7 +26,7 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
               include: {
                 dependsOn: {
                   include: {
-                    server: { select: { name: true } },
+                    serviceDeployments: { include: { server: { select: { name: true } } } },
                   },
                 },
               },
@@ -35,7 +35,7 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
               include: {
                 dependent: {
                   include: {
-                    server: { select: { name: true } },
+                    serviceDeployments: { include: { server: { select: { name: true } } } },
                   },
                 },
               },
@@ -65,14 +65,8 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
 
       // Verify both services exist
       const [dependent, dependsOn] = await Promise.all([
-        prisma.service.findUnique({
-          where: { id },
-          include: { server: true },
-        }),
-        prisma.service.findUnique({
-          where: { id: body.dependsOnId },
-          include: { server: true },
-        }),
+        prisma.service.findUnique({ where: { id } }),
+        prisma.service.findUnique({ where: { id: body.dependsOnId } }),
       ]);
 
       if (!dependent) {
@@ -85,7 +79,7 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
 
 
       // Verify both services are in the same environment
-      if (dependent.server.environmentId !== dependsOn.server.environmentId) {
+      if (dependent.environmentId !== dependsOn.environmentId) {
         return reply.code(400).send({
           error: 'Dependencies can only be created between services in the same environment',
         });
@@ -100,9 +94,9 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
       try {
         // Temporarily add the dependency to check for cycles
         const allServices = await prisma.service.findMany({
-          where: { server: { environmentId: dependent.server.environmentId } },
+          where: { environmentId: dependent.environmentId },
           include: {
-            server: { select: { name: true, hostname: true } },
+            serviceDeployments: { include: { server: { select: { name: true, hostname: true } } } },
             dependencies: { include: { dependsOn: true } },
             dependents: { include: { dependent: true } },
           },
@@ -142,7 +136,7 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
           include: {
             dependsOn: {
               include: {
-                server: { select: { name: true } },
+                serviceDeployments: { include: { server: { select: { name: true } } } },
               },
             },
           },
@@ -161,7 +155,7 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
             type: body.type,
           },
           ...actorFrom(request),
-          environmentId: dependent.server.environmentId,
+          environmentId: dependent.environmentId,
         });
 
         return { dependency };
@@ -184,9 +178,7 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
           prisma.serviceDependency.findUnique({
             where: { id },
             include: {
-              dependent: {
-                include: { server: true },
-              },
+              dependent: true,
               dependsOn: true,
             },
           }),
@@ -209,7 +201,7 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
             dependsOnName: dependency.dependsOn.name,
           },
           ...actorFrom(request),
-          environmentId: dependency.dependent.server.environmentId,
+          environmentId: dependency.dependent.environmentId,
         });
 
         return { success: true };
@@ -229,41 +221,45 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
     async (request) => {
       const { envId } = request.params as { envId: string };
 
-      // Get all services with their dependencies in this environment
+      // Get all services with their dependencies in this environment.
+      // Since runtime status moved to ServiceDeployment, derive a rolled-up
+      // "service-level" status (worst-case across deployments) for nodes.
       const services = await prisma.service.findMany({
-        where: {
-          server: { environmentId: envId },
-        },
+        where: { environmentId: envId },
         include: {
-          server: { select: { id: true, name: true } },
+          serviceDeployments: {
+            select: { id: true, status: true, healthStatus: true, server: { select: { id: true, name: true } } },
+          },
           dependencies: {
-            include: {
-              dependsOn: {
-                select: { id: true, name: true },
-              },
-            },
+            include: { dependsOn: { select: { id: true, name: true } } },
           },
           dependents: {
-            include: {
-              dependent: {
-                select: { id: true, name: true },
-              },
-            },
+            include: { dependent: { select: { id: true, name: true } } },
           },
-          containerImage: {
-            select: { id: true, name: true },
-          },
+          containerImage: { select: { id: true, name: true } },
         },
       });
 
-      // Build nodes and edges for visualization
+      const rollupStatus = (deployments: { status: string }[]) => {
+        if (deployments.length === 0) return 'unknown';
+        if (deployments.some((d) => d.status === 'unhealthy')) return 'unhealthy';
+        if (deployments.some((d) => d.status === 'stopped' || d.status === 'not_found')) return 'stopped';
+        if (deployments.every((d) => d.status === 'healthy' || d.status === 'running')) return 'healthy';
+        return 'unknown';
+      };
+      const rollupHealth = (deployments: { healthStatus: string }[]) => {
+        if (deployments.some((d) => d.healthStatus === 'unhealthy')) return 'unhealthy';
+        if (deployments.every((d) => d.healthStatus === 'healthy')) return 'healthy';
+        return 'unknown';
+      };
+
       const nodes = services.map((service) => ({
         id: service.id,
         name: service.name,
-        server: service.server.name,
+        servers: service.serviceDeployments.map((d) => d.server.name),
         containerImage: service.containerImage,
-        status: service.status,
-        healthStatus: service.healthStatus,
+        status: rollupStatus(service.serviceDeployments),
+        healthStatus: rollupHealth(service.serviceDeployments),
         dependencyCount: service.dependencies.length,
         dependentCount: service.dependents.length,
       }));
@@ -281,9 +277,9 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
       let deploymentOrder: string[][] = [];
       try {
         const servicesWithDeps = await prisma.service.findMany({
-          where: { server: { environmentId: envId } },
+          where: { environmentId: envId },
           include: {
-            server: { select: { name: true, hostname: true } },
+            serviceDeployments: { include: { server: { select: { name: true, hostname: true } } } },
             dependencies: { include: { dependsOn: true } },
             dependents: { include: { dependent: true } },
           },
@@ -310,31 +306,26 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
       const service = await findOrNotFound(
         prisma.service.findUnique({
           where: { id },
-          include: {
-            server: true,
-            dependencies: true,
-          },
+          include: { dependencies: true },
         }),
         'Service',
         reply
       );
       if (!service) return;
 
-      // Get existing dependency IDs
       const existingDependencyIds = new Set(service.dependencies.map((d) => d.dependsOnId));
 
-      // Get all services in the same environment that are not this service
-      // and not already a dependency
+      // Get all services in the same environment that are not this service and not already a dependency.
       const availableServices = await prisma.service.findMany({
         where: {
-          server: { environmentId: service.server.environmentId },
+          environmentId: service.environmentId,
           id: {
             not: id,
             notIn: Array.from(existingDependencyIds),
           },
         },
         include: {
-          server: { select: { name: true } },
+          serviceDeployments: { select: { server: { select: { name: true } } } },
         },
         orderBy: { name: 'asc' },
       });

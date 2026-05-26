@@ -1,7 +1,7 @@
 import { prisma } from '../lib/db.js';
 import { getNotificationType } from './notifications.js';
 
-export type ResourceType = 'server' | 'service' | 'database';
+export type ResourceType = 'server' | 'service' | 'service_deployment' | 'database';
 export type EventType = 'health_check' | 'offline' | 'crash' | 'backup';
 
 interface BounceResult {
