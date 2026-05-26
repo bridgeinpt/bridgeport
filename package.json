@@ -30,7 +30,8 @@
     "test:tokens": "vitest run --config config/vitest.config.ts src/routes/api-tokens.test.ts src/routes/service-accounts.test.ts src/routes/auth.test.ts",
     "test:ui": "cd ui && vitest run",
     "test:ui:watch": "cd ui && vitest",
-    "test:all": "vitest run && cd ui && vitest run"
+    "test:all": "vitest run && cd ui && vitest run",
+    "test:stress": "tsx tests/stress/run.ts"
   },
   "keywords": [
     "deployment",
@@ -76,6 +77,7 @@
     "@types/pg": "^8.20.0",
     "@types/ssh2": "^1.15.0",
     "@vitest/coverage-v8": "^4.1.7",
+    "autocannon": "^8.0.0",
     "pino-pretty": "^11.0.0",
     "prisma": "^7.8.0",
     "tsx": "^4.22.3",

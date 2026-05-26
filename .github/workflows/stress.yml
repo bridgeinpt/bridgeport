@@ -1,0 +1,87 @@
+name: Stress
+
+on:
+  workflow_dispatch:
+    inputs:
+      servers:
+        description: 'Servers to seed (drives N for ServerMetrics N+1)'
+        required: false
+        default: '30'
+      services_per_server:
+        description: 'Services per server'
+        required: false
+        default: '3'
+      duration_sec:
+        description: 'Load duration in seconds per scenario'
+        required: false
+        default: '10'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'src/routes/monitoring.ts'
+      - 'src/services/**'
+      - 'prisma/schema.prisma'
+      - 'tests/stress/**'
+      - '.github/workflows/stress.yml'
+  schedule:
+    - cron: '0 4 * * 1'  # Mondays at 04:00 UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MASTER_KEY: ilyS3JROhJmj8QEYHuoZts8aoK2LG9SHl0EgIn0gsVw=
+  JWT_SECRET: stress-jwt-secret-not-real
+  NODE_ENV: test
+  SCHEDULER_ENABLED: 'false'
+
+jobs:
+  stress:
+    name: Monitoring history endpoints
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Run stress tests
+        env:
+          STRESS_SERVERS: ${{ github.event.inputs.servers || '30' }}
+          STRESS_SERVICES_PER_SERVER: ${{ github.event.inputs.services_per_server || '3' }}
+          STRESS_METRICS_PER_ENTITY: '12'
+        run: npm run test:stress
+      - name: Upload stress report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stress-report
+          path: stress-report.json
+          retention-days: 30
+      - name: Summarize results
+        if: always()
+        run: |
+          if [ -f stress-report.json ]; then
+            {
+              echo '## Stress Test Results'
+              echo
+              echo '| Scenario | p50 | p90 | p99 | RPS | non2xx | Pass |'
+              echo '|---|---|---|---|---|---|---|'
+              jq -r '.scenarios[] | "| \(.name) | \(.p50)ms | \(.p90)ms | \(.p99)ms | \(.rps | floor) | \(.non2xx) | \(if .passed then "✅" else "❌" end) |"' stress-report.json
+              echo
+              echo '<details><summary>Full report</summary>'
+              echo
+              echo '```json'
+              cat stress-report.json
+              echo '```'
+              echo
+              echo '</details>'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi

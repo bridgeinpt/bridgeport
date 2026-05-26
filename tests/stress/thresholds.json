@@ -1,0 +1,20 @@
+{
+  "$schema": "Latency in ms; each scenario's p99 must be <= maxP99Ms; non2xx must be 0. We use p99 (not p95) because autocannon's default percentile set tracks p99 but not p95. Thresholds intentionally have headroom over local p99 to absorb GitHub Actions runner variance; a real N+1 regression doubles or triples latency, so a 2x margin still catches them.",
+  "scenarios": {
+    "server-metrics-history": {
+      "path": "/api/environments/{envId}/metrics/history?hours=6",
+      "maxP99Ms": 120,
+      "minRps": 50
+    },
+    "service-metrics-history": {
+      "path": "/api/environments/{envId}/services/metrics/history?hours=6",
+      "maxP99Ms": 120,
+      "minRps": 50
+    }
+  },
+  "load": {
+    "connections": 20,
+    "durationSec": 10,
+    "pipelining": 1
+  }
+}

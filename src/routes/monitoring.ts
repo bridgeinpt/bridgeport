@@ -297,103 +297,110 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         select: { id: true, name: true, tags: true },
       });
 
-      // Get metrics for each server
-      const serverMetrics = await Promise.all(
-        servers.map(async (server) => {
-          const metrics = await prisma.serverMetrics.findMany({
-            where: {
-              serverId: server.id,
-              collectedAt: { gte: since },
-            },
-            orderBy: { collectedAt: 'asc' },
-            select: {
-              cpuPercent: true,
-              memoryUsedMb: true,
-              memoryTotalMb: true,
-              swapUsedMb: true,
-              swapTotalMb: true,
-              diskUsedGb: true,
-              diskTotalGb: true,
-              loadAvg1: true,
-              loadAvg5: true,
-              loadAvg15: true,
-              openFds: true,
-              maxFds: true,
-              tcpEstablished: true,
-              tcpListen: true,
-              tcpTimeWait: true,
-              tcpCloseWait: true,
-              tcpTotal: true,
-              collectedAt: true,
-            },
-          });
+      // Fetch all metrics in one query, then bucket by serverId.
+      // Sentry BRIDGEPORT-BE-2 was an N+1 here when this loop ran per-server.
+      const serverIds = servers.map((s) => s.id);
+      const rows =
+        serverIds.length === 0
+          ? []
+          : await prisma.serverMetrics.findMany({
+              where: {
+                serverId: { in: serverIds },
+                collectedAt: { gte: since },
+              },
+              orderBy: { collectedAt: 'asc' },
+              select: {
+                serverId: true,
+                cpuPercent: true,
+                memoryUsedMb: true,
+                memoryTotalMb: true,
+                swapUsedMb: true,
+                swapTotalMb: true,
+                diskUsedGb: true,
+                diskTotalGb: true,
+                loadAvg1: true,
+                loadAvg5: true,
+                loadAvg15: true,
+                openFds: true,
+                maxFds: true,
+                tcpEstablished: true,
+                tcpListen: true,
+                tcpTimeWait: true,
+                tcpCloseWait: true,
+                tcpTotal: true,
+                collectedAt: true,
+              },
+            });
 
-          // Transform metrics based on requested metric type
-          const data = metrics.map((m) => {
-            const base = { time: m.collectedAt.toISOString() };
+      const byServer = new Map<string, typeof rows>();
+      for (const id of serverIds) byServer.set(id, []);
+      for (const row of rows) byServer.get(row.serverId)?.push(row);
 
-            // If no specific metric requested, return all metrics
-            if (!metric) {
-              const memPercent =
-                m.memoryUsedMb && m.memoryTotalMb
-                  ? (m.memoryUsedMb / m.memoryTotalMb) * 100
-                  : null;
-              const swapPercent =
-                m.swapUsedMb && m.swapTotalMb && m.swapTotalMb > 0
-                  ? (m.swapUsedMb / m.swapTotalMb) * 100
-                  : null;
-              const diskPercent =
-                m.diskUsedGb && m.diskTotalGb ? (m.diskUsedGb / m.diskTotalGb) * 100 : null;
-              return {
-                ...base,
-                cpu: m.cpuPercent,
-                memory: memPercent,
-                memoryUsedMb: m.memoryUsedMb,
-                swap: swapPercent,
-                swapUsedMb: m.swapUsedMb,
-                disk: diskPercent,
-                diskUsedGb: m.diskUsedGb,
-                load1: m.loadAvg1,
-                load5: m.loadAvg5,
-                load15: m.loadAvg15,
-                openFds: m.openFds,
-                maxFds: m.maxFds,
-                tcpEstablished: m.tcpEstablished,
-                tcpListen: m.tcpListen,
-                tcpTimeWait: m.tcpTimeWait,
-                tcpCloseWait: m.tcpCloseWait,
-                tcpTotal: m.tcpTotal,
-              };
-            }
-            if (metric === 'cpu') {
-              return { ...base, cpu: m.cpuPercent };
-            }
-            if (metric === 'memory') {
-              const memPercent =
-                m.memoryUsedMb && m.memoryTotalMb
-                  ? (m.memoryUsedMb / m.memoryTotalMb) * 100
-                  : null;
-              return { ...base, memory: memPercent, memoryUsedMb: m.memoryUsedMb };
-            }
-            if (metric === 'disk') {
-              const diskPercent =
-                m.diskUsedGb && m.diskTotalGb ? (m.diskUsedGb / m.diskTotalGb) * 100 : null;
-              return { ...base, disk: diskPercent, diskUsedGb: m.diskUsedGb };
-            }
-            if (metric === 'load') {
-              return { ...base, load1: m.loadAvg1, load5: m.loadAvg5, load15: m.loadAvg15 };
-            }
-            return base;
-          });
+      const serverMetrics = servers.map((server) => {
+        const metrics = byServer.get(server.id) ?? [];
+        const data = metrics.map((m) => {
+          const base = { time: m.collectedAt.toISOString() };
 
-          return {
-            id: server.id,
-            name: server.name,
-            tags: server.tags,
-            data,
-          };
-        })
-      );
+          if (!metric) {
+            const memPercent =
+              m.memoryUsedMb && m.memoryTotalMb
+                ? (m.memoryUsedMb / m.memoryTotalMb) * 100
+                : null;
+            const swapPercent =
+              m.swapUsedMb && m.swapTotalMb && m.swapTotalMb > 0
+                ? (m.swapUsedMb / m.swapTotalMb) * 100
+                : null;
+            const diskPercent =
+              m.diskUsedGb && m.diskTotalGb ? (m.diskUsedGb / m.diskTotalGb) * 100 : null;
+            return {
+              ...base,
+              cpu: m.cpuPercent,
+              memory: memPercent,
+              memoryUsedMb: m.memoryUsedMb,
+              swap: swapPercent,
+              swapUsedMb: m.swapUsedMb,
+              disk: diskPercent,
+              diskUsedGb: m.diskUsedGb,
+              load1: m.loadAvg1,
+              load5: m.loadAvg5,
+              load15: m.loadAvg15,
+              openFds: m.openFds,
+              maxFds: m.maxFds,
+              tcpEstablished: m.tcpEstablished,
+              tcpListen: m.tcpListen,
+              tcpTimeWait: m.tcpTimeWait,
+              tcpCloseWait: m.tcpCloseWait,
+              tcpTotal: m.tcpTotal,
+            };
+          }
+          if (metric === 'cpu') {
+            return { ...base, cpu: m.cpuPercent };
+          }
+          if (metric === 'memory') {
+            const memPercent =
+              m.memoryUsedMb && m.memoryTotalMb
+                ? (m.memoryUsedMb / m.memoryTotalMb) * 100
+                : null;
+            return { ...base, memory: memPercent, memoryUsedMb: m.memoryUsedMb };
+          }
+          if (metric === 'disk') {
+            const diskPercent =
+              m.diskUsedGb && m.diskTotalGb ? (m.diskUsedGb / m.diskTotalGb) * 100 : null;
+            return { ...base, disk: diskPercent, diskUsedGb: m.diskUsedGb };
+          }
+          if (metric === 'load') {
+            return { ...base, load1: m.loadAvg1, load5: m.loadAvg5, load15: m.loadAvg15 };
+          }
+          return base;
+        });
+
+        return {
+          id: server.id,
+          name: server.name,
+          tags: server.tags,
+          data,
+        };
+      });
 
       return { servers: serverMetrics };
     }
@@ -427,45 +434,54 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         select: { id: true, name: true, server: { select: { id: true, name: true } } },
       });
 
-      // Get metrics for each service
-      const serviceMetrics = await Promise.all(
-        services.map(async (service) => {
-          const metrics = await prisma.serviceMetrics.findMany({
-            where: {
-              serviceId: service.id,
-              collectedAt: { gte: since },
-            },
-            orderBy: { collectedAt: 'asc' },
-            select: {
-              cpuPercent: true,
-              memoryUsedMb: true,
-              memoryLimitMb: true,
-              networkRxMb: true,
-              networkTxMb: true,
-              restartCount: true,
-              collectedAt: true,
-            },
-          });
+      // Fetch all metrics in one query, then bucket by serviceId.
+      // Sentry BRIDGEPORT-BE-5 was an N+1 here when this loop ran per-service.
+      const serviceIds = services.map((s) => s.id);
+      const rows =
+        serviceIds.length === 0
+          ? []
+          : await prisma.serviceMetrics.findMany({
+              where: {
+                serviceId: { in: serviceIds },
+                collectedAt: { gte: since },
+              },
+              orderBy: { collectedAt: 'asc' },
+              select: {
+                serviceId: true,
+                cpuPercent: true,
+                memoryUsedMb: true,
+                memoryLimitMb: true,
+                networkRxMb: true,
+                networkTxMb: true,
+                restartCount: true,
+                collectedAt: true,
+              },
+            });
 
-          const data = metrics.map((m) => ({
-            time: m.collectedAt.toISOString(),
-            cpu: m.cpuPercent,
-            memory: m.memoryUsedMb,
-            memoryLimit: m.memoryLimitMb,
-            networkRx: m.networkRxMb,
-            networkTx: m.networkTxMb,
-            restartCount: m.restartCount,
-          }));
+      const byService = new Map<string, typeof rows>();
+      for (const id of serviceIds) byService.set(id, []);
+      for (const row of rows) byService.get(row.serviceId)?.push(row);
 
-          return {
-            id: service.id,
-            name: service.name,
-            serverName: service.server.name,
-            serverId: service.server.id,
-            data,
-          };
-        })
-      );
+      const serviceMetrics = services.map((service) => {
+        const metrics = byService.get(service.id) ?? [];
+        const data = metrics.map((m) => ({
+          time: m.collectedAt.toISOString(),
+          cpu: m.cpuPercent,
+          memory: m.memoryUsedMb,
+          memoryLimit: m.memoryLimitMb,
+          networkRx: m.networkRxMb,
+          networkTx: m.networkTxMb,
+          restartCount: m.restartCount,
+        }));
+
+        return {
+          id: service.id,
+          name: service.name,
+          serverName: service.server.name,
+          serverId: service.server.id,
+          data,
+        };
+      });
 
       return { services: serviceMetrics };
     }

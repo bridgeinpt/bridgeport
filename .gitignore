@@ -31,6 +31,8 @@ data/
 
 # Test artifacts
 test-uploads/
+stress-uploads/
+stress-report*.json
 
 # Specs (local design docs)
 specs/
