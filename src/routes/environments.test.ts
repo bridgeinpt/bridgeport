@@ -2,6 +2,10 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { buildTestApp, type TestApp } from '../../tests/helpers/app.js';
 import { createTestUser } from '../../tests/factories/user.js';
 import { createTestEnvironment } from '../../tests/factories/environment.js';
+import { createTestServer } from '../../tests/factories/server.js';
+import { createTestContainerImage } from '../../tests/factories/container-image.js';
+import { createTestService } from '../../tests/factories/service.js';
+import { createTestDatabase } from '../../tests/factories/database.js';
 import { generateTestToken } from '../../tests/helpers/auth.js';
 
 describe('environment routes', () => {
@@ -56,7 +60,7 @@ describe('environment routes', () => {
   // ==================== GET /api/environments/:id ====================
 
   describe('GET /api/environments/:id', () => {
-    it('should return environment with details', async () => {
+    it('should return slim env row with zero counts when no children', async () => {
       const env = await createTestEnvironment(app.prisma, { name: 'detail-test-env' });
 
       const res = await app.inject({
@@ -66,9 +70,120 @@ describe('environment routes', () => {
       });
 
       expect(res.statusCode).toBe(200);
-      expect(res.json().environment).toMatchObject({
+      const body = res.json();
+      expect(body.environment).toMatchObject({
         id: env.id,
         name: 'detail-test-env',
+      });
+      // Slim shape: denormalized counts, no nested children array.
+      expect(body.environment._count).toEqual({
+        servers: 0,
+        services: 0,
+        databases: 0,
+        secrets: 0,
+      });
+      expect(body.environment).not.toHaveProperty('servers');
+    });
+
+    it('should return correct counts when env has servers, services, databases, and secrets', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'counts-test-env' });
+
+      // Seed: 2 servers, 3 services (2 on s1, 1 on s2), 2 databases, 2 secrets.
+      const s1 = await createTestServer(app.prisma, { environmentId: env.id, name: 'counts-s1' });
+      const s2 = await createTestServer(app.prisma, { environmentId: env.id, name: 'counts-s2' });
+      const img = await createTestContainerImage(app.prisma, {
+        environmentId: env.id,
+        name: 'counts-img',
+      });
+      await createTestService(app.prisma, {
+        serverId: s1.id,
+        containerImageId: img.id,
+        name: 'counts-svc-1',
+        containerName: 'counts-c-1',
+      });
+      await createTestService(app.prisma, {
+        serverId: s1.id,
+        containerImageId: img.id,
+        name: 'counts-svc-2',
+        containerName: 'counts-c-2',
+      });
+      await createTestService(app.prisma, {
+        serverId: s2.id,
+        containerImageId: img.id,
+        name: 'counts-svc-3',
+        containerName: 'counts-c-3',
+      });
+      await createTestDatabase(app.prisma, { environmentId: env.id, name: 'counts-db-1' });
+      await createTestDatabase(app.prisma, { environmentId: env.id, name: 'counts-db-2' });
+      await app.prisma.secret.create({
+        data: {
+          environmentId: env.id,
+          key: 'COUNTS_SECRET_A',
+          encryptedValue: 'x',
+          nonce: 'x',
+        },
+      });
+      await app.prisma.secret.create({
+        data: {
+          environmentId: env.id,
+          key: 'COUNTS_SECRET_B',
+          encryptedValue: 'x',
+          nonce: 'x',
+        },
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/environments/${env.id}`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.environment._count).toEqual({
+        servers: 2,
+        services: 3,
+        databases: 2,
+        secrets: 2,
+      });
+      // Critically, no nested servers / services tree leaks into the response.
+      expect(body.environment).not.toHaveProperty('servers');
+      expect(body.environment).not.toHaveProperty('services');
+      expect(body.environment).not.toHaveProperty('databases');
+    });
+
+    it('should not leak children from a neighboring environment into the counts', async () => {
+      // Guards against the env-scoping in the services count (which goes through
+      // Server.environmentId rather than a direct Service.envId field).
+      const envA = await createTestEnvironment(app.prisma, { name: 'iso-env-a' });
+      const envB = await createTestEnvironment(app.prisma, { name: 'iso-env-b' });
+      const serverB = await createTestServer(app.prisma, {
+        environmentId: envB.id,
+        name: 'iso-s-b',
+      });
+      const imgB = await createTestContainerImage(app.prisma, {
+        environmentId: envB.id,
+        name: 'iso-img-b',
+      });
+      await createTestService(app.prisma, {
+        serverId: serverB.id,
+        containerImageId: imgB.id,
+        name: 'iso-svc-b',
+        containerName: 'iso-c-b',
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/environments/${envA.id}`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json().environment._count).toEqual({
+        servers: 0,
+        services: 0,
+        databases: 0,
+        secrets: 0,
       });
     });
 

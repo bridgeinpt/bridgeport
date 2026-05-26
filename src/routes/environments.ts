@@ -43,38 +43,38 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
     }
   );
 
-  // Get environment
+  // Get environment (thin shape: row + denormalized counts, no nested children).
+  // Per-resource detail lives on /api/environments/:envId/servers and /api/servers/:id.
   fastify.get(
     '/api/environments/:id',
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
-      const environment = await findOrNotFound(
+      // Service count requires traversing Server (no direct env FK on Service),
+      // so we compute it in parallel with the env findUnique.
+      const [environment, servicesCount] = await Promise.all([
         prisma.environment.findUnique({
           where: { id },
           include: {
-            servers: {
-              include: {
-                services: {
-                  include: {
-                    serviceType: true,
-                    containerImage: true,
-                  },
-                },
-              },
-            },
             _count: {
-              select: { secrets: true },
+              select: { servers: true, secrets: true, databases: true },
             },
           },
         }),
-        'Environment',
-        reply
-      );
-      if (!environment) return;
+        prisma.service.count({ where: { server: { environmentId: id } } }),
+      ]);
 
-      return { environment };
+      if (!environment) {
+        return reply.code(404).send({ error: 'Environment not found' });
+      }
+
+      return {
+        environment: {
+          ...environment,
+          _count: { ...environment._count, services: servicesCount },
+        },
+      };
     }
   );
 

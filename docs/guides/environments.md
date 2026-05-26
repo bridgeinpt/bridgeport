@@ -116,6 +116,34 @@ Authorization: Bearer <token>
 
 Returns all environments with server and secret counts. Available to all authenticated users.
 
+**Get one environment (thin shape):**
+```http
+GET /api/environments/:id
+Authorization: Bearer <token>
+```
+
+Returns the environment row plus a `_count` block with denormalized resource counts. Nested servers/services are intentionally **not** included -- use `GET /api/environments/:envId/servers` and `GET /api/servers/:id` for per-resource detail.
+
+**Response (200):**
+```json
+{
+  "environment": {
+    "id": "clenv...",
+    "name": "production",
+    "createdAt": "2026-02-25T10:00:00.000Z",
+    "updatedAt": "2026-02-25T10:00:00.000Z",
+    "_count": {
+      "servers": 12,
+      "services": 47,
+      "databases": 3,
+      "secrets": 18
+    }
+  }
+}
+```
+
+Returns `404` if no environment matches the id.
+
 **Delete an environment:**
 ```http
 DELETE /api/environments/:id

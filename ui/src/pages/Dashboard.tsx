@@ -6,17 +6,21 @@ import {
   getEnvironmentMetricsSummary,
   getAuditLogs,
   listDatabases,
+  listServers,
+  listServices,
   listDatabaseBackups,
   getBackupSchedule,
   deployService,
   checkServiceUpdates,
-  type EnvironmentWithServers,
+  type EnvironmentDetail,
+  type ServerWithServicesCount,
   type MetricsSummaryServer,
   type AuditLog,
   type Database,
   type DatabaseBackup,
   type BackupSchedule,
   type Service,
+  type ServiceWithServerName,
 } from '../lib/api';
 import { formatDistanceToNow } from 'date-fns';
 import { Modal } from '../components/Modal';
@@ -58,7 +62,9 @@ export default function Dashboard() {
   const { selectedEnvironment, dismissedAlerts, dismissAlert, clearDismissedAlerts } = useAppStore();
   const { user } = useAuthStore();
   const toast = useToast();
-  const [environment, setEnvironment] = useState<EnvironmentWithServers | null>(null);
+  const [environment, setEnvironment] = useState<EnvironmentDetail | null>(null);
+  const [servers, setServers] = useState<ServerWithServicesCount[]>([]);
+  const [services, setServices] = useState<ServiceWithServerName[]>([]);
   const [metrics, setMetrics] = useState<MetricsSummaryServer[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [databases, setDatabases] = useState<DatabaseWithBackups[]>([]);
@@ -76,14 +82,18 @@ export default function Dashboard() {
     if (!isRefresh) setLoading(true);
 
     try {
-      const [envRes, metricsRes, logsRes, dbRes] = await Promise.all([
+      const [envRes, serversRes, servicesRes, metricsRes, logsRes, dbRes] = await Promise.all([
         getEnvironment(selectedEnvironment.id),
+        listServers(selectedEnvironment.id, { includeServicesCount: true, limit: 500 }),
+        listServices(selectedEnvironment.id, { limit: 1000 }),
         getEnvironmentMetricsSummary(selectedEnvironment.id),
         getAuditLogs({ environmentId: selectedEnvironment.id, limit: 15 }),
         listDatabases(selectedEnvironment.id),
       ]);
 
       setEnvironment(envRes.environment);
+      setServers(serversRes.servers);
+      setServices(servicesRes.services);
       setMetrics(metricsRes.servers);
       setAuditLogs(logsRes.logs);
 
@@ -175,30 +185,29 @@ export default function Dashboard() {
 
     // Unhealthy services (using Set for O(1) lookup)
     const healthyStatuses = new Set(['running', 'healthy', 'unknown']);
-    environment?.servers.forEach((server) => {
-      server.services.forEach((service) => {
-        if (!healthyStatuses.has(service.status)) {
-          result.push({
-            id: `unhealthy-${service.id}`,
-            type: 'unhealthy',
-            severity: 'error',
-            title: 'Unhealthy Service',
-            description: `${service.name} on ${server.name}: ${service.status}`,
-            link: `/services/${service.id}`,
-          });
-        }
+    services.forEach((service) => {
+      const serverName = service.server.name;
+      if (!healthyStatuses.has(service.status)) {
+        result.push({
+          id: `unhealthy-${service.id}`,
+          type: 'unhealthy',
+          severity: 'error',
+          title: 'Unhealthy Service',
+          description: `${service.name} on ${serverName}: ${service.status}`,
+          link: `/services/${service.id}`,
+        });
+      }
 
-        if (service.discoveryStatus === 'missing') {
-          result.push({
-            id: `missing-${service.id}`,
-            type: 'missing',
-            severity: 'warning',
-            title: 'Missing Container',
-            description: `${service.name} on ${server.name}: container not found`,
-            link: `/services/${service.id}`,
-          });
-        }
-      });
+      if (service.discoveryStatus === 'missing') {
+        result.push({
+          id: `missing-${service.id}`,
+          type: 'missing',
+          severity: 'warning',
+          title: 'Missing Container',
+          description: `${service.name} on ${serverName}: container not found`,
+          link: `/services/${service.id}`,
+        });
+      }
     });
 
     // Failed deployments from audit logs
@@ -218,18 +227,14 @@ export default function Dashboard() {
 
     // Filter out dismissed alerts
     return result.filter((alert) => !dismissedAlerts.includes(alert.id));
-  }, [metrics, environment, auditLogs, dismissedAlerts]);
+  }, [metrics, services, auditLogs, dismissedAlerts]);
 
   // Services with available updates
   const servicesWithUpdates = useMemo<ServiceWithUpdate[]>(() => {
-    return (
-      environment?.servers.flatMap((server) =>
-        server.services
-          .filter((s) => s.latestAvailableTag && s.latestAvailableTag !== s.imageTag)
-          .map((s) => ({ ...s, serverName: server.name, serverId: server.id }))
-      ) || []
-    );
-  }, [environment]);
+    return services
+      .filter((s) => s.latestAvailableTag && s.latestAvailableTag !== s.imageTag)
+      .map((s) => ({ ...s, serverName: s.server.name, serverId: s.server.id }));
+  }, [services]);
 
   // Recent activity (filtered to relevant actions)
   const recentActivity = useMemo(() => {
@@ -241,12 +246,20 @@ export default function Dashboard() {
 
   // All services with server info for health grid
   const allServices = useMemo(() => {
-    return (
-      environment?.servers.flatMap((server) =>
-        server.services.map((s) => ({ ...s, serverName: server.name }))
-      ) || []
-    );
-  }, [environment]);
+    return services.map((s) => ({ ...s, serverName: s.server.name }));
+  }, [services]);
+
+  // Build a topology-friendly `ServerWithServices[]` shape from the separate
+  // servers + services arrays. The topology component still expects nested services.
+  const serversWithServices = useMemo(() => {
+    const byServer = new Map<string, Service[]>();
+    for (const s of services) {
+      const list = byServer.get(s.serverId);
+      if (list) list.push(s);
+      else byServer.set(s.serverId, [s]);
+    }
+    return servers.map((srv) => ({ ...srv, services: byServer.get(srv.id) ?? [] }));
+  }, [servers, services]);
 
   // Service health counts
   const serviceHealthCounts = useMemo(() => {
@@ -257,15 +270,18 @@ export default function Dashboard() {
   }, [allServices]);
 
 
+  const refreshServices = async () => {
+    if (!selectedEnvironment?.id) return;
+    const servicesRes = await listServices(selectedEnvironment.id, { limit: 1000 });
+    setServices(servicesRes.services);
+  };
+
   const handleDeploy = async (serviceId: string, imageTag: string) => {
     setDeploying(serviceId);
     try {
       await deployService(serviceId, { imageTag, pullImage: true });
-      // Refresh environment data
-      if (selectedEnvironment?.id) {
-        const envRes = await getEnvironment(selectedEnvironment.id);
-        setEnvironment(envRes.environment);
-      }
+      // Refresh services so the dashboard reflects the new tag/status.
+      await refreshServices();
     } catch (error) {
       console.error('Deploy failed:', error);
     } finally {
@@ -274,18 +290,14 @@ export default function Dashboard() {
   };
 
   const handleCheckAllUpdates = async () => {
-    if (!environment) return;
+    if (services.length === 0) return;
     setCheckingUpdates(true);
     try {
-      const serviceIds = environment.servers.flatMap((s) =>
-        s.services.filter((svc) => svc.containerImage?.registryConnectionId).map((svc) => svc.id)
-      );
+      const serviceIds = services
+        .filter((svc) => svc.containerImage?.registryConnectionId)
+        .map((svc) => svc.id);
       await Promise.all(serviceIds.map((id) => checkServiceUpdates(id)));
-      // Refresh environment data
-      if (selectedEnvironment?.id) {
-        const envRes = await getEnvironment(selectedEnvironment.id);
-        setEnvironment(envRes.environment);
-      }
+      await refreshServices();
     } catch (error) {
       console.error('Update check failed:', error);
     } finally {
@@ -328,11 +340,8 @@ export default function Dashboard() {
     setDeployAllResults(results);
     setDeployingAll(false);
 
-    // Refresh environment data
-    if (selectedEnvironment?.id) {
-      const envRes = await getEnvironment(selectedEnvironment.id);
-      setEnvironment(envRes.environment);
-    }
+    // Refresh services so the dashboard reflects the new tags/status.
+    await refreshServices();
 
     const successCount = results.filter((r) => r.success).length;
     if (successCount === results.length) {
@@ -367,10 +376,8 @@ export default function Dashboard() {
     );
   }
 
-  const serverCount = environment.servers.length;
-  const healthyServers = environment.servers.filter(
-    (s) => s.status === 'healthy'
-  ).length;
+  const serverCount = servers.length;
+  const healthyServers = servers.filter((s) => s.status === 'healthy').length;
 
   return (
     <div className="p-6">
@@ -452,10 +459,10 @@ export default function Dashboard() {
       )}
 
       {/* Service Topology Diagram */}
-      {environment.servers.length > 0 && (
+      {servers.length > 0 && (
         <div className="mb-5">
           <TopologyDiagram
-            servers={environment.servers}
+            servers={serversWithServices}
             databases={databases}
             environmentId={environment.id}
             userRole={user?.role || 'viewer'}
@@ -627,19 +634,15 @@ export default function Dashboard() {
               </div>
             ))}
           </div>
-          {environment.servers.some((s) =>
-            s.services.some((svc) => svc.lastUpdateCheckAt)
-          ) && (
+          {services.some((svc) => svc.lastUpdateCheckAt) && (
             <p className="text-xs text-slate-500 mt-3">
               Last checked:{' '}
               {formatDistanceToNow(
                 new Date(
                   Math.max(
-                    ...environment.servers.flatMap((s) =>
-                      s.services
-                        .filter((svc) => svc.lastUpdateCheckAt)
-                        .map((svc) => new Date(svc.lastUpdateCheckAt!).getTime())
-                    )
+                    ...services
+                      .filter((svc) => svc.lastUpdateCheckAt)
+                      .map((svc) => new Date(svc.lastUpdateCheckAt!).getTime())
                   )
                 ),
                 { addSuffix: true }
@@ -650,7 +653,7 @@ export default function Dashboard() {
       )}
 
       {/* Servers Health Grid */}
-      {environment.servers.length > 0 && (
+      {servers.length > 0 && (
         <div className="panel mb-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-white flex items-center gap-2">
@@ -665,7 +668,7 @@ export default function Dashboard() {
             </Link>
           </div>
           <div className="flex flex-wrap gap-2">
-            {environment.servers.map((server) => {
+            {servers.map((server) => {
               const isHealthy = server.status === 'healthy';
               const isWarning = server.status === 'unknown';
               const statusColor = isHealthy ? 'bg-green-500' : isWarning ? 'bg-yellow-500' : 'bg-red-500';

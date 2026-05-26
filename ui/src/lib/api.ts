@@ -248,7 +248,7 @@ export const listEnvironments = () =>
   api.get<{ environments: Environment[] }>('/environments');
 
 export const getEnvironment = (id: string) =>
-  api.get<{ environment: EnvironmentWithServers }>(`/environments/${id}`);
+  api.get<{ environment: EnvironmentDetail }>(`/environments/${id}`);
 
 export const createEnvironment = (name: string) =>
   api.post<{ environment: Environment }>('/environments', { name });
@@ -372,13 +372,29 @@ export const registerHost = (envId: string, data: RegisterHostInput = {}) =>
   api.post<{ server: Server; success: boolean }>(`/environments/${envId}/servers/register-host`, data);
 
 // Servers
-export const listServers = (envId: string, options?: { limit?: number; offset?: number }) => {
+export type ServerWithServicesCount = Server & { _count: { services: number } };
+
+export function listServers(
+  envId: string,
+  options?: { limit?: number; offset?: number; includeServicesCount?: false }
+): Promise<{ servers: Server[]; total: number }>;
+export function listServers(
+  envId: string,
+  options: { limit?: number; offset?: number; includeServicesCount: true }
+): Promise<{ servers: ServerWithServicesCount[]; total: number }>;
+export function listServers(
+  envId: string,
+  options?: { limit?: number; offset?: number; includeServicesCount?: boolean }
+): Promise<{ servers: (Server | ServerWithServicesCount)[]; total: number }> {
   const params = new URLSearchParams();
   if (options?.limit) params.append('limit', options.limit.toString());
   if (options?.offset) params.append('offset', options.offset.toString());
+  if (options?.includeServicesCount) params.append('include', 'services-count');
   const query = params.toString();
-  return api.get<{ servers: Server[]; total: number }>(`/environments/${envId}/servers${query ? `?${query}` : ''}`);
-};
+  return api.get<{ servers: (Server | ServerWithServicesCount)[]; total: number }>(
+    `/environments/${envId}/servers${query ? `?${query}` : ''}`
+  );
+}
 
 export interface CreateServerInput {
   name: string;
@@ -390,8 +406,15 @@ export interface CreateServerInput {
 export const createServer = (envId: string, data: CreateServerInput) =>
   api.post<{ server: Server }>(`/environments/${envId}/servers`, data);
 
-export const getServer = (id: string) =>
-  api.get<{ server: ServerWithServices }>(`/servers/${id}`);
+export function getServer(id: string, options: { includeServices: true }): Promise<{ server: ServerWithServices }>;
+export function getServer(id: string, options?: { includeServices?: false }): Promise<{ server: Server }>;
+export function getServer(
+  id: string,
+  options?: { includeServices?: boolean }
+): Promise<{ server: Server | ServerWithServices }> {
+  const query = options?.includeServices ? '?include=services' : '';
+  return api.get<{ server: Server | ServerWithServices }>(`/servers/${id}${query}`);
+}
 
 export interface UpdateServerInput {
   name?: string;
@@ -584,8 +607,11 @@ export interface Environment {
   _count: { servers: number; secrets: number };
 }
 
-export interface EnvironmentWithServers extends Environment {
-  servers: ServerWithServices[];
+// Thin env-detail response: row + denormalized counts. No nested servers/services.
+// Use listServers / getServer for per-resource detail.
+export interface EnvironmentDetail extends Omit<Environment, '_count'> {
+  updatedAt: string;
+  _count: { servers: number; services: number; databases: number; secrets: number };
 }
 
 export interface Server {

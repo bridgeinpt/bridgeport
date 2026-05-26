@@ -109,6 +109,22 @@ Content-Type: application/json
 
 Server names must be unique within an environment. If a name is already taken, the server returns `409 Conflict`.
 
+### Listing and Inspecting Servers
+
+**List servers (paginated):**
+```http
+GET /api/environments/:envId/servers?limit=25&offset=0
+```
+
+Pass `?include=services-count` to add a `_count: { services }` field to each server -- useful for env-detail dashboards that need per-server service counts without loading the full service list.
+
+**Get a single server:**
+```http
+GET /api/servers/:id
+```
+
+By default, this returns just the server row (fast, no joins). Pass `?include=services` to nest the server's services and their container images -- use this on the server-detail page where the nested data is needed.
+
 ### SSH Key Configuration
 
 Every environment has one SSH private key that all servers in that environment share. The key is encrypted at rest using AES-256-GCM.

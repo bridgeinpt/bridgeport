@@ -102,26 +102,40 @@ export async function updateServer(
   });
 }
 
-export async function getServer(serverId: string): Promise<ServerWithServices | null> {
-  return prisma.server.findUnique({
-    where: { id: serverId },
-    include: {
-      services: {
-        include: {
-          containerImage: true,
+export async function getServer(
+  serverId: string,
+  options?: { includeServices?: boolean }
+): Promise<Server | ServerWithServices | null> {
+  if (options?.includeServices) {
+    return prisma.server.findUnique({
+      where: { id: serverId },
+      include: {
+        services: {
+          include: {
+            containerImage: true,
+          },
         },
       },
-    },
+    });
+  }
+  return prisma.server.findUnique({
+    where: { id: serverId },
   });
 }
 
+export type ServerWithServicesCount = Server & { _count: { services: number } };
+
 export async function listServers(
   environmentId: string,
-  options?: { limit?: number; offset?: number }
-): Promise<{ servers: Server[]; total: number }> {
+  options?: { limit?: number; offset?: number; includeServicesCount?: boolean }
+): Promise<{ servers: (Server | ServerWithServicesCount)[]; total: number }> {
   const limit = options?.limit ?? 25;
   const offset = options?.offset ?? 0;
   const where = { environmentId };
+
+  const include = options?.includeServicesCount
+    ? { _count: { select: { services: true } } }
+    : undefined;
 
   const [servers, total] = await Promise.all([
     prisma.server.findMany({
@@ -129,6 +143,7 @@ export async function listServers(
       orderBy: { name: 'asc' },
       take: limit,
       skip: offset,
+      ...(include ? { include } : {}),
     }),
     prisma.server.count({ where }),
   ]);
