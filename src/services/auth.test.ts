@@ -51,10 +51,15 @@ import {
   deleteApiToken,
   bootstrapAdminUser,
 } from './auth.js';
+import { apiTokenLastUsedThrottle } from '../lib/last-active-throttle.js';
 
 describe('auth', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Reset the per-token throttle so each test starts with a clean state —
+    // otherwise tests that re-validate the same tokenId in <60s skip the
+    // lastUsedAt write.
+    apiTokenLastUsedThrottle.reset();
   });
 
   describe('createUser', () => {

@@ -1,0 +1,180 @@
+name: Stress
+
+# Stress tests on every PR are noisy because GitHub-hosted runners have wide
+# performance variance (shared kernel, neighbour load, etc). To keep the signal
+# without blocking PRs, we run in two modes:
+#
+#   pull_request      → soft mode. The runner never fails the job; it posts a
+#                       sticky PR comment with the latency table and marks any
+#                       breached threshold with ⚠️. Engineers see the regression
+#                       without the merge button being held hostage.
+#
+#   workflow_dispatch → hard mode. Manual runs against a known reference branch
+#                       are the source of truth for current performance and DO
+#                       fail when thresholds are breached.
+#
+#   schedule          → hard mode. Weekly trend; failures page the team via the
+#                       usual GH Actions notifications.
+
+on:
+  workflow_dispatch:
+    inputs:
+      servers:
+        description: 'Servers to seed (drives N for ServerMetrics N+1)'
+        required: false
+        default: '30'
+      services_per_server:
+        description: 'Services per server'
+        required: false
+        default: '3'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'src/routes/monitoring.ts'
+      - 'src/services/**'
+      - 'prisma/schema.prisma'
+      - 'tests/stress/**'
+      - '.github/workflows/stress.yml'
+  schedule:
+    - cron: '0 4 * * 1'  # Mondays at 04:00 UTC
+
+permissions:
+  contents: read
+  pull-requests: write  # for posting/updating the sticky comment
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MASTER_KEY: ilyS3JROhJmj8QEYHuoZts8aoK2LG9SHl0EgIn0gsVw=
+  JWT_SECRET: stress-jwt-secret-not-real
+  NODE_ENV: test
+  SCHEDULER_ENABLED: 'false'
+
+jobs:
+  stress:
+    name: Monitoring history endpoints
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Run stress tests
+        env:
+          STRESS_SERVERS: ${{ github.event.inputs.servers || '30' }}
+          STRESS_SERVICES_PER_SERVER: ${{ github.event.inputs.services_per_server || '3' }}
+          STRESS_METRICS_PER_ENTITY: '12'
+          # Soft mode on PRs only; manual + scheduled runs enforce thresholds.
+          STRESS_SOFT: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
+        run: npm run test:stress
+
+      - name: Upload stress report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stress-report
+          path: stress-report.json
+          retention-days: 30
+
+      - name: Write workflow run summary
+        if: always()
+        run: |
+          if [ -f stress-report.json ]; then
+            soft=$(jq -r '.soft // false' stress-report.json)
+            passed=$(jq -r '.passed' stress-report.json)
+            if [ "$passed" = "true" ]; then
+              header='## ✅ Stress Test Results'
+            elif [ "$soft" = "true" ]; then
+              header='## ⚠️ Stress Test Results (soft mode — not failing)'
+            else
+              header='## ❌ Stress Test Results'
+            fi
+            {
+              echo "$header"
+              echo
+              echo '| Scenario | p50 | p90 | p99 | RPS | non2xx | Pass |'
+              echo '|---|---|---|---|---|---|---|'
+              jq -r '.scenarios[] | "| \(.name) | \(.p50)ms | \(.p90)ms | \(.p99)ms | \(.rps | floor) | \(.non2xx) | \(if .passed then "✅" else "⚠️" end) |"' stress-report.json
+              echo
+              echo '<details><summary>Full report</summary>'
+              echo
+              echo '```json'
+              cat stress-report.json
+              echo '```'
+              echo
+              echo '</details>'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Post sticky PR comment
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            if (!fs.existsSync('stress-report.json')) {
+              core.warning('stress-report.json not found — skipping PR comment.');
+              return;
+            }
+            const report = JSON.parse(fs.readFileSync('stress-report.json', 'utf8'));
+            const marker = '<!-- stress-report-comment -->';
+
+            const headerEmoji = report.passed ? '✅' : '⚠️';
+            const headerText = report.passed
+              ? 'Stress thresholds met'
+              : 'Stress thresholds breached (CI is in soft mode — not blocking)';
+            const note = report.passed
+              ? ''
+              : '\n> ℹ️ GitHub-hosted runners are noisy. To verify a real regression, ' +
+                'run the workflow manually (`workflow_dispatch`) or look at the ' +
+                'scheduled Monday run on master.\n';
+
+            const rows = report.scenarios.map((s) => {
+              const pass = s.passed ? '✅' : '⚠️';
+              const reasons = s.failures.length ? ` (${s.failures.join(', ')})` : '';
+              return `| \`${s.name}\` | ${s.p50}ms | ${s.p90}ms | **${s.p99}ms** | ${Math.floor(s.rps)} | ${s.non2xx} | ${pass}${reasons} |`;
+            }).join('\n');
+
+            const body = [
+              marker,
+              `### ${headerEmoji} ${headerText}`,
+              note,
+              '| Scenario | p50 | p90 | p99 | RPS | non2xx | Pass |',
+              '|---|---|---|---|---|---|---|',
+              rows,
+              '',
+              `**Seed:** ${JSON.stringify(report.seed)}  `,
+              `**Load:** ${JSON.stringify(report.load)}  `,
+              `**Generated:** ${report.generatedAt}`,
+              '',
+              '<details><summary>Full JSON report</summary>',
+              '',
+              '```json',
+              JSON.stringify(report, null, 2),
+              '```',
+              '',
+              '</details>',
+            ].join('\n');
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner, repo, issue_number, per_page: 100,
+            });
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner, repo, comment_id: existing.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number, body,
+              });
+            }
