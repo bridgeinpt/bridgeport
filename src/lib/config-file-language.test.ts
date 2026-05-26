@@ -106,6 +106,54 @@ describe('detectLanguage', () => {
     });
   });
 
+  describe('compound filename shortcuts', () => {
+    it('detects Dockerfile.dev as dockerfile', () => {
+      expect(detectLanguage('Dockerfile.dev')).toBe('dockerfile');
+    });
+
+    it('detects Dockerfile.prod as dockerfile', () => {
+      expect(detectLanguage('Dockerfile.prod')).toBe('dockerfile');
+    });
+
+    it('detects Dockerfile-base as dockerfile', () => {
+      expect(detectLanguage('Dockerfile-base')).toBe('dockerfile');
+    });
+
+    it('detects nginx.conf.dev as nginx', () => {
+      expect(detectLanguage('nginx.conf.dev')).toBe('nginx');
+    });
+
+    it('detects nginx.conf-prod as nginx', () => {
+      expect(detectLanguage('nginx.conf-prod')).toBe('nginx');
+    });
+
+    it('detects Caddyfile.dev as nginx', () => {
+      expect(detectLanguage('Caddyfile.dev')).toBe('nginx');
+    });
+
+    it('detects Caddyfile-prod as nginx', () => {
+      expect(detectLanguage('Caddyfile-prod')).toBe('nginx');
+    });
+  });
+
+  describe('template wrapper extensions', () => {
+    it('strips .template and detects inner type (nginx.conf.template -> nginx)', () => {
+      expect(detectLanguage('nginx.conf.template')).toBe('nginx');
+    });
+
+    it('strips .j2 and detects inner type (compose.yml.j2 -> yaml)', () => {
+      expect(detectLanguage('compose.yml.j2')).toBe('yaml');
+    });
+
+    it('strips .template and detects inner type (Dockerfile.template -> dockerfile)', () => {
+      expect(detectLanguage('Dockerfile.template')).toBe('dockerfile');
+    });
+
+    it('strips .j2 from app.env.j2 to env', () => {
+      expect(detectLanguage('app.env.j2')).toBe('env');
+    });
+  });
+
   describe('unknown / edge cases', () => {
     it('returns plaintext for unknown extensions', () => {
       expect(detectLanguage('readme.txt')).toBe('plaintext');

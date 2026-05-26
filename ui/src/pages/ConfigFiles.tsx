@@ -26,6 +26,7 @@ import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { OperationResultsModal, type OperationResult } from '../components/OperationResultsModal.js';
 import { ConfigFileEditor, SUPPORTED_LANGUAGES } from '../components/ConfigFileEditor.js';
+import { useToast } from '../components/Toast.js';
 
 interface ServiceOption {
   id: string;
@@ -34,6 +35,7 @@ interface ServiceOption {
 }
 
 export default function ConfigFiles() {
+  const toast = useToast();
   const {
     selectedEnvironment,
     configFilesAttachedFilter,
@@ -99,9 +101,25 @@ export default function ConfigFiles() {
   const [syncResults, setSyncResults] = useState<OperationResult[] | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<ConfigFile | null>(null);
 
+  const resetCreateForm = () => {
+    setNewName('');
+    setNewFilename('');
+    setNewContent('');
+    setNewDescription('');
+    setNewAutoResync(true);
+    setNewLanguage('plaintext');
+    setNewLanguageDirty(false);
+  };
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedEnvironment?.id) return;
+    // The server's create schema requires non-empty content for text files;
+    // catch it here so users get an inline message instead of a 400.
+    if (!newContent.trim()) {
+      toast.error('Content cannot be empty');
+      return;
+    }
     setCreating(true);
     try {
       await createConfigFile(selectedEnvironment.id, {
@@ -116,13 +134,7 @@ export default function ConfigFiles() {
       });
       reload();
       setShowCreate(false);
-      setNewName('');
-      setNewFilename('');
-      setNewContent('');
-      setNewDescription('');
-      setNewAutoResync(true);
-      setNewLanguage('plaintext');
-      setNewLanguageDirty(false);
+      resetCreateForm();
     } finally {
       setCreating(false);
     }
@@ -134,7 +146,10 @@ export default function ConfigFiles() {
       content: editContent,
       description: editDescription || undefined,
       autoResync: editAutoResync,
-      language: editLanguage,
+      // Language is only meaningful for text files. For binary files the
+      // language select is hidden, so don't re-assert a (possibly stale)
+      // language on every unrelated edit — let the server keep what it has.
+      ...(editingFile.isBinary ? {} : { language: editLanguage }),
     });
     setEditingFile(null);
     setEditContent('');
@@ -292,10 +307,7 @@ export default function ConfigFiles() {
         isOpen={showCreate}
         onClose={() => {
           setShowCreate(false);
-          setNewName('');
-          setNewFilename('');
-          setNewContent('');
-          setNewDescription('');
+          resetCreateForm();
         }}
         title="New Config File"
         size="lg"
@@ -395,13 +407,7 @@ export default function ConfigFiles() {
               type="button"
               onClick={() => {
                 setShowCreate(false);
-                setNewName('');
-                setNewFilename('');
-                setNewContent('');
-                setNewDescription('');
-                setNewAutoResync(true);
-                setNewLanguage('plaintext');
-                setNewLanguageDirty(false);
+                resetCreateForm();
               }}
               className="btn btn-ghost"
             >

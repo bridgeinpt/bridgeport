@@ -154,6 +154,21 @@ export async function environmentSettingsRoutes(fastify: FastifyInstance): Promi
         }),
       ]);
 
+      // If the persisted override points at a channel that's been disabled
+      // (or deleted), it won't appear in the `channels` list above. Surface
+      // it explicitly so the UI can show a "(disabled)" hint and let the
+      // admin clear or reassign it instead of silently hiding the state.
+      let selectedChannel: { id: string; name: string; slackChannelName: string | null; enabled: boolean } | null = null;
+      if (settings?.slackChannelId && !channels.some((c) => c.id === settings.slackChannelId)) {
+        const dangling = await prisma.slackChannel.findUnique({
+          where: { id: settings.slackChannelId },
+          select: { id: true, name: true, slackChannelName: true, enabled: true },
+        });
+        if (dangling) {
+          selectedChannel = dangling;
+        }
+      }
+
       return {
         settings: {
           slackChannelId: settings?.slackChannelId ?? null,
@@ -161,6 +176,7 @@ export async function environmentSettingsRoutes(fastify: FastifyInstance): Promi
         },
         channels,
         defaultChannel,
+        selectedChannel,
       };
     },
   );
@@ -177,14 +193,21 @@ export async function environmentSettingsRoutes(fastify: FastifyInstance): Promi
       const env = await findOrNotFound(prisma.environment.findUnique({ where: { id } }), 'Environment', reply);
       if (!env) return;
 
-      // When the caller sets a channel, make sure it exists. Null clears.
+      // When the caller sets a channel, make sure it exists AND is enabled.
+      // Persisting a pointer to a disabled channel would cause
+      // dispatchSlackNotification to silently skip notifications later.
+      // Distinguish "not found" from "disabled" so the UI can show a clearer error.
+      // Null clears the override.
       if (body.slackChannelId) {
         const channel = await prisma.slackChannel.findUnique({
           where: { id: body.slackChannelId },
-          select: { id: true },
+          select: { id: true, enabled: true },
         });
         if (!channel) {
           return reply.code(400).send({ error: 'Slack channel not found' });
+        }
+        if (!channel.enabled) {
+          return reply.code(400).send({ error: 'Slack channel is disabled' });
         }
       }
 
@@ -241,26 +264,46 @@ export async function environmentSettingsRoutes(fastify: FastifyInstance): Promi
         select: { slackChannelId: true },
       });
 
-      let channelId = settings?.slackChannelId ?? null;
-      if (!channelId) {
+      // Mirror dispatchSlackNotification: only use the override when it
+      // resolves to an enabled channel. Otherwise fall through to the
+      // global default — sending through a disabled override would diverge
+      // from real notification behavior.
+      let resolved: { id: string; name: string; isDefault: boolean } | null = null;
+      let source: 'override' | 'default' = 'default';
+      if (settings?.slackChannelId) {
+        const overrideChannel = await prisma.slackChannel.findFirst({
+          where: { id: settings.slackChannelId, enabled: true },
+          select: { id: true, name: true, isDefault: true },
+        });
+        if (overrideChannel) {
+          resolved = overrideChannel;
+          source = 'override';
+        }
+      }
+      if (!resolved) {
         const fallback = await prisma.slackChannel.findFirst({
           where: { isDefault: true, enabled: true },
-          select: { id: true },
+          select: { id: true, name: true, isDefault: true },
         });
         if (!fallback) {
           return reply.code(400).send({
             error: 'No Slack channel configured for this environment and no default channel is set.',
           });
         }
-        channelId = fallback.id;
+        resolved = fallback;
+        source = 'default';
       }
 
-      const result = await testSlackChannel(channelId);
+      const result = await testSlackChannel(resolved.id);
       if (!result.success) {
         return reply.code(400).send({ success: false, error: result.error || 'Test failed' });
       }
 
-      return { success: true, channelId };
+      return {
+        success: true,
+        channelId: resolved.id,
+        usedChannel: { id: resolved.id, name: resolved.name, source },
+      };
     },
   );
 }

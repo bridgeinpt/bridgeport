@@ -13,7 +13,7 @@ import { detectLanguage } from '../lib/config-file-language.js';
 const createConfigFileSchema = z.object({
   name: z.string().min(1),
   filename: z.string().min(1),
-  content: z.string(),
+  content: z.string().min(1, 'Content is required'),
   description: z.string().optional(),
   isBinary: z.boolean().optional(),
   mimeType: z.string().optional(),

@@ -510,5 +510,10 @@ export async function createDefaultSettings(environmentId: string): Promise<void
       create: { environmentId },
       update: {},
     });
+    await tx.notificationSettings.upsert({
+      where: { environmentId },
+      create: { environmentId },
+      update: {},
+    });
   });
 }

@@ -486,6 +486,16 @@ export async function dispatchSlackNotification(
       });
       if (envSettings?.slackChannel && envSettings.slackChannel.enabled) {
         overrideChannel = envSettings.slackChannel;
+      } else if (envSettings?.slackChannelId) {
+        // The env has an override set but the target channel is either
+        // disabled or no longer exists. This is observability-only — we
+        // still fall back to the global default below — but surface the
+        // dangling pointer so operators can clean it up.
+        const targetId = envSettings.slackChannelId;
+        const reason = envSettings.slackChannel ? 'disabled' : 'missing';
+        console.warn(
+          `[slack] Slack override for env ${environmentId} points at ${reason} channel ${targetId}; falling back to default.`
+        );
       }
     }
 

@@ -933,18 +933,20 @@ export class DockerSSH {
 
   async composeUp(composePath: string, serviceName?: string, forceRecreate: boolean = true): Promise<void> {
     const { cmd: compose, majorVersion } = await this.getComposeInfo();
+    const escapedPath = shellEscape(composePath);
+    const escapedService = serviceName ? shellEscape(serviceName) : undefined;
 
     if (forceRecreate && majorVersion === 1) {
       // docker-compose v1.x has a bug with --force-recreate on newer Docker versions
       // (KeyError: 'ContainerConfig'). Work around by using rm + up instead.
-      const rmCmd = serviceName
-        ? `${compose} -f ${composePath} rm -f -s ${serviceName}`
-        : `${compose} -f ${composePath} down`;
+      const rmCmd = escapedService
+        ? `${compose} -f ${escapedPath} rm -f -s ${escapedService}`
+        : `${compose} -f ${escapedPath} down`;
       await this.client.exec(this.pathPrefix + rmCmd);
 
-      const upCmd = serviceName
-        ? `${compose} -f ${composePath} up -d ${serviceName}`
-        : `${compose} -f ${composePath} up -d`;
+      const upCmd = escapedService
+        ? `${compose} -f ${escapedPath} up -d ${escapedService}`
+        : `${compose} -f ${escapedPath} up -d`;
       const { code, stderr } = await this.client.exec(this.pathPrefix + upCmd);
       if (code !== 0) {
         throw new Error(`Failed to run compose up: ${stderr}`);
@@ -952,9 +954,9 @@ export class DockerSSH {
     } else {
       // docker compose v2.x: use --force-recreate normally
       const forceFlag = forceRecreate ? '--force-recreate' : '';
-      const cmd = serviceName
-        ? `${compose} -f ${composePath} up -d ${forceFlag} ${serviceName}`
-        : `${compose} -f ${composePath} up -d ${forceFlag}`;
+      const cmd = escapedService
+        ? `${compose} -f ${escapedPath} up -d ${forceFlag} ${escapedService}`
+        : `${compose} -f ${escapedPath} up -d ${forceFlag}`;
 
       const { code, stderr } = await this.client.exec(this.pathPrefix + cmd);
       if (code !== 0) {
@@ -965,9 +967,10 @@ export class DockerSSH {
 
   async composePull(composePath: string, serviceName?: string): Promise<void> {
     const compose = await this.getComposeCommand();
+    const escapedPath = shellEscape(composePath);
     const cmd = serviceName
-      ? `${compose} -f ${composePath} pull ${serviceName}`
-      : `${compose} -f ${composePath} pull`;
+      ? `${compose} -f ${escapedPath} pull ${shellEscape(serviceName)}`
+      : `${compose} -f ${escapedPath} pull`;
 
     const { code, stderr } = await this.client.exec(this.pathPrefix + cmd);
     if (code !== 0) {

@@ -57,6 +57,22 @@ export function detectLanguage(filename: string): string {
   // Dotfile shortcuts: .env, .env.production, .env.local
   if (base.startsWith('.env')) return 'env';
 
+  // Compound filename shortcuts. Things like `Dockerfile.dev`,
+  // `nginx.conf.template`, `Caddyfile-prod` are recognizable by their prefix
+  // even though they don't match the exact-name map. Match these before the
+  // generic extension lookup since the extension would otherwise win.
+  if (/^Dockerfile[.-]/.test(base)) return 'dockerfile';
+  if (/^nginx\.conf[.-]/.test(base)) return 'nginx';
+  if (/^Caddyfile[.-]/.test(base)) return 'nginx';
+
+  // Template wrappers: strip `.template` or `.j2` and recurse on the inner
+  // filename. E.g. `nginx.conf.template` -> `nginx.conf` -> 'nginx',
+  // `compose.yml.j2` -> `compose.yml` -> 'yaml'.
+  if (/\.(template|j2)$/i.test(base)) {
+    const stripped = base.replace(/\.(template|j2)$/i, '');
+    if (stripped) return detectLanguage(stripped);
+  }
+
   // Extension-based detection. Use the last `.` segment.
   const dot = base.lastIndexOf('.');
   if (dot < 0) return 'plaintext';
