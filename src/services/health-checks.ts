@@ -1,7 +1,16 @@
 import { prisma } from '../lib/db.js';
 
 /**
- * Log a health check result
+ * Log a health check result.
+ *
+ * Writes the full audit row to HealthCheckLog AND updates the denormalized
+ * lastCheck* cache columns on the target Server or Service in a single
+ * transaction, so GET /:envId/health-status can read current status directly
+ * from the entity table instead of scanning the log.
+ *
+ * resourceType maps:
+ *   - 'server'              -> Server.lastCheck*
+ *   - 'service' | 'container' -> Service.lastCheck* (container checks target services)
  */
 export async function logHealthCheck(params: {
   environmentId: string;
@@ -14,8 +23,29 @@ export async function logHealthCheck(params: {
   httpStatus?: number;
   errorMessage?: string;
 }): Promise<void> {
-  await prisma.healthCheckLog.create({
-    data: params,
+  const cacheUpdate = {
+    lastCheckStatus: params.status,
+    lastCheckAt: new Date(),
+    lastCheckType: params.checkType,
+    lastCheckDurationMs: params.durationMs ?? null,
+    lastCheckError: params.errorMessage ?? null,
+  };
+
+  await prisma.$transaction(async (tx) => {
+    await tx.healthCheckLog.create({ data: params });
+
+    if (params.resourceType === 'server') {
+      await tx.server.updateMany({
+        where: { id: params.resourceId },
+        data: cacheUpdate,
+      });
+    } else {
+      // Both 'service' and 'container' resourceTypes write to the Service entity.
+      await tx.service.updateMany({
+        where: { id: params.resourceId },
+        data: cacheUpdate,
+      });
+    }
   });
 }
 

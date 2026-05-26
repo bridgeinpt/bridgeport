@@ -208,6 +208,14 @@ model Server {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
+  // Denormalized last health check cache (best-effort; full audit lives in HealthCheckLog).
+  // Updated atomically by logHealthCheck so GET /:envId/health-status doesn't have to scan logs.
+  lastCheckStatus     String? // "success" | "failure" | "timeout"
+  lastCheckAt         DateTime?
+  lastCheckType       String? // "ssh" | "url" | "container_health" | "discovery"
+  lastCheckDurationMs Int?
+  lastCheckError      String?
+
   // Metrics collection settings
   metricsMode String  @default("disabled") // "ssh" | "agent" | "disabled"
   agentToken  String? // Token for agent authentication
@@ -284,6 +292,14 @@ model Service {
   healthWaitMs     Int @default(30000) // Wait after deploy before checking (default 30s)
   healthRetries    Int @default(3) // Number of health check attempts
   healthIntervalMs Int @default(5000) // Interval between retries (default 5s)
+
+  // Denormalized last health check cache (best-effort; full audit lives in HealthCheckLog).
+  // Updated atomically by logHealthCheck for both 'service' and 'container' resourceTypes.
+  lastCheckStatus     String? // "success" | "failure" | "timeout"
+  lastCheckAt         DateTime?
+  lastCheckType       String? // "ssh" | "url" | "container_health" | "discovery"
+  lastCheckDurationMs Int?
+  lastCheckError      String?
 
   // Agent-reported health check results (for services with healthCheckUrl)
   agentHealthSuccess    Boolean? // Last health check result from agent

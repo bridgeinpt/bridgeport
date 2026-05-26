@@ -1,16 +1,33 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const { mockPrisma } = vi.hoisted(() => ({
-  mockPrisma: {
-    healthCheckLog: {
-      create: vi.fn(),
-      deleteMany: vi.fn(),
+const { mockPrisma, txHealthCheckLogCreate, txServerUpdateMany, txServiceUpdateMany } = vi.hoisted(() => {
+  const txHealthCheckLogCreate = vi.fn();
+  const txServerUpdateMany = vi.fn();
+  const txServiceUpdateMany = vi.fn();
+  return {
+    txHealthCheckLogCreate,
+    txServerUpdateMany,
+    txServiceUpdateMany,
+    mockPrisma: {
+      healthCheckLog: {
+        deleteMany: vi.fn(),
+      },
+      monitoringSettings: {
+        findUnique: vi.fn(),
+      },
+      // logHealthCheck wraps writes in prisma.$transaction; the inner callback
+      // receives a tx client that proxies to our mocks so tests can assert what
+      // happened inside the transaction.
+      $transaction: vi.fn(async (cb: (tx: unknown) => Promise<void>) => {
+        await cb({
+          healthCheckLog: { create: txHealthCheckLogCreate },
+          server: { updateMany: txServerUpdateMany },
+          service: { updateMany: txServiceUpdateMany },
+        });
+      }),
     },
-    monitoringSettings: {
-      findUnique: vi.fn(),
-    },
-  },
-}));
+  };
+});
 
 vi.mock('../lib/db.js', () => ({
   prisma: mockPrisma,
@@ -29,8 +46,9 @@ describe('health-checks', () => {
   });
 
   describe('logHealthCheck', () => {
-    it('creates a health check log entry', async () => {
-      mockPrisma.healthCheckLog.create.mockResolvedValue({});
+    it('creates a health check log entry and updates Server cache', async () => {
+      txHealthCheckLogCreate.mockResolvedValue({});
+      txServerUpdateMany.mockResolvedValue({ count: 1 });
 
       await logHealthCheck({
         environmentId: 'env-1',
@@ -42,7 +60,7 @@ describe('health-checks', () => {
         durationMs: 150,
       });
 
-      expect(mockPrisma.healthCheckLog.create).toHaveBeenCalledWith({
+      expect(txHealthCheckLogCreate).toHaveBeenCalledWith({
         data: {
           environmentId: 'env-1',
           resourceType: 'server',
@@ -53,10 +71,72 @@ describe('health-checks', () => {
           durationMs: 150,
         },
       });
+      expect(txServerUpdateMany).toHaveBeenCalledWith({
+        where: { id: 'srv-1' },
+        data: expect.objectContaining({
+          lastCheckStatus: 'success',
+          lastCheckType: 'ssh',
+          lastCheckDurationMs: 150,
+          lastCheckError: null,
+        }),
+      });
+      // lastCheckAt must be a Date instance (mapped from createdAt) — the route
+      // serializes it via toISOString() so it cannot be a string or number.
+      const serverUpdateArg = txServerUpdateMany.mock.calls[0][0] as {
+        data: { lastCheckAt: unknown };
+      };
+      expect(serverUpdateArg.data.lastCheckAt).toBeInstanceOf(Date);
+      expect(txServiceUpdateMany).not.toHaveBeenCalled();
     });
 
-    it('stores error message for failed checks', async () => {
-      mockPrisma.healthCheckLog.create.mockResolvedValue({});
+    it('wraps log insert + cache update in a single $transaction', async () => {
+      // Track call order across the tx and the surrounding $transaction wrapper.
+      const order: string[] = [];
+      mockPrisma.$transaction.mockImplementationOnce(async (cb: (tx: unknown) => Promise<void>) => {
+        order.push('tx:start');
+        await cb({
+          healthCheckLog: {
+            create: vi.fn(async () => {
+              order.push('tx:healthCheckLog.create');
+            }),
+          },
+          server: {
+            updateMany: vi.fn(async () => {
+              order.push('tx:server.updateMany');
+            }),
+          },
+          service: {
+            updateMany: vi.fn(async () => {
+              order.push('tx:service.updateMany');
+            }),
+          },
+        });
+        order.push('tx:end');
+      });
+
+      await logHealthCheck({
+        environmentId: 'env-1',
+        resourceType: 'server',
+        resourceId: 'srv-1',
+        resourceName: 'prod-server',
+        checkType: 'ssh',
+        status: 'success',
+      });
+
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+      // Both writes must happen between tx:start and tx:end — i.e. inside the
+      // transaction callback, not before/after it.
+      expect(order).toEqual([
+        'tx:start',
+        'tx:healthCheckLog.create',
+        'tx:server.updateMany',
+        'tx:end',
+      ]);
+    });
+
+    it('stores error message for failed checks and updates Service cache', async () => {
+      txHealthCheckLogCreate.mockResolvedValue({});
+      txServiceUpdateMany.mockResolvedValue({ count: 1 });
 
       await logHealthCheck({
         environmentId: 'env-1',
@@ -69,17 +149,27 @@ describe('health-checks', () => {
         errorMessage: 'Service unavailable',
       });
 
-      expect(mockPrisma.healthCheckLog.create).toHaveBeenCalledWith({
+      expect(txHealthCheckLogCreate).toHaveBeenCalledWith({
         data: expect.objectContaining({
           status: 'failure',
           httpStatus: 503,
           errorMessage: 'Service unavailable',
         }),
       });
+      expect(txServiceUpdateMany).toHaveBeenCalledWith({
+        where: { id: 'svc-1' },
+        data: expect.objectContaining({
+          lastCheckStatus: 'failure',
+          lastCheckType: 'url',
+          lastCheckError: 'Service unavailable',
+        }),
+      });
+      expect(txServerUpdateMany).not.toHaveBeenCalled();
     });
 
     it('handles timeout status', async () => {
-      mockPrisma.healthCheckLog.create.mockResolvedValue({});
+      txHealthCheckLogCreate.mockResolvedValue({});
+      txServerUpdateMany.mockResolvedValue({ count: 1 });
 
       await logHealthCheck({
         environmentId: 'env-1',
@@ -91,12 +181,42 @@ describe('health-checks', () => {
         durationMs: 60000,
       });
 
-      expect(mockPrisma.healthCheckLog.create).toHaveBeenCalledWith({
+      expect(txHealthCheckLogCreate).toHaveBeenCalledWith({
         data: expect.objectContaining({
           status: 'timeout',
           durationMs: 60000,
         }),
       });
+      expect(txServerUpdateMany).toHaveBeenCalledWith({
+        where: { id: 'srv-1' },
+        data: expect.objectContaining({
+          lastCheckStatus: 'timeout',
+          lastCheckDurationMs: 60000,
+        }),
+      });
+    });
+
+    it('routes container resourceType to Service cache (containers map to services)', async () => {
+      txHealthCheckLogCreate.mockResolvedValue({});
+      txServiceUpdateMany.mockResolvedValue({ count: 1 });
+
+      await logHealthCheck({
+        environmentId: 'env-1',
+        resourceType: 'container',
+        resourceId: 'svc-1',
+        resourceName: 'web-container',
+        checkType: 'container_health',
+        status: 'success',
+      });
+
+      expect(txServiceUpdateMany).toHaveBeenCalledWith({
+        where: { id: 'svc-1' },
+        data: expect.objectContaining({
+          lastCheckStatus: 'success',
+          lastCheckType: 'container_health',
+        }),
+      });
+      expect(txServerUpdateMany).not.toHaveBeenCalled();
     });
   });
 
