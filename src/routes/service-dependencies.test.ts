@@ -28,9 +28,9 @@ describe('service-dependencies routes', () => {
     const imgB = await createTestContainerImage(app.prisma, { environmentId: env.id, name: 'Img B' });
     const imgC = await createTestContainerImage(app.prisma, { environmentId: env.id, name: 'Img C' });
 
-    serviceA = await createTestService(app.prisma, { serverId: server.id, containerImageId: imgA.id, name: 'svc-a' });
-    serviceB = await createTestService(app.prisma, { serverId: server.id, containerImageId: imgB.id, name: 'svc-b' });
-    serviceC = await createTestService(app.prisma, { serverId: server.id, containerImageId: imgC.id, name: 'svc-c' });
+    serviceA = await createTestService(app.prisma, { environmentId: env.id, containerImageId: imgA.id, name: 'svc-a', serverId: server.id });
+    serviceB = await createTestService(app.prisma, { environmentId: env.id, containerImageId: imgB.id, name: 'svc-b', serverId: server.id });
+    serviceC = await createTestService(app.prisma, { environmentId: env.id, containerImageId: imgC.id, name: 'svc-c', serverId: server.id });
   });
 
   afterAll(async () => {

@@ -35,9 +35,10 @@ export async function createNotificationStormScenario(prisma: PrismaClient) {
 
   const service = await createTestService(prisma, {
     name: 'unstable-service',
-    containerName: 'unstable',
-    serverId: server.id,
+    environmentId: env.id,
     containerImageId: image.id,
+    serverId: server.id,
+    containerName: 'unstable',
   });
 
   // Create a notification type with bounce logic

@@ -241,8 +241,8 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
           id: true,
           name: true,
           imageTag: true,
-          server: {
-            select: { id: true, name: true },
+          serviceDeployments: {
+            select: { id: true, server: { select: { id: true, name: true } } },
           },
           containerImage: {
             select: {
@@ -279,7 +279,10 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
       }
 
       const services = await prisma.service.findMany({
-        where: { containerImage: { registryConnectionId: id }, discoveryStatus: DISCOVERY_STATUS.FOUND },
+        where: {
+          containerImage: { registryConnectionId: id },
+          serviceDeployments: { some: { discoveryStatus: DISCOVERY_STATUS.FOUND } },
+        },
         select: { id: true, name: true },
       });
 

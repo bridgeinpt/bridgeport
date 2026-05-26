@@ -1,10 +1,16 @@
+import { randomUUID } from 'crypto';
 import { prisma } from '../lib/db.js';
 import type { Notification, NotificationType, NotificationPreference } from '@prisma/client';
 import { sendEmail, generateNotificationEmail } from './email.js';
 import { dispatchWebhook } from './outgoing-webhooks.js';
 import { dispatchSlackNotification } from './slack-notifications.js';
 import { eventBus } from '../lib/event-bus.js';
-import { safeJsonParse } from '../lib/helpers.js';
+import { safeJsonParse, getErrorMessage } from '../lib/helpers.js';
+import {
+  enqueue as enqueueNotificationJob,
+  setJobProcessor,
+  type NotificationJob,
+} from './notification-queue.js';
 
 // Predefined notification types
 export const NOTIFICATION_TYPES = {
@@ -396,54 +402,179 @@ export async function send(
 }
 
 /**
- * Send a system notification to all subscribed users
+ * Send a system notification to all subscribed users.
+ *
+ * Enqueues a fan-out job and returns immediately so the request handler
+ * isn't blocked by per-user DB writes/email dispatch. The actual fan-out
+ * runs in {@link processSystemNotificationJob} via the queue consumer.
  */
 export async function sendSystemNotification(
   typeCode: NotificationTypeCode,
   environmentId: string | null,
   data: Record<string, unknown> = {}
-): Promise<Notification[]> {
+): Promise<void> {
+  enqueueNotificationJob(typeCode, environmentId, data);
+}
+
+/**
+ * Consumer for a single system-notification fan-out job.
+ *
+ * Batches DB reads to keep this O(1) queries, not O(N users):
+ *   - notificationType: single findUnique
+ *   - users: single findMany
+ *   - preferences: single findMany with { userId: { in: [...] } }
+ *   - environment: single findUnique
+ *   - notifications: single createMany insert
+ *
+ * Per-user email dispatch still runs sequentially but each call is wrapped
+ * in try/catch so one failure doesn't block the others.
+ */
+export async function processSystemNotificationJob(job: NotificationJob): Promise<void> {
+  const { typeCode, environmentId, data } = job;
+
   const notificationType = await getNotificationType(typeCode);
   if (!notificationType) {
     console.error(`[Notifications] Unknown notification type: ${typeCode}`);
-    return [];
+    return;
   }
 
   // Check if this notification type is enabled (only for system notifications)
   if (notificationType.category === 'system' && !notificationType.enabled) {
-    return [];
+    return;
   }
 
-  // Get all users
-  const users = await prisma.user.findMany({ select: { id: true } });
-
-  const notifications: Notification[] = [];
-  for (const user of users) {
-    const notification = await send(typeCode, user.id, data, environmentId ?? undefined);
-    if (notification) {
-      notifications.push(notification);
-    }
-  }
-
-  // Send webhooks for system notifications
-  const defaultChannels = safeJsonParse(notificationType.defaultChannels, [] as string[]);
+  // Resolve env name once — used by both email and webhook/Slack dispatch.
   let envName: string | undefined;
   if (environmentId) {
-    const env = await prisma.environment.findUnique({ where: { id: environmentId }, select: { name: true } });
+    const env = await prisma.environment.findUnique({
+      where: { id: environmentId },
+      select: { name: true },
+    });
     envName = env?.name;
   }
 
+  // Load all users and their preferences in two queries instead of N pairs.
+  const users = await prisma.user.findMany({ select: { id: true, email: true } });
+  const userIds = users.map((u) => u.id);
+
+  const preferences = userIds.length === 0
+    ? []
+    : await prisma.notificationPreference.findMany({
+        where: { userId: { in: userIds }, typeId: notificationType.id },
+      });
+  const prefByUserId = new Map(preferences.map((p) => [p.userId, p]));
+
+  const title = notificationType.name;
+  const message = renderTemplate(notificationType.template, data);
+  const defaultChannels = safeJsonParse(notificationType.defaultChannels, [] as string[]);
+  const defaultEmailEnabled = defaultChannels.includes('email');
+  const serializedData = JSON.stringify(data);
+
+  // Figure out which users get an in-app notification, honoring per-user
+  // toggles + environment filter. Same semantics as the old per-user send().
+  // We generate the notification id up front so we can correlate inserted rows
+  // back to recipients (for the emailSentAt update) without a fragile re-query.
+  type Recipient = { id: string; userId: string; email: string | null; emailEnabled: boolean };
+  const recipients: Recipient[] = [];
+  for (const user of users) {
+    const pref = prefByUserId.get(user.id);
+    const inAppEnabled = pref?.inAppEnabled ?? true;
+    if (!inAppEnabled) continue;
+
+    if (environmentId && pref?.environmentIds) {
+      const allowedEnvs = safeJsonParse(pref.environmentIds, [] as string[]);
+      if (!allowedEnvs.includes(environmentId)) continue;
+    }
+
+    recipients.push({
+      id: randomUUID(),
+      userId: user.id,
+      email: user.email,
+      emailEnabled: pref?.emailEnabled ?? defaultEmailEnabled,
+    });
+  }
+
+  if (recipients.length > 0) {
+    // Bulk-insert in-app notification rows. We pass our own client-generated ids
+    // so we can map userId -> notificationId directly from the recipients list,
+    // avoiding a re-query (which would be ambiguous when two jobs for the same
+    // typeCode insert rows for shared users in the same millisecond).
+    const now = new Date();
+    await prisma.notification.createMany({
+      data: recipients.map((r) => ({
+        id: r.id,
+        typeId: notificationType.id,
+        userId: r.userId,
+        title,
+        message,
+        data: serializedData,
+        environmentId: environmentId ?? undefined,
+        createdAt: now,
+      })),
+    });
+
+    // Emit SSE event for each recipient so the UI badge updates in real time.
+    for (const r of recipients) {
+      eventBus.emitEvent({ type: 'notification', data: { userId: r.userId, count: 1 } });
+    }
+
+    // Email fan-out. One failure must not block the others — wrap each in try/catch.
+    const emailRecipients = recipients.filter((r) => r.emailEnabled && r.email);
+    if (emailRecipients.length > 0) {
+      // Map userId -> notificationId from the recipients we just inserted. No
+      // re-query needed: ids were generated client-side above.
+      const notificationIdByUserId = new Map(recipients.map((r) => [r.userId, r.id]));
+
+      const { html, text } = generateNotificationEmail(title, message, notificationType.severity, envName);
+      for (const r of emailRecipients) {
+        try {
+          const emailResult = await sendEmail({
+            to: r.email!,
+            subject: `[BRIDGEPORT] ${title}`,
+            html,
+            text,
+          });
+          if (emailResult.success) {
+            const notificationId = notificationIdByUserId.get(r.userId);
+            if (notificationId) {
+              await prisma.notification.update({
+                where: { id: notificationId },
+                data: { emailSentAt: new Date() },
+              });
+            }
+          }
+        } catch (err) {
+          // Don't let one bad recipient block the rest of the fan-out.
+          console.error(
+            `[Notifications] Email dispatch failed for user ${r.userId}:`,
+            getErrorMessage(err)
+          );
+        }
+      }
+    }
+  }
+
+  // Send webhooks for system notifications (channel-level, not per user)
   if (defaultChannels.includes('webhook')) {
-    await dispatchWebhook(typeCode, environmentId, data, envName);
+    try {
+      await dispatchWebhook(typeCode, environmentId, data, envName);
+    } catch (err) {
+      console.error('[Notifications] Webhook dispatch failed:', getErrorMessage(err));
+    }
   }
 
   // Send Slack notifications (routing is configured separately in Slack settings)
-  const title = notificationType.name;
-  const message = renderTemplate(notificationType.template, data);
-  await dispatchSlackNotification(notificationType, title, message, data, environmentId, envName);
-
-  return notifications;
+  try {
+    await dispatchSlackNotification(notificationType, title, message, data, environmentId, envName);
+  } catch (err) {
+    console.error('[Notifications] Slack dispatch failed:', getErrorMessage(err));
+  }
 }
+
+// Register the consumer with the queue. Done at module load time so any
+// caller that imports `sendSystemNotification` automatically wires up the
+// processor without an explicit init step.
+setJobProcessor(processSystemNotificationJob);
 
 /**
  * Mark a notification as read

@@ -28,7 +28,7 @@ describe('topology routes', () => {
     envId = env.id;
     const server = await createTestServer(app.prisma, { environmentId: envId, name: 'topo-server' });
     const image = await createTestContainerImage(app.prisma, { environmentId: envId });
-    const service = await createTestService(app.prisma, { serverId: server.id, containerImageId: image.id });
+    const service = await createTestService(app.prisma, { environmentId: envId, serverId: server.id, containerImageId: image.id });
     serviceId = service.id;
   });
 
@@ -68,7 +68,7 @@ describe('topology routes', () => {
       // Create a second service for the connection target
       const server = await createTestServer(app.prisma, { environmentId: envId, name: 'topo-server-2' });
       const image2 = await createTestContainerImage(app.prisma, { environmentId: envId, name: 'Image 2' });
-      const service2 = await createTestService(app.prisma, { serverId: server.id, containerImageId: image2.id });
+      const service2 = await createTestService(app.prisma, { environmentId: envId, serverId: server.id, containerImageId: image2.id });
 
       const res = await app.inject({
         method: 'POST',
@@ -128,7 +128,7 @@ describe('topology routes', () => {
       // adds a pre-create check for this case.
       const server = await createTestServer(app.prisma, { environmentId: envId, name: 'dup-server' });
       const image = await createTestContainerImage(app.prisma, { environmentId: envId, name: 'Dup Img' });
-      const svc = await createTestService(app.prisma, { serverId: server.id, containerImageId: image.id });
+      const svc = await createTestService(app.prisma, { environmentId: envId, serverId: server.id, containerImageId: image.id });
 
       const first = await app.inject({
         method: 'POST',
@@ -162,7 +162,7 @@ describe('topology routes', () => {
     it('should persist sourceHandle and targetHandle', async () => {
       const server = await createTestServer(app.prisma, { environmentId: envId, name: 'handle-server' });
       const image = await createTestContainerImage(app.prisma, { environmentId: envId, name: 'Handle Img' });
-      const svc = await createTestService(app.prisma, { serverId: server.id, containerImageId: image.id });
+      const svc = await createTestService(app.prisma, { environmentId: envId, serverId: server.id, containerImageId: image.id });
 
       const res = await app.inject({
         method: 'POST',
@@ -193,7 +193,7 @@ describe('topology routes', () => {
     it('should delete connection as operator', async () => {
       const server = await createTestServer(app.prisma, { environmentId: envId, name: 'del-conn-server' });
       const image = await createTestContainerImage(app.prisma, { environmentId: envId, name: 'Del Img' });
-      const svc = await createTestService(app.prisma, { serverId: server.id, containerImageId: image.id });
+      const svc = await createTestService(app.prisma, { environmentId: envId, serverId: server.id, containerImageId: image.id });
 
       const conn = await app.prisma.serviceConnection.create({
         data: {

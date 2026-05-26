@@ -55,7 +55,7 @@ import {
 } from '../lib/status';
 import { safeJsonParse } from '../lib/helpers';
 
-function parseExposedPorts(portsJson: string | null): ExposedPort[] {
+function parseExposedPorts(portsJson: string | null | undefined): ExposedPort[] {
   return safeJsonParse(portsJson, [] as ExposedPort[]);
 }
 
@@ -67,16 +67,16 @@ function parseTCPChecks(jsonStr: string | null): TCPCheckConfig[] {
   return safeJsonParse(jsonStr, [] as TCPCheckConfig[]);
 }
 
-function parseTCPCheckResults(jsonStr: string | null): TCPCheckResult[] {
-  return safeJsonParse(jsonStr, [] as TCPCheckResult[]);
+function parseTCPCheckResults(jsonStr: string | null | undefined): TCPCheckResult[] {
+  return safeJsonParse(jsonStr ?? null, [] as TCPCheckResult[]);
 }
 
-function parseCertChecks(jsonStr: string | null): CertCheckConfig[] {
-  return safeJsonParse(jsonStr, [] as CertCheckConfig[]);
+function parseCertChecks(jsonStr: string | null | undefined): CertCheckConfig[] {
+  return safeJsonParse(jsonStr ?? null, [] as CertCheckConfig[]);
 }
 
-function parseCertCheckResults(jsonStr: string | null): CertCheckResult[] {
-  return safeJsonParse(jsonStr, [] as CertCheckResult[]);
+function parseCertCheckResults(jsonStr: string | null | undefined): CertCheckResult[] {
+  return safeJsonParse(jsonStr ?? null, [] as CertCheckResult[]);
 }
 
 export default function ServiceDetail() {
@@ -297,10 +297,16 @@ export default function ServiceDetail() {
     setDeployError(null);
     setShowDeployModal(false);
     try {
-      const result = await deployService(id, { imageTag: deployTag, pullImage: true });
-      setDeployments((prev) => [result.deployment, ...prev]);
+      const outcome = await deployService(id, { imageTag: deployTag, pullImage: true });
+      // outcome.results is an array of per-deployment results in 2.0. Show whichever ran.
+      const newDeployments = outcome.results
+        .map((r) => r.result?.deployment)
+        .filter((d): d is NonNullable<typeof d> => Boolean(d));
+      if (newDeployments.length > 0) {
+        setDeployments((prev) => [...newDeployments, ...prev]);
+      }
       if (service) {
-        setService({ ...service, imageTag: deployTag, status: 'running' });
+        setService({ ...service, imageTag: deployTag });
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Deployment failed';
@@ -336,7 +342,9 @@ export default function ServiceDetail() {
     setDeleting(true);
     try {
       await deleteService(id);
-      navigate(`/servers/${service.server.id}`);
+      const targetServerId =
+        service.server?.id ?? service.serviceDeployments?.[0]?.serverId ?? null;
+      navigate(targetServerId ? `/servers/${targetServerId}` : `/services`);
     } finally {
       setDeleting(false);
     }
@@ -514,7 +522,13 @@ export default function ServiceDetail() {
         tcpChecks: editTcpChecks.length > 0 ? JSON.stringify(editTcpChecks) : null,
         certChecks: editCertChecks.length > 0 ? JSON.stringify(editCertChecks) : null,
       });
-      setService((prev) => (prev ? { ...prev, ...updated } : null));
+      setService((prev) => {
+        if (!prev) return null;
+        // The PATCH endpoint returns the bare Service template (no deployments
+        // joined); preserve the existing serviceDeployments so the runtime/server
+        // panels keep rendering.
+        return { ...prev, ...updated, serviceDeployments: prev.serviceDeployments };
+      });
       setShowConfig(false);
       toast.success('Configuration saved');
     } finally {
@@ -697,8 +711,8 @@ export default function ServiceDetail() {
         <div>
           <div className="flex items-center gap-3">
             {/* Container Status Badge */}
-            <span className={`badge ${getContainerStatusColor(service.containerStatus || service.status)}`}>
-              {service.containerStatus || service.status}
+            <span className={`badge ${getContainerStatusColor(service.containerStatus || service.status || 'unknown')}`}>
+              {service.containerStatus || service.status || 'unknown'}
             </span>
             {/* Health Status Badge */}
             <span className={`badge ${getHealthStatusColor(service.healthStatus || 'unknown')}`}>
@@ -736,15 +750,35 @@ export default function ServiceDetail() {
             )}
           </div>
           <p className="text-slate-400 mt-1">
-            on{' '}
-            <Link
-              to={`/servers/${service.server.id}`}
-              className="text-primary-400 hover:underline"
-            >
-              {service.server.name}
-            </Link>
-            {' • '}
-            {service.server.environment.name}
+            {service.server ? (
+              <>
+                on{' '}
+                <Link
+                  to={`/servers/${service.server.id}`}
+                  className="text-primary-400 hover:underline"
+                >
+                  {service.server.name}
+                </Link>
+                {service.environment?.name && (
+                  <>
+                    {' • '}
+                    {service.environment.name}
+                  </>
+                )}
+              </>
+            ) : service.serviceDeployments && service.serviceDeployments.length > 0 ? (
+              <>
+                {service.serviceDeployments.length} deployment{service.serviceDeployments.length === 1 ? '' : 's'}
+                {service.environment?.name && (
+                  <>
+                    {' • '}
+                    {service.environment.name}
+                  </>
+                )}
+              </>
+            ) : (
+              <>No deployments{service.environment?.name && <> • {service.environment.name}</>}</>
+            )}
           </p>
         </div>
         <div className="flex gap-2">

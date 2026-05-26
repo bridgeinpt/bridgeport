@@ -2,18 +2,67 @@ package api
 
 import "fmt"
 
+// ServiceDeployment is one per-server runtime row attached to a Service template.
+type ServiceDeployment struct {
+	ID              string  `json:"id"`
+	ServiceID       string  `json:"serviceId"`
+	ServerID        string  `json:"serverId"`
+	ContainerName   string  `json:"containerName"`
+	Status          string  `json:"status"`
+	ContainerStatus string  `json:"containerStatus"`
+	HealthStatus    string  `json:"healthStatus"`
+	DiscoveryStatus string  `json:"discoveryStatus"`
+	LastDeployedAt  *string `json:"lastDeployedAt,omitempty"`
+	Server          *Server `json:"server,omitempty"`
+}
+
+// Service is the template. After the 2.0 split it is environment-scoped and
+// references zero-or-more ServiceDeployments. The backend additionally flattens
+// the first deployment's runtime onto the service row for back-compat (these
+// are the lower-case omitempty fields below).
 type Service struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	ImageName     string   `json:"imageName"`
-	ImageTag      string   `json:"imageTag"`
-	Status        string   `json:"status"`
-	Health        string   `json:"health"`
-	ServerID      string   `json:"serverId"`
-	Server        *Server  `json:"server,omitempty"`
-	ServiceTypeID *string  `json:"serviceTypeId"`
-	ServiceType   *ServiceType `json:"serviceType,omitempty"`
-	CreatedAt     string   `json:"createdAt"`
+	ID                 string              `json:"id"`
+	Name               string              `json:"name"`
+	ImageTag           string              `json:"imageTag"`
+	EnvironmentID      string              `json:"environmentId"`
+	ContainerImageID   string              `json:"containerImageId"`
+	ContainerImage     *ContainerImage     `json:"containerImage,omitempty"`
+	ServiceTypeID      *string             `json:"serviceTypeId"`
+	ServiceType        *ServiceType        `json:"serviceType,omitempty"`
+	ServiceDeployments []ServiceDeployment `json:"serviceDeployments,omitempty"`
+	CreatedAt          string              `json:"createdAt"`
+
+	// --- Back-compat fields surfaced by the backend (flattened from the first
+	// ServiceDeployment so legacy CLI flows keep working). ---
+	ContainerName   string  `json:"containerName,omitempty"`
+	Status          string  `json:"status,omitempty"`
+	ContainerStatus string  `json:"containerStatus,omitempty"`
+	HealthStatus    string  `json:"healthStatus,omitempty"`
+	ServerID        string  `json:"serverId,omitempty"`
+	Server          *Server `json:"server,omitempty"`
+}
+
+// ImageName returns the image name from the linked container image, or empty
+// when no container image is loaded.
+func (s *Service) ImageName() string {
+	if s.ContainerImage != nil {
+		return s.ContainerImage.ImageName
+	}
+	return ""
+}
+
+// Health returns the service's health status across all deployments.
+// Returns "unknown" if no deployments exist or no health data is available.
+func (s *Service) Health() string {
+	if s.HealthStatus != "" {
+		return s.HealthStatus
+	}
+	for _, d := range s.ServiceDeployments {
+		if d.HealthStatus != "" {
+			return d.HealthStatus
+		}
+	}
+	return "unknown"
 }
 
 type ServiceType struct {

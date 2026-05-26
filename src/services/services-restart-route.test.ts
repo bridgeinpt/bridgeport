@@ -1,12 +1,17 @@
 /**
- * Unit tests for the `POST /api/services/:id/restart` route's compose-vs-container
- * branching.
+ * Unit tests for the `POST /api/services/:id/deployments/:depId/restart` route's
+ * compose-vs-container branching.
  *
  * The route file under test is `src/routes/services.ts`. We exercise the route
  * via a minimal Fastify app rather than `buildTestApp()` so we can mock the SSH
  * / Docker layer cleanly — this lives in `src/services/` only so the unit-test
  * Vitest config picks it up (it requires `vi.mock` + `isolate: true` to avoid
  * leaking module mocks into the integration suite).
+ *
+ * Note: post the Service-template + per-server-ServiceDeployment split (PR #107),
+ * restart targets a specific deployment, not the parent template. The route
+ * queries `prisma.serviceDeployment.findUnique(...)` and reads runtime fields
+ * (containerName, composePath, server) from the deployment row.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -25,6 +30,11 @@ const {
       create: vi.fn(),
       update: vi.fn(),
       delete: vi.fn(),
+    },
+    // After the per-server-deployment split, restart targets a specific
+    // ServiceDeployment, so the route under test reads from this delegate.
+    serviceDeployment: {
+      findUnique: vi.fn(),
     },
     server: {
       findUnique: vi.fn(),
@@ -126,7 +136,7 @@ async function buildAppWithRestart(): Promise<FastifyInstance> {
   return app;
 }
 
-describe('POST /api/services/:id/restart — compose vs container branch', () => {
+describe('POST /api/services/:id/deployments/:depId/restart — compose vs container branch', () => {
   let app: FastifyInstance;
 
   beforeEach(async () => {
@@ -141,10 +151,17 @@ describe('POST /api/services/:id/restart — compose vs container branch', () =>
     app = await buildAppWithRestart();
   });
 
-  function serviceFixture(overrides: Record<string, unknown> = {}) {
+  /**
+   * Build a ServiceDeployment row in the shape Prisma returns for the route's
+   * `serviceDeployment.findUnique({ include: { server: true, service: { select: { name, environmentId } } } })`.
+   * Runtime fields (containerName, composePath, server) live on the deployment;
+   * the parent template only contributes name + environmentId.
+   */
+  function deploymentFixture(overrides: Record<string, unknown> = {}) {
     return {
-      id: 'svc-1',
-      name: 'web',
+      id: 'dep-1',
+      serviceId: 'svc-1',
+      serverId: 'srv-1',
       containerName: 'web-container',
       composePath: null,
       server: {
@@ -154,18 +171,22 @@ describe('POST /api/services/:id/restart — compose vs container branch', () =>
         environmentId: 'env-1',
         serverType: 'standard',
       },
+      service: {
+        name: 'web',
+        environmentId: 'env-1',
+      },
       ...overrides,
     };
   }
 
   it('runs composeDown + composeUp(forceRecreate=true) when composePath is set, and DOES NOT restart the container', async () => {
-    mockPrisma.service.findUnique.mockResolvedValue(
-      serviceFixture({ composePath: '/srv/web/docker-compose.yml' })
+    mockPrisma.serviceDeployment.findUnique.mockResolvedValue(
+      deploymentFixture({ composePath: '/srv/web/docker-compose.yml' })
     );
 
     const res = await app.inject({
       method: 'POST',
-      url: '/api/services/svc-1/restart',
+      url: '/api/services/svc-1/deployments/dep-1/restart',
     });
 
     expect(res.statusCode).toBe(200);
@@ -189,13 +210,13 @@ describe('POST /api/services/:id/restart — compose vs container branch', () =>
   });
 
   it('runs restartContainer when composePath is null, and does NOT touch compose helpers', async () => {
-    mockPrisma.service.findUnique.mockResolvedValue(
-      serviceFixture({ composePath: null })
+    mockPrisma.serviceDeployment.findUnique.mockResolvedValue(
+      deploymentFixture({ composePath: null })
     );
 
     const res = await app.inject({
       method: 'POST',
-      url: '/api/services/svc-1/restart',
+      url: '/api/services/svc-1/deployments/dep-1/restart',
     });
 
     expect(res.statusCode).toBe(200);
@@ -209,14 +230,14 @@ describe('POST /api/services/:id/restart — compose vs container branch', () =>
   });
 
   it('returns 500 with an error message when the compose flow throws', async () => {
-    mockPrisma.service.findUnique.mockResolvedValue(
-      serviceFixture({ composePath: '/srv/web/docker-compose.yml' })
+    mockPrisma.serviceDeployment.findUnique.mockResolvedValue(
+      deploymentFixture({ composePath: '/srv/web/docker-compose.yml' })
     );
     mockDocker.composeUp.mockRejectedValue(new Error('Failed to run compose up: boom'));
 
     const res = await app.inject({
       method: 'POST',
-      url: '/api/services/svc-1/restart',
+      url: '/api/services/svc-1/deployments/dep-1/restart',
     });
 
     expect(res.statusCode).toBe(500);
@@ -224,8 +245,8 @@ describe('POST /api/services/:id/restart — compose vs container branch', () =>
   });
 
   it('returns 500 with an error message when the docker restart flow throws', async () => {
-    mockPrisma.service.findUnique.mockResolvedValue(
-      serviceFixture({ composePath: null })
+    mockPrisma.serviceDeployment.findUnique.mockResolvedValue(
+      deploymentFixture({ composePath: null })
     );
     mockDocker.restartContainer.mockRejectedValue(
       new Error('Failed to restart container: not found')
@@ -233,7 +254,7 @@ describe('POST /api/services/:id/restart — compose vs container branch', () =>
 
     const res = await app.inject({
       method: 'POST',
-      url: '/api/services/svc-1/restart',
+      url: '/api/services/svc-1/deployments/dep-1/restart',
     });
 
     expect(res.statusCode).toBe(500);
@@ -241,7 +262,7 @@ describe('POST /api/services/:id/restart — compose vs container branch', () =>
   });
 
   it('returns 400 when createClientForServer fails (no SSH key)', async () => {
-    mockPrisma.service.findUnique.mockResolvedValue(serviceFixture());
+    mockPrisma.serviceDeployment.findUnique.mockResolvedValue(deploymentFixture());
     createClientForServerMock.mockResolvedValue({
       client: null,
       error: 'SSH key not configured for this environment',
@@ -249,7 +270,7 @@ describe('POST /api/services/:id/restart — compose vs container branch', () =>
 
     const res = await app.inject({
       method: 'POST',
-      url: '/api/services/svc-1/restart',
+      url: '/api/services/svc-1/deployments/dep-1/restart',
     });
 
     expect(res.statusCode).toBe(400);
@@ -259,12 +280,12 @@ describe('POST /api/services/:id/restart — compose vs container branch', () =>
     expect(mockDocker.composeUp).not.toHaveBeenCalled();
   });
 
-  it('returns 404 when the service does not exist', async () => {
-    mockPrisma.service.findUnique.mockResolvedValue(null);
+  it('returns 404 when the deployment does not exist', async () => {
+    mockPrisma.serviceDeployment.findUnique.mockResolvedValue(null);
 
     const res = await app.inject({
       method: 'POST',
-      url: '/api/services/missing/restart',
+      url: '/api/services/svc-1/deployments/missing/restart',
     });
 
     expect(res.statusCode).toBe(404);
