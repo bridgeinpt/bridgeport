@@ -642,7 +642,7 @@ function sanitizeMermaidId(id: string): string {
 }
 
 function escapeMermaidLabel(label: string): string {
-  return label.replace(/"/g, '#quot;');
+  return label.replace(/"/g, '#quot;').replace(/\|/g, '#124;');
 }
 
 function getServicePrimaryPort(exposedPortsJson: string | null): string | null {

@@ -3141,10 +3141,6 @@ export const updateServerCluster = (id: string, data: ServerClusterUpdate) =>
 export const deleteServerCluster = (id: string) =>
   api.delete<{ success: boolean }>(`/server-clusters/${id}`);
 
-// Attach/detach a server from a cluster (passes through to PATCH /servers/:id).
-export const updateServerCluster_setServerCluster = (serverId: string, clusterId: string | null) =>
-  api.patch<{ server: Server }>(`/servers/${serverId}`, { clusterId });
-
 // ============================================================
 // Service Accounts (admin only)
 // ============================================================

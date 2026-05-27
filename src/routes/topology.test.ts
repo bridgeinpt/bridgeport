@@ -345,6 +345,53 @@ describe('topology routes', () => {
       // that resolveEndpoints emitted the expected ext_ prefix.
       expect(mermaid).toMatch(/ext_[A-Za-z0-9_]+/);
     });
+
+    it('should escape pipe characters in connection labels so mermaid parses', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'mermaid-pipe-env' });
+
+      // Build a service-to-service connection whose label contains `|`. Without
+      // escaping, the rendered line is `... -->|main|backup| ...` which
+      // mermaid parses as label `main` followed by garbage tokens — the entire
+      // diagram fails to render.
+      const server = await createTestServer(app.prisma, { environmentId: env.id, name: 'mermaid-pipe-server' });
+      const image = await createTestContainerImage(app.prisma, { environmentId: env.id, name: 'Mermaid Pipe Img' });
+      const svcA = await createTestService(app.prisma, {
+        environmentId: env.id,
+        serverId: server.id,
+        containerImageId: image.id,
+        name: 'mermaid-pipe-svc-a',
+      });
+      const svcB = await createTestService(app.prisma, {
+        environmentId: env.id,
+        serverId: server.id,
+        containerImageId: image.id,
+        name: 'mermaid-pipe-svc-b',
+      });
+      await app.prisma.serviceConnection.create({
+        data: {
+          environmentId: env.id,
+          sourceType: 'service',
+          sourceId: svcA.id,
+          targetType: 'service',
+          targetId: svcB.id,
+          direction: 'forward',
+          label: 'main|backup',
+        },
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/diagram-export?environmentId=${env.id}&format=mermaid`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const mermaid = res.json().mermaid as string;
+      // The raw `|` between `main` and `backup` must be replaced with the
+      // numeric character entity so the label survives mermaid parsing.
+      expect(mermaid).not.toMatch(/\|main\|backup\|/);
+      expect(mermaid).toContain('main#124;backup');
+    });
   });
 
   // ==================== External Entities CRUD ====================
@@ -840,11 +887,10 @@ describe('topology routes', () => {
       expect(after?.clusterId).toBe(cluster.id);
     });
 
-    // The route does NOT currently verify that the cluster is in the same
-    // environment as the server — Prisma's FK only enforces row existence.
-    // This test pins that current (loose) behaviour so a future tightening
-    // is intentional, not accidental.
-    it('does not currently reject a cross-environment clusterId (FK existence only)', async () => {
+    // Environment isolation must be enforced at the route layer because
+    // Prisma's FK on Server.clusterId only checks row existence — not env
+    // match. A server in env A must not be allowed to join a cluster in env B.
+    it('should reject a cross-environment clusterId with 400', async () => {
       const envA = await createTestEnvironment(app.prisma, { name: 'srv-cluster-xenv-a' });
       const envB = await createTestEnvironment(app.prisma, { name: 'srv-cluster-xenv-b' });
       const clusterInB = await app.prisma.serverCluster.create({
@@ -858,12 +904,12 @@ describe('topology routes', () => {
         headers: { authorization: `Bearer ${adminToken}` },
         payload: { clusterId: clusterInB.id },
       });
-      expect(res.statusCode).toBe(200);
+      expect(res.statusCode).toBe(400);
       const after = await app.prisma.server.findUnique({ where: { id: serverInA.id } });
-      expect(after?.clusterId).toBe(clusterInB.id);
+      expect(after?.clusterId).toBeNull();
     });
 
-    it('should reject a non-existent clusterId via FK constraint with 404', async () => {
+    it('should reject a non-existent clusterId with 404', async () => {
       const env = await createTestEnvironment(app.prisma, { name: 'srv-cluster-bad-env' });
       const server = await createTestServer(app.prisma, { environmentId: env.id, name: 'bad-cluster-srv' });
 
@@ -873,9 +919,22 @@ describe('topology routes', () => {
         headers: { authorization: `Bearer ${adminToken}` },
         payload: { clusterId: 'no-such-cluster' },
       });
-      // The route wraps any update failure in a 404 — match that existing
-      // behaviour rather than asserting a specific Prisma error shape.
       expect(res.statusCode).toBe(404);
+    });
+
+    it('should reject empty-string clusterId with 400 validation', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'srv-cluster-empty-env' });
+      const server = await createTestServer(app.prisma, { environmentId: env.id, name: 'empty-cluster-srv' });
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/servers/${server.id}`,
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { clusterId: '' },
+      });
+      // Empty string must be rejected at the Zod boundary so Prisma never
+      // sees it (otherwise it bubbles up as a P2003 -> 500).
+      expect(res.statusCode).toBe(400);
     });
   });
 

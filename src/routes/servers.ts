@@ -34,7 +34,8 @@ const updateServerSchema = z.object({
   tags: z.array(z.string()).optional(),
   dockerMode: z.enum(['socket', 'ssh']).optional(),
   // `null` clears the cluster association, omit to leave unchanged.
-  clusterId: z.string().nullable().optional(),
+  // Empty strings are rejected at the boundary so Prisma never sees a bogus FK.
+  clusterId: z.string().min(1).nullable().optional(),
 });
 
 const importTerraformSchema = z.object({
@@ -151,6 +152,29 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
 
       try {
         const existing = await getServer(id);
+        if (!existing) {
+          return reply.code(404).send({ error: 'Server not found' });
+        }
+
+        // When the caller is re-parenting under a cluster, the cluster must
+        // exist AND belong to the same environment as the server. The FK only
+        // enforces existence, so without this check a cross-env clusterId
+        // silently corrupts environment isolation.
+        if (typeof body.clusterId === 'string' && body.clusterId.length > 0) {
+          const cluster = await prisma.serverCluster.findUnique({
+            where: { id: body.clusterId },
+            select: { environmentId: true },
+          });
+          if (!cluster) {
+            return reply.code(404).send({ error: 'Cluster not found' });
+          }
+          if (cluster.environmentId !== existing.environmentId) {
+            return reply
+              .code(400)
+              .send({ error: 'Cluster belongs to a different environment' });
+          }
+        }
+
         const server = await updateServer(id, body);
 
         await logAudit({
@@ -160,7 +184,7 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
           resourceName: server.name,
           details: { changes: body },
           ...actorFrom(request),
-          environmentId: existing?.environmentId,
+          environmentId: existing.environmentId,
         });
 
         return { server };

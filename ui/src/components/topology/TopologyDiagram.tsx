@@ -250,13 +250,17 @@ function buildNodes(ctx: BuildNodesContext): BuildResult {
   }
   // serverToCluster is populated from Server.clusterId as we iterate servers.
   serverToCluster.clear();
-  const clusterCursor = new Map<string, { x: number; y: number }>();
+  const clusterCursor = new Map<
+    string,
+    { x: number; y: number; maxRowHeight: number; width: number }
+  >();
   for (const cluster of serverClusters) {
     const clusterNodeId = `cluster:${cluster.id}`;
     const isCollapsed = collapsedClusters.has(cluster.id);
     const savedPos = savedPositions?.[clusterNodeId];
     const widthFromSaved = savedPos?.width ?? cluster.width ?? undefined;
     const heightFromSaved = savedPos?.height ?? cluster.height ?? undefined;
+    const effectiveClusterWidth = widthFromSaved ?? 600;
     const childServers = servers.filter((s) => s.clusterId === cluster.id);
     const data: ServerClusterNodeData = {
       label: cluster.name,
@@ -273,14 +277,19 @@ function buildNodes(ctx: BuildNodesContext): BuildResult {
       position: savedPos ? { x: savedPos.x, y: savedPos.y } : { x: cluster.x, y: cluster.y },
       data: data as unknown as Record<string, unknown>,
       style: {
-        width: widthFromSaved ?? 600,
+        width: effectiveClusterWidth,
         height: heightFromSaved ?? (isCollapsed ? 80 : 260),
         // Clusters render below all other nodes so children float above the
         // dashed border.
         zIndex: 0,
       },
     });
-    clusterCursor.set(cluster.id, { x: 12, y: SERVER_HEADER_HEIGHT + 4 });
+    clusterCursor.set(cluster.id, {
+      x: 12,
+      y: SERVER_HEADER_HEIGHT + 4,
+      maxRowHeight: 0,
+      width: effectiveClusterWidth,
+    });
   }
 
   for (const server of servers) {
@@ -335,9 +344,33 @@ function buildNodes(ctx: BuildNodesContext): BuildResult {
     let position: { x: number; y: number };
     if (inCluster) {
       const cursor = clusterCursor.get(inCluster)!;
-      position = savedPos ? { x: savedPos.x, y: savedPos.y } : { x: cursor.x, y: cursor.y };
-      // Advance cursor for the next sibling.
-      cursor.x += computedWidth + SERVER_GAP;
+      // savedPos may be stale from when the server was top-level (absolute
+      // coords) before being re-parented. If it looks unreasonable for the
+      // cluster's local coordinate space, fall back to the cursor layout so
+      // the child doesn't get clamped far outside the cluster bounds.
+      const savedLooksRelative =
+        savedPos &&
+        savedPos.x >= 0 &&
+        savedPos.x <= cursor.width - 50 &&
+        savedPos.y >= 0;
+      position = savedLooksRelative
+        ? { x: savedPos!.x, y: savedPos!.y }
+        : { x: cursor.x, y: cursor.y };
+      // Only advance the cursor when we actually placed the server via the
+      // cursor — otherwise the next sibling gets bumped by a phantom slot.
+      if (!savedLooksRelative) {
+        cursor.x += computedWidth + SERVER_GAP;
+        cursor.maxRowHeight = Math.max(cursor.maxRowHeight, computedHeight);
+        // Wrap to a new row if the next server (assume ~200px wide) wouldn't
+        // fit inside the cluster's effective width. Without this, children
+        // past the right edge stack on top of each other once extent:'parent'
+        // clamps them.
+        if (cursor.x + 200 > cursor.width - 12) {
+          cursor.x = 12;
+          cursor.y += cursor.maxRowHeight + SERVER_GAP;
+          cursor.maxRowHeight = 0;
+        }
+      }
     } else {
       position = savedPos ? { x: savedPos.x, y: savedPos.y } : { x: serverX, y: 0 };
     }
@@ -663,17 +696,16 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
 
   const [collapsedClusters, setCollapsedClusters] = useState<Set<string>>(new Set());
 
-  // Reflect the persisted `collapsed` flag from the server into local state
-  // when clusters change. We only seed once per cluster-set so user toggles
-  // since last fetch aren't clobbered.
+  // Reflect the persisted `collapsed` flag from the server into local state.
+  // Rebuild the Set fully on each fetch — the server is the source of truth
+  // because `handleToggleClusterCollapse` already persists optimistic toggles
+  // via `updateServerCluster({ collapsed })`. Union-merging would silently
+  // re-collapse a cluster the user just expanded if a concurrent refetch
+  // returns a stale `collapsed: true`.
   useEffect(() => {
-    setCollapsedClusters((prev) => {
-      const next = new Set(prev);
-      for (const c of serverClusters) {
-        if (c.collapsed) next.add(c.id);
-      }
-      return next;
-    });
+    setCollapsedClusters(
+      new Set(serverClusters.filter((c) => c.collapsed).map((c) => c.id))
+    );
   }, [serverClusters]);
 
   const handleToggleCollapse = useCallback((serverId: string) => {
@@ -722,22 +754,35 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
       const currentNodes = reactFlowInstance.getNodes();
       const positions: DiagramLayoutPositions = {};
       for (const n of currentNodes) {
-        // Only save canvas-level (no parent) node positions. Children are
-        // positioned relative to parents and re-derived on every render.
-        if (!n.parentId) {
-          // Pull width/height off either the inline style or measured size,
-          // whichever is available — NodeResizer writes to both.
-          const styleWidth = typeof n.style?.width === 'number' ? (n.style.width as number) : undefined;
-          const styleHeight = typeof n.style?.height === 'number' ? (n.style.height as number) : undefined;
-          const measuredWidth = n.measured?.width ?? n.width ?? undefined;
-          const measuredHeight = n.measured?.height ?? n.height ?? undefined;
-          positions[n.id] = {
-            x: n.position.x,
-            y: n.position.y,
-            ...(styleWidth !== undefined || measuredWidth !== undefined ? { width: styleWidth ?? measuredWidth! } : {}),
-            ...(styleHeight !== undefined || measuredHeight !== undefined ? { height: styleHeight ?? measuredHeight! } : {}),
-          };
-        }
+        // Persist the node IDs that `buildNodes` reads back from
+        // savedPositions: clusters, servers (both top-level and clustered),
+        // standalone databases, and external entities. Child service/database
+        // nodes inside a server are positioned by computed grid and aren't
+        // user-draggable, so we skip them. The previous `!n.parentId` guard
+        // incorrectly dropped clustered servers — their parentId is the
+        // cluster, but their drag/resize state still needs to round-trip.
+        const isSaveable =
+          n.id.startsWith('cluster:') ||
+          n.id.startsWith('server:') ||
+          n.id.startsWith('database:') ||
+          n.id.startsWith('external:');
+        if (!isSaveable) continue;
+        // For child databases under a server (parentId starts with `server:`)
+        // skip: they're laid out by the grid alongside services, not by
+        // savedPositions. Only standalone databases (no parent) round-trip.
+        if (n.id.startsWith('database:') && n.parentId) continue;
+        // Pull width/height off either the inline style or measured size,
+        // whichever is available — NodeResizer writes to both.
+        const styleWidth = typeof n.style?.width === 'number' ? (n.style.width as number) : undefined;
+        const styleHeight = typeof n.style?.height === 'number' ? (n.style.height as number) : undefined;
+        const measuredWidth = n.measured?.width ?? n.width ?? undefined;
+        const measuredHeight = n.measured?.height ?? n.height ?? undefined;
+        positions[n.id] = {
+          x: n.position.x,
+          y: n.position.y,
+          ...(styleWidth !== undefined || measuredWidth !== undefined ? { width: styleWidth ?? measuredWidth! } : {}),
+          ...(styleHeight !== undefined || measuredHeight !== undefined ? { height: styleHeight ?? measuredHeight! } : {}),
+        };
       }
       saveDiagramLayout(targetEnv, positions).catch(() => {});
     }, 1000);
@@ -1171,7 +1216,11 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
 
   const heightClass = mode === 'compact' ? 'h-[350px]' : mode === 'expanded' ? 'h-[700px]' : '';
   const totalServices = servers.reduce((acc, s) => acc + s.services.length, 0);
-  const isEmpty = servers.length === 0 && databases.length === 0;
+  const isEmpty =
+    servers.length === 0 &&
+    databases.length === 0 &&
+    externalEntities.length === 0 &&
+    serverClusters.length === 0;
 
   if (isEmpty) {
     return (
@@ -1219,6 +1268,7 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
       environmentId={environmentId}
       servers={servers}
       databases={databases}
+      externalEntities={externalEntities}
       onConnectionCreated={(conn) => setManualConnections((prev) => [...prev, conn])}
     />
   ) : null;
