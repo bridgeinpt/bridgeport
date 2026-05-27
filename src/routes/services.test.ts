@@ -338,7 +338,46 @@ describe('service routes', () => {
 
         expect(log).not.toBeNull();
         const details = JSON.parse(log!.details ?? '{}');
-        expect(details).toMatchObject({ typeTag: 'redis' });
+        // CREATE mirrors PATCH's shape: field-level state lives under `changes`.
+        expect(details).toMatchObject({ changes: { typeTag: 'redis' } });
+      });
+
+      it('rejects the reserved "__none__" sentinel value on create', async () => {
+        const res = await app.inject({
+          method: 'POST',
+          url: `/api/environments/${envId}/services`,
+          headers: { authorization: `Bearer ${adminToken}` },
+          payload: {
+            name: 'tt-reserved-svc',
+            containerImageId: imageId,
+            typeTag: '__none__',
+          },
+        });
+
+        expect(res.statusCode).toBe(400);
+      });
+
+      it('rejects the reserved "__none__" sentinel value on update', async () => {
+        const svc = await app.prisma.service.create({
+          data: {
+            name: 'tt-reserved-update-svc',
+            environmentId: envId,
+            containerImageId: imageId,
+            imageTag: 'latest',
+            typeTag: 'original',
+          },
+        });
+
+        const res = await app.inject({
+          method: 'PATCH',
+          url: `/api/services/${svc.id}`,
+          headers: { authorization: `Bearer ${adminToken}` },
+          payload: { typeTag: '__none__' },
+        });
+
+        expect(res.statusCode).toBe(400);
+        const row = await app.prisma.service.findUnique({ where: { id: svc.id } });
+        expect(row?.typeTag).toBe('original');
       });
     });
 

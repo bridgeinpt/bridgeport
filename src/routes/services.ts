@@ -24,11 +24,16 @@ import { validateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, 
 
 // Free-form operator-defined type label (issue #112). String-trim, normalize empty → null.
 // Distinct from `serviceTypeId` which references the plugin-provided ServiceType model.
+// `__none__` is reserved: the Services UI uses it as a URL sentinel for the "No type"
+// filter chip (see ui/src/pages/Services.tsx `NO_TYPE_FILTER`). Persisting a literal
+// '__none__' would collide with that sentinel and silently break the filter, so reject
+// it here at the API boundary.
 const typeTagSchema = z
   .string()
   .trim()
   .max(64)
   .transform((v) => (v === '' ? null : v))
+  .refine((v) => v !== '__none__', { message: 'typeTag value "__none__" is reserved' })
   .nullable()
   .optional();
 
@@ -188,7 +193,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
       });
 
       const tags = grouped
-        .filter((row): row is typeof row & { typeTag: string } => row.typeTag !== null && row.typeTag !== '')
+        .filter((row): row is typeof row & { typeTag: string } => row.typeTag !== null)
         .map((row) => ({ tag: row.typeTag, count: row._count._all }))
         .sort((a, b) => a.tag.localeCompare(b.tag));
 
@@ -301,7 +306,9 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           resourceType: 'service',
           resourceId: service.id,
           resourceName: service.name,
-          details: { containerImageId: service.containerImageId, typeTag: service.typeTag },
+          // Wrap field-level state in `changes` so it mirrors PATCH's audit shape.
+          // A forensic query of `details.changes.typeTag` finds both CREATE and PATCH events.
+          details: { containerImageId: service.containerImageId, changes: { typeTag: service.typeTag } },
           ...actorFrom(request),
           environmentId: envId,
         });

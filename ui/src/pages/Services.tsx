@@ -95,6 +95,8 @@ export default function Services() {
 
   // Active filter (URL-persisted). null = "All"; NO_TYPE_FILTER = services with no type;
   // any other string = exact-match typeTag (case-sensitive — matches backend grouping).
+  // URL params: type filter is shareable + survives reload. `servicesShowUpdatesOnly`
+  // above is a per-user preference, kept in Zustand — intentionally different mechanisms.
   const activeTypeFilter = searchParams.get('type');
 
   const setActiveTypeFilter = (next: string | null) => {
