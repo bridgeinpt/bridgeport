@@ -22,10 +22,21 @@ import { validateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, 
 
 // --- schemas ---
 
+// Free-form operator-defined type label (issue #112). String-trim, normalize empty → null.
+// Distinct from `serviceTypeId` which references the plugin-provided ServiceType model.
+const typeTagSchema = z
+  .string()
+  .trim()
+  .max(64)
+  .transform((v) => (v === '' ? null : v))
+  .nullable()
+  .optional();
+
 const createServiceSchema = z.object({
   name: z.string().min(1),
   containerImageId: z.string().min(1),
   imageTag: z.string().default('latest'),
+  typeTag: typeTagSchema,
   composeTemplate: z.string().nullable().optional(),
   healthCheckUrl: z.string().nullable().optional(),
   baseEnv: z.record(z.string(), z.string()).optional(),
@@ -36,6 +47,7 @@ const updateServiceSchema = z.object({
   name: z.string().min(1).optional(),
   containerImageId: z.string().min(1).optional(),
   imageTag: z.string().optional(),
+  typeTag: typeTagSchema,
   composeTemplate: z.string().nullable().optional(),
   healthCheckUrl: z.string().nullable().optional(),
   baseEnv: z.record(z.string(), z.string()).nullable().optional(),
@@ -158,6 +170,32 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
+  // Distinct free-form type tags for an environment (issue #112).
+  // Used to populate the Services list filter chips and the ServiceDetail
+  // type-tag autocomplete. Case-sensitive grouping (operators converge via
+  // the datalist UX); empty/null typeTags are excluded from the list — the
+  // UI surfaces a separate "No type" chip computed client-side.
+  fastify.get(
+    '/api/environments/:envId/services/type-tags',
+    { preHandler: [fastify.authenticate] },
+    async (request) => {
+      const { envId } = request.params as { envId: string };
+
+      const grouped = await prisma.service.groupBy({
+        by: ['typeTag'],
+        where: { environmentId: envId, typeTag: { not: null } },
+        _count: { _all: true },
+      });
+
+      const tags = grouped
+        .filter((row): row is typeof row & { typeTag: string } => row.typeTag !== null && row.typeTag !== '')
+        .map((row) => ({ tag: row.typeTag, count: row._count._all }))
+        .sort((a, b) => a.tag.localeCompare(b.tag));
+
+      return { tags };
+    }
+  );
+
   // Get service template
   fastify.get(
     '/api/services/:id',
@@ -249,6 +287,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
             name: body.name,
             containerImageId: body.containerImageId,
             imageTag: body.imageTag,
+            typeTag: body.typeTag ?? null,
             composeTemplate: body.composeTemplate ?? null,
             healthCheckUrl: body.healthCheckUrl ?? null,
             baseEnv: body.baseEnv ? JSON.stringify(body.baseEnv) : null,
@@ -262,7 +301,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           resourceType: 'service',
           resourceId: service.id,
           resourceName: service.name,
-          details: { containerImageId: service.containerImageId },
+          details: { containerImageId: service.containerImageId, typeTag: service.typeTag },
           ...actorFrom(request),
           environmentId: envId,
         });
@@ -329,6 +368,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
               name: body.name,
               containerImageId: body.containerImageId,
               imageTag: body.imageTag,
+              typeTag: body.typeTag ?? null,
               composeTemplate: body.composeTemplate ?? null,
               healthCheckUrl: body.healthCheckUrl ?? null,
               baseEnv: body.baseEnv ? JSON.stringify(body.baseEnv) : null,
