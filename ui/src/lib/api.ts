@@ -478,6 +478,54 @@ export const setMetricsMode = (id: string, mode: 'ssh' | 'agent' | 'disabled') =
 export const pruneServerImages = (id: string, mode: 'dangling' | 'all' = 'dangling') =>
   api.post<{ success: boolean; spaceReclaimedBytes: number; spaceReclaimedHuman: string }>(`/servers/${id}/prune-images`, { mode });
 
+// Server bootstrap (issue #113)
+export type BootstrapState = 'not_bootstrapped' | 'bootstrapped' | 'error';
+
+export interface BootstrapStatus {
+  bootstrapState: BootstrapState;
+  bootstrapDistro: string | null;
+  dockerInstalled: boolean;
+  dockerInstalledAt: string | null;
+  agentInstalled: boolean;
+  agentInstalledAt: string | null;
+  sysctlApplied: boolean;
+  sysctlAppliedAt: string | null;
+  swapConfigured: boolean;
+  swapConfiguredAt: string | null;
+  swapSizeMb: number | null;
+  distro: { distro: string | null; supported: boolean; raw: string } | null;
+  sudo: { ok: boolean; error?: string } | null;
+  memory: string | null;
+  probeError?: string;
+}
+
+export interface BootstrapComponents {
+  docker?: boolean;
+  sysctl?: boolean;
+  agent?: boolean;
+  swap?: boolean;
+}
+
+export interface BootstrapRunInput {
+  components: BootstrapComponents;
+  swapSizeMb?: number;
+}
+
+export const getBootstrapStatus = (id: string) =>
+  api.get<BootstrapStatus>(`/servers/${id}/bootstrap`);
+
+export const runServerBootstrap = (id: string, data: BootstrapRunInput) =>
+  api.post<{ started: true }>(`/servers/${id}/bootstrap`, data);
+
+export const addServerSwap = (
+  id: string,
+  data: { sizeMb: number; confirm: true; force?: boolean },
+) =>
+  api.post<{ success: boolean; before: string; after: string }>(
+    `/servers/${id}/bootstrap/swap`,
+    data,
+  );
+
 // Services
 /**
  * Service template enriched with the first deployment's runtime + server

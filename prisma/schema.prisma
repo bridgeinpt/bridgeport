@@ -229,6 +229,18 @@ model Server {
   agentVersion         String? // Agent version reported by agent
   agentStatusChangedAt DateTime? // When agent status last changed
 
+  // Bootstrap state (one-click Docker/sysctl/agent/swap install). See docs/guides/server-bootstrap.md.
+  bootstrapState     String    @default("not_bootstrapped") // not_bootstrapped|bootstrapped|error
+  bootstrapDistro    String?   // Cached e.g. "ubuntu:22.04" from /etc/os-release
+  dockerInstalled    Boolean   @default(false)
+  dockerInstalledAt  DateTime?
+  agentInstalledAt   DateTime? // When agent was installed via bootstrap (agentEnabled = source of truth for "installed")
+  sysctlApplied      Boolean   @default(false)
+  sysctlAppliedAt    DateTime?
+  swapConfigured     Boolean   @default(false)
+  swapConfiguredAt   DateTime?
+  swapSizeMb         Int?      // Configured swapfile size (the file we created, not total system swap)
+
   environmentId String
   environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
 

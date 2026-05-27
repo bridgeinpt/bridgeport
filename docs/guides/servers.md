@@ -403,6 +403,7 @@ Server names must be unique within an environment. Choose a different name or de
 
 ## Related
 
+- [Server Bootstrap](server-bootstrap.md) -- one-click Docker + agent + sysctl + swap setup for new Ubuntu/Debian hosts
 - [Services](services.md) -- managing Docker containers on servers
 - [Environments](environments.md) -- SSH key and per-module settings
 - [Monitoring Quick Start](monitoring.md) -- setting up metrics collection

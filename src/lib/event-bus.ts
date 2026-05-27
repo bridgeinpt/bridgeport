@@ -5,7 +5,18 @@ export type BRIDGEPORTEvent =
   | { type: 'deployment_progress'; data: { deploymentId?: string; planId?: string; serviceId: string; status: string; environmentId: string } }
   | { type: 'notification'; data: { userId: string; count: number } }
   | { type: 'metrics_updated'; data: { serverId: string; environmentId: string } }
-  | { type: 'container_discovery'; data: { serverId: string; environmentId: string } };
+  | { type: 'container_discovery'; data: { serverId: string; environmentId: string } }
+  | {
+      type: 'bootstrap_progress';
+      data: {
+        serverId: string;
+        environmentId: string;
+        component?: 'docker' | 'sysctl' | 'agent' | 'swap' | 'distro' | 'preflight';
+        phase: 'start' | 'step' | 'done' | 'error';
+        level: 'info' | 'error';
+        line: string;
+      };
+    };
 
 class EventBus extends EventEmitter {
   emitEvent(event: BRIDGEPORTEvent): void {

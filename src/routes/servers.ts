@@ -14,9 +14,19 @@ import {
 import { logAudit, actorFrom } from '../services/audit.js';
 import { deployAgent, removeAgent, checkAgentStatus } from '../services/agent-deploy.js';
 import { getHostInfo, registerHostServer } from '../services/host-detection.js';
+import {
+  runBootstrap,
+  addSwapLive,
+  detectDistro,
+  preflightSudo,
+  SWAP_MIN_MB,
+  SWAP_MAX_MB,
+} from '../services/bootstrap.js';
+import { isLocalhost, SSHClient, LocalClient, type CommandClient } from '../lib/ssh.js';
+import { getEnvironmentSshKey } from './environments.js';
 import { prisma } from '../lib/db.js';
 import { bundledAgentVersion } from '../lib/version.js';
-import { requireAdmin } from '../plugins/authorize.js';
+import { requireAdmin, requireOperator } from '../plugins/authorize.js';
 import { METRICS_MODE } from '../lib/constants.js';
 import { safeJsonParse, validateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery, flattenDeploymentOntoService } from '../lib/helpers.js';
 
@@ -58,6 +68,29 @@ const importTerraformSchema = z.object({
 
 const registerHostSchema = z.object({
   name: z.string().min(1).default('host'),
+});
+
+// Bootstrap schemas (issue #113)
+const bootstrapRunSchema = z.object({
+  components: z.object({
+    docker: z.boolean().optional(),
+    sysctl: z.boolean().optional(),
+    agent: z.boolean().optional(),
+    swap: z.boolean().optional(),
+  }).refine(
+    (c) => c.docker || c.sysctl || c.agent || c.swap,
+    'At least one component must be selected',
+  ),
+  swapSizeMb: z.number().int().min(SWAP_MIN_MB).max(SWAP_MAX_MB).optional(),
+}).refine(
+  (body) => !body.components.swap || typeof body.swapSizeMb === 'number',
+  { message: 'swapSizeMb is required when swap component is selected', path: ['swapSizeMb'] },
+);
+
+const bootstrapSwapSchema = z.object({
+  sizeMb: z.number().int().min(SWAP_MIN_MB).max(SWAP_MAX_MB),
+  confirm: z.literal(true),
+  force: z.boolean().optional(),
 });
 
 export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
@@ -510,6 +543,151 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
         updatedAt: hasData ? server.processSnapshot.updatedAt : null,
       };
     }
+  );
+
+  // ==================== Bootstrap (issue #113) ====================
+
+  // Helper: build a CommandClient for read-only bootstrap status checks.
+  async function clientFor(server: { hostname: string; environmentId: string }): Promise<{
+    client: CommandClient | null;
+    error?: string;
+  }> {
+    if (isLocalhost(server.hostname)) {
+      return { client: new LocalClient() };
+    }
+    const creds = await getEnvironmentSshKey(server.environmentId);
+    if (!creds) return { client: null, error: 'SSH key not configured for this environment' };
+    return {
+      client: new SSHClient({ hostname: server.hostname, username: creds.username, privateKey: creds.privateKey }),
+    };
+  }
+
+  // GET bootstrap status: per-component flags, timestamps, distro, current memory.
+  // Returns cached state immediately; runs a live distro/sudo/free probe in the
+  // background only if a client can be created (best-effort).
+  fastify.get(
+    '/api/servers/:id/bootstrap',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const server = await findOrNotFound(
+        prisma.server.findUnique({ where: { id } }),
+        'Server',
+        reply,
+      );
+      if (!server) return;
+
+      const cached = {
+        bootstrapState: server.bootstrapState,
+        bootstrapDistro: server.bootstrapDistro,
+        dockerInstalled: server.dockerInstalled,
+        dockerInstalledAt: server.dockerInstalledAt,
+        agentInstalled: server.metricsMode === METRICS_MODE.AGENT,
+        agentInstalledAt: server.agentInstalledAt,
+        sysctlApplied: server.sysctlApplied,
+        sysctlAppliedAt: server.sysctlAppliedAt,
+        swapConfigured: server.swapConfigured,
+        swapConfiguredAt: server.swapConfiguredAt,
+        swapSizeMb: server.swapSizeMb,
+      };
+
+      // Best-effort live probe — distro detect + free -m. Failures are silent;
+      // the cached fields still render.
+      const { client } = await clientFor(server);
+      if (!client) return { ...cached, distro: null, memory: null, sudo: null };
+      try {
+        await client.connect();
+        const [distro, sudo, mem] = await Promise.all([
+          detectDistro(client, id).catch(() => null),
+          preflightSudo(client).catch(() => null),
+          client.exec('free -m').catch(() => null),
+        ]);
+        return {
+          ...cached,
+          distro,
+          sudo,
+          memory: mem?.stdout ?? null,
+        };
+      } catch (err) {
+        return { ...cached, distro: null, memory: null, sudo: null, probeError: getErrorMessage(err) };
+      } finally {
+        client.disconnect();
+      }
+    },
+  );
+
+  // POST bootstrap: kick off a bootstrap run in the background. Returns 202
+  // immediately with `{ started: true }`. Operator+ role required because this
+  // changes system state and can install Docker / write to /etc/fstab.
+  fastify.post(
+    '/api/servers/:id/bootstrap',
+    { preHandler: [fastify.authenticate, requireOperator] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = validateBody(bootstrapRunSchema, request, reply);
+      if (!body) return;
+
+      const server = await findOrNotFound(
+        prisma.server.findUnique({ where: { id } }),
+        'Server',
+        reply,
+      );
+      if (!server) return;
+
+      const actor = actorFrom(request);
+      await logAudit({
+        action: 'bootstrap_start',
+        resourceType: 'server',
+        resourceId: server.id,
+        resourceName: server.name,
+        details: { components: body.components, swapSizeMb: body.swapSizeMb },
+        ...actor,
+        environmentId: server.environmentId,
+      });
+
+      // Fire-and-forget — progress streams via the SSE event bus.
+      void runBootstrap(id, {
+        components: body.components,
+        swapSizeMb: body.swapSizeMb,
+        actor,
+      }).catch((err) => {
+        console.error('[bootstrap] background run threw:', err);
+      });
+
+      reply.code(202);
+      return { started: true };
+    },
+  );
+
+  // POST /bootstrap/swap: live-add a swap file outside the full bootstrap flow.
+  // Requires explicit `confirm: true` so accidental clicks don't write fstab.
+  fastify.post(
+    '/api/servers/:id/bootstrap/swap',
+    { preHandler: [fastify.authenticate, requireOperator] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = validateBody(bootstrapSwapSchema, request, reply);
+      if (!body) return;
+
+      const server = await findOrNotFound(
+        prisma.server.findUnique({ where: { id } }),
+        'Server',
+        reply,
+      );
+      if (!server) return;
+
+      const actor = actorFrom(request);
+      const result = await addSwapLive(id, body.sizeMb, { force: body.force, actor });
+
+      if (!result.success) {
+        return reply.code(400).send({
+          error: result.error ?? 'Failed to configure swap',
+          before: result.before,
+        });
+      }
+
+      return { success: true, before: result.before, after: result.after };
+    },
   );
 
   // Prune unused Docker images on server to reclaim disk space
