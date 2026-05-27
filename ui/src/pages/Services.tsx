@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, lazy, Suspense } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAppStore, useAuthStore, isAdmin } from '../lib/store.js';
-import { listServices, deployService, checkServiceHealth, deleteService, getDependencyGraph, type ServiceWithServerName, type ExposedPort, type DependencyGraphNode, type DependencyGraphEdge } from '../lib/api.js';
+import { listServices, listServiceTypeTags, deployService, checkServiceHealth, deleteService, getDependencyGraph, type ServiceWithServerName, type ExposedPort, type DependencyGraphNode, type DependencyGraphEdge, type ServiceTypeTagCount } from '../lib/api.js';
 import { usePaginatedFetch } from '../hooks/usePaginatedFetch.js';
 import { formatDistanceToNow } from 'date-fns';
 import { getContainerStatusColor, getHealthStatusColor } from '../lib/status.js';
@@ -40,11 +40,15 @@ function formatPorts(ports: ExposedPort[], maxDisplay = 2): string {
 
 type TabType = 'list' | 'dependencies';
 
+// URL sentinel for the "no type" filter chip (services where typeTag is null/empty)
+const NO_TYPE_FILTER = '__none__';
+
 export default function Services() {
   const { selectedEnvironment, servicesShowUpdatesOnly, setServicesShowUpdatesOnly } = useAppStore();
   const { user } = useAuthStore();
   const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const toast = useToast();
 
   // Get tab from URL hash, default to 'list'
@@ -86,7 +90,31 @@ export default function Services() {
   const [graphEdges, setGraphEdges] = useState<DependencyGraphEdge[]>([]);
   const [deploymentOrder, setDeploymentOrder] = useState<string[][]>([]);
 
-  // Dependency graph is environment-wide — fetch once per environment, not on pagination change
+  // Distinct free-form type tags for filter chips (issue #112)
+  const [typeTagCounts, setTypeTagCounts] = useState<ServiceTypeTagCount[]>([]);
+
+  // Active filter (URL-persisted). null = "All"; NO_TYPE_FILTER = services with no type;
+  // any other string = exact-match typeTag (case-sensitive — matches backend grouping).
+  // URL params: type filter is shareable + survives reload. `servicesShowUpdatesOnly`
+  // above is a per-user preference, kept in Zustand — intentionally different mechanisms.
+  const activeTypeFilter = searchParams.get('type');
+
+  const setActiveTypeFilter = (next: string | null) => {
+    setSearchParams(
+      (prev) => {
+        const params = new URLSearchParams(prev);
+        if (next === null) {
+          params.delete('type');
+        } else {
+          params.set('type', next);
+        }
+        return params;
+      },
+      { replace: true }
+    );
+  };
+
+  // Dependency graph + type tag list are environment-wide — fetch once per environment, not on pagination change
   useEffect(() => {
     if (selectedEnvironment?.id) {
       getDependencyGraph(selectedEnvironment.id)
@@ -100,7 +128,22 @@ export default function Services() {
           graph.nodes.forEach((node) => nodeMap.set(node.id, node));
           setDependencyNodes(nodeMap);
         });
+
+      listServiceTypeTags(selectedEnvironment.id)
+        .then(({ tags }) => setTypeTagCounts(tags))
+        .catch(() => setTypeTagCounts([]));
     }
+  }, [selectedEnvironment?.id]);
+
+  // Clear any stale type filter when the environment changes — a tag from
+  // env A won't necessarily exist in env B, and leaving it set would hide
+  // every service silently.
+  useEffect(() => {
+    if (activeTypeFilter !== null) {
+      setActiveTypeFilter(null);
+    }
+    // Intentionally only reacts to environment changes, not the filter itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedEnvironment?.id]);
 
   // Services with available updates (memoized).
@@ -113,11 +156,22 @@ export default function Services() {
     [services]
   );
 
-  // Filtered services based on "show updates only" toggle (memoized)
-  const filteredServices = useMemo(
-    () => (servicesShowUpdatesOnly ? servicesWithUpdates : services),
-    [servicesShowUpdatesOnly, servicesWithUpdates, services]
+  // Count of services without a type — drives whether to surface the "No type" chip.
+  const noTypeCount = useMemo(
+    () => services.filter((s) => !s.typeTag).length,
+    [services]
   );
+
+  // Filtered services based on "show updates only" toggle + active type filter (memoized).
+  // Type filter matches case-sensitively (matches the backend's groupBy behavior).
+  const filteredServices = useMemo(() => {
+    const base = servicesShowUpdatesOnly ? servicesWithUpdates : services;
+    if (activeTypeFilter === null) return base;
+    if (activeTypeFilter === NO_TYPE_FILTER) {
+      return base.filter((s) => !s.typeTag);
+    }
+    return base.filter((s) => s.typeTag === activeTypeFilter);
+  }, [servicesShowUpdatesOnly, servicesWithUpdates, services, activeTypeFilter]);
 
   const handleBulkDeployAll = async () => {
     if (servicesWithUpdates.length === 0) return;
@@ -313,6 +367,59 @@ export default function Services() {
         </Suspense>
       ) : (
       <div className="space-y-4">
+        {/* Type-tag filter chips (issue #112). Hidden when no service in the env has a typeTag and there are no untyped services to differentiate either. */}
+        {(typeTagCounts.length > 0 || noTypeCount > 0) && (
+          <div
+            role="group"
+            aria-label="Filter services by type"
+            className="flex flex-wrap items-center gap-2"
+          >
+            <button
+              type="button"
+              onClick={() => setActiveTypeFilter(null)}
+              aria-pressed={activeTypeFilter === null}
+              className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                activeTypeFilter === null
+                  ? 'bg-primary-500/20 border-primary-500/50 text-primary-300'
+                  : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-600'
+              }`}
+            >
+              All ({services.length})
+            </button>
+            {typeTagCounts.map((t) => {
+              const active = activeTypeFilter === t.tag;
+              return (
+                <button
+                  key={t.tag}
+                  type="button"
+                  onClick={() => setActiveTypeFilter(t.tag)}
+                  aria-pressed={active}
+                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                    active
+                      ? 'bg-primary-500/20 border-primary-500/50 text-primary-300'
+                      : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-600'
+                  }`}
+                >
+                  {t.tag} ({t.count})
+                </button>
+              );
+            })}
+            {noTypeCount > 0 && (
+              <button
+                type="button"
+                onClick={() => setActiveTypeFilter(NO_TYPE_FILTER)}
+                aria-pressed={activeTypeFilter === NO_TYPE_FILTER}
+                className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                  activeTypeFilter === NO_TYPE_FILTER
+                    ? 'bg-primary-500/20 border-primary-500/50 text-primary-300'
+                    : 'bg-slate-800 border-slate-700 text-slate-400 italic hover:border-slate-600'
+                }`}
+              >
+                No type ({noTypeCount})
+              </button>
+            )}
+          </div>
+        )}
         {filteredServices.length > 0 ? (
           <>
             {filteredServices.map((service) => {
@@ -350,6 +457,11 @@ export default function Services() {
                           </span>
                           {hasUpdate && (
                             <span className="badge bg-green-500/20 text-green-400 text-xs">Update available</span>
+                          )}
+                          {service.typeTag && (
+                            <span className="badge bg-slate-700 text-slate-300 text-xs" title="Service type">
+                              {service.typeTag}
+                            </span>
                           )}
                           {hasContainerImage && (
                             <span

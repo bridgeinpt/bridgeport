@@ -444,6 +444,7 @@ export interface CreateServiceInput {
   containerName: string;
   containerImageId: string;  // Required - links to ContainerImage
   imageTag?: string;
+  typeTag?: string | null;
   composePath?: string;
   healthCheckUrl?: string;
 }
@@ -522,6 +523,15 @@ export const listServices = (envId: string, options?: { limit?: number; offset?:
   const query = params.toString();
   return api.get<{ services: ServiceWithServerName[]; total: number }>(`/environments/${envId}/services${query ? `?${query}` : ''}`);
 };
+
+// Distinct free-form service type tags in an environment with their counts (issue #112).
+// Used by the Services list filter chips and the ServiceDetail autocomplete.
+export interface ServiceTypeTagCount {
+  tag: string;
+  count: number;
+}
+export const listServiceTypeTags = (envId: string) =>
+  api.get<{ tags: ServiceTypeTagCount[] }>(`/environments/${envId}/services/type-tags`);
 
 export const getService = (id: string) =>
   api.get<{ service: ServiceWithServer }>(`/services/${id}`);
@@ -843,6 +853,7 @@ export interface Service {
   id: string;
   name: string;
   imageTag: string; // Shared across all deployments in 2.0
+  typeTag: string | null; // Free-form operator-defined type label (issue #112)
   composeTemplate: string | null;
   healthCheckUrl: string | null;
   baseEnv: string | null; // JSON object of env vars applied to every deployment
@@ -1087,6 +1098,7 @@ export interface ServiceUpdate {
   name?: string;
   containerName?: string;
   imageTag?: string;
+  typeTag?: string | null;
   composePath?: string | null;
   healthCheckUrl?: string | null;
   autoUpdate?: boolean;
