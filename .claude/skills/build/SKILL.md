@@ -349,32 +349,38 @@ git commit -m "fix security review findings (#<N>)"
 git push
 ```
 
+**Do not stop here.** The skill is not complete until CI is green. Continue immediately to Step 10 — even if `/security-review` reported zero findings and no commits were made. The user is relying on you to watch CI and fix failures; ending the turn after the security review is a skill failure.
+
 ---
 
 ## Step 10: Wait for green CI
 
-Watch CI to completion:
+**CRITICAL**: `gh pr checks --watch` blocks until CI finishes, which routinely takes 5–15 minutes — far longer than the default 2-minute foreground Bash timeout. You MUST run it in the background so the harness notifies you on completion. Do not call it as a foreground Bash command.
 
-```bash
-gh pr checks <PR_NUMBER> --watch
+Run the watch in the background:
+
+```
+Bash(command="gh pr checks <PR_NUMBER> --watch --interval 30", run_in_background=true, description="Watch PR CI checks until completion")
 ```
 
-This blocks until all required checks finish. Outcomes:
+The harness will notify you when the command finishes — do NOT poll, sleep, or proactively re-check. When the notification arrives, read the output and exit code:
 
-- **All green** → continue to Step 11.
-- **One or more failed** → fetch the failing logs:
+- **Exit 0 (all green)** → continue to Step 11.
+- **Exit non-zero (one or more failed)** → fetch the failing logs:
   ```bash
   gh run list --branch "$(git rev-parse --abbrev-ref HEAD)" --limit 5 --json databaseId,conclusion,name
   gh run view <FAILING_RUN_ID> --log-failed
   ```
-  Delegate to a `general-purpose` subagent with the failure log and the diff. Apply fix, commit, push, re-run `gh pr checks --watch`. Maximum 2 fix attempts. After 2 failed attempts, stop and surface the failures to the user.
+  Delegate to a `general-purpose` subagent with the failure log and the diff. Apply fix, commit, push, then **re-run the watch in the background again** (same pattern: `run_in_background=true`). Maximum 2 fix attempts. After 2 failed attempts, stop and surface the failures to the user.
 
-If checks are skipped or there are 0 runs after 60s, push an empty commit to force a trigger:
+If the watch returns immediately with "no checks reported" or there are 0 runs for the branch, push an empty commit to force a trigger, then restart the background watch:
 
 ```bash
 git commit --allow-empty -m "ci: re-trigger checks"
 git push
 ```
+
+As a safety net (in case the background watch process is killed or the harness misses the notification), if you have not received a completion notification within ~20 minutes of starting the watch, check status manually with a single foreground call: `gh pr checks <PR_NUMBER>` (no `--watch`). If checks are still pending, start a fresh background watch. If checks have completed, branch on the result as above.
 
 ---
 
