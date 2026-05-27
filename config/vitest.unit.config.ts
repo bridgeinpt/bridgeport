@@ -20,6 +20,7 @@ export default defineConfig({
     include: [
       'src/services/**/*.test.ts',
       'src/lib/**/*.test.ts',
+      'src/plugins/**/*.test.ts',
     ],
     exclude: [
       'node_modules',

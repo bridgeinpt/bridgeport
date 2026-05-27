@@ -13,6 +13,8 @@ import { config } from './lib/config.js';
 import { initializeCrypto } from './lib/crypto.js';
 import { initializeDatabase, disconnectDatabase } from './lib/db.js';
 import authenticatePlugin from './plugins/authenticate.js';
+import errorHandlerPlugin from './plugins/error-handler.js';
+import openapiPlugin from './plugins/openapi.js';
 import { authRoutes } from './routes/auth.js';
 import { bootstrapAdminUser } from './services/auth.js';
 import { bootstrapManagementEnvironment } from './services/host-detection.js';
@@ -128,11 +130,20 @@ async function buildServer() {
     timeWindow: '1 minute',
     allowList: (req) => req.url === '/health' || req.url === '/api/client-config',
     errorResponseBuilder: (_req, context) => ({
-      error: 'Too many requests',
+      code: 'RATE_LIMITED',
       message: `Rate limit exceeded. Try again in ${Math.ceil(context.ttl / 1000)} seconds.`,
-      retryAfterSeconds: Math.ceil(context.ttl / 1000),
+      hint: `Retry after ${Math.ceil(context.ttl / 1000)} seconds.`,
     }),
   });
+
+  // Register the global error handler before any routes so it catches
+  // ApiError / Zod / Fastify validation / unknown errors thrown anywhere
+  // in the request pipeline and serializes the canonical envelope.
+  await fastify.register(errorHandlerPlugin);
+
+  // Register OpenAPI spec + Swagger UI before routes so it can observe
+  // route schemas during registration. Serves /openapi.json and /api/docs.
+  await fastify.register(openapiPlugin);
 
   // Register authenticate decorator (must be before routes)
   await fastify.register(authenticatePlugin);
@@ -214,20 +225,7 @@ async function buildServer() {
     };
   });
 
-  // Capture 5xx errors to Sentry
-  fastify.setErrorHandler((error: Error & { statusCode?: number }, request, reply) => {
-    const statusCode = error.statusCode ?? 500;
-    if (statusCode >= 500) {
-      captureException(error, {
-        method: request.method,
-        url: request.url,
-        statusCode,
-      });
-    }
-    reply.status(statusCode).send({
-      error: statusCode >= 500 ? 'Internal Server Error' : error.message,
-    });
-  });
+  // Global error handler is registered above via errorHandlerPlugin.
 
   // Serve static files in production
   if (config.NODE_ENV === 'production') {
@@ -236,10 +234,11 @@ async function buildServer() {
       prefix: '/',
     });
 
-    // SPA fallback
+    // SPA fallback. API 404s use the canonical envelope; everything else
+    // falls through to the SPA shell so client-side routing works.
     fastify.setNotFoundHandler((request, reply) => {
       if (request.url.startsWith('/api/')) {
-        return reply.code(404).send({ error: 'Not found' });
+        return reply.code(404).send({ code: 'NOT_FOUND', message: 'Not found' });
       }
       return reply.sendFile('index.html');
     });

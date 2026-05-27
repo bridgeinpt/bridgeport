@@ -19,6 +19,8 @@ import { PrismaClient } from '@prisma/client';
 import { setupTestDb, teardownTestDb, getTestPrisma } from './db.js';
 import { initializeCrypto } from '../../src/lib/crypto.js';
 import authenticatePlugin from '../../src/plugins/authenticate.js';
+import errorHandlerPlugin from '../../src/plugins/error-handler.js';
+import openapiPlugin from '../../src/plugins/openapi.js';
 
 // Route imports
 import { authRoutes } from '../../src/routes/auth.js';
@@ -104,6 +106,14 @@ export async function buildTestApp(options: BuildTestAppOptions = {}): Promise<T
   // Register plugins
   await fastify.register(cors, { origin: true, credentials: true });
   await fastify.register(jwt, { secret: process.env.JWT_SECRET! });
+
+  // Match production: error handler + openapi must run before routes so the
+  // canonical error envelope and the spec both observe everything that
+  // follows. Tests therefore exercise the real error wire shape, not a
+  // legacy `{error: ...}` body.
+  await fastify.register(errorHandlerPlugin);
+  await fastify.register(openapiPlugin);
+
   await fastify.register(authenticatePlugin);
   await fastify.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } });
 
@@ -147,13 +157,7 @@ export async function buildTestApp(options: BuildTestAppOptions = {}): Promise<T
     version: 'test',
   }));
 
-  // Error handler matching production behavior
-  fastify.setErrorHandler((error: Error & { statusCode?: number }, _request, reply) => {
-    const statusCode = error.statusCode ?? 500;
-    reply.status(statusCode).send({
-      error: statusCode >= 500 ? 'Internal Server Error' : error.message,
-    });
-  });
+  // Error handler is provided by errorHandlerPlugin above (canonical envelope).
 
   // Attach prisma to the instance for test access
   const testApp = fastify as TestApp;
