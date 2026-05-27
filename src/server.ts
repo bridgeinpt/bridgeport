@@ -129,11 +129,17 @@ async function buildServer() {
     max: 100,
     timeWindow: '1 minute',
     allowList: (req) => req.url === '/health' || req.url === '/api/client-config',
-    errorResponseBuilder: (_req, context) => ({
-      code: 'RATE_LIMITED',
-      message: `Rate limit exceeded. Try again in ${Math.ceil(context.ttl / 1000)} seconds.`,
-      hint: `Retry after ${Math.ceil(context.ttl / 1000)} seconds.`,
-    }),
+    errorResponseBuilder: (_req, context) => {
+      const retryAfter = Math.ceil(context.ttl / 1000);
+      return {
+        code: 'RATE_LIMITED',
+        message: `Rate limit exceeded. Try again in ${retryAfter} seconds.`,
+        hint: `Retry after ${retryAfter} seconds.`,
+        // Numeric convenience field for programmatic clients; the
+        // RFC-standard `Retry-After` header is still set by the plugin.
+        retryAfter,
+      };
+    },
   });
 
   // Register the global error handler before any routes so it catches

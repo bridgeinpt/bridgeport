@@ -291,7 +291,8 @@ Every non-2xx response returns a standardized envelope:
 | `VALIDATION_ERROR` | 400 | Request body / query failed schema validation. |
 | `READONLY_FIELD` | 400 | Client tried to mutate a server-managed field. |
 | `UNAUTHORIZED` | 401 | Missing or invalid credentials. |
-| `FORBIDDEN_SCOPE` | 403 | Authenticated but the principal isn't permitted for this resource (RBAC or token scope). |
+| `FORBIDDEN_SCOPE` | 403 | Authenticated but the token isn't scoped to this environment (env-scoped API token hitting an environment outside its allowlist, or a global route). |
+| `FORBIDDEN_ROLE` | 403 | Authenticated but the principal's role is insufficient (e.g., a viewer attempting a write, a non-admin hitting an admin-only route). |
 | `NOT_FOUND` | 404 | Resource doesn't exist (or the caller can't see it). |
 | `CONFLICT` | 409 | Conflicting state (duplicate name, optimistic-lock failure, etc.). |
 | `IDEMPOTENCY_KEY_REUSED` | 409 | An idempotency key was replayed with a different request body. |

@@ -110,6 +110,22 @@ describe('error-handler plugin', () => {
       expect(res.statusCode).toBe(422);
       expect(res.json().code).toBe('VALIDATION_ERROR');
     });
+
+    it('masks ApiError messages on 5xx so internal detail does not leak', async () => {
+      const app = await buildApp();
+      app.get('/api-boom', async () => {
+        throw new ApiError('INTERNAL', 'secret detail', { statusCode: 500 });
+      });
+
+      const res = await app.inject({ method: 'GET', url: '/api-boom' });
+      expect(res.statusCode).toBe(500);
+      const body = res.json();
+      expect(body.code).toBe('INTERNAL');
+      expect(body.message).toBe('Internal Server Error');
+      expect(body.message).not.toContain('secret detail');
+      // Original error is still captured to Sentry by the surrounding handler.
+      expect(captureException).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('onSend reshaping', () => {
@@ -209,6 +225,21 @@ describe('error-handler plugin', () => {
       const body = res.json();
       expect(body.code).toBe('VALIDATION_ERROR');
       expect(body.details).toEqual([{ path: ['email'], message: 'required' }]);
+    });
+
+    it('drops legacy `details` on 5xx responses to avoid leaking debug info', async () => {
+      const app = await buildApp();
+      app.get('/sd', async (_req, reply) => {
+        return reply.code(500).send({
+          error: 'DB exploded',
+          details: 'stack trace ...',
+        });
+      });
+      const res = await app.inject({ method: 'GET', url: '/sd' });
+      const body = res.json();
+      expect(body.code).toBe('INTERNAL');
+      expect(body.message).toBe('Internal Server Error');
+      expect(body).not.toHaveProperty('details');
     });
   });
 });

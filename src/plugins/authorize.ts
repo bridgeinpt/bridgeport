@@ -4,7 +4,7 @@ import { ApiError } from '../lib/errors.js';
 
 /**
  * Middleware that requires the user to be an admin.
- * Throws ApiError(FORBIDDEN_SCOPE) for non-admins, ApiError(UNAUTHORIZED) for unauthenticated.
+ * Throws ApiError(FORBIDDEN_ROLE) for non-admins, ApiError(UNAUTHORIZED) for unauthenticated.
  */
 export async function requireAdmin(
   request: FastifyRequest,
@@ -15,13 +15,13 @@ export async function requireAdmin(
   }
 
   if (request.authUser.role !== 'admin') {
-    throw new ApiError('FORBIDDEN_SCOPE', 'Admin access required');
+    throw new ApiError('FORBIDDEN_ROLE', 'Admin access required');
   }
 }
 
 /**
  * Middleware that requires the user to be an admin or operator.
- * Throws ApiError(FORBIDDEN_SCOPE) for viewers.
+ * Throws ApiError(FORBIDDEN_ROLE) for viewers.
  */
 export async function requireOperator(
   request: FastifyRequest,
@@ -33,7 +33,7 @@ export async function requireOperator(
 
   const allowedRoles: UserRole[] = ['admin', 'operator'];
   if (!allowedRoles.includes(request.authUser.role)) {
-    throw new ApiError('FORBIDDEN_SCOPE', 'Operator or admin access required');
+    throw new ApiError('FORBIDDEN_ROLE', 'Operator or admin access required');
   }
 }
 
@@ -61,7 +61,7 @@ export function requireAdminOrSelf(paramName: string = 'id') {
 
     // Non-admin can only access their own resource
     if (request.authUser.id !== targetId) {
-      throw new ApiError('FORBIDDEN_SCOPE', 'Access denied');
+      throw new ApiError('FORBIDDEN_ROLE', 'Access denied');
     }
   };
 }

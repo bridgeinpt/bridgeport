@@ -76,7 +76,7 @@ function enforceRoleForMethod(user: AuthUser, request: FastifyRequest): void {
   const routePattern = request.routeOptions?.url ?? request.url;
   if (VIEWER_ALLOWED_MUTATIONS.has(`${method} ${routePattern}`)) return;
 
-  throw new ApiError('FORBIDDEN_SCOPE', 'This action requires operator or admin role');
+  throw new ApiError('FORBIDDEN_ROLE', 'This action requires operator or admin role');
 }
 
 async function authenticatePlugin(fastify: FastifyInstance) {
