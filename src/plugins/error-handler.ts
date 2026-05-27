@@ -53,10 +53,13 @@ function envelopeFromFastifyValidation(err: AnyError): ErrorEnvelope {
 
 function buildEnvelope(err: AnyError): { envelope: ErrorEnvelope; statusCode: number } {
   if (err instanceof ApiError) {
+    // 5xx: hide the original message to avoid leaking internals. The full
+    // error is still logged + sent to Sentry by the surrounding handler.
+    const message = err.statusCode >= 500 ? 'Internal Server Error' : err.message;
     return {
       envelope: {
         code: err.code,
-        message: err.message,
+        message,
         ...(err.field !== undefined ? { field: err.field } : {}),
         ...(err.hint !== undefined ? { hint: err.hint } : {}),
       },
@@ -175,7 +178,9 @@ async function errorHandlerPlugin(fastify: FastifyInstance): Promise<void> {
     // Preserve legacy `details` array (used by validation errors) as a
     // non-standard but harmless field — clients that branch on `code`
     // will continue to work, and existing UIs that read `details` still see them.
-    if (legacy.details !== undefined) envelope.details = legacy.details;
+    // For 5xx we drop it: legacy routes may stuff stack-trace fragments or
+    // internal debug info in there, and we already mask `message`.
+    if (legacy.details !== undefined && status < 500) envelope.details = legacy.details;
 
     return JSON.stringify(envelope);
   });

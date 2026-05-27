@@ -3,7 +3,10 @@ import { captureException } from './sentry';
 const API_BASE = '/api';
 
 interface ApiError {
-  error: string;
+  code?: string;
+  message?: string;
+  // Legacy shape — kept for backwards compatibility with any unmigrated responses
+  error?: string;
   details?: unknown;
 }
 
@@ -109,14 +112,15 @@ class ApiClient {
     const data = await response.json();
 
     if (!response.ok) {
+      const apiErr = data as ApiError;
       if (response.status >= 500) {
-        captureException(new Error((data as ApiError).error || 'Server error'), {
+        captureException(new Error(apiErr.message ?? apiErr.error ?? 'Server error'), {
           method,
           url: path,
           statusCode: response.status,
         });
       }
-      throw new Error((data as ApiError).error || 'Request failed');
+      throw new Error(apiErr.message ?? apiErr.error ?? 'Request failed');
     }
 
     return data as T;
@@ -166,7 +170,8 @@ class ApiClient {
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error((data as ApiError).error || 'Upload failed');
+      const apiErr = data as ApiError;
+      throw new Error(apiErr.message ?? apiErr.error ?? 'Upload failed');
     }
 
     return data as T;
