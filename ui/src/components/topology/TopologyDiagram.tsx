@@ -29,9 +29,36 @@ import '@xyflow/react/dist/style.css';
 import { ServerGroupNode } from './ServerGroupNode';
 import { ServiceNode, type ServiceNodeData } from './ServiceNode';
 import { DatabaseNode, type DatabaseNodeData } from './DatabaseNode';
+import { ExternalEntityNode, type ExternalEntityNodeData } from './ExternalEntityNode';
+import { ServerClusterNode, type ServerClusterNodeData } from './ServerClusterNode';
 import { AddConnectionModal } from './AddConnectionModal';
-import type { ServerWithServices, Database, UserRole, ExposedPort, ServiceConnection, DiagramLayoutPositions } from '../../lib/api';
-import { listConnections, createConnection, deleteConnection, getDiagramLayout, saveDiagramLayout, exportDiagramMermaid } from '../../lib/api';
+import type {
+  ServerWithServices,
+  Database,
+  UserRole,
+  ExposedPort,
+  ServiceConnection,
+  DiagramLayoutPositions,
+  ExternalEntity,
+  ServerCluster,
+  ConnectionEndpointType,
+} from '../../lib/api';
+import {
+  listConnections,
+  createConnection,
+  deleteConnection,
+  getDiagramLayout,
+  saveDiagramLayout,
+  exportDiagramMermaid,
+  listExternalEntities,
+  createExternalEntity,
+  updateExternalEntity,
+  deleteExternalEntity,
+  listServerClusters,
+  createServerCluster,
+  updateServerCluster,
+  deleteServerCluster,
+} from '../../lib/api';
 import { inferConnections, mergeConnections, aggregateCollapsedEdges, type TopologyEdge } from '../../lib/topology';
 import { EmptyState } from '../EmptyState';
 import { useToast } from '../Toast';
@@ -61,6 +88,8 @@ const nodeTypes: NodeTypes = {
   serverGroup: ServerGroupNode,
   serviceNode: ServiceNode,
   databaseNode: DatabaseNode,
+  externalEntity: ExternalEntityNode,
+  serverCluster: ServerClusterNode,
 };
 
 // Prevent React Flow from intercepting events on interactive edge label elements
@@ -170,24 +199,106 @@ interface BuildResult {
   nodes: Node[];
   serviceToServer: Map<string, string>;
   databaseToServer: Map<string, string>;
+  serverToCluster: Map<string, string>;
 }
 
-function buildNodes(
-  servers: ServerWithServices[],
-  databases: Database[],
-  collapsedServers: Set<string>,
-  onToggleCollapse: (serverId: string) => void,
-  savedPositions: DiagramLayoutPositions | null,
-): BuildResult {
+// Sidecar parameters bundle so the function signature stays manageable as
+// the diagram grew to support external entities and clusters.
+interface BuildNodesContext {
+  servers: ServerWithServices[];
+  databases: Database[];
+  externalEntities: ExternalEntity[];
+  serverClusters: ServerCluster[];
+  collapsedServers: Set<string>;
+  collapsedClusters: Set<string>;
+  savedPositions: DiagramLayoutPositions | null;
+  onToggleCollapse: (serverId: string) => void;
+  onToggleClusterCollapse?: (clusterId: string) => void;
+  onDeleteCluster?: (clusterId: string) => void;
+  onDeleteExternalEntity?: (externalEntityId: string) => void;
+}
+
+function buildNodes(ctx: BuildNodesContext): BuildResult {
+  const {
+    servers,
+    databases,
+    externalEntities,
+    serverClusters,
+    collapsedServers,
+    collapsedClusters,
+    savedPositions,
+    onToggleCollapse,
+    onToggleClusterCollapse,
+    onDeleteCluster,
+    onDeleteExternalEntity,
+  } = ctx;
   const nodes: Node[] = [];
   const serviceToServer = new Map<string, string>();
   const databaseToServer = new Map<string, string>();
+  const serverToCluster = new Map<string, string>();
   let serverX = 0;
 
   const placedDatabaseIds = new Set<string>();
 
+  // --- Cluster nodes first, so server groups can reference them as parents.
+  // We track per-cluster cursor positions for laying out parented servers
+  // inside the cluster body.
+  const clustersById = new Map<string, ServerCluster>();
+  for (const c of serverClusters) {
+    clustersById.set(c.id, c);
+    serverToCluster.set(c.id, c.id); // placeholder; replaced below per-server
+  }
+  // serverToCluster is populated from Server.clusterId as we iterate servers.
+  serverToCluster.clear();
+  const clusterCursor = new Map<string, { x: number; y: number }>();
+  for (const cluster of serverClusters) {
+    const clusterNodeId = `cluster:${cluster.id}`;
+    const isCollapsed = collapsedClusters.has(cluster.id);
+    const savedPos = savedPositions?.[clusterNodeId];
+    const widthFromSaved = savedPos?.width ?? cluster.width ?? undefined;
+    const heightFromSaved = savedPos?.height ?? cluster.height ?? undefined;
+    const childServers = servers.filter((s) => s.clusterId === cluster.id);
+    const data: ServerClusterNodeData = {
+      label: cluster.name,
+      clusterId: cluster.id,
+      color: cluster.color,
+      collapsed: isCollapsed,
+      serverCount: childServers.length,
+      onToggleCollapse: onToggleClusterCollapse,
+      onDelete: onDeleteCluster,
+    };
+    nodes.push({
+      id: clusterNodeId,
+      type: 'serverCluster',
+      position: savedPos ? { x: savedPos.x, y: savedPos.y } : { x: cluster.x, y: cluster.y },
+      data: data as unknown as Record<string, unknown>,
+      style: {
+        width: widthFromSaved ?? 600,
+        height: heightFromSaved ?? (isCollapsed ? 80 : 260),
+        // Clusters render below all other nodes so children float above the
+        // dashed border.
+        zIndex: 0,
+      },
+    });
+    clusterCursor.set(cluster.id, { x: 12, y: SERVER_HEADER_HEIGHT + 4 });
+  }
+
   for (const server of servers) {
     const isCollapsed = collapsedServers.has(server.id);
+    const inCluster = server.clusterId && clustersById.has(server.clusterId) ? server.clusterId : null;
+    if (inCluster) serverToCluster.set(server.id, inCluster);
+    const parentClusterCollapsed = inCluster ? collapsedClusters.has(inCluster) : false;
+    // If the parent cluster is collapsed, skip rendering child servers — the
+    // cluster node is the visual stand-in and edges aggregate to it.
+    if (parentClusterCollapsed) {
+      for (const service of server.services) serviceToServer.set(service.id, server.id);
+      const serverDatabases = databases.filter((db) => db.serverId === server.id);
+      for (const db of serverDatabases) {
+        placedDatabaseIds.add(db.id);
+        databaseToServer.set(db.id, server.id);
+      }
+      continue;
+    }
     const serverDatabases = databases.filter((db) => db.serverId === server.id);
     serverDatabases.forEach((db) => placedDatabaseIds.add(db.id));
 
@@ -201,20 +312,41 @@ function buildNodes(
     const childCount = isCollapsed ? 0 : server.services.length + serverDatabases.length;
     const columns = Math.max(1, Math.min(3, Math.ceil(childCount / 3)));
     const rows = Math.ceil(childCount / columns);
-    const serverWidth = Math.max(
+    const computedWidth = Math.max(
       200,
       columns * (NODE_WIDTH + NODE_GAP) + SERVER_PADDING * 2 - NODE_GAP
     );
-    const serverHeight = isCollapsed
+    const computedHeight = isCollapsed
       ? SERVER_HEADER_HEIGHT + 10
       : SERVER_HEADER_HEIGHT + rows * (NODE_HEIGHT + NODE_GAP) + SERVER_PADDING + NODE_GAP;
 
     const serverNodeId = `server:${server.id}`;
     const savedPos = savedPositions?.[serverNodeId];
+    // Prefer saved size from a prior resize; otherwise fall back to the
+    // computed bounding box. Clamp NodeResizer to the computed minimums so
+    // children with extent:'parent' don't get clipped.
+    const serverWidth = savedPos?.width ?? computedWidth;
+    const serverHeight = savedPos?.height ?? computedHeight;
+
+    // Position the server group: inside its cluster's local coordinate space
+    // when clustered, otherwise on the canvas. For clustered servers we lay
+    // them out with a simple per-cluster cursor unless saved-relative positions
+    // are present.
+    let position: { x: number; y: number };
+    if (inCluster) {
+      const cursor = clusterCursor.get(inCluster)!;
+      position = savedPos ? { x: savedPos.x, y: savedPos.y } : { x: cursor.x, y: cursor.y };
+      // Advance cursor for the next sibling.
+      cursor.x += computedWidth + SERVER_GAP;
+    } else {
+      position = savedPos ? { x: savedPos.x, y: savedPos.y } : { x: serverX, y: 0 };
+    }
+
     nodes.push({
       id: serverNodeId,
       type: 'serverGroup',
-      position: savedPos || { x: serverX, y: 0 },
+      position,
+      ...(inCluster ? { parentId: `cluster:${inCluster}`, extent: 'parent' as const } : {}),
       data: {
         label: server.name,
         serverId: server.id,
@@ -222,6 +354,10 @@ function buildNodes(
         serviceCount: server.services.length,
         collapsed: isCollapsed,
         onToggleCollapse,
+        // Pass the computed bounding-box as the NodeResizer floor so the user
+        // can't shrink below the children's footprint.
+        minWidth: computedWidth,
+        minHeight: computedHeight,
       },
       style: { width: serverWidth, height: serverHeight },
     });
@@ -289,7 +425,11 @@ function buildNodes(
       }
     }
 
-    serverX += serverWidth + SERVER_GAP;
+    // Only unclustered servers advance the canvas-level cursor; clustered
+    // servers consume cluster-local space.
+    if (!inCluster) {
+      serverX += serverWidth + SERVER_GAP;
+    }
   }
 
   const standaloneDatabases = databases.filter((db) => !placedDatabaseIds.has(db.id));
@@ -299,10 +439,12 @@ function buildNodes(
     nodes.push({
       id: nodeId,
       type: 'databaseNode',
-      position: savedPos || {
-        x: serverX + DATABASE_STANDALONE_X_OFFSET,
-        y: i * (NODE_HEIGHT + NODE_GAP * 2),
-      },
+      position: savedPos
+        ? { x: savedPos.x, y: savedPos.y }
+        : {
+            x: serverX + DATABASE_STANDALONE_X_OFFSET,
+            y: i * (NODE_HEIGHT + NODE_GAP * 2),
+          },
       data: {
         label: db.name,
         databaseId: db.id,
@@ -313,7 +455,33 @@ function buildNodes(
     });
   });
 
-  return { nodes, serviceToServer, databaseToServer };
+  // External entities — fall back to their stored x/y, but prefer saved
+  // canvas-layout positions if present.
+  externalEntities.forEach((ext, i) => {
+    const nodeId = `external:${ext.id}`;
+    const savedPos = savedPositions?.[nodeId];
+    const data: ExternalEntityNodeData = {
+      label: ext.label,
+      externalEntityId: ext.id,
+      kind: ext.kind,
+      iconKey: ext.iconKey,
+      onDelete: onDeleteExternalEntity,
+    };
+    nodes.push({
+      id: nodeId,
+      type: 'externalEntity',
+      position: savedPos
+        ? { x: savedPos.x, y: savedPos.y }
+        : { x: ext.x, y: ext.y || i * 70 },
+      data: data as unknown as Record<string, unknown>,
+      style: {
+        width: savedPos?.width ?? ext.width ?? 160,
+        height: savedPos?.height ?? ext.height ?? 48,
+      },
+    });
+  });
+
+  return { nodes, serviceToServer, databaseToServer, serverToCluster };
 }
 
 function topologyEdgesToReactFlow(
@@ -403,6 +571,8 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
   const [savedPositions, setSavedPositions] = useState<DiagramLayoutPositions | null>(null);
   const [showConnectionsList, setShowConnectionsList] = useState(false);
   const [showAddConnectionModal, setShowAddConnectionModal] = useState(false);
+  const [externalEntities, setExternalEntities] = useState<ExternalEntity[]>([]);
+  const [serverClusters, setServerClusters] = useState<ServerCluster[]>([]);
   const connectionsListRef = useRef<HTMLDivElement>(null);
   const reactFlowInstance = useReactFlow();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -470,6 +640,42 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     return () => { cancelled = true; };
   }, [environmentId]);
 
+  // Fetch external entities & server clusters in parallel — reset eagerly on
+  // env change for the same reason as manualConnections.
+  useEffect(() => {
+    if (!environmentId) return;
+    setExternalEntities([]);
+    setServerClusters([]);
+    let cancelled = false;
+    Promise.all([listExternalEntities(environmentId), listServerClusters(environmentId)])
+      .then(([extRes, clRes]) => {
+        if (cancelled) return;
+        setExternalEntities(extRes.externalEntities || []);
+        setServerClusters(clRes.serverClusters || []);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setExternalEntities([]);
+        setServerClusters([]);
+      });
+    return () => { cancelled = true; };
+  }, [environmentId]);
+
+  const [collapsedClusters, setCollapsedClusters] = useState<Set<string>>(new Set());
+
+  // Reflect the persisted `collapsed` flag from the server into local state
+  // when clusters change. We only seed once per cluster-set so user toggles
+  // since last fetch aren't clobbered.
+  useEffect(() => {
+    setCollapsedClusters((prev) => {
+      const next = new Set(prev);
+      for (const c of serverClusters) {
+        if (c.collapsed) next.add(c.id);
+      }
+      return next;
+    });
+  }, [serverClusters]);
+
   const handleToggleCollapse = useCallback((serverId: string) => {
     setCollapsedServers((prev) => {
       const next = new Set(prev);
@@ -499,9 +705,10 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     isDraggingRef.current = true;
   }, []);
 
-  // Layout persistence: debounced save on drag end
-  const handleNodeDragStop: OnNodeDrag = useCallback((_event, _node) => {
-    isDraggingRef.current = false;
+  // Snapshot the current canvas-level positions (top-level nodes only) and
+  // persist them, including any resized width/height. Used by both
+  // drag-stop and resize-end so both interactions share the same store shape.
+  const scheduleLayoutSave = useCallback(() => {
     if (!canInteract || !environmentId) return;
 
     if (saveTimeoutRef.current) {
@@ -515,14 +722,32 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
       const currentNodes = reactFlowInstance.getNodes();
       const positions: DiagramLayoutPositions = {};
       for (const n of currentNodes) {
-        // Only save server and standalone (no parent) node positions
+        // Only save canvas-level (no parent) node positions. Children are
+        // positioned relative to parents and re-derived on every render.
         if (!n.parentId) {
-          positions[n.id] = { x: n.position.x, y: n.position.y };
+          // Pull width/height off either the inline style or measured size,
+          // whichever is available — NodeResizer writes to both.
+          const styleWidth = typeof n.style?.width === 'number' ? (n.style.width as number) : undefined;
+          const styleHeight = typeof n.style?.height === 'number' ? (n.style.height as number) : undefined;
+          const measuredWidth = n.measured?.width ?? n.width ?? undefined;
+          const measuredHeight = n.measured?.height ?? n.height ?? undefined;
+          positions[n.id] = {
+            x: n.position.x,
+            y: n.position.y,
+            ...(styleWidth !== undefined || measuredWidth !== undefined ? { width: styleWidth ?? measuredWidth! } : {}),
+            ...(styleHeight !== undefined || measuredHeight !== undefined ? { height: styleHeight ?? measuredHeight! } : {}),
+          };
         }
       }
       saveDiagramLayout(targetEnv, positions).catch(() => {});
     }, 1000);
   }, [canInteract, environmentId, reactFlowInstance]);
+
+  // Layout persistence: debounced save on drag end
+  const handleNodeDragStop: OnNodeDrag = useCallback((_event, _node) => {
+    isDraggingRef.current = false;
+    scheduleLayoutSave();
+  }, [scheduleLayoutSave]);
 
   // Cancel any pending layout save when the environment changes or on unmount —
   // otherwise the timer fires against the now-current env and overwrites its
@@ -554,15 +779,17 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
       return;
     }
 
-    // Parse node IDs (format: "service:<id>" or "database:<id>")
-    const parseNodeId = (nodeId: string) => {
+    // Parse node IDs (format: "service:<id>" | "database:<id>" | "external:<id>").
+    // We narrow to the persisted endpoint types — server/cluster IDs cannot be
+    // either source or target of a stored connection.
+    const parseNodeId = (nodeId: string): { type: ConnectionEndpointType | 'server' | 'cluster'; id: string } => {
       const [type, ...rest] = nodeId.split(':');
-      return { type: type as 'service' | 'database', id: rest.join(':') };
+      return { type: type as ConnectionEndpointType | 'server' | 'cluster', id: rest.join(':') };
     };
 
     // React Flow normalizes connections so source always has a "source" handle,
     // regardless of drag direction. Use the tracked start node to preserve
-    // the user's intended direction.
+    // the user's intended direction AND the user-chosen handle on each side.
     let sourceNodeId = connection.source;
     let targetNodeId = connection.target;
     let sourceHandle = connection.sourceHandle ?? null;
@@ -578,10 +805,11 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     const source = parseNodeId(sourceNodeId);
     const target = parseNodeId(targetNodeId);
 
-    // Skip server-to-server connections (shouldn't reach here normally,
-    // since ServerGroupNode no longer renders handles when expanded).
-    if (source.type !== 'service' && source.type !== 'database') return;
-    if (target.type !== 'service' && target.type !== 'database') return;
+    // Drop connections involving server/cluster aggregate nodes — they aren't
+    // a persistent endpoint type.
+    const isValidEndpoint = (t: string): t is ConnectionEndpointType =>
+      t === 'service' || t === 'database' || t === 'external';
+    if (!isValidEndpoint(source.type) || !isValidEndpoint(target.type)) return;
 
     try {
       const conn = await createConnection({
@@ -600,6 +828,131 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
       toast.error(`Failed to create connection: ${getErrorMessage(err, 'Unknown error')}`);
     }
   }, [canInteract, environmentId, toast]);
+
+  // ==================== Cluster handlers ====================
+
+  const handleToggleClusterCollapse = useCallback((clusterId: string) => {
+    setCollapsedClusters((prev) => {
+      const next = new Set(prev);
+      const wasCollapsed = next.has(clusterId);
+      if (wasCollapsed) next.delete(clusterId);
+      else next.add(clusterId);
+      // Best-effort persist to the server — local state is authoritative for
+      // immediate UI feedback.
+      if (canInteract) {
+        updateServerCluster(clusterId, { collapsed: !wasCollapsed }).catch(() => {});
+      }
+      return next;
+    });
+  }, [canInteract]);
+
+  const handleDeleteCluster = useCallback(async (clusterId: string) => {
+    if (!canInteract) return;
+    const removed = serverClusters.find((c) => c.id === clusterId);
+    setServerClusters((prev) => prev.filter((c) => c.id !== clusterId));
+    try {
+      await deleteServerCluster(clusterId);
+    } catch (err) {
+      if (removed) setServerClusters((prev) => (prev.some((c) => c.id === clusterId) ? prev : [...prev, removed]));
+      toast.error(`Failed to delete cluster: ${getErrorMessage(err, 'Unknown error')}`);
+    }
+  }, [canInteract, serverClusters, toast]);
+
+  const handleCreateCluster = useCallback(async () => {
+    if (!canInteract || !environmentId) return;
+    const name = window.prompt('Cluster name (e.g. "Production HA", "EU region")');
+    if (!name) return;
+    try {
+      // Place the new cluster at the current viewport center so it lands on
+      // screen rather than at (0,0).
+      const { x: vx, y: vy, zoom } = reactFlowInstance.getViewport();
+      const center = {
+        x: ((-vx) / Math.max(0.1, zoom)) + 200,
+        y: ((-vy) / Math.max(0.1, zoom)) + 80,
+      };
+      const res = await createServerCluster(environmentId, {
+        name: name.trim(),
+        x: center.x,
+        y: center.y,
+        width: 640,
+        height: 280,
+      });
+      setServerClusters((prev) => [...prev, res.serverCluster]);
+    } catch (err) {
+      toast.error(`Failed to create cluster: ${getErrorMessage(err, 'Unknown error')}`);
+    }
+  }, [canInteract, environmentId, reactFlowInstance, toast]);
+
+  // ==================== External entity handlers ====================
+
+  const handleDeleteExternalEntity = useCallback(async (id: string) => {
+    if (!canInteract) return;
+    const removed = externalEntities.find((e) => e.id === id);
+    setExternalEntities((prev) => prev.filter((e) => e.id !== id));
+    try {
+      await deleteExternalEntity(id);
+    } catch (err) {
+      if (removed) setExternalEntities((prev) => (prev.some((e) => e.id === id) ? prev : [...prev, removed]));
+      toast.error(`Failed to delete external entity: ${getErrorMessage(err, 'Unknown error')}`);
+    }
+  }, [canInteract, externalEntities, toast]);
+
+  const handleCreateExternalEntity = useCallback(async () => {
+    if (!canInteract || !environmentId) return;
+    const label = window.prompt('External entity label (e.g. "Cloudflare", "Web", "Internet")');
+    if (!label) return;
+    const kind = (window.prompt('Kind (e.g. cloudflare, cdn, web, client) — used for styling', 'web') || 'web').trim();
+    try {
+      const { x: vx, y: vy, zoom } = reactFlowInstance.getViewport();
+      const center = {
+        x: ((-vx) / Math.max(0.1, zoom)) + 80,
+        y: ((-vy) / Math.max(0.1, zoom)) + 200,
+      };
+      const res = await createExternalEntity(environmentId, {
+        label: label.trim(),
+        kind,
+        x: center.x,
+        y: center.y,
+      });
+      setExternalEntities((prev) => [...prev, res.externalEntity]);
+    } catch (err) {
+      toast.error(`Failed to create external entity: ${getErrorMessage(err, 'Unknown error')}`);
+    }
+  }, [canInteract, environmentId, reactFlowInstance, toast]);
+
+  // ==================== Resize-end persistence ====================
+
+  // React Flow fires a `dimensions` change with `resizing: true` while the
+  // user is dragging a NodeResizer handle, then a final dimensions change
+  // when they release. We piggyback the same debounced save used for drags
+  // and also persist updated positions for external entities back to their
+  // own row (so they survive a layout reset).
+  const handleNodeResizeEnd = useCallback((_event: unknown, node: Node) => {
+    scheduleLayoutSave();
+    // Best-effort: when an external entity is resized, persist its position
+    // to its own row too. We use the inline style if present, else measured.
+    if (node.id.startsWith('external:')) {
+      const id = node.id.slice('external:'.length);
+      const width = typeof node.style?.width === 'number' ? (node.style.width as number) : node.measured?.width;
+      const height = typeof node.style?.height === 'number' ? (node.style.height as number) : node.measured?.height;
+      updateExternalEntity(id, {
+        x: node.position.x,
+        y: node.position.y,
+        width: width ?? null,
+        height: height ?? null,
+      }).catch(() => {});
+    } else if (node.id.startsWith('cluster:')) {
+      const id = node.id.slice('cluster:'.length);
+      const width = typeof node.style?.width === 'number' ? (node.style.width as number) : node.measured?.width;
+      const height = typeof node.style?.height === 'number' ? (node.style.height as number) : node.measured?.height;
+      updateServerCluster(id, {
+        x: node.position.x,
+        y: node.position.y,
+        width: width ?? null,
+        height: height ?? null,
+      }).catch(() => {});
+    }
+  }, [scheduleLayoutSave]);
 
   // ESC to exit fullscreen — but only when no modal is open, otherwise the
   // same keypress would close the modal AND drop out of fullscreen.
@@ -680,20 +1033,66 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     for (const db of databases) {
       map.set(`database:${db.id}`, db.name);
     }
+    for (const ext of externalEntities) {
+      map.set(`external:${ext.id}`, ext.label);
+    }
     return map;
-  }, [servers, databases]);
+  }, [servers, databases, externalEntities]);
 
-  const { nodes, serviceToServer, databaseToServer } = useMemo(
-    () => buildNodes(servers, databases, collapsedServers, handleToggleCollapse, savedPositions),
-    [servers, databases, collapsedServers, handleToggleCollapse, savedPositions]
+  const { nodes, serviceToServer, databaseToServer, serverToCluster } = useMemo(
+    () => buildNodes({
+      servers,
+      databases,
+      externalEntities,
+      serverClusters,
+      collapsedServers,
+      collapsedClusters,
+      savedPositions,
+      onToggleCollapse: handleToggleCollapse,
+      onToggleClusterCollapse: canInteract ? handleToggleClusterCollapse : undefined,
+      onDeleteCluster: canInteract ? handleDeleteCluster : undefined,
+      onDeleteExternalEntity: canInteract ? handleDeleteExternalEntity : undefined,
+    }),
+    [
+      servers,
+      databases,
+      externalEntities,
+      serverClusters,
+      collapsedServers,
+      collapsedClusters,
+      savedPositions,
+      handleToggleCollapse,
+      canInteract,
+      handleToggleClusterCollapse,
+      handleDeleteCluster,
+      handleDeleteExternalEntity,
+    ]
   );
 
   const edges = useMemo(() => {
     const inferred = inferConnections(servers, databases);
     const merged = mergeConnections(inferred, manualConnections);
-    const aggregated = aggregateCollapsedEdges(merged, collapsedServers, serviceToServer, databaseToServer);
+    const aggregated = aggregateCollapsedEdges(
+      merged,
+      collapsedServers,
+      serviceToServer,
+      databaseToServer,
+      collapsedClusters,
+      serverToCluster,
+    );
     return topologyEdgesToReactFlow(aggregated, canInteract ? handleDeleteConnection : null);
-  }, [servers, databases, manualConnections, collapsedServers, serviceToServer, databaseToServer, canInteract, handleDeleteConnection]);
+  }, [
+    servers,
+    databases,
+    manualConnections,
+    collapsedServers,
+    serviceToServer,
+    databaseToServer,
+    collapsedClusters,
+    serverToCluster,
+    canInteract,
+    handleDeleteConnection,
+  ]);
 
   const [flowNodes, setFlowNodes, onNodesChange] = useNodesState(nodes);
   const [flowEdges, setFlowEdges, onEdgesChange] = useEdgesState(edges);
@@ -717,6 +1116,34 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
       return edges.map((e) => (selectedIds.has(e.id) ? { ...e, selected: true } : e));
     });
   }, [edges, setFlowEdges]);
+
+  // Wrap onNodesChange so we can fire a "resize end" callback for resizable
+  // nodes (server groups, external entities, clusters). ReactFlow fires
+  // `dimensions` changes with `resizing: true` while the user drags a
+  // NodeResizer handle, and a final change when they release. We track the
+  // last-seen resizing state per node and fire on the falling edge.
+  const resizingNodeIdsRef = useRef<Set<string>>(new Set());
+  const handleNodesChange = useCallback((changes: import('@xyflow/react').NodeChange[]) => {
+    if (canInteract) {
+      for (const change of changes) {
+        if (change.type !== 'dimensions') continue;
+        const id = change.id;
+        const isResizing = Boolean((change as { resizing?: boolean }).resizing);
+        const was = resizingNodeIdsRef.current.has(id);
+        if (isResizing) {
+          resizingNodeIdsRef.current.add(id);
+        } else if (was) {
+          resizingNodeIdsRef.current.delete(id);
+          // Defer to next tick so the new dimensions have been applied to the node.
+          const node = reactFlowInstance.getNode(id);
+          if (node) {
+            setTimeout(() => handleNodeResizeEnd(null, node), 0);
+          }
+        }
+      }
+    }
+    onNodesChange(changes);
+  }, [canInteract, onNodesChange, handleNodeResizeEnd, reactFlowInstance]);
 
   // Wrap onEdgesChange: ReactFlow fires `remove` changes when the user presses
   // Backspace/Delete on a selected edge. Without this wrap the change is
@@ -764,7 +1191,7 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
   const flowProps = {
     nodes: flowNodes,
     edges: flowEdges,
-    onNodesChange: canInteract ? onNodesChange : undefined,
+    onNodesChange: canInteract ? handleNodesChange : undefined,
     onEdgesChange: handleEdgesChange,
     onNodeDragStart: canInteract ? handleNodeDragStart : undefined,
     onNodeDragStop: canInteract ? handleNodeDragStop : undefined,
@@ -816,6 +1243,8 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
               />
               {canInteract && (
                 <>
+                  <AddExternalEntityButton onClick={handleCreateExternalEntity} />
+                  <NewClusterButton onClick={handleCreateCluster} />
                   <AddConnectionButton onClick={() => setShowAddConnectionModal(true)} />
                   <ConnectionsListButton
                     connections={manualConnections}
@@ -1008,6 +1437,41 @@ function AddConnectionButton({ onClick }: { onClick: () => void }) {
     >
       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+      </svg>
+    </button>
+  );
+}
+
+// Drops a non-server entity (Cloudflare, "Web", a generic client) on the
+// canvas. Used to represent inbound external traffic toward a service.
+function AddExternalEntityButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="p-1.5 text-slate-400 hover:text-white rounded"
+      title="Add external entity"
+      aria-label="Add external entity"
+    >
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    </button>
+  );
+}
+
+// Creates a logical cluster (HA pair, swarm/k8s nodes, regional grouping).
+// Servers can then be associated with the cluster via their PATCH endpoint
+// (or by selection in a separate flow — see docs/guides/topology.md).
+function NewClusterButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="p-1.5 text-slate-400 hover:text-white rounded"
+      title="New cluster"
+      aria-label="New cluster"
+    >
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14-4H5m14 8H5m14 4H5" />
       </svg>
     </button>
   );

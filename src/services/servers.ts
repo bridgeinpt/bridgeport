@@ -64,6 +64,8 @@ export interface ServerInput {
   publicIp?: string | null;
   tags?: string[];
   dockerMode?: 'socket' | 'ssh';
+  // Server clustering: optional logical group. `null` disassociates.
+  clusterId?: string | null;
 }
 
 export interface ServerWithServices extends Server {
@@ -96,6 +98,8 @@ export async function updateServer(
   if (input.publicIp !== undefined) updateData.publicIp = input.publicIp || null;
   if (input.tags) updateData.tags = JSON.stringify(input.tags);
   if (input.dockerMode) updateData.dockerMode = input.dockerMode;
+  // `clusterId === null` clears the cluster association; `undefined` leaves it alone.
+  if (input.clusterId !== undefined) updateData.clusterId = input.clusterId;
 
   return prisma.server.update({
     where: { id: serverId },

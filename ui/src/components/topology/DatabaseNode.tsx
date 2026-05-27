@@ -58,8 +58,8 @@ function DatabaseNodeComponent({ data }: NodeProps) {
             <span className="text-[10px] text-slate-400 font-mono">:{nodeData.port}</span>
           )}
         </div>
-        <Handle type="target" position={Position.Left} className="topology-handle topology-handle-db" />
-        <Handle type="source" position={Position.Right} className="topology-handle topology-handle-db" />
+        <Handle id="left" type="target" position={Position.Left} className="topology-handle topology-handle-db" />
+        <Handle id="right" type="source" position={Position.Right} className="topology-handle topology-handle-db" />
         <Handle id="top" type="source" position={Position.Top} className="topology-handle topology-handle-db" />
         <Handle id="bottom" type="source" position={Position.Bottom} className="topology-handle topology-handle-db" />
       </div>

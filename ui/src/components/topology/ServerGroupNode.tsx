@@ -1,5 +1,5 @@
 import { memo, useState, useCallback } from 'react';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, Position, NodeResizer, type NodeProps } from '@xyflow/react';
 
 export interface ServerGroupNodeData {
   label: string;
@@ -8,6 +8,11 @@ export interface ServerGroupNodeData {
   serviceCount: number;
   collapsed: boolean;
   onToggleCollapse: (serverId: string) => void;
+  // Lower bounds clamp NodeResizer so the user can't shrink a server group
+  // smaller than its currently-laid-out children. Falls back to safe minimums
+  // when not provided (e.g. collapsed servers have no children to clamp to).
+  minWidth?: number;
+  minHeight?: number;
 }
 
 function getStatusDotColor(status: string): string {
@@ -21,7 +26,7 @@ function getStatusDotColor(status: string): string {
   }
 }
 
-function ServerGroupNodeComponent({ data }: NodeProps) {
+function ServerGroupNodeComponent({ data, selected }: NodeProps) {
   const nodeData = data as unknown as ServerGroupNodeData;
   const dotColor = getStatusDotColor(nodeData.status);
   const [isHovered, setIsHovered] = useState(false);
@@ -31,12 +36,24 @@ function ServerGroupNodeComponent({ data }: NodeProps) {
     nodeData.onToggleCollapse(nodeData.serverId);
   }, [nodeData]);
 
+  // Clamp to the children's bounding box so resize can't clip child nodes.
+  const minWidth = nodeData.minWidth ?? 200;
+  const minHeight = nodeData.minHeight ?? 80;
+
   return (
     <div
       className="bg-slate-800/50 border-2 border-blue-500/40 rounded-lg min-w-[180px] h-full"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
+      {/* Resizer — only visible on selection so it doesn't litter the canvas. */}
+      <NodeResizer
+        isVisible={Boolean(selected)}
+        minWidth={minWidth}
+        minHeight={minHeight}
+        color="#3b82f6"
+        handleClassName="!w-2 !h-2 !rounded-sm"
+      />
       {/* Header bar */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-blue-500/20">
         <div className="flex items-center gap-2">
@@ -78,11 +95,14 @@ function ServerGroupNodeComponent({ data }: NodeProps) {
           handle DOM positions, ignoring CSS opacity/pointer-events, so an
           invisible handle near a child node's edge would silently capture
           drops and route them to a server:<id> source/target that handleConnect
-          then rejects. */}
+          then rejects. We expose all 4 sides + stable IDs so the user can
+          start/end a connection from any anchor and the handle is persisted. */}
       {nodeData.collapsed && (
         <>
-          <Handle type="target" position={Position.Left} className="topology-handle" />
-          <Handle type="source" position={Position.Right} className="topology-handle" />
+          <Handle id="left" type="target" position={Position.Left} className="topology-handle" />
+          <Handle id="right" type="source" position={Position.Right} className="topology-handle" />
+          <Handle id="top" type="source" position={Position.Top} className="topology-handle" />
+          <Handle id="bottom" type="source" position={Position.Bottom} className="topology-handle" />
         </>
       )}
     </div>

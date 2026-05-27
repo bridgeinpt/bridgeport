@@ -33,6 +33,8 @@ const updateServerSchema = z.object({
   publicIp: z.string().nullable().optional(),
   tags: z.array(z.string()).optional(),
   dockerMode: z.enum(['socket', 'ssh']).optional(),
+  // `null` clears the cluster association, omit to leave unchanged.
+  clusterId: z.string().nullable().optional(),
 });
 
 const importTerraformSchema = z.object({

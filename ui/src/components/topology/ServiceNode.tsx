@@ -68,8 +68,8 @@ function ServiceNodeComponent({ data }: NodeProps) {
         {nodeData.primaryPort && (
           <span className="text-[10px] text-slate-400 font-mono ml-4">:{nodeData.primaryPort}</span>
         )}
-        <Handle type="target" position={Position.Left} className="topology-handle" />
-        <Handle type="source" position={Position.Right} className="topology-handle" />
+        <Handle id="left" type="target" position={Position.Left} className="topology-handle" />
+        <Handle id="right" type="source" position={Position.Right} className="topology-handle" />
         <Handle id="top" type="source" position={Position.Top} className="topology-handle" />
         <Handle id="bottom" type="source" position={Position.Bottom} className="topology-handle" />
       </div>
