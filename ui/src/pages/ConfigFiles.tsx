@@ -13,6 +13,7 @@ import {
   uploadAssetFile,
   syncConfigFileToAll,
   type ConfigFile,
+  type ConfigFileServiceAttachment,
   type FileHistoryEntry,
   type ConfigFileSyncResult,
 } from '../lib/api.js';
@@ -59,10 +60,14 @@ export default function ConfigFiles() {
     for (const cf of configFiles) {
       for (const sf of cf.services || []) {
         if (!serviceMap.has(sf.service.id)) {
+          const serverName =
+            sf.serviceDeployment?.server.name ??
+            sf.service.serviceDeployments?.[0]?.server.name ??
+            '—';
           serviceMap.set(sf.service.id, {
             id: sf.service.id,
             name: sf.service.name,
-            serverName: sf.service.server.name,
+            serverName,
           });
         }
       }
@@ -86,7 +91,7 @@ export default function ConfigFiles() {
   const [editDescription, setEditDescription] = useState('');
   const [editAutoResync, setEditAutoResync] = useState(true);
   const [editLanguage, setEditLanguage] = useState<string>('plaintext');
-  const [viewingFile, setViewingFile] = useState<(ConfigFile & { services: Array<{ targetPath: string; service: { id: string; name: string; server: { id: string; name: string } } }> }) | null>(null);
+  const [viewingFile, setViewingFile] = useState<(ConfigFile & { services: ConfigFileServiceAttachment[] }) | null>(null);
   const [historyFile, setHistoryFile] = useState<ConfigFile | null>(null);
   const [history, setHistory] = useState<FileHistoryEntry[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -637,9 +642,14 @@ export default function ConfigFiles() {
               <div className="mb-4 p-3 bg-slate-800/50 rounded-lg">
                 <p className="text-sm text-slate-400 mb-2">Attached to services:</p>
                 <div className="space-y-1">
-                  {viewingFile.services.map((sf) => (
-                    <div key={sf.service.id} className="flex items-center gap-2 text-sm">
-                      <span className="text-white">{sf.service.server.name}</span>
+                  {viewingFile.services.map((sf) => {
+                    const serverName =
+                      sf.serviceDeployment?.server.name ??
+                      sf.service.serviceDeployments?.[0]?.server.name ??
+                      '—';
+                    return (
+                    <div key={sf.id} className="flex items-center gap-2 text-sm">
+                      <span className="text-white">{serverName}</span>
                       <span className="text-slate-500">/</span>
                       <Link
                         to={`/services/${sf.service.id}`}
@@ -655,7 +665,8 @@ export default function ConfigFiles() {
                         </span>
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
