@@ -163,7 +163,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
     async (request, reply) => {
       const { id } = request.params as { id: string };
       // Rejects PATCH of derived/system fields (lastCheckedAt, updateAvailable,
-      // deployedDigestId, imageName) atomically — see src/lib/readonly-fields.ts.
+      // deployedDigestId) atomically — see src/lib/readonly-fields.ts.
       const body = validateUpdateBody(updateContainerImageSchema, 'containerImage', request, reply);
       if (!body) return;
 

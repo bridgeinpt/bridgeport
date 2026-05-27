@@ -343,7 +343,11 @@ export async function triggerAutoResyncForKey(
       candidates.map(async (cf) => {
         try {
           const outcome = await syncConfigFileToAttachedServices(cf.id);
-          if (!outcome) return; // Not attached to anything - nothing to do.
+          // Skip null (config file vanished) and no_targets (orphan — not
+          // attached to any service/deployment). Writing an audit row for the
+          // latter would record a spurious `success:false` event for an
+          // operation that never had anything to do.
+          if (!outcome || outcome.status === 'no_targets') return;
 
           await logAudit({
             ...(actor ?? {}),

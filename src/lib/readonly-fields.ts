@@ -34,7 +34,9 @@ export type ReadonlyModelName =
   | 'containerImage'
   | 'database'
   | 'registry'
-  | 'secret';
+  | 'secret'
+  | 'var'
+  | 'user';
 
 /**
  * Derived / system-managed fields per model.
@@ -76,9 +78,11 @@ export const READONLY_FIELDS_BY_MODEL: Record<ReadonlyModelName, ReadonlySet<str
     'agentCertCheckResults',
     'agentCertCheckedAt',
     // Per-deployment runtime ownership now lives on ServiceDeployment.
-    'serverId',
-    'containerName',
-    'composePath',
+    // `serverId`, `containerName`, and `composePath` are still surfaced by the
+    // Configure modal on the Service detail page (UI flattens deployment fields
+    // onto the service for backwards compatibility) — leave them off this list
+    // so the PATCH doesn't 422 on legitimate saves; Zod silently drops them and
+    // the dedicated deployment PATCH endpoint owns the real write.
     'envOverrides',
     'imageDigestId',
   ]),
@@ -147,7 +151,10 @@ export const READONLY_FIELDS_BY_MODEL: Record<ReadonlyModelName, ReadonlySet<str
     'createdAt',
     'updatedAt',
     'environmentId',
-    'imageName',
+    // `imageName` IS user-editable from the Edit Image modal — leave it off so
+    // the PATCH doesn't 422 on legitimate edits. (It's not in the Zod update
+    // schema, so it's silently dropped today; surfacing that is a separate
+    // concern from the no-silent-success initiative.)
     'lastCheckedAt',
     // updateAvailable is set by the scheduled update-check job; cleared on deploy.
     'updateAvailable',
@@ -189,6 +196,23 @@ export const READONLY_FIELDS_BY_MODEL: Record<ReadonlyModelName, ReadonlySet<str
     'encryptedValue',
     'nonce',
   ]),
+  var: new Set([
+    'id',
+    'createdAt',
+    'updatedAt',
+    'environmentId',
+    'key',
+  ]),
+  user: new Set([
+    'id',
+    'createdAt',
+    'updatedAt',
+    // Email/password have dedicated flows; surfacing them on the generic PATCH
+    // produced a silent-success today (Zod drops them).
+    'email',
+    'passwordHash',
+    'lastActiveAt',
+  ]),
 };
 
 /**
@@ -224,6 +248,16 @@ export const HINTS_BY_FIELD: Record<string, string> = {
     'Set when a deploy succeeds. Trigger a deploy to update.',
   'database.monitoringStatus':
     'Monitoring status is set by the monitoring collector; configure monitoring via PATCH /api/environments/:envId/databases/:id/monitoring.',
+  'var.key':
+    'Var keys cannot be changed after creation. Delete and recreate to change the key.',
+  'var.environmentId':
+    'Vars cannot be moved between environments. Delete and recreate in the target environment.',
+  'user.email':
+    'Email cannot be changed via this endpoint. Use the dedicated email-change flow.',
+  'user.passwordHash':
+    'Passwords must be changed via the password-reset / change-password flow, not the generic PATCH.',
+  'user.lastActiveAt':
+    'lastActiveAt is updated by the auth middleware on each authenticated request.',
 };
 
 const DEFAULT_HINT = 'This field is derived/system-managed and cannot be set via PATCH. Remove it from the request body.';

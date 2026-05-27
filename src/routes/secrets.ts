@@ -450,7 +450,9 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = validateBody(updateVarSchema, request, reply);
+      // Rejects PATCH of derived fields (id/key/environmentId/timestamps)
+      // atomically — see src/lib/readonly-fields.ts.
+      const body = validateUpdateBody(updateVarSchema, 'var', request, reply);
       if (!body) return;
 
       try {

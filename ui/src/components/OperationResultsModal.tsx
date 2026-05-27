@@ -58,7 +58,10 @@ export function OperationResultsModal({
   const isLoading = results === null;
   const successCount = results?.filter((r) => r.success).length ?? 0;
   const totalCount = results?.length ?? 0;
-  const allSuccess = results?.every((r) => r.success) ?? false;
+  // Guard against `[].every(...) === true` (vacuous truth) so an empty results
+  // array doesn't masquerade as "all succeeded" if a future caller forgets to
+  // pass the `no_targets` status explicitly.
+  const allSuccess = totalCount > 0 && (results?.every((r) => r.success) ?? false);
   const someSuccess = successCount > 0;
   // `no_targets` is a terminal warning state (issue #127): the operation
   // returned 200 OK but did nothing because there was nothing to act on.
