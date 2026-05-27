@@ -7,7 +7,7 @@ import { logAudit, actorFrom } from '../services/audit.js';
 import type { UserRole } from '../services/auth.js';
 import { send, NOTIFICATION_TYPES } from '../services/notifications.js';
 import { getSystemSettings } from '../services/system-settings.js';
-import { validateBody, findOrNotFound } from '../lib/helpers.js';
+import { validateBody, validateUpdateBody, findOrNotFound } from '../lib/helpers.js';
 
 const SALT_ROUNDS = 12;
 
@@ -159,7 +159,10 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate, requireAdminOrSelf('id')] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = validateBody(updateUserSchema, request, reply);
+      // Rejects PATCH of derived fields (email, passwordHash, lastActiveAt,
+      // id, timestamps) atomically — see src/lib/readonly-fields.ts. Email
+      // and password each have their own dedicated flow.
+      const body = validateUpdateBody(updateUserSchema, 'user', request, reply);
       if (!body) return;
 
       const existingUser = await findOrNotFound(prisma.user.findUnique({

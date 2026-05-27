@@ -10,6 +10,13 @@ export interface OperationResult {
   error?: string;
 }
 
+/**
+ * Terminal status of a sync/operation envelope (issue #127). Passed through
+ * from the backend's `SyncEnvelope.status`. `no_targets` is distinct from `ok`
+ * and renders a yellow "nothing to do" warning instead of a green checkmark.
+ */
+export type OperationStatus = 'ok' | 'no_targets' | 'partial' | 'failed';
+
 interface OperationResultsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -20,6 +27,15 @@ interface OperationResultsModalProps {
   loadingCount?: number;
   /** Results to display (null means still loading) */
   results: OperationResult[] | null;
+  /**
+   * Optional terminal status. When `no_targets`, the modal renders a yellow
+   * warning banner ("nothing to sync") instead of computing summary from
+   * results.length === 0. Without this prop we fall back to inferring status
+   * from the results array (legacy behaviour).
+   */
+  status?: OperationStatus;
+  /** Message for the warning banner when `status === 'no_targets'`. */
+  noTargetsMessage?: string;
   /** Button text for closing the modal */
   closeText?: string;
 }
@@ -35,15 +51,26 @@ export function OperationResultsModal({
   loadingMessage,
   loadingCount,
   results,
+  status,
+  noTargetsMessage = 'Nothing to do — no targets matched this operation.',
   closeText = 'Done',
 }: OperationResultsModalProps): JSX.Element {
   const isLoading = results === null;
   const successCount = results?.filter((r) => r.success).length ?? 0;
   const totalCount = results?.length ?? 0;
-  const allSuccess = results?.every((r) => r.success) ?? false;
+  // Guard against `[].every(...) === true` (vacuous truth) so an empty results
+  // array doesn't masquerade as "all succeeded" if a future caller forgets to
+  // pass the `no_targets` status explicitly.
+  const allSuccess = totalCount > 0 && (results?.every((r) => r.success) ?? false);
   const someSuccess = successCount > 0;
+  // `no_targets` is a terminal warning state (issue #127): the operation
+  // returned 200 OK but did nothing because there was nothing to act on.
+  const isNoTargets = status === 'no_targets';
 
   function getSummaryStyle(): string {
+    if (isNoTargets) {
+      return 'bg-yellow-500/10 border border-yellow-500/30';
+    }
     if (allSuccess) {
       return 'bg-green-500/10 border border-green-500/30';
     }
@@ -54,6 +81,7 @@ export function OperationResultsModal({
   }
 
   function getSummaryTextColor(): string {
+    if (isNoTargets) return 'text-yellow-400';
     if (allSuccess) return 'text-green-400';
     if (someSuccess) return 'text-yellow-400';
     return 'text-red-400';
@@ -74,13 +102,17 @@ export function OperationResultsModal({
           {/* Summary */}
           <div className={`p-3 rounded-lg ${getSummaryStyle()}`}>
             <div className="flex items-center gap-2">
-              {allSuccess ? (
+              {isNoTargets ? (
+                <WarningIcon className="w-5 h-5 text-yellow-400" />
+              ) : allSuccess ? (
                 <CheckIcon className="w-5 h-5 text-green-400" />
               ) : (
                 <WarningIcon className="w-5 h-5 text-yellow-400" />
               )}
               <span className={getSummaryTextColor()}>
-                {successCount} of {totalCount} completed successfully
+                {isNoTargets
+                  ? noTargetsMessage
+                  : `${successCount} of ${totalCount} completed successfully`}
               </span>
             </div>
           </div>

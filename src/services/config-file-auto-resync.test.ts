@@ -59,6 +59,7 @@ vi.mock('./audit.js', () => ({
 import {
   triggerAutoResyncForKey,
   syncConfigFileToAttachedServices,
+  deriveSyncStatus,
 } from './config-file-auto-resync.js';
 import { createClientForServer } from '../lib/ssh.js';
 import { resolveSecretPlaceholders } from './secrets.js';
@@ -327,14 +328,26 @@ describe('syncConfigFileToAttachedServices', () => {
     expect(createClientForServer).not.toHaveBeenCalled();
   });
 
-  it('returns null when the ConfigFile has zero attached services', async () => {
+  it('returns a no_targets outcome when the ConfigFile has zero attached services (issue #127)', async () => {
+    // Pre-#127 this returned `null`; the new contract reserves `null` for
+    // "ConfigFile not found" so callers can distinguish "did nothing" (200 +
+    // warning) from "doesn't exist" (404).
     mockPrisma.configFile.findUnique.mockResolvedValue(
       buildConfigFileFixture({ attached: false })
     );
 
     const result = await syncConfigFileToAttachedServices('cf-1');
 
-    expect(result).toBeNull();
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe('no_targets');
+    expect(result!.targetsAttempted).toBe(0);
+    expect(result!.targetsSucceeded).toBe(0);
+    expect(result!.targetsFailed).toBe(0);
+    expect(result!.results).toEqual([]);
+    // Deprecated `success` field retained for one release; false because we
+    // did not actually sync anything.
+    expect(result!.success).toBe(false);
+    // No SSH attempted when there's nothing to do.
     expect(createClientForServer).not.toHaveBeenCalled();
   });
 
@@ -423,5 +436,68 @@ describe('syncConfigFileToAttachedServices', () => {
       error: 'permission denied',
     });
     expect(mockPrisma.serviceFile.update).not.toHaveBeenCalled();
+  });
+
+  it('happy path exposes the new envelope: status=ok + targets counters (issue #127)', async () => {
+    // Verifies the issue #127 envelope shape from the success branch — pre-#127
+    // only `success` existed; new callers should be able to read `status`,
+    // `targetsAttempted/Succeeded/Failed` directly.
+    mockPrisma.configFile.findUnique.mockResolvedValue(buildConfigFileFixture());
+
+    const result = await syncConfigFileToAttachedServices('cf-1');
+
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe('ok');
+    expect(result!.targetsAttempted).toBe(1);
+    expect(result!.targetsSucceeded).toBe(1);
+    expect(result!.targetsFailed).toBe(0);
+    // Deprecated `success` aliases `status === 'ok'`.
+    expect(result!.success).toBe(true);
+  });
+
+  it('all-failed sync surfaces status=failed with non-zero targetsAttempted (issue #127)', async () => {
+    // Distinct from `no_targets`: at least one target was attempted, but
+    // everything failed. The UI surfaces this as a red error (not a yellow
+    // "nothing to sync" warning).
+    mockPrisma.configFile.findUnique.mockResolvedValue(buildConfigFileFixture());
+    vi.mocked(createClientForServer).mockResolvedValue({
+      client: null,
+      error: 'SSH key not configured for this environment',
+    });
+
+    const result = await syncConfigFileToAttachedServices('cf-1');
+
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe('failed');
+    expect(result!.targetsAttempted).toBe(1);
+    expect(result!.targetsSucceeded).toBe(0);
+    expect(result!.targetsFailed).toBe(1);
+    expect(result!.success).toBe(false);
+  });
+});
+
+describe('deriveSyncStatus (issue #127)', () => {
+  // Pure helper: status is determined by counts of successes vs. results
+  // length. The four cases below define the entire contract.
+  it('returns no_targets when the results array is empty', () => {
+    expect(deriveSyncStatus([])).toBe('no_targets');
+  });
+
+  it('returns ok when every result succeeded', () => {
+    expect(deriveSyncStatus([{ success: true }])).toBe('ok');
+    expect(deriveSyncStatus([{ success: true }, { success: true }, { success: true }])).toBe('ok');
+  });
+
+  it('returns failed when every result failed', () => {
+    expect(deriveSyncStatus([{ success: false }])).toBe('failed');
+    expect(deriveSyncStatus([{ success: false }, { success: false }])).toBe('failed');
+  });
+
+  it('returns partial when results are mixed', () => {
+    expect(deriveSyncStatus([{ success: true }, { success: false }])).toBe('partial');
+    expect(deriveSyncStatus([{ success: false }, { success: true }])).toBe('partial');
+    expect(
+      deriveSyncStatus([{ success: true }, { success: true }, { success: false }])
+    ).toBe('partial');
   });
 });

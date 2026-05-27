@@ -29,6 +29,32 @@ export interface AutoResyncResult {
 }
 
 /**
+ * Terminal status of a sync run (issue #127).
+ *
+ * - `ok`           : all targets succeeded.
+ * - `no_targets`   : zero targets — the config file isn't attached anywhere, or
+ *                    the server/service has nothing to sync. Distinct from `ok`
+ *                    so callers can surface "did nothing" as a warning instead
+ *                    of green success.
+ * - `partial`      : at least one target succeeded and at least one failed.
+ * - `failed`       : every target failed.
+ */
+export type SyncStatus = 'ok' | 'no_targets' | 'partial' | 'failed';
+
+/**
+ * Compute the terminal SyncStatus for an array of per-target results.
+ * Exported so the route handlers that build their own results arrays
+ * (sync-files, sync-all-files) stay in lockstep with this module's contract.
+ */
+export function deriveSyncStatus(results: ReadonlyArray<{ success: boolean }>): SyncStatus {
+  if (results.length === 0) return 'no_targets';
+  const succeeded = results.filter((r) => r.success).length;
+  if (succeeded === results.length) return 'ok';
+  if (succeeded === 0) return 'failed';
+  return 'partial';
+}
+
+/**
  * Sync a single ConfigFile to every service it is attached to.
  *
  * This is the extracted core of `POST /api/config-files/:id/sync-all` so it can
@@ -39,9 +65,21 @@ export interface AutoResyncResult {
  * partial failures (HTTP route returns 207-ish payload, background trigger
  * just logs).
  */
+export interface SyncOutcome {
+  results: AutoResyncResult[];
+  /** @deprecated retained for one release; use `status` instead (issue #127). */
+  success: boolean;
+  status: SyncStatus;
+  targetsAttempted: number;
+  targetsSucceeded: number;
+  targetsFailed: number;
+  configFileName: string;
+  environmentId: string;
+}
+
 export async function syncConfigFileToAttachedServices(
   configFileId: string
-): Promise<{ results: AutoResyncResult[]; success: boolean; configFileName: string; environmentId: string } | null> {
+): Promise<SyncOutcome | null> {
   const configFile = await prisma.configFile.findUnique({
     where: { id: configFileId },
     include: {
@@ -54,8 +92,25 @@ export async function syncConfigFileToAttachedServices(
     },
   });
 
-  if (!configFile || configFile.services.length === 0) {
+  // The ConfigFile itself doesn't exist — true 404. Callers translate `null`
+  // to a 404 NOT_FOUND envelope. Zero-attachments is no longer a `null` return:
+  // it falls through to a successful `no_targets` outcome so the caller can
+  // surface a yellow warning instead of a red error (issue #127).
+  if (!configFile) {
     return null;
+  }
+
+  if (configFile.services.length === 0) {
+    return {
+      results: [],
+      success: false,
+      status: 'no_targets',
+      targetsAttempted: 0,
+      targetsSucceeded: 0,
+      targetsFailed: 0,
+      configFileName: configFile.name,
+      environmentId: configFile.environmentId,
+    };
   }
 
   const results: AutoResyncResult[] = [];
@@ -223,11 +278,21 @@ export async function syncConfigFileToAttachedServices(
     }
   }
 
-  const success = results.length > 0 && results.every((r) => r.success);
+  const status = deriveSyncStatus(results);
+  const targetsAttempted = results.length;
+  const targetsSucceeded = results.filter((r) => r.success).length;
+  const targetsFailed = targetsAttempted - targetsSucceeded;
+  // `success` is deprecated (issue #127) — kept as a top-level alias for one
+  // release so older clients keep working. True iff all targets succeeded.
+  const success = status === 'ok';
 
   return {
     results,
     success,
+    status,
+    targetsAttempted,
+    targetsSucceeded,
+    targetsFailed,
     configFileName: configFile.name,
     environmentId: configFile.environmentId,
   };
@@ -278,7 +343,11 @@ export async function triggerAutoResyncForKey(
       candidates.map(async (cf) => {
         try {
           const outcome = await syncConfigFileToAttachedServices(cf.id);
-          if (!outcome) return; // Not attached to anything - nothing to do.
+          // Skip null (config file vanished) and no_targets (orphan — not
+          // attached to any service/deployment). Writing an audit row for the
+          // latter would record a spurious `success:false` event for an
+          // operation that never had anything to do.
+          if (!outcome || outcome.status === 'no_targets') return;
 
           await logAudit({
             ...(actor ?? {}),

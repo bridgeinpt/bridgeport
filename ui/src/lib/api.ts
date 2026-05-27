@@ -1284,6 +1284,26 @@ export interface SyncResult {
   error?: string;
 }
 
+/**
+ * Terminal outcome of a sync operation (issue #127).
+ * `no_targets` is distinct from `ok` and surfaces as a yellow warning, NOT a green success.
+ */
+export type SyncStatus = 'ok' | 'no_targets' | 'partial' | 'failed';
+
+/**
+ * Standard envelope returned by every sync endpoint. The deprecated `success`
+ * alias is true iff `status === 'ok'` — new UI code branches on `status`.
+ */
+export interface SyncEnvelope<R> {
+  status: SyncStatus;
+  targetsAttempted: number;
+  targetsSucceeded: number;
+  targetsFailed: number;
+  results: R[];
+  /** @deprecated use `status` (issue #127). */
+  success: boolean;
+}
+
 export const listConfigFiles = (envId: string, options?: { limit?: number; offset?: number }) => {
   const params = new URLSearchParams();
   if (options?.limit) params.append('limit', options.limit.toString());
@@ -1317,7 +1337,7 @@ export const updateServiceFile = (serviceId: string, configFileId: string, targe
   api.patch<{ serviceFile: ServiceFile }>(`/services/${serviceId}/files/${configFileId}`, { targetPath });
 
 export const syncServiceFiles = (serviceId: string) =>
-  api.post<{ results: SyncResult[]; success: boolean }>(`/services/${serviceId}/sync-files`);
+  api.post<SyncEnvelope<SyncResult>>(`/services/${serviceId}/sync-files`);
 
 export interface ConfigFileSyncResult {
   serviceId: string;
@@ -1329,7 +1349,7 @@ export interface ConfigFileSyncResult {
 }
 
 export const syncConfigFileToAll = (configFileId: string) =>
-  api.post<{ results: ConfigFileSyncResult[]; success: boolean }>(`/config-files/${configFileId}/sync-all`);
+  api.post<SyncEnvelope<ConfigFileSyncResult>>(`/config-files/${configFileId}/sync-all`);
 
 // Server Config Files Sync Status
 export interface ServerConfigFileAttachment {
@@ -1369,7 +1389,7 @@ export interface ServerSyncAllResult {
 }
 
 export const syncAllServerFiles = (serverId: string) =>
-  api.post<{ results: ServerSyncAllResult[]; success: boolean }>(`/servers/${serverId}/sync-all-files`);
+  api.post<SyncEnvelope<ServerSyncAllResult>>(`/servers/${serverId}/sync-all-files`);
 
 // File History
 export interface FileHistoryEntry {

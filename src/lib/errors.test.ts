@@ -10,7 +10,9 @@ describe('errors', () => {
   describe('statusForCode', () => {
     it('maps each ErrorCode to its canonical HTTP status', () => {
       expect(statusForCode('VALIDATION_ERROR')).toBe(400);
-      expect(statusForCode('READONLY_FIELD')).toBe(400);
+      // 422 (Unprocessable Entity) per issue #127 — the request is syntactically
+      // valid but names a derived/system-managed field that can't be PATCHed.
+      expect(statusForCode('READONLY_FIELD')).toBe(422);
       expect(statusForCode('UNAUTHORIZED')).toBe(401);
       expect(statusForCode('FORBIDDEN_SCOPE')).toBe(403);
       expect(statusForCode('NOT_FOUND')).toBe(404);

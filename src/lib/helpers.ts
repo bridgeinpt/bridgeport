@@ -4,6 +4,7 @@
 
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { z, ZodType } from 'zod';
+import { assertNoReadonlyFields, type ReadonlyModelName } from './readonly-fields.js';
 
 /**
  * Validate the request body against a Zod schema.
@@ -20,6 +21,34 @@ export function validateBody<S extends ZodType>(
     return null;
   }
   return result.data as z.infer<S>;
+}
+
+/**
+ * Validate a PATCH request body against a Zod schema, rejecting read-only fields
+ * BEFORE schema parsing so a body that mixes a derived field with otherwise-valid
+ * input is rejected atomically (no partial application, no DB write). See
+ * `src/lib/readonly-fields.ts` for the per-model field lists and rationale.
+ *
+ * Throws `ApiError('READONLY_FIELD', …)` (HTTP 422) on a readonly violation; the
+ * Fastify error handler converts it to the standard envelope. On a Zod failure
+ * this falls through to `validateBody`'s legacy `{error, details}` shape, which
+ * the onSend hook reshapes into the envelope.
+ *
+ * Returns the parsed data, or null after sending a 400 response (Zod-only path).
+ */
+export function validateUpdateBody<S extends ZodType>(
+  schema: S,
+  model: ReadonlyModelName,
+  request: FastifyRequest,
+  reply: FastifyReply
+): z.infer<S> | null {
+  // 1. Reject readonly fields atomically. Throws an ApiError on violation —
+  //    intentionally NOT caught here so the global error handler emits the
+  //    structured envelope.
+  assertNoReadonlyFields(model, request.body);
+  // 2. Fall through to the standard schema parse (Zod default still drops
+  //    *unknown* fields silently; only fields registered as readonly are loud).
+  return validateBody(schema, request, reply);
 }
 
 /**

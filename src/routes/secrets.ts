@@ -9,7 +9,7 @@ import {
   deleteSecret,
 } from '../services/secrets.js';
 import { logAudit, actorFrom } from '../services/audit.js';
-import { validateBody, findOrNotFound, handleUniqueConstraint } from '../lib/helpers.js';
+import { validateBody, validateUpdateBody, findOrNotFound, handleUniqueConstraint } from '../lib/helpers.js';
 import { requireOperator } from '../plugins/authorize.js';
 import { triggerAutoResyncForKey } from '../services/config-file-auto-resync.js';
 
@@ -222,7 +222,9 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = validateBody(updateSecretSchema, request, reply);
+      // Rejects PATCH of derived/encrypted-storage fields (key, encryptedValue,
+      // nonce) atomically — see src/lib/readonly-fields.ts.
+      const body = validateUpdateBody(updateSecretSchema, 'secret', request, reply);
       if (!body) return;
 
       try {
@@ -448,7 +450,9 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = validateBody(updateVarSchema, request, reply);
+      // Rejects PATCH of derived fields (id/key/environmentId/timestamps)
+      // atomically — see src/lib/readonly-fields.ts.
+      const body = validateUpdateBody(updateVarSchema, 'var', request, reply);
       if (!body) return;
 
       try {

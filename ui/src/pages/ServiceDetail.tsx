@@ -31,6 +31,7 @@ import {
   type ServiceFile,
   type ConfigFile,
   type SyncResult,
+  type SyncStatus,
   type AuditLog,
   type ExposedPort,
   type ServiceHistoryEntry,
@@ -129,6 +130,8 @@ export default function ServiceDetail() {
   const [attaching, setAttaching] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResults, setSyncResults] = useState<SyncResult[] | null>(null);
+  // `no_targets` is distinct from `ok` — render as a yellow warning (issue #127).
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | undefined>(undefined);
   const [viewingFileContent, setViewingFileContent] = useState<{ name: string; filename: string; content: string } | null>(null);
   const [showCreateFile, setShowCreateFile] = useState(false);
   const [newFileName, setNewFileName] = useState('');
@@ -624,9 +627,11 @@ export default function ServiceDetail() {
     if (!id) return;
     setSyncing(true);
     setSyncResults(null);
+    setSyncStatus(undefined);
     try {
-      const { results } = await syncServiceFiles(id);
+      const { results, status } = await syncServiceFiles(id);
       setSyncResults(results);
+      setSyncStatus(status);
     } finally {
       setSyncing(false);
     }
@@ -1135,27 +1140,47 @@ export default function ServiceDetail() {
 
           {/* Sync Results */}
           {syncResults && (
-            <div className="mb-4 p-3 bg-slate-800/50 rounded-lg border border-slate-700">
-              <p className="text-sm text-slate-400 mb-2">Sync Results:</p>
-              <div className="space-y-1">
-                {syncResults.map((result, i) => (
-                  <div key={i} className="flex items-center gap-2 text-sm">
-                    {result.success ? (
-                      <span className="text-green-400">✓</span>
-                    ) : (
-                      <span className="text-red-400">✕</span>
-                    )}
-                    <span className="text-white">{result.file}</span>
-                    <span className="text-slate-500">→</span>
-                    <code className="text-slate-400 text-xs">{result.targetPath}</code>
-                    {result.error && (
-                      <span className="text-red-400 text-xs">({result.error})</span>
-                    )}
+            <div
+              className={`mb-4 p-3 rounded-lg border ${
+                syncStatus === 'no_targets'
+                  ? 'bg-yellow-500/10 border-yellow-500/30'
+                  : 'bg-slate-800/50 border-slate-700'
+              }`}
+            >
+              {syncStatus === 'no_targets' ? (
+                // 200 OK + no_targets → yellow warning, NOT a green success.
+                // Sync ran but found nothing to write — surface the gap to the
+                // operator (issue #127).
+                <p className="text-sm text-yellow-400">
+                  This service has no files attached, or no deployments to sync to — sync did nothing.
+                </p>
+              ) : (
+                <>
+                  <p className="text-sm text-slate-400 mb-2">Sync Results:</p>
+                  <div className="space-y-1">
+                    {syncResults.map((result, i) => (
+                      <div key={i} className="flex items-center gap-2 text-sm">
+                        {result.success ? (
+                          <span className="text-green-400">✓</span>
+                        ) : (
+                          <span className="text-red-400">✕</span>
+                        )}
+                        <span className="text-white">{result.file}</span>
+                        <span className="text-slate-500">→</span>
+                        <code className="text-slate-400 text-xs">{result.targetPath}</code>
+                        {result.error && (
+                          <span className="text-red-400 text-xs">({result.error})</span>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </>
+              )}
               <button
-                onClick={() => setSyncResults(null)}
+                onClick={() => {
+                  setSyncResults(null);
+                  setSyncStatus(undefined);
+                }}
                 className="mt-2 text-xs text-slate-400 hover:text-white"
               >
                 Dismiss

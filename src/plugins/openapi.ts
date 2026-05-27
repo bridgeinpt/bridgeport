@@ -69,6 +69,44 @@ async function openapiPlugin(fastify: FastifyInstance): Promise<void> {
                 description: 'Server-assigned request ID; quote this when reporting issues.',
               },
             },
+            example: {
+              code: 'READONLY_FIELD',
+              message: 'Field "exposedPorts" is read-only and cannot be set via PATCH.',
+              field: 'exposedPorts',
+              hint: 'Exposed ports are discovered from the running container. Change the ports mapping in the compose file at composePath and redeploy.',
+              requestId: 'req_01H0…',
+            },
+          },
+          // Standard envelope returned by every sync endpoint
+          // (`POST /api/config-files/:id/sync-all`,
+          //  `POST /api/services/:id/sync-files`,
+          //  `POST /api/servers/:serverId/sync-all-files`). The `status` field
+          // is the terminal outcome — clients should prefer it over the
+          // deprecated top-level `success`. See issue #127.
+          SyncResult: {
+            type: 'object',
+            required: ['status', 'targetsAttempted', 'targetsSucceeded', 'targetsFailed', 'results'],
+            properties: {
+              status: {
+                type: 'string',
+                enum: ['ok', 'no_targets', 'partial', 'failed'],
+                description:
+                  'Terminal outcome. `no_targets` is distinct from `ok` and signals "nothing to sync" — surface as a warning, not a green success.',
+              },
+              targetsAttempted: { type: 'integer', minimum: 0 },
+              targetsSucceeded: { type: 'integer', minimum: 0 },
+              targetsFailed: { type: 'integer', minimum: 0 },
+              results: {
+                type: 'array',
+                description: 'Per-target results. Shape varies by endpoint (file/serviceName/targetPath/serverName/error).',
+                items: { type: 'object', additionalProperties: true },
+              },
+              success: {
+                type: 'boolean',
+                deprecated: true,
+                description: 'Deprecated alias for `status === "ok"`. Will be removed in a future release.',
+              },
+            },
           },
         },
         responses: {

@@ -217,6 +217,100 @@ describe('secret routes', () => {
 
       expect(res.statusCode).toBe(404);
     });
+
+    // ── issue #127: no-silent-success — PATCH of readonly fields ────────────
+
+    it('rejects PATCH of a readonly field with 422 + READONLY_FIELD envelope and no DB write', async () => {
+      const createRes = await app.inject({
+        method: 'POST',
+        url: `/api/environments/${envId}/secrets`,
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { key: 'READONLY_KEY_TEST', value: 'before' },
+      });
+      const secretId = createRes.json().secret.id;
+      const beforeRow = await app.prisma.secret.findUnique({ where: { id: secretId } });
+
+      // `key` is in the secret model's readonly set — it's identity, not a
+      // writable attribute. PATCH must atomically reject the whole request.
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/secrets/${secretId}`,
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { key: 'RENAMED' },
+      });
+
+      expect(res.statusCode).toBe(422);
+      const body = res.json();
+      expect(body.code).toBe('READONLY_FIELD');
+      expect(body.field).toBe('key');
+      expect(body.message).toMatch(/read-only/);
+      // Generic fallback hint kicks in for `secret.key` (no HINTS_BY_FIELD entry).
+      expect(body.hint).toBeTruthy();
+
+      // DB row must be unchanged: no `key` rename, encrypted material intact.
+      const afterRow = await app.prisma.secret.findUnique({ where: { id: secretId } });
+      expect(afterRow!.key).toBe('READONLY_KEY_TEST');
+      expect(afterRow!.encryptedValue).toBe(beforeRow!.encryptedValue);
+      expect(afterRow!.nonce).toBe(beforeRow!.nonce);
+      expect(afterRow!.updatedAt.getTime()).toBe(beforeRow!.updatedAt.getTime());
+    });
+
+    it('atomically rejects a mixed-payload PATCH — writable field is NOT applied (issue #127)', async () => {
+      // The core invariant of #127: a body that names a readonly field MUST
+      // be rejected as a unit. The writable field (`description`) cannot land
+      // partially. This is what makes the response useful — clients fix the
+      // payload and re-send, instead of finding half their change applied.
+      const createRes = await app.inject({
+        method: 'POST',
+        url: `/api/environments/${envId}/secrets`,
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { key: 'ATOMIC_TEST', value: 'before', description: 'old description' },
+      });
+      const secretId = createRes.json().secret.id;
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/secrets/${secretId}`,
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: {
+          description: 'new description',
+          encryptedValue: 'cafebabe',
+        },
+      });
+
+      expect(res.statusCode).toBe(422);
+      expect(res.json().code).toBe('READONLY_FIELD');
+      // First readonly field encountered wins for `field`.
+      expect(res.json().field).toBe('encryptedValue');
+
+      // Critically: the writable `description` must NOT have been applied.
+      const afterRow = await app.prisma.secret.findUnique({ where: { id: secretId } });
+      expect(afterRow!.description).toBe('old description');
+    });
+
+    it('writable-only PATCH still works — 200 + change applied', async () => {
+      // Sanity check that the readonly guard hasn't accidentally regressed the
+      // normal PATCH path. `value` and `description` are both writable.
+      const createRes = await app.inject({
+        method: 'POST',
+        url: `/api/environments/${envId}/secrets`,
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { key: 'HAPPY_PATH_PATCH', value: 'v1', description: 'd1' },
+      });
+      const secretId = createRes.json().secret.id;
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/secrets/${secretId}`,
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { description: 'd2' },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const afterRow = await app.prisma.secret.findUnique({ where: { id: secretId } });
+      expect(afterRow!.description).toBe('d2');
+      expect(afterRow!.key).toBe('HAPPY_PATH_PATCH');
+    });
   });
 
   // ==================== DELETE /api/secrets/:id ====================

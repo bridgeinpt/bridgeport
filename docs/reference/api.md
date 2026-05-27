@@ -289,7 +289,7 @@ Every non-2xx response returns a standardized envelope:
 | `code` | HTTP | When |
 |--------|------|------|
 | `VALIDATION_ERROR` | 400 | Request body / query failed schema validation. |
-| `READONLY_FIELD` | 400 | Client tried to mutate a server-managed field. |
+| `READONLY_FIELD` | 422 | Client tried to mutate a server-managed/derived field on a PATCH (e.g. `status`, `exposedPorts`, `lastCheckedAt`). The entire request is rejected — no partial application. The envelope's `field` names the first offender and `hint` explains how to update it through the correct channel. |
 | `UNAUTHORIZED` | 401 | Missing or invalid credentials. |
 | `FORBIDDEN_SCOPE` | 403 | Authenticated but the token isn't scoped to this environment (env-scoped API token hitting an environment outside its allowlist, or a global route). |
 | `FORBIDDEN_ROLE` | 403 | Authenticated but the principal's role is insufficient (e.g., a viewer attempting a write, a non-admin hitting an admin-only route). |

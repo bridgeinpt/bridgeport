@@ -233,16 +233,32 @@ sequenceDiagram
     BP->>SSH: Disconnect
 ```
 
-**Sync result example:**
+**Sync result envelope:**
+
+All three sync endpoints return the same envelope. Branch on `status`, not `success` — the latter is a deprecated alias kept for one release.
+
 ```json
 {
-  "success": true,
+  "status": "ok",
+  "targetsAttempted": 2,
+  "targetsSucceeded": 2,
+  "targetsFailed": 0,
   "results": [
     { "file": "App API .env", "targetPath": "/opt/app/.env", "success": true },
     { "file": "Nginx Config", "targetPath": "/etc/nginx/conf.d/app.conf", "success": true }
-  ]
+  ],
+  "success": true
 }
 ```
+
+`status` is one of:
+
+| Status | Meaning |
+|--------|---------|
+| `ok` | Every target succeeded. |
+| `no_targets` | Zero targets — the config file isn't attached to any service, or the server/service has nothing to sync. Returned as **HTTP 200** with `targetsAttempted: 0` so the UI can render a warning instead of a red error. |
+| `partial` | At least one target succeeded and at least one failed. |
+| `failed` | Every target failed. |
 
 > [!NOTE]
 > Syncing a file does **not** restart the service. After syncing, you may need to restart or reload the service for changes to take effect (e.g., `docker compose up -d` or `nginx -s reload`).

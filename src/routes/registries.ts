@@ -12,7 +12,7 @@ import {
 import { RegistryFactory } from '../lib/registry.js';
 import { logAudit, actorFrom } from '../services/audit.js';
 import { DISCOVERY_STATUS } from '../lib/constants.js';
-import { validateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage } from '../lib/helpers.js';
+import { validateBody, validateUpdateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage } from '../lib/helpers.js';
 
 const registryTypeSchema = z.enum(['digitalocean', 'dockerhub', 'generic']);
 
@@ -103,7 +103,9 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = validateBody(updateRegistrySchema, request, reply);
+      // Rejects PATCH of derived/encrypted-storage fields (lastRefreshAt,
+      // encryptedToken, etc.) atomically — see src/lib/readonly-fields.ts.
+      const body = validateUpdateBody(updateRegistrySchema, 'registry', request, reply);
       if (!body) return;
 
       try {

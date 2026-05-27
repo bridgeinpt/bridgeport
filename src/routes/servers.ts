@@ -30,7 +30,7 @@ import { prisma } from '../lib/db.js';
 import { bundledAgentVersion } from '../lib/version.js';
 import { requireAdmin, requireOperator } from '../plugins/authorize.js';
 import { METRICS_MODE } from '../lib/constants.js';
-import { safeJsonParse, validateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery, flattenDeploymentOntoService } from '../lib/helpers.js';
+import { safeJsonParse, validateBody, validateUpdateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery, flattenDeploymentOntoService } from '../lib/helpers.js';
 
 const createServerSchema = z.object({
   name: z.string().min(1),
@@ -182,7 +182,10 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = validateBody(updateServerSchema, request, reply);
+      // Rejects PATCH of derived fields (status, agentStatus, lastCheckedAt,
+      // metricsMode — has a dedicated endpoint, etc.) with 422 BEFORE any DB
+      // read/write. See src/lib/readonly-fields.ts.
+      const body = validateUpdateBody(updateServerSchema, 'server', request, reply);
       if (!body) return;
 
       try {

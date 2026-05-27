@@ -19,7 +19,7 @@ import { logAudit, actorFrom } from '../services/audit.js';
 import { RegistryFactory } from '../lib/registry.js';
 import { getRegistryCredentials } from '../services/registries.js';
 import { extractRepoName, stripRegistryPrefix, parseTagFilter, getBestTag, getDefaultTag } from '../lib/image-utils.js';
-import { safeJsonParse, validateBody, findOrNotFound, getErrorMessage, handleUniqueConstraint, parsePaginationQuery } from '../lib/helpers.js';
+import { safeJsonParse, validateBody, validateUpdateBody, findOrNotFound, getErrorMessage, handleUniqueConstraint, parsePaginationQuery } from '../lib/helpers.js';
 
 const createContainerImageSchema = z.object({
   name: z.string().min(1),
@@ -162,7 +162,9 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = validateBody(updateContainerImageSchema, request, reply);
+      // Rejects PATCH of derived/system fields (lastCheckedAt, updateAvailable,
+      // deployedDigestId) atomically — see src/lib/readonly-fields.ts.
+      const body = validateUpdateBody(updateContainerImageSchema, 'containerImage', request, reply);
       if (!body) return;
 
       try {
