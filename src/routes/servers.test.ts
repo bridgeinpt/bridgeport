@@ -6,18 +6,25 @@ import { createTestServer } from '../../tests/factories/server.js';
 import { createTestContainerImage } from '../../tests/factories/container-image.js';
 import { createTestService } from '../../tests/factories/service.js';
 import { generateTestToken } from '../../tests/helpers/auth.js';
+import { tryAcquireBootstrapLock, releaseBootstrapLock } from '../services/bootstrap.js';
 
 describe('server routes', () => {
   let app: TestApp;
   let adminToken: string;
+  let operatorToken: string;
   let viewerToken: string;
   let envId: string;
 
   beforeAll(async () => {
     app = await buildTestApp();
     const admin = await createTestUser(app.prisma, { email: 'admin@servers.test', role: 'admin' });
+    const operator = await createTestUser(app.prisma, {
+      email: 'operator@servers.test',
+      role: 'operator',
+    });
     const viewer = await createTestUser(app.prisma, { email: 'viewer@servers.test', role: 'viewer' });
     adminToken = await generateTestToken({ id: admin.id, email: admin.email });
+    operatorToken = await generateTestToken({ id: operator.id, email: operator.email });
     viewerToken = await generateTestToken({ id: viewer.id, email: viewer.email });
     const env = await createTestEnvironment(app.prisma, { name: 'servers-env' });
     envId = env.id;
@@ -386,6 +393,323 @@ describe('server routes', () => {
       });
 
       expect(res.statusCode).toBe(400);
+    });
+  });
+
+  // ==================== GET /api/servers/:id/bootstrap (issue #113) ====================
+
+  describe('GET /api/servers/:id/bootstrap', () => {
+    it('forbids viewers (operator+ required: route fires SSH probes)', async () => {
+      const server = await createTestServer(app.prisma, {
+        environmentId: envId,
+        name: 'bs-get-viewer-server',
+        hostname: '203.0.113.9',
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/servers/${server.id}/bootstrap`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+
+      expect(res.statusCode).toBe(403);
+    });
+
+    it('returns cached per-component fields for a fresh server', async () => {
+      const server = await createTestServer(app.prisma, {
+        environmentId: envId,
+        name: 'bs-get-server',
+        // Non-localhost hostname so the route uses the SSH branch. With no SSH
+        // key configured on the env, the live probe is skipped (client=null)
+        // and only the cached fields are returned.
+        hostname: '203.0.113.10',
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/servers/${server.id}/bootstrap`,
+        headers: { authorization: `Bearer ${operatorToken}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      // Defaults from the schema migration.
+      expect(body.bootstrapState).toBe('not_bootstrapped');
+      expect(body.dockerInstalled).toBe(false);
+      expect(body.sysctlApplied).toBe(false);
+      expect(body.swapConfigured).toBe(false);
+      expect(body.swapSizeMb).toBeNull();
+    });
+
+    it('reflects updated cached fields when bootstrap state changes', async () => {
+      const server = await createTestServer(app.prisma, {
+        environmentId: envId,
+        name: 'bs-cached-server',
+        hostname: '203.0.113.11',
+      });
+      // Simulate a successful bootstrap by writing the cached flags directly.
+      await app.prisma.server.update({
+        where: { id: server.id },
+        data: {
+          bootstrapState: 'bootstrapped',
+          bootstrapDistro: 'ubuntu:22.04',
+          dockerInstalled: true,
+          dockerInstalledAt: new Date('2026-01-01T00:00:00Z'),
+          // agentInstalled is derived from agentInstalledAt (not metricsMode)
+          // so set the timestamp directly.
+          agentInstalledAt: new Date('2026-01-01T00:01:00Z'),
+          sysctlApplied: true,
+          swapConfigured: true,
+          swapSizeMb: 1024,
+        },
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/servers/${server.id}/bootstrap`,
+        headers: { authorization: `Bearer ${operatorToken}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.bootstrapState).toBe('bootstrapped');
+      expect(body.bootstrapDistro).toBe('ubuntu:22.04');
+      expect(body.dockerInstalled).toBe(true);
+      expect(body.sysctlApplied).toBe(true);
+      expect(body.swapConfigured).toBe(true);
+      expect(body.swapSizeMb).toBe(1024);
+      // agentInstalled tracks the timestamp, not metricsMode.
+      expect(body.agentInstalled).toBe(true);
+    });
+
+    it('returns 404 for non-existent server', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/servers/does-not-exist/bootstrap',
+        headers: { authorization: `Bearer ${operatorToken}` },
+      });
+
+      expect(res.statusCode).toBe(404);
+    });
+  });
+
+  // ==================== POST /api/servers/:id/bootstrap (issue #113) ====================
+
+  describe('POST /api/servers/:id/bootstrap', () => {
+    it('forbids viewers (operator+ required)', async () => {
+      const server = await createTestServer(app.prisma, {
+        environmentId: envId,
+        name: 'bs-403-server',
+        hostname: '203.0.113.20',
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/servers/${server.id}/bootstrap`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+        payload: { components: { docker: true } },
+      });
+
+      expect(res.statusCode).toBe(403);
+    });
+
+    it('returns 400 when swap is selected but swapSizeMb is missing (Zod refine)', async () => {
+      const server = await createTestServer(app.prisma, {
+        environmentId: envId,
+        name: 'bs-nosize-server',
+        hostname: '203.0.113.21',
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/servers/${server.id}/bootstrap`,
+        headers: { authorization: `Bearer ${operatorToken}` },
+        // swap=true but no swapSizeMb provided — Zod refine should reject.
+        payload: { components: { swap: true } },
+      });
+
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('returns 400 when no components are selected', async () => {
+      const server = await createTestServer(app.prisma, {
+        environmentId: envId,
+        name: 'bs-empty-server',
+        hostname: '203.0.113.22',
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/servers/${server.id}/bootstrap`,
+        headers: { authorization: `Bearer ${operatorToken}` },
+        payload: { components: {} },
+      });
+
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('returns 400 when swapSizeMb is out of range', async () => {
+      const server = await createTestServer(app.prisma, {
+        environmentId: envId,
+        name: 'bs-bigswap-server',
+        hostname: '203.0.113.23',
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/servers/${server.id}/bootstrap`,
+        headers: { authorization: `Bearer ${operatorToken}` },
+        // 1 TB swap — way over SWAP_MAX_MB (64 GB).
+        payload: { components: { swap: true }, swapSizeMb: 1_000_000 },
+      });
+
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('accepts a valid operator-issued bootstrap request and returns 202', async () => {
+      const server = await createTestServer(app.prisma, {
+        environmentId: envId,
+        name: 'bs-202-server',
+        hostname: '203.0.113.24',
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/servers/${server.id}/bootstrap`,
+        headers: { authorization: `Bearer ${operatorToken}` },
+        // Don't select agent — agent deploy reads disk for the binary which may
+        // not exist in CI. docker+sysctl is enough to exercise validation +
+        // the audit-log path.
+        payload: { components: { docker: true, sysctl: true } },
+      });
+
+      expect(res.statusCode).toBe(202);
+      expect(res.json()).toEqual({ started: true });
+    });
+
+    it('returns 409 when a bootstrap is already running for the same server', async () => {
+      const server = await createTestServer(app.prisma, {
+        environmentId: envId,
+        name: 'bs-409-server',
+        hostname: '203.0.113.25',
+      });
+
+      // Pre-acquire the lock directly so the route sees a busy state and
+      // returns 409. Driving the race through two parallel inject() calls is
+      // flaky because the first fire-and-forget runBootstrap can fail fast
+      // (no SSH key in tests) and release the lock before the second handler
+      // dispatches. Testing the route's lock-check in isolation is enough.
+      const acquired = tryAcquireBootstrapLock(server.id);
+      expect(acquired).toBe(true);
+      try {
+        const res = await app.inject({
+          method: 'POST',
+          url: `/api/servers/${server.id}/bootstrap`,
+          headers: { authorization: `Bearer ${operatorToken}` },
+          payload: { components: { docker: true } },
+        });
+
+        expect(res.statusCode).toBe(409);
+        expect(res.json().message).toMatch(/already running/i);
+      } finally {
+        releaseBootstrapLock(server.id);
+      }
+    });
+
+    it('returns 404 for non-existent server', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/servers/missing/bootstrap',
+        headers: { authorization: `Bearer ${operatorToken}` },
+        payload: { components: { docker: true } },
+      });
+
+      expect(res.statusCode).toBe(404);
+    });
+  });
+
+  // ==================== POST /api/servers/:id/bootstrap/swap (issue #113) ====================
+
+  describe('POST /api/servers/:id/bootstrap/swap', () => {
+    it('requires confirm=true (Zod literal)', async () => {
+      const server = await createTestServer(app.prisma, {
+        environmentId: envId,
+        name: 'bs-swap-noconfirm-server',
+        hostname: '203.0.113.30',
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/servers/${server.id}/bootstrap/swap`,
+        headers: { authorization: `Bearer ${operatorToken}` },
+        // Missing confirm — Zod should reject.
+        payload: { sizeMb: 1024 },
+      });
+
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('rejects confirm=false', async () => {
+      const server = await createTestServer(app.prisma, {
+        environmentId: envId,
+        name: 'bs-swap-falseconfirm-server',
+        hostname: '203.0.113.31',
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/servers/${server.id}/bootstrap/swap`,
+        headers: { authorization: `Bearer ${operatorToken}` },
+        payload: { sizeMb: 1024, confirm: false },
+      });
+
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('forbids viewers (operator+ required)', async () => {
+      const server = await createTestServer(app.prisma, {
+        environmentId: envId,
+        name: 'bs-swap-viewer-server',
+        hostname: '203.0.113.32',
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/servers/${server.id}/bootstrap/swap`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+        payload: { sizeMb: 1024, confirm: true },
+      });
+
+      expect(res.statusCode).toBe(403);
+    });
+
+    it('rejects swap size below SWAP_MIN_MB', async () => {
+      const server = await createTestServer(app.prisma, {
+        environmentId: envId,
+        name: 'bs-swap-small-server',
+        hostname: '203.0.113.33',
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/servers/${server.id}/bootstrap/swap`,
+        headers: { authorization: `Bearer ${operatorToken}` },
+        // 64 MB — below SWAP_MIN_MB (128).
+        payload: { sizeMb: 64, confirm: true },
+      });
+
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('returns 404 for non-existent server', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/servers/missing/bootstrap/swap',
+        headers: { authorization: `Bearer ${operatorToken}` },
+        payload: { sizeMb: 1024, confirm: true },
+      });
+
+      expect(res.statusCode).toBe(404);
     });
   });
 });

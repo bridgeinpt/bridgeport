@@ -1,0 +1,48 @@
+-- RedefineTables
+PRAGMA defer_foreign_keys=ON;
+PRAGMA foreign_keys=OFF;
+CREATE TABLE "new_Server" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "name" TEXT NOT NULL,
+    "hostname" TEXT NOT NULL,
+    "publicIp" TEXT,
+    "tags" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'unknown',
+    "serverType" TEXT NOT NULL DEFAULT 'remote',
+    "dockerMode" TEXT NOT NULL DEFAULT 'ssh',
+    "lastCheckedAt" DATETIME,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    "lastHealthCheckStatus" TEXT,
+    "lastHealthCheckAt" DATETIME,
+    "lastHealthCheckType" TEXT,
+    "lastHealthCheckDurationMs" INTEGER,
+    "lastHealthCheckError" TEXT,
+    "metricsMode" TEXT NOT NULL DEFAULT 'disabled',
+    "agentToken" TEXT,
+    "agentStatus" TEXT NOT NULL DEFAULT 'unknown',
+    "lastAgentPushAt" DATETIME,
+    "agentVersion" TEXT,
+    "agentStatusChangedAt" DATETIME,
+    "bootstrapState" TEXT NOT NULL DEFAULT 'not_bootstrapped',
+    "bootstrapDistro" TEXT,
+    "dockerInstalled" BOOLEAN NOT NULL DEFAULT false,
+    "dockerInstalledAt" DATETIME,
+    "agentInstalledAt" DATETIME,
+    "sysctlApplied" BOOLEAN NOT NULL DEFAULT false,
+    "sysctlAppliedAt" DATETIME,
+    "swapConfigured" BOOLEAN NOT NULL DEFAULT false,
+    "swapConfiguredAt" DATETIME,
+    "swapSizeMb" INTEGER,
+    "environmentId" TEXT NOT NULL,
+    "clusterId" TEXT,
+    CONSTRAINT "Server_environmentId_fkey" FOREIGN KEY ("environmentId") REFERENCES "Environment" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "Server_clusterId_fkey" FOREIGN KEY ("clusterId") REFERENCES "ServerCluster" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+INSERT INTO "new_Server" ("agentStatus", "agentStatusChangedAt", "agentToken", "agentVersion", "clusterId", "createdAt", "dockerMode", "environmentId", "hostname", "id", "lastAgentPushAt", "lastCheckedAt", "lastHealthCheckAt", "lastHealthCheckDurationMs", "lastHealthCheckError", "lastHealthCheckStatus", "lastHealthCheckType", "metricsMode", "name", "publicIp", "serverType", "status", "tags", "updatedAt") SELECT "agentStatus", "agentStatusChangedAt", "agentToken", "agentVersion", "clusterId", "createdAt", "dockerMode", "environmentId", "hostname", "id", "lastAgentPushAt", "lastCheckedAt", "lastHealthCheckAt", "lastHealthCheckDurationMs", "lastHealthCheckError", "lastHealthCheckStatus", "lastHealthCheckType", "metricsMode", "name", "publicIp", "serverType", "status", "tags", "updatedAt" FROM "Server";
+DROP TABLE "Server";
+ALTER TABLE "new_Server" RENAME TO "Server";
+CREATE INDEX "Server_clusterId_idx" ON "Server"("clusterId");
+CREATE UNIQUE INDEX "Server_environmentId_name_key" ON "Server"("environmentId", "name");
+PRAGMA foreign_keys=ON;
+PRAGMA defer_foreign_keys=OFF;

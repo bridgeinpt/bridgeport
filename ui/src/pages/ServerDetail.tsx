@@ -22,6 +22,7 @@ import {
   listContainerImages,
   getModuleSettings,
   pruneServerImages,
+  getBootstrapStatus,
   type ServerWithServices,
   type MetricsMode,
   type ServerMetrics,
@@ -33,7 +34,9 @@ import {
   type ServerSyncAllResult,
   type ContainerImage,
   type ProcessSnapshot,
+  type BootstrapStatus,
 } from '../lib/api';
+import BootstrapModal from '../components/BootstrapModal';
 import { useToast } from '../components/Toast';
 import { formatDistanceToNow } from 'date-fns';
 import { getContainerStatusColor, getHealthStatusColor, getSyncStatusColor } from '../lib/status';
@@ -148,6 +151,11 @@ export default function ServerDetail() {
 
   const [pruning, setPruning] = useState(false);
 
+  // Bootstrap state (issue #113)
+  const [bootstrapStatus, setBootstrapStatus] = useState<BootstrapStatus | null>(null);
+  const [showBootstrapModal, setShowBootstrapModal] = useState(false);
+  const [loadingBootstrap, setLoadingBootstrap] = useState(false);
+
   // Metrics config (for filtering disabled metrics)
   const [schedulerConfig, setSchedulerConfig] = useState<Record<string, unknown> | null>(null);
 
@@ -186,8 +194,22 @@ export default function ServerDetail() {
 
       // Load config files sync status
       loadConfigFilesStatus(id);
+      // Load bootstrap status (best effort)
+      loadBootstrap(id);
     }
   }, [id]);
+
+  const loadBootstrap = async (serverId: string) => {
+    setLoadingBootstrap(true);
+    try {
+      const status = await getBootstrapStatus(serverId);
+      setBootstrapStatus(status);
+    } catch {
+      setBootstrapStatus(null);
+    } finally {
+      setLoadingBootstrap(false);
+    }
+  };
 
   const loadConfigFilesStatus = async (serverId: string) => {
     setLoadingConfigFiles(true);
@@ -613,6 +635,101 @@ export default function ServerDetail() {
             )}
           </div>
         </div>
+      </div>
+
+      {/* Bootstrap Card (issue #113) */}
+      <div className="panel mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <h3 className="text-lg font-semibold text-white">Bootstrap</h3>
+            {bootstrapStatus && (
+              <span
+                className={`px-2 py-0.5 text-xs rounded-full ${
+                  bootstrapStatus.bootstrapState === 'bootstrapped'
+                    ? 'bg-green-500/20 text-green-400'
+                    : bootstrapStatus.bootstrapState === 'error'
+                    ? 'bg-red-500/20 text-red-400'
+                    : 'bg-slate-500/20 text-slate-400'
+                }`}
+              >
+                {bootstrapStatus.bootstrapState === 'bootstrapped'
+                  ? 'Bootstrapped'
+                  : bootstrapStatus.bootstrapState === 'error'
+                  ? 'Error'
+                  : 'Not bootstrapped'}
+              </span>
+            )}
+            {bootstrapStatus?.bootstrapDistro && (
+              <span className="text-xs text-slate-400 font-mono">
+                {bootstrapStatus.bootstrapDistro}
+              </span>
+            )}
+          </div>
+          <button
+            onClick={() => setShowBootstrapModal(true)}
+            disabled={loadingBootstrap}
+            className="btn btn-secondary"
+            title="Install Docker, sysctl, agent, and (optionally) swap on this server"
+          >
+            Bootstrap server
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {([
+            ['Docker', bootstrapStatus?.dockerInstalled ?? false, bootstrapStatus?.dockerInstalledAt],
+            ['sysctl', bootstrapStatus?.sysctlApplied ?? false, bootstrapStatus?.sysctlAppliedAt],
+            ['Agent', bootstrapStatus?.agentInstalled ?? false, bootstrapStatus?.agentInstalledAt],
+            [
+              'Swap',
+              bootstrapStatus?.swapConfigured ?? false,
+              bootstrapStatus?.swapConfiguredAt,
+              bootstrapStatus?.swapSizeMb
+                ? `${bootstrapStatus.swapSizeMb} MB`
+                : undefined,
+            ],
+          ] as Array<[string, boolean, string | null | undefined, string?]>).map(
+            ([label, done, at, extra]) => (
+              <div
+                key={label}
+                className={`p-3 rounded-lg border ${
+                  done
+                    ? 'border-green-500/30 bg-green-500/5'
+                    : 'border-slate-700 bg-slate-800/50'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-white font-medium">{label}</span>
+                  <span
+                    className={`text-xs px-1.5 py-0.5 rounded ${
+                      done ? 'bg-green-500/20 text-green-400' : 'bg-slate-700 text-slate-400'
+                    }`}
+                  >
+                    {done ? 'Installed' : 'Pending'}
+                  </span>
+                </div>
+                {extra && <p className="text-xs text-slate-400 mt-1">{extra}</p>}
+                {at && (
+                  <p className="text-xs text-slate-500 mt-1">
+                    {formatDistanceToNow(new Date(at), { addSuffix: true })}
+                  </p>
+                )}
+              </div>
+            ),
+          )}
+        </div>
+
+        {bootstrapStatus?.distro && !bootstrapStatus.distro.supported && (
+          <p className="mt-3 text-sm text-yellow-300">
+            Detected distro <span className="font-mono">{bootstrapStatus.distro.raw || 'unknown'}</span>{' '}
+            is not supported. Bootstrap works on Ubuntu and Debian only.
+          </p>
+        )}
+        {bootstrapStatus?.sudo && !bootstrapStatus.sudo.ok && (
+          <p className="mt-3 text-sm text-yellow-300">
+            Passwordless sudo not detected. Configure NOPASSWD or use root SSH before running bootstrap.
+          </p>
+        )}
       </div>
 
       {/* Monitoring Card */}
@@ -1524,6 +1641,20 @@ export default function ServerDetail() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Bootstrap Modal (issue #113) */}
+      {id && (
+        <BootstrapModal
+          isOpen={showBootstrapModal}
+          onClose={() => {
+            setShowBootstrapModal(false);
+            loadBootstrap(id);
+          }}
+          serverId={id}
+          status={bootstrapStatus}
+          onComplete={() => loadBootstrap(id)}
+        />
       )}
 
       {/* Edit Server Modal */}

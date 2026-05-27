@@ -122,3 +122,12 @@ export const HEALTH_CHECK_STATUS = {
   TIMEOUT: 'timeout',
 } as const;
 export type HealthCheckStatus = (typeof HEALTH_CHECK_STATUS)[keyof typeof HEALTH_CHECK_STATUS];
+
+// ==================== Bootstrap ====================
+
+export const BOOTSTRAP_STATE = {
+  NOT_BOOTSTRAPPED: 'not_bootstrapped',
+  BOOTSTRAPPED: 'bootstrapped',
+  ERROR: 'error',
+} as const;
+export type BootstrapState = (typeof BOOTSTRAP_STATE)[keyof typeof BOOTSTRAP_STATE];

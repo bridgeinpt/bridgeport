@@ -68,6 +68,7 @@ function connectSSE(token: string, environmentId?: string): void {
     'notification',
     'metrics_updated',
     'container_discovery',
+    'bootstrap_progress',
   ];
   for (const eventType of eventTypes) {
     globalSource.addEventListener(eventType, (event: MessageEvent) => {
