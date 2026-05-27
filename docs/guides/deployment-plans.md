@@ -279,6 +279,43 @@ curl -X POST "https://your-bridgeport/api/environments/env_abc123/deployment-pla
 
 The plan is created and execution begins asynchronously. The response includes the plan with all steps in `pending` status. Use [SSE streaming](#real-time-progress-tracking-sse) or polling to track progress.
 
+### Dry-Run Preview
+
+`POST /api/deployment-plans/:id/execute?dryRun=true` (or `X-Dry-Run: true`) walks the same ordered deploy steps **synchronously** and returns a per-step preview report — no plan status transition, no step rows written, no SSH writes, no `docker pull`. Plan status stays `pending` so a real execute is still a valid follow-up.
+
+```http
+POST /api/deployment-plans/:id/execute?dryRun=true
+Authorization: Bearer <token>
+```
+
+**Response shape:**
+
+```json
+{
+  "dryRun": true,
+  "planId": "cdpl...",
+  "planName": "Deploy v2.2.0",
+  "steps": [
+    {
+      "dryRun": true,
+      "stepOrder": 0,
+      "serviceName": "migrator",
+      "serviceId": "csrv...",
+      "serviceDeploymentId": "csdp...",
+      "serverName": "db-1",
+      "imageTag": "v2.2.0",
+      "imageDigest": "sha256:abc...",
+      "composeContent": "...",
+      "env": { "DB_PASSWORD": "***" },
+      "containerAction": "cycle",
+      "warnings": []
+    }
+  ]
+}
+```
+
+Health-check steps are not part of the preview (no container is actually deployed, so there's nothing to check). The endpoint writes an audit entry with `details.dryRun = true`.
+
 ---
 
 ## Step Types

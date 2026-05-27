@@ -1,8 +1,14 @@
 import { prisma } from '../lib/db.js';
 import { createClientForServer, shellEscape } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
-import { resolveSecretPlaceholders } from './secrets.js';
+import { resolveSecretPlaceholders, getSecretsForEnv } from './secrets.js';
 import { logAudit } from './audit.js';
+import {
+  redactSecretValues,
+  unifiedDiff,
+  type ConfigSyncDryRunReport,
+  type ConfigSyncTarget,
+} from '../lib/dry-run.js';
 
 /**
  * Actor fields used to attribute the auto-triggered audit log row to the user
@@ -296,6 +302,223 @@ export async function syncConfigFileToAttachedServices(
     configFileName: configFile.name,
     environmentId: configFile.environmentId,
   };
+}
+
+/**
+ * Dry-run preview of `syncConfigFileToAttachedServices`. For each target,
+ * returns the unified diff between the current host file and the rendered
+ * (redacted) content that would be written — without writing the file or
+ * touching `lastSyncedAt`.
+ *
+ * Binary files are not diffed (no useful line view); their target is reported
+ * with an empty diff and a warning.
+ *
+ * Returns `null` when the ConfigFile itself doesn't exist (true 404). Zero
+ * attachments returns an empty `results` array — same shape as the real path.
+ */
+export async function syncConfigFileToAttachedServicesDryRun(
+  configFileId: string
+): Promise<ConfigSyncDryRunReport | null> {
+  const configFile = await prisma.configFile.findUnique({
+    where: { id: configFileId },
+    include: {
+      services: {
+        include: {
+          service: { include: { serviceDeployments: { include: { server: true } } } },
+          serviceDeployment: { include: { server: true } },
+        },
+      },
+    },
+  });
+
+  if (!configFile) return null;
+
+  // Same fan-out logic as syncConfigFileToAttachedServices — kept inline rather
+  // than extracted so the live and dry-run paths stay easy to keep in lockstep.
+  type Pair = {
+    sf: typeof configFile.services[number];
+    serviceDeploymentId: string;
+    server: typeof configFile.services[number]['service']['serviceDeployments'][number]['server'];
+    serviceName: string;
+  };
+  const pairs: Pair[] = [];
+  const overrideCovered = new Map<string, Set<string>>();
+  for (const sf of configFile.services) {
+    if (sf.serviceDeployment) {
+      pairs.push({ sf, serviceDeploymentId: sf.serviceDeployment.id, server: sf.serviceDeployment.server, serviceName: sf.service.name });
+      if (!overrideCovered.has(sf.configFileId)) overrideCovered.set(sf.configFileId, new Set());
+      overrideCovered.get(sf.configFileId)!.add(sf.serviceDeployment.id);
+    }
+  }
+  for (const sf of configFile.services) {
+    if (sf.serviceDeployment) continue;
+    const covered = overrideCovered.get(sf.configFileId) ?? new Set<string>();
+    for (const sd of sf.service.serviceDeployments) {
+      if (covered.has(sd.id)) continue;
+      pairs.push({ sf, serviceDeploymentId: sd.id, server: sd.server, serviceName: sf.service.name });
+    }
+  }
+
+  const results: ConfigSyncTarget[] = [];
+  if (pairs.length === 0) {
+    return { dryRun: true, results: [] };
+  }
+
+  // Group pairs by server so we open one SSH connection per host. Important:
+  // the connections are read-only — we only run `cat <hostPath>` to capture
+  // the current content for the diff.
+  const serverGroups = new Map<string, Pair[]>();
+  for (const p of pairs) {
+    if (!serverGroups.has(p.server.id)) serverGroups.set(p.server.id, []);
+    serverGroups.get(p.server.id)!.push(p);
+  }
+
+  for (const [, group] of serverGroups) {
+    const server = group[0].server;
+    const warnings: string[] = [];
+
+    // Resolve secrets once per environment so we can both substitute and
+    // redact in the rendered output (the redacted form is what we show in the
+    // diff to avoid leaking secret values in dry-run responses).
+    const secretValues = Object.values(await getSecretsForEnv(server.environmentId));
+
+    const { client, error: clientError } = await createClientForServer(
+      server.hostname,
+      server.environmentId,
+      getEnvironmentSshKey,
+      { serverType: server.serverType }
+    );
+
+    if (!client) {
+      for (const p of group) {
+        results.push({
+          serverName: server.name,
+          serviceName: p.serviceName,
+          configFileName: configFile.name,
+          hostPath: p.sf.targetPath,
+          diff: '',
+          exists: false,
+          referencingServices: [p.serviceName],
+          warnings: [clientError || 'Failed to create SSH client'],
+        });
+      }
+      continue;
+    }
+
+    try {
+      await client.connect();
+
+      for (const p of group) {
+        const targetPath = p.sf.targetPath;
+        const referencingServices = await listReferencingServiceNames(configFile.id, server.id);
+
+        if (configFile.isBinary) {
+          // No meaningful line diff for binary blobs — surface the size and a
+          // warning so the caller knows a sync would still write the file.
+          results.push({
+            serverName: server.name,
+            serviceName: p.serviceName,
+            configFileName: configFile.name,
+            hostPath: targetPath,
+            diff: '',
+            exists: false,
+            referencingServices,
+            warnings: ['Binary file — diff omitted'],
+          });
+          continue;
+        }
+
+        const { content: rawContent, missing, templateErrors } = await resolveSecretPlaceholders(
+          server.environmentId,
+          configFile.content
+        );
+        const renderedContent = redactSecretValues(rawContent.trimEnd(), secretValues);
+        const localWarnings: string[] = [];
+        if (templateErrors.length > 0) {
+          localWarnings.push(`Template errors: ${templateErrors.join('; ')}`);
+        }
+        if (missing.length > 0) {
+          localWarnings.push(`Missing secrets: ${missing.join(', ')}`);
+        }
+
+        // Read the current host file (best-effort). Use `cat` and check the
+        // exit code so a missing file shows up as an empty `before`.
+        // shellEscape() is mandatory here — the target path is user-supplied.
+        let currentContent = '';
+        let exists = false;
+        try {
+          const { stdout, code } = await client.exec(`cat ${shellEscape(targetPath)} 2>/dev/null`);
+          if (code === 0) {
+            currentContent = stdout.replace(/\n$/, '');
+            exists = true;
+          }
+        } catch (err) {
+          localWarnings.push(`Could not read host file: ${err instanceof Error ? err.message : String(err)}`);
+        }
+
+        const diff = unifiedDiff(currentContent, renderedContent, {
+          fromLabel: `a${targetPath}`,
+          toLabel: `b${targetPath}`,
+        });
+
+        results.push({
+          serverName: server.name,
+          serviceName: p.serviceName,
+          configFileName: configFile.name,
+          hostPath: targetPath,
+          diff,
+          exists,
+          referencingServices,
+          warnings: [...warnings, ...localWarnings],
+        });
+      }
+    } catch (err) {
+      for (const p of group) {
+        results.push({
+          serverName: server.name,
+          serviceName: p.serviceName,
+          configFileName: configFile.name,
+          hostPath: p.sf.targetPath,
+          diff: '',
+          exists: false,
+          referencingServices: [p.serviceName],
+          warnings: [err instanceof Error ? err.message : String(err)],
+        });
+      }
+    } finally {
+      client.disconnect();
+    }
+  }
+
+  return { dryRun: true, results };
+}
+
+/**
+ * List the names of services that reference a given ConfigFile on a given
+ * server (via their ServiceDeployment). Used by the dry-run sync preview so
+ * callers see the blast radius of a single config-file change.
+ */
+async function listReferencingServiceNames(configFileId: string, serverId: string): Promise<string[]> {
+  const rows = await prisma.serviceFile.findMany({
+    where: {
+      configFileId,
+      OR: [
+        { serviceDeployment: { serverId } },
+        // base rows (no serviceDeploymentId) attach to every deployment of the
+        // service on this server.
+        {
+          serviceDeploymentId: null,
+          service: { serviceDeployments: { some: { serverId } } },
+        },
+      ],
+    },
+    include: { service: { select: { name: true } } },
+  });
+  const seen = new Set<string>();
+  for (const r of rows) {
+    if (r.service?.name) seen.add(r.service.name);
+  }
+  return [...seen].sort();
 }
 
 /**

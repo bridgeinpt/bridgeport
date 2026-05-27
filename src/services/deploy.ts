@@ -5,7 +5,7 @@ import { createDockerClientForServer, type DockerClient } from '../lib/docker.js
 import { RegistryFactory } from '../lib/registry.js';
 import { getRegistryCredentials } from './registries.js';
 import { extractRepoName, stripRegistryPrefix } from '../lib/image-utils.js';
-import { generateDeploymentArtifacts, saveDeploymentArtifacts } from './compose.js';
+import { generateDeploymentArtifacts, previewDryRunArtifacts, saveDeploymentArtifacts } from './compose.js';
 import { ensureRegistryLogin, getSocketAuthConfig } from './registry-login.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 import { checkServiceUpdate } from '../lib/scheduler.js';
@@ -17,6 +17,7 @@ import { getSystemSettings } from './system-settings.js';
 import { eventBus } from '../lib/event-bus.js';
 import { DEPLOYMENT_STATUS, CONTAINER_STATUS, HISTORY_STATUS, DISCOVERY_STATUS } from '../lib/constants.js';
 import type { Deployment } from '@prisma/client';
+import type { ContainerAction, DeployDryRunReport } from '../lib/dry-run.js';
 
 export interface DeployOptions {
   imageTag?: string;
@@ -406,6 +407,135 @@ export async function deployService(
 
     return { deployment: failedDeployment, logs: logs.join('\n'), previousTag };
   }
+}
+
+/**
+ * Resolve digest + container action for the dry-run report.
+ * Split from the main builder so the SSH inspect step can be retried/skipped
+ * without re-doing the registry call.
+ */
+async function resolveDigestAndAction(
+  containerImage: { imageName: string; registryConnectionId: string | null },
+  imageTag: string,
+  server: { hostname: string; dockerMode: string; serverType: string; environmentId: string },
+  containerName: string
+): Promise<{ digest: string | null; action: ContainerAction; warnings: string[] }> {
+  const warnings: string[] = [];
+
+  // Resolve the new digest from the registry (no pull).
+  let newDigest: string | null = null;
+  if (containerImage.registryConnectionId) {
+    try {
+      const creds = await getRegistryCredentials(containerImage.registryConnectionId);
+      if (!creds) {
+        warnings.push('Registry credentials not found — digest cannot be resolved');
+      } else {
+        const client = RegistryFactory.create(creds);
+        const repoName = creds.type === 'digitalocean'
+          ? extractRepoName(containerImage.imageName, creds.repositoryPrefix)
+          : stripRegistryPrefix(containerImage.imageName);
+        newDigest = await client.getManifestDigest(repoName, imageTag);
+      }
+    } catch (err) {
+      warnings.push(`Failed to resolve image digest from registry: ${getErrorMessage(err, 'unknown error')}`);
+    }
+  } else {
+    warnings.push('No registry connection configured — digest cannot be resolved without a pull');
+  }
+
+  // Inspect the running container's current image to decide cycle vs no-op.
+  // Failures here are non-fatal — fall back to `cycle` (the safe default).
+  let action: ContainerAction = 'cycle';
+  try {
+    const { dockerClient, sshClient, needsConnect } = await createDockerClientForServer(server, getEnvironmentSshKey);
+    if (!dockerClient) {
+      warnings.push('Could not connect to server to inspect current container');
+    } else {
+      try {
+        if (needsConnect && sshClient) {
+          await sshClient.connect();
+        }
+        const info = await dockerClient.getContainerInfo(containerName);
+        if (!info.running || info.state === CONTAINER_STATUS.NOT_FOUND) {
+          action = 'start';
+        } else if (newDigest && info.image) {
+          // info.image is the image reference (e.g. "repo/img:tag"); we can't
+          // compare it to a registry manifest digest directly. The dry-run
+          // therefore optimistically reports `cycle` whenever a container is
+          // running — a real comparison would require inspecting the local
+          // image's RepoDigests, which is mode-specific. This is documented
+          // explicitly so callers don't read `cycle` as "definitely will
+          // restart".
+          action = 'cycle';
+        }
+      } finally {
+        if (sshClient) {
+          try { sshClient.disconnect(); } catch { /* ignore */ }
+        }
+      }
+    }
+  } catch (err) {
+    warnings.push(`Could not inspect running container: ${getErrorMessage(err, 'unknown error')}`);
+  }
+
+  return { digest: newDigest, action, warnings };
+}
+
+/**
+ * Dry-run preview of `deployService`. Renders the artifacts the real path
+ * would write to the host and reports the resolved image digest + the action
+ * Docker would take — without creating a Deployment row, opening a writeable
+ * SSH session, or pulling the image.
+ *
+ * Secret VALUES in the compose content and env map are replaced with `***`;
+ * `${KEY}` references in the source template that would normally be substituted
+ * remain visible via the substituted-then-redacted form.
+ */
+export async function deployServiceDryRun(
+  serviceDeploymentId: string
+): Promise<DeployDryRunReport> {
+  const deployment = await prisma.serviceDeployment.findUniqueOrThrow({
+    where: { id: serviceDeploymentId },
+    include: {
+      server: true,
+      service: { include: { containerImage: true } },
+    },
+  });
+
+  const service = deployment.service;
+  const imageTag = service.imageTag;
+
+  // Render the artifacts with secrets redacted. previewDryRunArtifacts mirrors
+  // generateDeploymentArtifacts but replaces secret values with `***`.
+  const preview = await previewDryRunArtifacts(serviceDeploymentId);
+
+  const { digest, action, warnings } = await resolveDigestAndAction(
+    {
+      imageName: service.containerImage.imageName,
+      registryConnectionId: service.containerImage.registryConnectionId,
+    },
+    imageTag,
+    {
+      hostname: deployment.server.hostname,
+      dockerMode: deployment.server.dockerMode,
+      serverType: deployment.server.serverType,
+      environmentId: deployment.server.environmentId,
+    },
+    deployment.containerName
+  );
+
+  return {
+    dryRun: true,
+    serviceId: service.id,
+    serviceDeploymentId,
+    serverName: deployment.server.name,
+    imageTag,
+    imageDigest: digest,
+    composeContent: preview.composeContent,
+    env: preview.env,
+    containerAction: action,
+    warnings: [...preview.warnings, ...warnings],
+  };
 }
 
 /**

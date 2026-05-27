@@ -208,6 +208,57 @@ Content-Type: application/json
 }
 ```
 
+### Dry-Run Preview
+
+Add `?dryRun=true` to the query string (or send `X-Dry-Run: true` as a header) on `POST /api/services/:id/deployments/:depId/deploy` to preview what a real deploy would do **without** creating a `Deployment` row, pulling the image, opening an SSH write session, or running `docker compose up`. The same flag works on `POST /api/services/:id/sync-files` and the deployment-plan / config-file sync endpoints documented below.
+
+```http
+POST /api/services/:id/deployments/:depId/deploy?dryRun=true
+Authorization: Bearer <token>
+```
+
+**Response shape:**
+
+```json
+{
+  "dryRun": true,
+  "serviceId": "csrv...",
+  "serviceDeploymentId": "csdp...",
+  "serverName": "web-1",
+  "imageTag": "v2.2.0",
+  "imageDigest": "sha256:abc123...",
+  "composeContent": "services:\n  api:\n    image: registry.example.com/api:v2.2.0\n    ...",
+  "env": { "PORT": "3000", "DB_PASSWORD": "***" },
+  "containerAction": "cycle",
+  "warnings": []
+}
+```
+
+- `imageDigest` is resolved from the registry manifest (no `docker pull`). `null` when no registry connection exists or the manifest fetch failed — a warning is added explaining why.
+- `containerAction` is `"start"` (no container running), `"cycle"` (running, would be recreated by `compose up`), or `"no-op"`.
+- Secret VALUES are replaced with `***` in both `composeContent` and `env`. `${KEY}` references in the template stay visible in the source compose template's substitution path; once resolved, the substituted value is redacted.
+- The endpoint still writes an audit-log entry with `details.dryRun = true` so operators can see who probed which deployment.
+
+For the service-wide `POST /api/services/:id/sync-files` endpoint, the dry-run response shape is:
+
+```json
+{
+  "dryRun": true,
+  "results": [
+    {
+      "serverName": "web-1",
+      "serviceName": "api",
+      "configFileName": "app.env",
+      "hostPath": "/etc/api/app.env",
+      "diff": "--- a/etc/api/app.env\n+++ b/etc/api/app.env\n@@ -1,2 +1,2 @@\n-OLD=value\n+NEW=value",
+      "exists": true,
+      "referencingServices": ["api"],
+      "warnings": []
+    }
+  ]
+}
+```
+
 ### Deployment Logs & History
 
 **View deployment history:**

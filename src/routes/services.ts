@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma, isPrismaNotFoundError } from '../lib/db.js';
 import {
   deployService,
+  deployServiceDryRun,
   deployServiceTemplate,
   getDeploymentHistory,
   getDeployment,
@@ -19,6 +20,7 @@ import { determineHealthStatus, determineOverallStatus } from '../services/serve
 import { getSystemSettings } from '../services/system-settings.js';
 import { HEALTH_STATUS, CONTAINER_STATUS, DISCOVERY_STATUS, HEALTH_CHECK_STATUS } from '../lib/constants.js';
 import { validateBody, validateUpdateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery, flattenDeploymentOntoService } from '../lib/helpers.js';
+import { isDryRun } from '../lib/dry-run.js';
 
 // --- schemas ---
 
@@ -727,6 +729,39 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         include: { service: true, server: true },
       });
       if (!deployment) return reply.code(404).send({ error: 'Deployment not found' });
+
+      // Dry-run: return the report without creating a Deployment row, opening
+      // an SSH session, or pulling the image. Audit the preview so operators
+      // can see who probed which deployment.
+      if (isDryRun(request)) {
+        try {
+          const report = await deployServiceDryRun(depId);
+          await logAudit({
+            action: 'deploy',
+            resourceType: 'service_deployment',
+            resourceId: depId,
+            resourceName: `${deployment.service.name}@${deployment.server.name}`,
+            details: { dryRun: true, imageTag: report.imageTag, serviceId: id },
+            ...actorFrom(request),
+            environmentId: deployment.service.environmentId,
+          });
+          return report;
+        } catch (error) {
+          const message = getErrorMessage(error, 'Dry-run failed');
+          await logAudit({
+            action: 'deploy',
+            resourceType: 'service_deployment',
+            resourceId: depId,
+            resourceName: `${deployment.service.name}@${deployment.server.name}`,
+            details: { dryRun: true, serviceId: id },
+            success: false,
+            error: message,
+            ...actorFrom(request),
+            environmentId: deployment.service.environmentId,
+          });
+          return reply.code(500).send({ error: message });
+        }
+      }
 
       try {
         const result = await deployService(

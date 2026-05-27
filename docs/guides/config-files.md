@@ -208,6 +208,41 @@ POST /api/config-files/:configFileId/sync-all
 Authorization: Bearer <token>
 ```
 
+### Dry-Run Preview
+
+All three sync endpoints accept `?dryRun=true` (or `X-Dry-Run: true`) to preview what a real sync would write without touching the host file or updating `lastSyncedAt`. The dry-run opens a read-only SSH session, runs `cat <hostPath>` to capture the current contents, and returns a unified diff against the rendered (redacted) content per target.
+
+```http
+POST /api/config-files/:id/sync-all?dryRun=true
+Authorization: Bearer <token>
+```
+
+**Response shape:**
+
+```json
+{
+  "dryRun": true,
+  "results": [
+    {
+      "serverName": "web-1",
+      "serviceName": "api",
+      "configFileName": "app.env",
+      "hostPath": "/etc/api/app.env",
+      "diff": "--- a/etc/api/app.env\n+++ b/etc/api/app.env\n@@ -1,2 +1,2 @@\n-OLD=value\n+NEW=value",
+      "exists": true,
+      "referencingServices": ["api", "worker"],
+      "warnings": []
+    }
+  ]
+}
+```
+
+- `diff` is a unified diff string (empty when the rendered content matches the host file).
+- `exists` is `false` if the file does not yet exist on the host — `diff` then shows the full rendered content as additions.
+- Secret VALUES in the rendered content are replaced with `***`. `${KEY}` placeholders that resolve to a secret are substituted then redacted.
+- Binary files are not diffed; they report an empty diff with a warning.
+- The dry-run writes an audit-log entry with `details.dryRun = true`. The same flag works on `POST /api/services/:id/sync-files`.
+
 ### What Happens During Sync
 
 ```mermaid

@@ -1,10 +1,11 @@
 import { prisma } from '../lib/db.js';
-import { deployService } from './deploy.js';
+import { deployService, deployServiceDryRun } from './deploy.js';
 import { verifyServiceHealth } from './health-verification.js';
 import { sendSystemNotification, NOTIFICATION_TYPES } from './notifications.js';
 import { eventBus } from '../lib/event-bus.js';
 import { DEPLOYMENT_STATUS, PLAN_STATUS, STEP_STATUS } from '../lib/constants.js';
 import type { DeploymentPlan, DeploymentPlanStep, Server, Service, ServiceDependency, ServiceDeployment } from '@prisma/client';
+import type { PlanDryRunReport } from '../lib/dry-run.js';
 
 export interface BuildPlanOptions {
   environmentId: string;
@@ -479,6 +480,48 @@ export async function executePlan(planId: string): Promise<void> {
       await rollbackPlan(planId);
     }
   }
+}
+
+/**
+ * Synchronous dry-run preview for a deployment plan. Iterates the same
+ * ordered deploy steps that `executePlan` would run, calls the per-deployment
+ * dry-run for each, and returns the collected report.
+ *
+ * Unlike `executePlan` this is synchronous (the caller awaits the report
+ * before responding) and has no side effects: no plan-status transition, no
+ * step rows updated, no audit events emitted from inside the service layer.
+ */
+export async function executePlanDryRun(planId: string): Promise<PlanDryRunReport> {
+  const plan = await prisma.deploymentPlan.findUniqueOrThrow({
+    where: { id: planId },
+    include: {
+      steps: {
+        orderBy: { order: 'asc' },
+        include: {
+          service: true,
+          serviceDeployment: { include: { server: true, service: true } },
+        },
+      },
+    },
+  });
+
+  const steps: PlanDryRunReport['steps'] = [];
+  for (const step of plan.steps) {
+    if (step.action !== 'deploy' || !step.serviceDeployment) continue;
+    const report = await deployServiceDryRun(step.serviceDeployment.id);
+    steps.push({
+      ...report,
+      stepOrder: step.order,
+      serviceName: step.serviceDeployment.service.name,
+    });
+  }
+
+  return {
+    dryRun: true,
+    planId: plan.id,
+    planName: plan.name,
+    steps,
+  };
 }
 
 async function executeDeployStep(
