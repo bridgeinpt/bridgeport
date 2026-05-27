@@ -610,7 +610,7 @@ describe('server routes', () => {
         });
 
         expect(res.statusCode).toBe(409);
-        expect(res.json().error).toMatch(/already running/i);
+        expect(res.json().message).toMatch(/already running/i);
       } finally {
         releaseBootstrapLock(server.id);
       }

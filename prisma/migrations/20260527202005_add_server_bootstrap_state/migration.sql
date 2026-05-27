@@ -35,11 +35,14 @@ CREATE TABLE "new_Server" (
     "swapConfiguredAt" DATETIME,
     "swapSizeMb" INTEGER,
     "environmentId" TEXT NOT NULL,
-    CONSTRAINT "Server_environmentId_fkey" FOREIGN KEY ("environmentId") REFERENCES "Environment" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+    "clusterId" TEXT,
+    CONSTRAINT "Server_environmentId_fkey" FOREIGN KEY ("environmentId") REFERENCES "Environment" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "Server_clusterId_fkey" FOREIGN KEY ("clusterId") REFERENCES "ServerCluster" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
-INSERT INTO "new_Server" ("agentStatus", "agentStatusChangedAt", "agentToken", "agentVersion", "createdAt", "dockerMode", "environmentId", "hostname", "id", "lastAgentPushAt", "lastCheckedAt", "lastHealthCheckAt", "lastHealthCheckDurationMs", "lastHealthCheckError", "lastHealthCheckStatus", "lastHealthCheckType", "metricsMode", "name", "publicIp", "serverType", "status", "tags", "updatedAt") SELECT "agentStatus", "agentStatusChangedAt", "agentToken", "agentVersion", "createdAt", "dockerMode", "environmentId", "hostname", "id", "lastAgentPushAt", "lastCheckedAt", "lastHealthCheckAt", "lastHealthCheckDurationMs", "lastHealthCheckError", "lastHealthCheckStatus", "lastHealthCheckType", "metricsMode", "name", "publicIp", "serverType", "status", "tags", "updatedAt" FROM "Server";
+INSERT INTO "new_Server" ("agentStatus", "agentStatusChangedAt", "agentToken", "agentVersion", "clusterId", "createdAt", "dockerMode", "environmentId", "hostname", "id", "lastAgentPushAt", "lastCheckedAt", "lastHealthCheckAt", "lastHealthCheckDurationMs", "lastHealthCheckError", "lastHealthCheckStatus", "lastHealthCheckType", "metricsMode", "name", "publicIp", "serverType", "status", "tags", "updatedAt") SELECT "agentStatus", "agentStatusChangedAt", "agentToken", "agentVersion", "clusterId", "createdAt", "dockerMode", "environmentId", "hostname", "id", "lastAgentPushAt", "lastCheckedAt", "lastHealthCheckAt", "lastHealthCheckDurationMs", "lastHealthCheckError", "lastHealthCheckStatus", "lastHealthCheckType", "metricsMode", "name", "publicIp", "serverType", "status", "tags", "updatedAt" FROM "Server";
 DROP TABLE "Server";
 ALTER TABLE "new_Server" RENAME TO "Server";
+CREATE INDEX "Server_clusterId_idx" ON "Server"("clusterId");
 CREATE UNIQUE INDEX "Server_environmentId_name_key" ON "Server"("environmentId", "name");
 PRAGMA foreign_keys=ON;
 PRAGMA defer_foreign_keys=OFF;
