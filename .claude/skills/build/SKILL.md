@@ -23,12 +23,16 @@ Fetch open, unassigned issues (limit 50, JSON):
 
 ```bash
 gh issue list --state open --assignee "" --limit 50 \
-  --json number,title,labels,createdAt,body
+  --json number,title,labels,createdAt,body,milestone
 ```
 
-Score each issue by priority labels and recency:
+Score each issue by milestone version, priority labels, and recency.
 
-| Label match (case-insensitive) | Tier |
+**Milestone version** — parse `milestone.title` as a dotted numeric version (e.g., `"2.0"` → `[2, 0]`, `"2.1.3"` → `[2, 1, 3]`). Lower versions sort first so we close out older milestones before opening new ones. Non-numeric milestone titles (e.g., `"Backlog"`) and issues without a milestone sort to the end, as if they had version `[Infinity]`.
+
+**Priority tier** — first label match wins, case-insensitive:
+
+| Label match | Tier |
 |---|---|
 | `P0`, `priority:critical`, `critical` | 0 |
 | `P1`, `priority:high`, `bug` | 1 |
@@ -36,9 +40,11 @@ Score each issue by priority labels and recency:
 | `feature`, `enhancement`, `task` | 3 |
 | anything else | 4 |
 
-Sort by `(tier asc, createdAt asc)` and pick the first. If zero open unassigned issues exist, tell the user and stop.
+**Sort key**: `(milestone_version asc with nulls last, tier asc, createdAt asc)`. Pick the first. If zero open unassigned issues exist, tell the user and stop.
 
-Print: `Picked #<N>: <title>` and continue.
+Example: between an open #500 `bug` (no milestone) and #112 `enhancement` (milestone `2.0`), pick #112 — closing the in-flight milestone is higher leverage than starting on an unscoped bug.
+
+Print: `Picked #<N> [<milestone>]: <title>` and continue.
 
 ### If argument provided
 
