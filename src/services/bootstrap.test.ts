@@ -422,7 +422,7 @@ describe('bootstrap service', () => {
       const execStreamCalls: string[] = [];
       mockSSHClientInstance.execStream.mockImplementation(async (cmd: string) => {
         // First line of each script identifies the component.
-        if (cmd.includes('get.docker.com')) execStreamCalls.push('docker');
+        if (cmd.includes('/tmp/get-docker.sh')) execStreamCalls.push('docker');
         else if (cmd.includes('/etc/sysctl.d/99-bridgeport.conf')) execStreamCalls.push('sysctl');
         else if (cmd.includes('/swapfile')) execStreamCalls.push('swap');
         return 0;
@@ -451,7 +451,7 @@ describe('bootstrap service', () => {
       setupSupportedHost();
       // sysctl succeeds, docker fails.
       mockSSHClientInstance.execStream.mockImplementation(async (cmd: string) => {
-        if (cmd.includes('get.docker.com')) return 1; // docker fails
+        if (cmd.includes('/tmp/get-docker.sh')) return 1; // docker fails
         return 0;
       });
 
