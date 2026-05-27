@@ -5,6 +5,8 @@ import {
   validatePassword,
 } from '../services/auth.js';
 import { validateBody } from '../lib/helpers.js';
+import { computeScopes } from '../lib/scopes.js';
+import { prisma } from '../lib/db.js';
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -64,7 +66,29 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
     '/api/auth/me',
     { preHandler: [fastify.authenticate] },
     async (request) => {
-      return { user: request.authUser };
+      const authUser = request.authUser!;
+
+      // environments[]: scoped tokens advertise their allowlist; JWT/full-access
+      // tokens get the complete list of environment IDs they can see.
+      let environments: string[];
+      if (authUser.scope && !authUser.scope.allEnvironments) {
+        environments = authUser.scope.environmentIds;
+      } else {
+        const rows = await prisma.environment.findMany({ select: { id: true } });
+        environments = rows.map((e) => e.id);
+      }
+
+      const scopes = computeScopes(authUser);
+
+      // ADDITIVE: existing `user` field is preserved verbatim so existing
+      // clients keep working. New fields `role`, `environments`, `scopes`
+      // are added at the top level.
+      return {
+        user: authUser,
+        role: authUser.role,
+        environments,
+        scopes,
+      };
     }
   );
 }

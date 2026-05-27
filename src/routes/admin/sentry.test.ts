@@ -66,7 +66,9 @@ describe('admin sentry routes', () => {
       });
 
       expect(res.statusCode).toBe(400);
-      expect(res.json()).toHaveProperty('error');
+      const body = res.json();
+      expect(body.code).toBeDefined();
+      expect(body.message).toBeDefined();
     });
 
     it('rejects viewer with 403', async () => {

@@ -5,6 +5,7 @@ BRIDGEPORT exposes a JSON REST API for all operations -- deployments, server man
 ## Table of Contents
 
 - [Base URL](#base-url)
+- [OpenAPI Spec & Interactive Docs](#openapi-spec--interactive-docs)
 - [Authentication](#authentication)
   - [JWT Authentication](#jwt-authentication)
   - [API Tokens](#api-tokens)
@@ -27,6 +28,27 @@ https://deploy.example.com/api
 ```
 
 All requests and responses use `Content-Type: application/json` unless otherwise noted (e.g., file uploads use `multipart/form-data`).
+
+---
+
+## OpenAPI Spec & Interactive Docs
+
+BRIDGEPORT publishes a self-describing OpenAPI 3 specification so programmatic clients can introspect routes, parameters, and the error envelope without scraping this page.
+
+| What | Path | Auth |
+|------|------|------|
+| Raw OpenAPI 3 spec (JSON) | `GET /openapi.json` | No |
+| Swagger UI (interactive) | `GET /api/docs` | No |
+
+Both endpoints are unauthenticated so CI tools, code generators, and reverse-proxy probes can pull the spec without minting a token. The spec includes the standard error envelope as a shared component (`#/components/schemas/ErrorEnvelope`).
+
+```bash
+# Pull the spec
+curl https://deploy.example.com/openapi.json > openapi.json
+
+# Open the interactive docs in a browser
+open https://deploy.example.com/api/docs
+```
 
 ---
 
@@ -72,6 +94,31 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
 curl https://deploy.example.com/api/auth/me \
   -H "Authorization: Bearer <token>"
 ```
+
+**Response**
+
+```json
+{
+  "user": {
+    "id": "clx...",
+    "email": "admin@example.com",
+    "name": "Admin",
+    "role": "admin"
+  },
+  "role": "admin",
+  "environments": ["clenv-staging...", "clenv-prod..."],
+  "scopes": [
+    "services:read", "secrets:read", "servers:read", "environments:read",
+    "services:write", "secrets:write", "servers:write", "environments:write",
+    "tokens:manage", "admin:*"
+  ]
+}
+```
+
+- `user` (existing) — full principal record.
+- `role` — `admin` / `operator` / `viewer` (effective role for API tokens).
+- `environments` — environment IDs the caller may act on. For env-scoped API tokens this is the token's allowlist; for full-access JWTs/tokens it's every environment in the system.
+- `scopes` — derived, human-friendly scope strings (`<resource>:<action>`). Use these to gate UI affordances; the source of truth for enforcement is still the role + token scope.
 
 **First-user registration**
 
@@ -217,44 +264,41 @@ GET /api/events?token=<token>
 
 ## Error Format
 
-All error responses follow a consistent JSON structure:
+Every non-2xx response returns a standardized envelope:
 
 ```json
 {
-  "error": "Human-readable error message"
+  "code": "VALIDATION_ERROR",
+  "message": "Must be at least 8 characters",
+  "field": "password",
+  "hint": "Passwords need 8+ characters",
+  "requestId": "req-abc123"
 }
 ```
 
-For validation errors (HTTP 400), an additional `details` array provides field-level information:
+| Field | Required | Description |
+|-------|----------|-------------|
+| `code` | Yes | Stable, machine-readable error code (see table below). Branch on this, not on `message` or HTTP status. |
+| `message` | Yes | Human-readable message. For 5xx responses this is always `"Internal Server Error"` — the real error is logged server-side. |
+| `field` | No | Field name when the error is tied to a specific input (e.g. validation, readonly violations). |
+| `hint` | No | Optional, human-friendly hint for resolving the error. |
+| `requestId` | No | Server-assigned request ID; include it when reporting an issue. |
 
-```json
-{
-  "error": "Invalid input",
-  "details": [
-    {
-      "code": "too_small",
-      "minimum": 8,
-      "type": "string",
-      "inclusive": true,
-      "exact": false,
-      "message": "String must contain at least 8 character(s)",
-      "path": ["password"]
-    }
-  ]
-}
-```
+### Error code → HTTP status
 
-**Common HTTP status codes**
+| `code` | HTTP | When |
+|--------|------|------|
+| `VALIDATION_ERROR` | 400 | Request body / query failed schema validation. |
+| `READONLY_FIELD` | 400 | Client tried to mutate a server-managed field. |
+| `UNAUTHORIZED` | 401 | Missing or invalid credentials. |
+| `FORBIDDEN_SCOPE` | 403 | Authenticated but the principal isn't permitted for this resource (RBAC or token scope). |
+| `NOT_FOUND` | 404 | Resource doesn't exist (or the caller can't see it). |
+| `CONFLICT` | 409 | Conflicting state (duplicate name, optimistic-lock failure, etc.). |
+| `IDEMPOTENCY_KEY_REUSED` | 409 | An idempotency key was replayed with a different request body. |
+| `RATE_LIMITED` | 429 | Global or per-route rate limit hit. |
+| `INTERNAL` | 500 | Anything else; the underlying error is logged + reported to Sentry. |
 
-| Code | Meaning |
-|------|---------|
-| `200` | Success |
-| `400` | Validation error (check `details`) |
-| `401` | Missing or invalid authentication |
-| `403` | Insufficient permissions (RBAC) |
-| `404` | Resource not found |
-| `409` | Conflict (e.g., duplicate name) |
-| `500` | Internal server error |
+Validation errors may include a legacy `details` array alongside the envelope when the underlying validator produced one. New clients should rely on `code` + `field`; `details` is kept for backwards compatibility with existing UIs.
 
 ---
 

@@ -85,7 +85,8 @@ describe('secret exfiltration protection', () => {
 
       expect(res.statusCode).toBe(403);
       const body = JSON.parse(res.body);
-      expect(body.error).toContain('write-only');
+      expect(body.code).toBeDefined();
+      expect(body.message).toContain('write-only');
     });
 
     it('should allow revealing a normal secret', async () => {
@@ -138,7 +139,8 @@ describe('secret exfiltration protection', () => {
 
       expect(res.statusCode).toBe(403);
       const body = JSON.parse(res.body);
-      expect(body.error).toContain('disabled');
+      expect(body.code).toBeDefined();
+      expect(body.message).toContain('disabled');
 
       // Re-enable for other tests
       await app.prisma.configurationSettings.update({

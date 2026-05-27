@@ -1,38 +1,39 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import type { UserRole } from '../services/auth.js';
+import { ApiError } from '../lib/errors.js';
 
 /**
  * Middleware that requires the user to be an admin.
- * Returns 403 Forbidden if the user is not an admin.
+ * Throws ApiError(FORBIDDEN_SCOPE) for non-admins, ApiError(UNAUTHORIZED) for unauthenticated.
  */
 export async function requireAdmin(
   request: FastifyRequest,
-  reply: FastifyReply
+  _reply: FastifyReply
 ): Promise<void> {
   if (!request.authUser) {
-    return reply.code(401).send({ error: 'Unauthorized' });
+    throw new ApiError('UNAUTHORIZED', 'Unauthorized');
   }
 
   if (request.authUser.role !== 'admin') {
-    return reply.code(403).send({ error: 'Admin access required' });
+    throw new ApiError('FORBIDDEN_SCOPE', 'Admin access required');
   }
 }
 
 /**
  * Middleware that requires the user to be an admin or operator.
- * Returns 403 Forbidden if the user is a viewer.
+ * Throws ApiError(FORBIDDEN_SCOPE) for viewers.
  */
 export async function requireOperator(
   request: FastifyRequest,
-  reply: FastifyReply
+  _reply: FastifyReply
 ): Promise<void> {
   if (!request.authUser) {
-    return reply.code(401).send({ error: 'Unauthorized' });
+    throw new ApiError('UNAUTHORIZED', 'Unauthorized');
   }
 
   const allowedRoles: UserRole[] = ['admin', 'operator'];
   if (!allowedRoles.includes(request.authUser.role)) {
-    return reply.code(403).send({ error: 'Operator or admin access required' });
+    throw new ApiError('FORBIDDEN_SCOPE', 'Operator or admin access required');
   }
 }
 
@@ -45,10 +46,10 @@ export async function requireOperator(
 export function requireAdminOrSelf(paramName: string = 'id') {
   return async function (
     request: FastifyRequest,
-    reply: FastifyReply
+    _reply: FastifyReply
   ): Promise<void> {
     if (!request.authUser) {
-      return reply.code(401).send({ error: 'Unauthorized' });
+      throw new ApiError('UNAUTHORIZED', 'Unauthorized');
     }
 
     const targetId = (request.params as Record<string, string>)[paramName];
@@ -60,7 +61,7 @@ export function requireAdminOrSelf(paramName: string = 'id') {
 
     // Non-admin can only access their own resource
     if (request.authUser.id !== targetId) {
-      return reply.code(403).send({ error: 'Access denied' });
+      throw new ApiError('FORBIDDEN_SCOPE', 'Access denied');
     }
   };
 }

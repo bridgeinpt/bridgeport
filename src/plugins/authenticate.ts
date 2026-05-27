@@ -3,6 +3,7 @@ import fp from 'fastify-plugin';
 import { validateApiToken, getUserById, type AuthUser } from '../services/auth.js';
 import { prisma } from '../lib/db.js';
 import { userLastActiveThrottle } from '../lib/last-active-throttle.js';
+import { ApiError } from '../lib/errors.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -41,100 +42,88 @@ function extractEnvIdFromPath(routePattern: string, params: Record<string, strin
   return params.envId ?? params.id ?? null;
 }
 
-function enforceTokenScope(
-  user: AuthUser,
-  request: FastifyRequest,
-  reply: FastifyReply
-): boolean {
+function enforceTokenScope(user: AuthUser, request: FastifyRequest): void {
   // No scope = JWT-authenticated session, no token-scope checks needed.
-  if (!user.scope) return true;
+  if (!user.scope) return;
   // Token allowed everywhere.
-  if (user.scope.allEnvironments) return true;
+  if (user.scope.allEnvironments) return;
 
   const routePattern = request.routeOptions?.url ?? request.url;
   const method = request.method.toUpperCase();
   const key = `${method} ${routePattern}`;
 
-  if (SCOPE_EXEMPT_ROUTES.has(key)) return true;
+  if (SCOPE_EXEMPT_ROUTES.has(key)) return;
 
   const params = (request.params ?? {}) as Record<string, string>;
   const envId = extractEnvIdFromPath(routePattern, params);
   if (envId) {
-    if (user.scope.environmentIds.includes(envId)) return true;
-    reply.code(403).send({ error: 'Token is not scoped to this environment' });
-    return false;
+    if (user.scope.environmentIds.includes(envId)) return;
+    throw new ApiError('FORBIDDEN_SCOPE', 'Token is not scoped to this environment');
   }
 
   // Global route (no env in path) and the token is env-scoped — deny.
-  reply.code(403).send({
-    error: 'Token is scoped to specific environments and cannot access global resources',
-  });
-  return false;
+  throw new ApiError(
+    'FORBIDDEN_SCOPE',
+    'Token is scoped to specific environments and cannot access global resources'
+  );
 }
 
-function enforceRoleForMethod(
-  user: AuthUser,
-  request: FastifyRequest,
-  reply: FastifyReply
-): boolean {
+function enforceRoleForMethod(user: AuthUser, request: FastifyRequest): void {
   const method = request.method.toUpperCase();
-  if (READONLY_METHODS.has(method)) return true;
-  if (user.role === 'admin' || user.role === 'operator') return true;
+  if (READONLY_METHODS.has(method)) return;
+  if (user.role === 'admin' || user.role === 'operator') return;
 
   const routePattern = request.routeOptions?.url ?? request.url;
-  if (VIEWER_ALLOWED_MUTATIONS.has(`${method} ${routePattern}`)) return true;
+  if (VIEWER_ALLOWED_MUTATIONS.has(`${method} ${routePattern}`)) return;
 
-  reply.code(403).send({ error: 'This action requires operator or admin role' });
-  return false;
+  throw new ApiError('FORBIDDEN_SCOPE', 'This action requires operator or admin role');
 }
 
 async function authenticatePlugin(fastify: FastifyInstance) {
   fastify.decorate(
     'authenticate',
-    async function (request: FastifyRequest, reply: FastifyReply) {
-      try {
-        const authHeader = request.headers.authorization;
-        if (authHeader?.startsWith('Bearer ')) {
-          const token = authHeader.slice(7);
+    async function (request: FastifyRequest, _reply: FastifyReply) {
+      const authHeader = request.headers.authorization;
+      if (authHeader?.startsWith('Bearer ')) {
+        const token = authHeader.slice(7);
 
-          // Try API token first
-          const user = await validateApiToken(token);
-          if (user) {
-            if (!enforceTokenScope(user, request, reply)) return;
-            if (!enforceRoleForMethod(user, request, reply)) return;
-            request.authUser = user;
-            return;
-          }
-
-          // Try JWT
-          try {
-            const payload = await request.jwtVerify<{ id: string; email: string }>();
-            // Fetch full user to get role
-            const fullUser = await getUserById(payload.id);
-            if (fullUser) {
-              if (!enforceRoleForMethod(fullUser, request, reply)) return;
-              request.authUser = fullUser;
-              // Update lastActiveAt in background (don't await), but throttle
-              // per-user so we don't pound the SQLite writer lock on every
-              // authenticated request — the timestamp only needs minute
-              // granularity. See lib/last-active-throttle for rationale.
-              if (userLastActiveThrottle.shouldWrite(fullUser.id)) {
-                prisma.user.update({
-                  where: { id: fullUser.id },
-                  data: { lastActiveAt: new Date() },
-                }).catch(() => {}); // Ignore errors
-              }
-              return;
-            }
-          } catch {
-            // Invalid JWT
-          }
+        // Try API token first
+        const user = await validateApiToken(token);
+        if (user) {
+          enforceTokenScope(user, request);
+          enforceRoleForMethod(user, request);
+          request.authUser = user;
+          return;
         }
 
-        reply.code(401).send({ error: 'Unauthorized' });
-      } catch {
-        reply.code(401).send({ error: 'Unauthorized' });
+        // Try JWT
+        let jwtPayload: { id: string; email: string } | null = null;
+        try {
+          jwtPayload = await request.jwtVerify<{ id: string; email: string }>();
+        } catch {
+          // Invalid JWT — fall through to the generic 401 below.
+        }
+        if (jwtPayload?.id) {
+          const fullUser = await getUserById(jwtPayload.id);
+          if (fullUser) {
+            enforceRoleForMethod(fullUser, request);
+            request.authUser = fullUser;
+            // Update lastActiveAt in background (don't await), but throttle
+            // per-user so we don't pound the SQLite writer lock on every
+            // authenticated request — the timestamp only needs minute
+            // granularity. See lib/last-active-throttle for rationale.
+            if (userLastActiveThrottle.shouldWrite(fullUser.id)) {
+              prisma.user.update({
+                where: { id: fullUser.id },
+                data: { lastActiveAt: new Date() },
+              }).catch(() => {}); // Ignore errors
+            }
+            return;
+          }
+        }
       }
+
+      throw new ApiError('UNAUTHORIZED', 'Unauthorized');
     }
   );
 }

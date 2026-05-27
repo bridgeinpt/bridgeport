@@ -68,7 +68,8 @@ describe('token tampering', () => {
 
       expect(res.statusCode).toBe(401);
       const body = JSON.parse(res.body);
-      expect(body.error).toBe('Unauthorized');
+      expect(body.code).toBe('UNAUTHORIZED');
+      expect(body.message).toBe('Unauthorized');
     });
 
     it('should return 401 with empty Authorization header', async () => {
