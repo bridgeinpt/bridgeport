@@ -1137,12 +1137,15 @@ export interface ConfigFileServiceAttachment {
   id: string;
   targetPath: string;
   lastSyncedAt: string | null;
+  kind?: string;
+  serviceDeploymentId?: string | null;
   syncStatus?: 'synced' | 'pending' | 'never';
   service: {
     id: string;
     name: string;
-    server: { id: string; name: string };
+    serviceDeployments: Array<{ id: string; server: { id: string; name: string } }>;
   };
+  serviceDeployment?: { id: string; server: { id: string; name: string } } | null;
 }
 
 export interface ConfigFileSyncCounts {
@@ -1220,7 +1223,7 @@ export const listConfigFiles = (envId: string, options?: { limit?: number; offse
 };
 
 export const getConfigFile = (id: string) =>
-  api.get<{ configFile: ConfigFile & { services: Array<{ targetPath: string; service: { id: string; name: string; server: { id: string; name: string } } }> } }>(`/config-files/${id}`);
+  api.get<{ configFile: ConfigFile & { services: ConfigFileServiceAttachment[] } }>(`/config-files/${id}`);
 
 export const createConfigFile = (envId: string, data: ConfigFileInput) =>
   api.post<{ configFile: ConfigFile }>(`/environments/${envId}/config-files`, data);
