@@ -10,6 +10,10 @@ Visualize your entire infrastructure at a glance with BRIDGEPORT's interactive t
 - [Creating Connections](#creating-connections)
   - [Connection Properties](#connection-properties)
   - [Direction Explained](#direction-explained)
+- [External Entities](#external-entities)
+- [Server Clustering](#server-clustering)
+- [Resizable Server Boxes](#resizable-server-boxes)
+- [Connection Anchors](#connection-anchors)
 - [Working with the Diagram](#working-with-the-diagram)
   - [Toolbar](#toolbar)
   - [Node Types](#node-types)
@@ -96,11 +100,11 @@ Click the **+** button in the topology toolbar to open a form where you can pick
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `environmentId` | string | Yes | The environment this connection belongs to |
-| `sourceType` | `"service"` or `"database"` | Yes | What kind of node the connection starts from |
-| `sourceId` | string | Yes | The ID of the source service or database |
-| `sourceHandle` | string | No | Which handle on the source the user dragged from (e.g. `"top"`, `"bottom"`). Used to preserve diagonal/vertical edge routing across reloads. |
-| `targetType` | `"service"` or `"database"` | Yes | What kind of node the connection goes to |
-| `targetId` | string | Yes | The ID of the target service or database |
+| `sourceType` | `"service"`, `"database"`, or `"external"` | Yes | What kind of node the connection starts from |
+| `sourceId` | string | Yes | The ID of the source service, database, or external entity |
+| `sourceHandle` | string | No | Which handle on the source the user dragged from (`"left"`, `"right"`, `"top"`, `"bottom"`). Used to preserve the exact anchor across reloads. |
+| `targetType` | `"service"`, `"database"`, or `"external"` | Yes | What kind of node the connection goes to |
+| `targetId` | string | Yes | The ID of the target service, database, or external entity |
 | `targetHandle` | string | No | Which handle on the target the user dropped onto |
 | `port` | integer | No | Port number (e.g., 5432, 6379, 443) |
 | `protocol` | string | No | Protocol label (e.g., `tcp`, `http`, `grpc`, `amqp`) |
@@ -154,13 +158,87 @@ Expected response (201):
 
 ---
 
+## External Entities
+
+Not every node on your diagram is a server-hosted service. Inbound traffic often originates from systems you don't run yourself -- Cloudflare, a CDN, an external browser/client, or another company's API. **External entities** model these on the canvas without pretending they're services.
+
+```
+  ┌──────────────┐         ┌──────────────────────────────┐
+  │  Cloudflare  │  --->   │  web-server-01               │
+  │  (external)  │         │  ┌────────────┐              │
+  └──────────────┘         │  │  nginx     │              │
+                           │  └────────────┘              │
+                           └──────────────────────────────┘
+```
+
+- Click the **globe icon** in the topology toolbar to drop a new external entity onto the canvas. You'll be prompted for a label (e.g. `"Cloudflare"`) and a `kind` (e.g. `cloudflare`, `cdn`, `web`, `client`).
+- The `kind` drives the visual accent (Cloudflare/CDN → orange, Web/Client → cyan, anything else → slate).
+- Drag from any of the four handles to a service or database to represent inbound traffic. The connection is stored exactly like any other `ServiceConnection`, but with `sourceType: "external"`.
+- Resize an external entity with the dashed corner handles when it's selected.
+- Delete via the trash icon on the node (operator role required). Connections referencing the deleted entity are cleaned up automatically.
+
+External entities live per-environment and persist their position and size across reloads.
+
+### API
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `GET` | `/api/environments/:envId/external-entities` | Any role | List external entities for an environment |
+| `POST` | `/api/environments/:envId/external-entities` | Operator+ | Create an external entity |
+| `PATCH` | `/api/external-entities/:id` | Operator+ | Update label, kind, position, size |
+| `DELETE` | `/api/external-entities/:id` | Operator+ | Delete the entity (cleans up referring connections) |
+
+---
+
+## Server Clustering
+
+When several servers belong together logically -- an HA pair, a swarm or Kubernetes node set, or a regional grouping -- you can wrap them in a **cluster** container. Clusters group servers visually and let you move or collapse them as a unit.
+
+- Click the **stack icon** in the topology toolbar to create a new cluster. You'll be prompted for a name (e.g. `"Production HA"`).
+- Open a server's detail view and set its `clusterId` to the cluster's ID (via `PATCH /api/servers/:id`). The diagram parents the server's group inside the cluster on the next render.
+- Collapse a cluster from its header to fold all child servers into a single aggregate node. **Edges from any child server reroute to the cluster** while collapsed -- a per-server collapse state inside a collapsed cluster is ignored (the cluster always wins).
+- Delete a cluster via its header trash icon. Member servers are **not** deleted -- their `clusterId` is set to `NULL` so they re-emerge as standalone server groups.
+
+### API
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `GET` | `/api/environments/:envId/server-clusters` | Any role | List clusters for an environment |
+| `POST` | `/api/environments/:envId/server-clusters` | Operator+ | Create a cluster |
+| `PATCH` | `/api/server-clusters/:id` | Operator+ | Update name, color, collapsed flag, position, size |
+| `DELETE` | `/api/server-clusters/:id` | Operator+ | Delete the cluster (sets child `Server.clusterId = NULL`) |
+| `PATCH` | `/api/servers/:id` | Operator+ | Set/clear `clusterId` on a server (pass `null` to disassociate) |
+
+---
+
+## Resizable Server Boxes
+
+Densely-populated server groups can become unreadable in a fixed-width box. To fix that, **select a server box** (click its border) -- four resize handles appear on the corners. Drag them to enlarge the container so child services stay legible.
+
+The new size persists in the diagram layout for everyone on the team, alongside the existing position data. Server boxes can't be shrunk below the bounding box of their currently-laid-out children to avoid clipping. The same NodeResizer behavior is available on external entities and cluster containers.
+
+---
+
+## Connection Anchors
+
+When you drag a connection between two nodes, BRIDGEPORT now remembers **the exact handle (anchor) you dragged from and dropped onto** -- not just "this node to that node". This matters when:
+
+- You routed a connection from the **bottom** of a node to the **top** of another (vertical flow).
+- You want auto-inferred and manual edges to share consistent routing across reloads.
+
+Each node exposes four handles -- `left`, `right`, `top`, `bottom` -- with stable IDs that are stored on the `ServiceConnection` row as `sourceHandle` and `targetHandle`. The Add Connection modal sets these to `null` (no specific anchor) so React Flow picks the shortest path; drag-to-connect captures the user's exact anchor choice.
+
+---
+
 ## Working with the Diagram
 
 ### Toolbar
 
-The top-right of the diagram canvas has a toolbar with three controls:
+The top-right of the diagram canvas has a toolbar with several controls:
 
 - **Add Connection** (+) -- opens the Create Connection modal. Same as the Dashboard-level button.
+- **Add external entity** (globe icon) -- drops a new external, non-server entity on the canvas. See [External Entities](#external-entities).
+- **New cluster** (stack icon) -- creates a logical grouping of servers. See [Server Clustering](#server-clustering).
 - **Connections list** (chain-link icon) -- opens a dropdown listing every manual connection in the environment with its source → target names. Hover a row to reveal a quick delete icon; the connection is removed without leaving the dashboard.
 - **Layout controls** -- fit-to-view, reset layout, and export as Mermaid (see [Exporting as Mermaid](#exporting-as-mermaid)).
 
@@ -174,7 +252,9 @@ The topology diagram renders three types of nodes:
 |-----------|--------|--------|
 | **ServiceNode** | Rounded rectangle with service name, status indicator, and exposed port | Every `Service` in the environment |
 | **DatabaseNode** | Cylinder shape with database name and port | Every `Database` in the environment |
-| **ServerGroupNode** | Container box that groups its child services (and databases hosted on it) | Every `Server` in the environment |
+| **ServerGroupNode** | Container box that groups its child services (and databases hosted on it) -- resizable when selected | Every `Server` in the environment |
+| **ExternalEntityNode** | Pill-shaped node with a globe icon, color-coded by `kind` | Every `ExternalEntity` in the environment |
+| **ServerClusterNode** | Dashed container that groups multiple server boxes; collapsible | Every `ServerCluster` in the environment |
 
 Each node displays a color-coded status indicator:
 
@@ -286,11 +366,20 @@ Before migrating a database to a new server, check the topology to see which ser
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
 | `GET` | `/api/connections?environmentId=X` | Any role | List all connections in an environment |
-| `POST` | `/api/connections` | Operator+ | Create a connection |
+| `POST` | `/api/connections` | Operator+ | Create a connection (`sourceType`/`targetType` may be `service`, `database`, or `external`) |
 | `DELETE` | `/api/connections/:id` | Operator+ | Delete a connection |
-| `GET` | `/api/diagram-layout?environmentId=X` | Any role | Get saved node positions |
-| `PUT` | `/api/diagram-layout` | Operator+ | Save/update node positions |
-| `GET` | `/api/diagram-export?environmentId=X&format=mermaid` | Any role | Export topology as Mermaid |
+| `GET` | `/api/diagram-layout?environmentId=X` | Any role | Get saved node positions (`x`, `y`, optional `width`, `height`) |
+| `PUT` | `/api/diagram-layout` | Operator+ | Save/update node positions (incl. resized width/height) |
+| `GET` | `/api/diagram-export?environmentId=X&format=mermaid` | Any role | Export topology as Mermaid (services, databases, external entities) |
+| `GET` | `/api/environments/:envId/external-entities` | Any role | List external entities |
+| `POST` | `/api/environments/:envId/external-entities` | Operator+ | Create an external entity |
+| `PATCH` | `/api/external-entities/:id` | Operator+ | Update an external entity |
+| `DELETE` | `/api/external-entities/:id` | Operator+ | Delete an external entity (cleans up referring connections) |
+| `GET` | `/api/environments/:envId/server-clusters` | Any role | List server clusters |
+| `POST` | `/api/environments/:envId/server-clusters` | Operator+ | Create a server cluster |
+| `PATCH` | `/api/server-clusters/:id` | Operator+ | Update a cluster (name, color, collapsed, position, size) |
+| `DELETE` | `/api/server-clusters/:id` | Operator+ | Delete a cluster (members keep existing; `clusterId` set to `NULL`) |
+| `PATCH` | `/api/servers/:id` | Operator+ | Includes `clusterId` (string or `null`) to attach/detach a server from a cluster |
 
 ---
 

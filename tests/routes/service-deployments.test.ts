@@ -172,7 +172,7 @@ describe('Service templates + per-server ServiceDeployments (#107)', () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json().error).toMatch(/same environment/i);
+    expect(res.json().message).toMatch(/same environment/i);
   });
 
   it('patches per-deployment env overrides without affecting the template baseEnv or sibling deployments', async () => {

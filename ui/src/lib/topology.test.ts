@@ -445,4 +445,273 @@ describe('aggregateCollapsedEdges', () => {
     expect(result).toHaveLength(1);
     expect(result[0].aggregated).toBeUndefined();
   });
+
+  // -------------------- collapsed clusters --------------------
+
+  it('should drop edges between two servers in the same collapsed cluster', () => {
+    // svc1 (on server-1) -> svc2 (on server-2), both servers live in cluster-A.
+    // When cluster-A is collapsed, both endpoints resolve to `cluster:cluster-A`
+    // — same bucket, so the edge is internal and dropped (no self-loop emitted).
+    const edges: TopologyEdge[] = [
+      {
+        id: 'manual:1',
+        source: 'service:svc1',
+        target: 'service:svc2',
+        type: 'manual',
+        directed: true,
+      },
+    ];
+    const serviceToServer = new Map([
+      ['svc1', 'server-1'],
+      ['svc2', 'server-2'],
+    ]);
+    const serverToCluster = new Map([
+      ['server-1', 'cluster-A'],
+      ['server-2', 'cluster-A'],
+    ]);
+
+    const result = aggregateCollapsedEdges(
+      edges,
+      new Set(),
+      serviceToServer,
+      new Map(),
+      new Set(['cluster-A']),
+      serverToCluster
+    );
+
+    expect(result).toHaveLength(0);
+  });
+
+  it('should aggregate edges between two different collapsed clusters into one cluster->cluster edge', () => {
+    const edges: TopologyEdge[] = [
+      { id: 'manual:1', source: 'service:svc1', target: 'service:svc3', type: 'manual', directed: true },
+      { id: 'manual:2', source: 'service:svc2', target: 'service:svc4', type: 'manual', directed: true },
+    ];
+    // svc1, svc2 live in cluster-A; svc3, svc4 live in cluster-B.
+    const serviceToServer = new Map([
+      ['svc1', 'server-1'],
+      ['svc2', 'server-2'],
+      ['svc3', 'server-3'],
+      ['svc4', 'server-4'],
+    ]);
+    const serverToCluster = new Map([
+      ['server-1', 'cluster-A'],
+      ['server-2', 'cluster-A'],
+      ['server-3', 'cluster-B'],
+      ['server-4', 'cluster-B'],
+    ]);
+
+    const result = aggregateCollapsedEdges(
+      edges,
+      new Set(),
+      serviceToServer,
+      new Map(),
+      new Set(['cluster-A', 'cluster-B']),
+      serverToCluster
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0].source).toBe('cluster:cluster-A');
+    expect(result[0].target).toBe('cluster:cluster-B');
+    expect(result[0].label).toBe('2 connections');
+    expect(result[0].aggregated).toBe(true);
+  });
+
+  it('should aggregate edges from a clustered server to a non-clustered node as cluster->node', () => {
+    const edges: TopologyEdge[] = [
+      // svc1 inside cluster-A, db1 not in any cluster.
+      { id: 'manual:1', source: 'service:svc1', target: 'database:db1', type: 'manual', directed: true, label: 'PG' },
+    ];
+    const serviceToServer = new Map([['svc1', 'server-1']]);
+    const databaseToServer = new Map<string, string>(); // db1 unmapped -> passes through
+    const serverToCluster = new Map([['server-1', 'cluster-A']]);
+
+    const result = aggregateCollapsedEdges(
+      edges,
+      new Set(),
+      serviceToServer,
+      databaseToServer,
+      new Set(['cluster-A']),
+      serverToCluster
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0].source).toBe('cluster:cluster-A');
+    expect(result[0].target).toBe('database:db1');
+    // Single-edge aggregation preserves the original ID and metadata, but
+    // flags aggregated=true (so the inline delete-X stays hidden).
+    expect(result[0].id).toBe('manual:1');
+    expect(result[0].label).toBe('PG');
+    expect(result[0].aggregated).toBe(true);
+  });
+
+  it('should let cluster win when a server is collapsed AND its cluster is collapsed', () => {
+    // svc1 lives on server-1, which is BOTH collapsed and inside collapsed cluster-A.
+    // The cluster bucket takes precedence — endpoint resolves to `cluster:cluster-A`,
+    // not `server:server-1`.
+    const edges: TopologyEdge[] = [
+      { id: 'manual:1', source: 'service:svc1', target: 'database:db1', type: 'manual', directed: true },
+    ];
+    const serviceToServer = new Map([['svc1', 'server-1']]);
+    const serverToCluster = new Map([['server-1', 'cluster-A']]);
+
+    const result = aggregateCollapsedEdges(
+      edges,
+      new Set(['server-1']),
+      serviceToServer,
+      new Map(),
+      new Set(['cluster-A']),
+      serverToCluster
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0].source).toBe('cluster:cluster-A');
+    expect(result[0].target).toBe('database:db1');
+  });
+
+  it('should treat collapsed cluster as transparent for servers that are not its members', () => {
+    // server-1 is in cluster-A (collapsed). server-2 is NOT in any cluster
+    // and is also not in collapsedServerIds. svc on server-2 must pass through
+    // unchanged.
+    const edges: TopologyEdge[] = [
+      { id: 'manual:1', source: 'service:svc-outside', target: 'database:db1', type: 'manual', directed: true },
+    ];
+    const serviceToServer = new Map([['svc-outside', 'server-2']]);
+    const serverToCluster = new Map([['server-1', 'cluster-A']]);
+
+    const result = aggregateCollapsedEdges(
+      edges,
+      new Set(),
+      serviceToServer,
+      new Map(),
+      new Set(['cluster-A']),
+      serverToCluster
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual(edges[0]);
+  });
+
+  // -------------------- handle preservation --------------------
+
+  it('should preserve sourceHandle/targetHandle on pass-through (non-aggregated) edges', () => {
+    const edges: TopologyEdge[] = [
+      {
+        id: 'manual:1',
+        source: 'service:svc1',
+        sourceHandle: 'bottom',
+        target: 'database:db1',
+        targetHandle: 'top',
+        type: 'manual',
+        directed: true,
+      },
+    ];
+    // svc1 is on server-2 which is NOT collapsed and not in any cluster
+    // — edge passes through resolveNode untouched.
+    const serviceToServer = new Map([['svc1', 'server-2']]);
+
+    const result = aggregateCollapsedEdges(edges, new Set(['server-1']), serviceToServer, new Map());
+
+    expect(result).toHaveLength(1);
+    expect(result[0].sourceHandle).toBe('bottom');
+    expect(result[0].targetHandle).toBe('top');
+  });
+
+  it('should drop sourceHandle/targetHandle on aggregated single edges', () => {
+    // When the endpoint is rewritten (cluster wins), the original handle id
+    // pointed at the child node — it's no longer meaningful on the rewritten
+    // endpoint, so the aggregation step zeroes it out.
+    const edges: TopologyEdge[] = [
+      {
+        id: 'manual:1',
+        source: 'service:svc1',
+        sourceHandle: 'bottom',
+        target: 'database:db1',
+        targetHandle: 'top',
+        type: 'manual',
+        directed: true,
+      },
+    ];
+    const serviceToServer = new Map([['svc1', 'server-1']]);
+
+    const result = aggregateCollapsedEdges(
+      edges,
+      new Set(['server-1']),
+      serviceToServer,
+      new Map()
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0].source).toBe('server:server-1');
+    expect(result[0].aggregated).toBe(true);
+    expect(result[0].sourceHandle).toBeUndefined();
+    expect(result[0].targetHandle).toBeUndefined();
+  });
+
+  // -------------------- unknown / external prefixes --------------------
+
+  it('should pass external/unknown-prefix endpoints through unchanged', () => {
+    // `external:` (and any non-service/non-database prefix) is treated as
+    // pass-through by resolveNode — these nodes never live inside a server
+    // group, so collapsing servers/clusters must not rewrite them.
+    const edges: TopologyEdge[] = [
+      {
+        id: 'manual:1',
+        source: 'external:ext1',
+        sourceHandle: 'right',
+        target: 'service:svc1',
+        targetHandle: 'left',
+        type: 'manual',
+        directed: true,
+      },
+      {
+        id: 'manual:2',
+        source: 'something-weird:foo',
+        target: 'external:ext2',
+        type: 'manual',
+        directed: false,
+      },
+    ];
+    // svc1 lives on server-2 which is NOT collapsed.
+    const serviceToServer = new Map([['svc1', 'server-2']]);
+
+    const result = aggregateCollapsedEdges(
+      edges,
+      new Set(['server-1']),
+      serviceToServer,
+      new Map()
+    );
+
+    expect(result).toHaveLength(2);
+    // Both edges pass through unchanged — including handles.
+    expect(result[0]).toEqual(edges[0]);
+    expect(result[1]).toEqual(edges[1]);
+  });
+
+  it('should rewrite the service side of an external->service edge when the server is collapsed', () => {
+    // The external endpoint stays put; only the service endpoint moves to its
+    // server bucket. The edge becomes external:ext1 -> server:server-1.
+    const edges: TopologyEdge[] = [
+      {
+        id: 'manual:1',
+        source: 'external:ext1',
+        target: 'service:svc1',
+        type: 'manual',
+        directed: true,
+      },
+    ];
+    const serviceToServer = new Map([['svc1', 'server-1']]);
+
+    const result = aggregateCollapsedEdges(
+      edges,
+      new Set(['server-1']),
+      serviceToServer,
+      new Map()
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0].source).toBe('external:ext1');
+    expect(result[0].target).toBe('server:server-1');
+    expect(result[0].aggregated).toBe(true);
+  });
 });

@@ -421,6 +421,8 @@ export interface UpdateServerInput {
   hostname?: string;
   publicIp?: string | null;
   tags?: string[];
+  // Pass `null` to disassociate from any cluster; omit to leave unchanged.
+  clusterId?: string | null;
 }
 
 export const updateServer = (id: string, data: UpdateServerInput) =>
@@ -838,6 +840,9 @@ export interface Server {
   serverType: 'remote' | 'host';
   lastCheckedAt: string | null;
   environmentId: string;
+  // Optional logical cluster grouping (HA pair, swarm/k8s nodes, region).
+  // `null` (or absent) means the server is not part of any cluster.
+  clusterId?: string | null;
 }
 
 export interface ServerWithServices extends Server {
@@ -3015,13 +3020,17 @@ export const updateDatabaseMonitoring = (envId: string, dbId: string, config: { 
 
 // ==================== Service Topology ====================
 
+// Endpoints can be services, databases, or user-placed external entities
+// (e.g. Cloudflare, "Web", a generic external client).
+export type ConnectionEndpointType = 'service' | 'database' | 'external';
+
 export interface ServiceConnection {
   id: string;
   environmentId: string;
-  sourceType: 'service' | 'database';
+  sourceType: ConnectionEndpointType;
   sourceId: string;
   sourceHandle: string | null;
-  targetType: 'service' | 'database';
+  targetType: ConnectionEndpointType;
   targetId: string;
   targetHandle: string | null;
   port: number | null;
@@ -3034,10 +3043,10 @@ export interface ServiceConnection {
 
 export interface ServiceConnectionInput {
   environmentId: string;
-  sourceType: 'service' | 'database';
+  sourceType: ConnectionEndpointType;
   sourceId: string;
   sourceHandle?: string | null;
-  targetType: 'service' | 'database';
+  targetType: ConnectionEndpointType;
   targetId: string;
   targetHandle?: string | null;
   port?: number | null;
@@ -3056,8 +3065,18 @@ export const deleteConnection = (id: string) =>
   api.delete<{ success: boolean }>(`/connections/${id}`);
 
 // Diagram Layout
+// Node positions may include optional width/height (used for resizable server
+// boxes and cluster containers). Rows persisted before this field existed
+// simply omit width/height — the renderer falls back to computed defaults.
+export interface DiagramLayoutPosition {
+  x: number;
+  y: number;
+  width?: number;
+  height?: number;
+}
+
 export interface DiagramLayoutPositions {
-  [nodeKey: string]: { x: number; y: number };
+  [nodeKey: string]: DiagramLayoutPosition;
 }
 
 export const getDiagramLayout = (environmentId: string) =>
@@ -3069,6 +3088,106 @@ export const saveDiagramLayout = (environmentId: string, positions: DiagramLayou
 // Diagram Export
 export const exportDiagramMermaid = (environmentId: string) =>
   api.get<{ mermaid: string }>(`/diagram-export?environmentId=${environmentId}&format=mermaid`);
+
+// ==================== External Entities ====================
+// External, non-server entities placed on the diagram (e.g. Cloudflare,
+// "Web", a generic external client). Connectable as a source/target on
+// a ServiceConnection with type "external".
+export interface ExternalEntity {
+  id: string;
+  environmentId: string;
+  kind: string;
+  label: string;
+  iconKey: string | null;
+  x: number;
+  y: number;
+  width: number | null;
+  height: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExternalEntityInput {
+  kind: string;
+  label: string;
+  iconKey?: string | null;
+  x: number;
+  y: number;
+  width?: number | null;
+  height?: number | null;
+}
+
+export interface ExternalEntityUpdate {
+  kind?: string;
+  label?: string;
+  iconKey?: string | null;
+  x?: number;
+  y?: number;
+  width?: number | null;
+  height?: number | null;
+}
+
+export const listExternalEntities = (envId: string) =>
+  api.get<{ externalEntities: ExternalEntity[] }>(`/environments/${envId}/external-entities`);
+
+export const createExternalEntity = (envId: string, data: ExternalEntityInput) =>
+  api.post<{ externalEntity: ExternalEntity }>(`/environments/${envId}/external-entities`, data);
+
+export const updateExternalEntity = (id: string, data: ExternalEntityUpdate) =>
+  api.patch<{ externalEntity: ExternalEntity }>(`/external-entities/${id}`, data);
+
+export const deleteExternalEntity = (id: string) =>
+  api.delete<{ success: boolean }>(`/external-entities/${id}`);
+
+// ==================== Server Clusters ====================
+// Logical grouping of multiple servers into a movable, collapsible container
+// (HA pairs, swarm/k8s nodes, regional groupings).
+export interface ServerCluster {
+  id: string;
+  environmentId: string;
+  name: string;
+  color: string | null;
+  collapsed: boolean;
+  x: number;
+  y: number;
+  width: number | null;
+  height: number | null;
+  servers?: Array<{ id: string; name: string }>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ServerClusterInput {
+  name: string;
+  color?: string | null;
+  collapsed?: boolean;
+  x: number;
+  y: number;
+  width?: number | null;
+  height?: number | null;
+}
+
+export interface ServerClusterUpdate {
+  name?: string;
+  color?: string | null;
+  collapsed?: boolean;
+  x?: number;
+  y?: number;
+  width?: number | null;
+  height?: number | null;
+}
+
+export const listServerClusters = (envId: string) =>
+  api.get<{ serverClusters: ServerCluster[] }>(`/environments/${envId}/server-clusters`);
+
+export const createServerCluster = (envId: string, data: ServerClusterInput) =>
+  api.post<{ serverCluster: ServerCluster }>(`/environments/${envId}/server-clusters`, data);
+
+export const updateServerCluster = (id: string, data: ServerClusterUpdate) =>
+  api.patch<{ serverCluster: ServerCluster }>(`/server-clusters/${id}`, data);
+
+export const deleteServerCluster = (id: string) =>
+  api.delete<{ success: boolean }>(`/server-clusters/${id}`);
 
 // ============================================================
 // Service Accounts (admin only)
