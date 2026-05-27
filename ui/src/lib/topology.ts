@@ -170,23 +170,43 @@ export function mergeConnections(
 
 /**
  * Given collapsed server IDs and a set of topology edges,
- * aggregate edges that touch child nodes of collapsed servers.
- * Returns a new edge list where collapsed-server edges show aggregated counts.
+ * aggregate edges that touch child nodes of collapsed servers — and,
+ * optionally, collapsed clusters. When a cluster is collapsed, every server
+ * inside it is bucketed as `cluster:<id>` regardless of the per-server
+ * collapse state.
+ *
+ * `collapsedClusterIds` and `serverToCluster` are optional so existing callers
+ * (and tests) keep working without clusters.
  */
 export function aggregateCollapsedEdges(
   edges: TopologyEdge[],
   collapsedServerIds: Set<string>,
   serviceToServer: Map<string, string>, // serviceId -> serverId
-  databaseToServer: Map<string, string> // databaseId -> serverId
+  databaseToServer: Map<string, string>, // databaseId -> serverId
+  collapsedClusterIds: Set<string> = new Set(),
+  serverToCluster: Map<string, string> = new Map() // serverId -> clusterId
 ): TopologyEdge[] {
-  if (collapsedServerIds.size === 0) return edges;
+  if (collapsedServerIds.size === 0 && collapsedClusterIds.size === 0) return edges;
 
   const resolveNode = (nodeKey: string): string => {
     const [type, id] = nodeKey.split(':');
+    // External entities and any unknown types pass through unchanged — they
+    // never live inside a server group.
+    if (type !== 'service' && type !== 'database') return nodeKey;
+
     const serverMap = type === 'service' ? serviceToServer : databaseToServer;
     const serverId = serverMap.get(id);
-    if (serverId && collapsedServerIds.has(serverId)) {
-      return `server:${serverId}`;
+
+    if (serverId) {
+      // Cluster takes precedence: a collapsed cluster swallows every child
+      // server (even non-collapsed ones) into a single bucket.
+      const clusterId = serverToCluster.get(serverId);
+      if (clusterId && collapsedClusterIds.has(clusterId)) {
+        return `cluster:${clusterId}`;
+      }
+      if (collapsedServerIds.has(serverId)) {
+        return `server:${serverId}`;
+      }
     }
     return nodeKey;
   };

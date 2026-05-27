@@ -1,6 +1,12 @@
 import { useState, useMemo } from 'react';
 import { Modal } from '../Modal';
-import { createConnection, type ServerWithServices, type Database, type ServiceConnection } from '../../lib/api';
+import {
+  createConnection,
+  type ServerWithServices,
+  type Database,
+  type ServiceConnection,
+  type ExternalEntity,
+} from '../../lib/api';
 
 interface AddConnectionModalProps {
   isOpen: boolean;
@@ -8,11 +14,12 @@ interface AddConnectionModalProps {
   environmentId: string;
   servers: ServerWithServices[];
   databases: Database[];
+  externalEntities?: ExternalEntity[];
   onConnectionCreated: (connection: ServiceConnection) => void;
 }
 
 interface NodeOption {
-  type: 'service' | 'database';
+  type: 'service' | 'database' | 'external';
   id: string;
   label: string;
   group: string;
@@ -26,6 +33,7 @@ export function AddConnectionModal({
   environmentId,
   servers,
   databases,
+  externalEntities = [],
   onConnectionCreated,
 }: AddConnectionModalProps) {
   const [sourceKey, setSourceKey] = useState('');
@@ -59,8 +67,16 @@ export function AddConnectionModal({
         group: serverName ? `Server: ${serverName}` : 'External',
       });
     }
+    for (const ext of externalEntities) {
+      options.push({
+        type: 'external',
+        id: ext.id,
+        label: ext.label,
+        group: 'External Entity',
+      });
+    }
     return options;
-  }, [servers, databases]);
+  }, [servers, databases, externalEntities]);
 
   const targetOptions = useMemo(() => {
     return nodeOptions.filter((n) => `${n.type}:${n.id}` !== sourceKey);
@@ -85,8 +101,8 @@ export function AddConnectionModal({
     e.preventDefault();
     if (!sourceKey || !targetKey) return;
 
-    const [sourceType, sourceId] = sourceKey.split(':') as ['service' | 'database', string];
-    const [targetType, targetId] = targetKey.split(':') as ['service' | 'database', string];
+    const [sourceType, sourceId] = sourceKey.split(':') as ['service' | 'database' | 'external', string];
+    const [targetType, targetId] = targetKey.split(':') as ['service' | 'database' | 'external', string];
 
     // Parse port and reject NaN explicitly — JSON.stringify(NaN) is "null",
     // which would silently drop the user's input.
@@ -149,7 +165,7 @@ export function AddConnectionModal({
             <option value="">Select source...</option>
             {nodeOptions.map((opt) => (
               <option key={`${opt.type}:${opt.id}`} value={`${opt.type}:${opt.id}`}>
-                [{opt.type === 'service' ? 'Service' : 'Database'}] {opt.label} ({opt.group})
+                [{opt.type === 'service' ? 'Service' : opt.type === 'database' ? 'Database' : 'External'}] {opt.label} ({opt.group})
               </option>
             ))}
           </select>
@@ -167,7 +183,7 @@ export function AddConnectionModal({
             <option value="">Select target...</option>
             {targetOptions.map((opt) => (
               <option key={`${opt.type}:${opt.id}`} value={`${opt.type}:${opt.id}`}>
-                [{opt.type === 'service' ? 'Service' : 'Database'}] {opt.label} ({opt.group})
+                [{opt.type === 'service' ? 'Service' : opt.type === 'database' ? 'Database' : 'External'}] {opt.label} ({opt.group})
               </option>
             ))}
           </select>
