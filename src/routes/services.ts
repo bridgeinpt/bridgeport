@@ -18,7 +18,7 @@ import { checkServiceUpdate } from '../lib/scheduler.js';
 import { determineHealthStatus, determineOverallStatus } from '../services/servers.js';
 import { getSystemSettings } from '../services/system-settings.js';
 import { HEALTH_STATUS, CONTAINER_STATUS, DISCOVERY_STATUS, HEALTH_CHECK_STATUS } from '../lib/constants.js';
-import { validateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery, flattenDeploymentOntoService } from '../lib/helpers.js';
+import { validateBody, validateUpdateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery, flattenDeploymentOntoService } from '../lib/helpers.js';
 
 // --- schemas ---
 
@@ -425,7 +425,9 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = validateBody(updateServiceSchema, request, reply);
+      // Rejects PATCH of read-only/derived fields (status, exposedPorts, etc.)
+      // with 422 BEFORE any DB read/write — see src/lib/readonly-fields.ts.
+      const body = validateUpdateBody(updateServiceSchema, 'service', request, reply);
       if (!body) return;
 
       try {
@@ -555,7 +557,9 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id, depId } = request.params as { id: string; depId: string };
-      const body = validateBody(updateDeploymentSchema, request, reply);
+      // Rejects PATCH of derived deployment fields (status, exposedPorts, agent*
+      // results, etc.) before mutating the row — see src/lib/readonly-fields.ts.
+      const body = validateUpdateBody(updateDeploymentSchema, 'serviceDeployment', request, reply);
       if (!body) return;
 
       try {

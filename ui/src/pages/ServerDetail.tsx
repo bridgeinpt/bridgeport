@@ -31,6 +31,7 @@ import {
   type ServerConfigFileStatus,
   type ServerConfigFilesSyncTotals,
   type ServerSyncAllResult,
+  type SyncStatus,
   type ContainerImage,
   type ProcessSnapshot,
 } from '../lib/api';
@@ -140,6 +141,8 @@ export default function ServerDetail() {
   const [loadingConfigFiles, setLoadingConfigFiles] = useState(false);
   const [syncingAllFiles, setSyncingAllFiles] = useState(false);
   const [syncResults, setSyncResults] = useState<ServerSyncAllResult[] | null>(null);
+  // `no_targets` is a yellow warning ("nothing to sync") — see issue #127.
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | undefined>(undefined);
   const [showSyncResults, setShowSyncResults] = useState(false);
 
   // Process snapshot (from agent)
@@ -206,13 +209,17 @@ export default function ServerDetail() {
     if (!id) return;
     setSyncingAllFiles(true);
     setSyncResults(null);
+    setSyncStatus(undefined);
     setShowSyncResults(true);
     try {
       const result = await syncAllServerFiles(id);
       setSyncResults(result.results);
+      setSyncStatus(result.status);
       // Reload config files status
       await loadConfigFilesStatus(id);
-      if (result.success) {
+      if (result.status === 'no_targets') {
+        toast.warning('No files attached to services on this server — nothing to sync');
+      } else if (result.status === 'ok') {
         toast.success('All files synced successfully');
       } else {
         toast.error('Some files failed to sync');
@@ -225,6 +232,7 @@ export default function ServerDetail() {
         success: false,
         error: err instanceof Error ? err.message : 'Sync failed',
       }]);
+      setSyncStatus('failed');
       toast.error('Failed to sync files');
     } finally {
       setSyncingAllFiles(false);
@@ -1109,6 +1117,7 @@ export default function ServerDetail() {
         onClose={() => {
           setShowSyncResults(false);
           setSyncResults(null);
+          setSyncStatus(undefined);
         }}
         title="Sync Results"
         size="md"
@@ -1122,23 +1131,33 @@ export default function ServerDetail() {
           <div className="space-y-4">
             {/* Summary */}
             <div className={`p-3 rounded-lg ${
-              syncResults.every(r => r.success)
+              syncStatus === 'no_targets'
+                ? 'bg-yellow-500/10 border border-yellow-500/30'
+                : syncResults.every(r => r.success)
                 ? 'bg-green-500/10 border border-green-500/30'
                 : syncResults.some(r => r.success)
                 ? 'bg-yellow-500/10 border border-yellow-500/30'
                 : 'bg-red-500/10 border border-red-500/30'
             }`}>
               <div className="flex items-center gap-2">
-                {syncResults.every(r => r.success) ? (
+                {syncStatus === 'no_targets' ? (
+                  // `no_targets` → "nothing to sync" warning (issue #127).
+                  // Server has no services with attached config files; render
+                  // as yellow info instead of a green success.
+                  <WarningIcon className="w-5 h-5 text-yellow-400" />
+                ) : syncResults.every(r => r.success) ? (
                   <CheckIcon className="w-5 h-5 text-green-400" />
                 ) : (
                   <WarningIcon className="w-5 h-5 text-yellow-400" />
                 )}
                 <span className={
+                  syncStatus === 'no_targets' ? 'text-yellow-400' :
                   syncResults.every(r => r.success) ? 'text-green-400' :
                   syncResults.some(r => r.success) ? 'text-yellow-400' : 'text-red-400'
                 }>
-                  {syncResults.filter(r => r.success).length} of {syncResults.length} synced successfully
+                  {syncStatus === 'no_targets'
+                    ? 'No config files attached to services on this server — sync did nothing.'
+                    : `${syncResults.filter(r => r.success).length} of ${syncResults.length} synced successfully`}
                 </span>
               </div>
             </div>
@@ -1176,6 +1195,7 @@ export default function ServerDetail() {
                 onClick={() => {
                   setShowSyncResults(false);
                   setSyncResults(null);
+                  setSyncStatus(undefined);
                 }}
                 className="btn btn-primary"
               >

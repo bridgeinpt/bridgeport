@@ -7,8 +7,8 @@ import { requireOperator } from '../plugins/authorize.js';
 import { logAudit, actorFrom } from '../services/audit.js';
 import { userIdForFk } from '../services/auth.js';
 import { resolveSecretPlaceholders } from '../services/secrets.js';
-import { syncConfigFileToAttachedServices } from '../services/config-file-auto-resync.js';
-import { validateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery } from '../lib/helpers.js';
+import { syncConfigFileToAttachedServices, deriveSyncStatus } from '../services/config-file-auto-resync.js';
+import { validateBody, validateUpdateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery } from '../lib/helpers.js';
 import { detectLanguage } from '../lib/config-file-language.js';
 import { syncUsageForConfigFile } from '../lib/key-usage-extraction.js';
 
@@ -248,7 +248,8 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
     { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = validateBody(updateConfigFileSchema, request, reply);
+      // Rejects PATCH of derived/system fields (id, createdAt, etc.) atomically.
+      const body = validateUpdateBody(updateConfigFileSchema, 'configFile', request, reply);
       if (!body) return;
 
       try {
@@ -659,11 +660,33 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
       );
       if (!service) return;
 
-      if (service.files.length === 0) {
-        return reply.code(400).send({ error: 'No files attached to this service' });
-      }
-      if (service.serviceDeployments.length === 0) {
-        return reply.code(400).send({ error: 'Service has no deployments to sync to' });
+      // Zero-target syncs used to return 400 — surface as 200 + no_targets so
+      // the UI can render a yellow warning ("nothing to sync") instead of a
+      // red error. See issue #127.
+      if (service.files.length === 0 || service.serviceDeployments.length === 0) {
+        await logAudit({
+          action: 'sync_files',
+          resourceType: 'service',
+          resourceId: service.id,
+          resourceName: service.name,
+          details: {
+            results: [],
+            status: 'no_targets',
+            reason: service.files.length === 0 ? 'no_files_attached' : 'no_deployments',
+          },
+          success: false,
+          ...actorFrom(request),
+          environmentId: service.environmentId,
+        });
+        return {
+          results: [],
+          status: 'no_targets' as const,
+          targetsAttempted: 0,
+          targetsSucceeded: 0,
+          targetsFailed: 0,
+          // Deprecated: retained for one release as a top-level alias (issue #127).
+          success: false,
+        };
       }
 
       const results: Array<{ file: string; targetPath: string; serverName: string; success: boolean; error?: string }> = [];
@@ -771,20 +794,25 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         }
       }
 
-      const allSuccess = results.length > 0 && results.every((r) => r.success);
+      const status = deriveSyncStatus(results);
+      const targetsAttempted = results.length;
+      const targetsSucceeded = results.filter((r) => r.success).length;
+      const targetsFailed = targetsAttempted - targetsSucceeded;
+      const allSuccess = status === 'ok';
 
       await logAudit({
         action: 'sync_files',
         resourceType: 'service',
         resourceId: service.id,
         resourceName: service.name,
-        details: { results, allSuccess },
+        details: { results, status, allSuccess },
         success: allSuccess,
         ...actorFrom(request),
         environmentId: service.environmentId,
       });
 
-      return { results, success: allSuccess };
+      // `success` is deprecated (issue #127); clients should prefer `status`.
+      return { results, status, targetsAttempted, targetsSucceeded, targetsFailed, success: allSuccess };
     }
   );
 
@@ -945,8 +973,27 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         }
       }
 
+      // Zero targets → 200 + no_targets (issue #127). Previously returned a 400
+      // which the UI surfaced as a red error even though nothing was wrong.
       if (serviceFilesToSync.length === 0) {
-        return reply.code(400).send({ error: 'No config files attached to services on this server' });
+        await logAudit({
+          action: 'sync_files',
+          resourceType: 'server',
+          resourceId: server.id,
+          resourceName: server.name,
+          details: { results: [], status: 'no_targets', reason: 'no_attached_files' },
+          success: false,
+          ...actorFrom(request),
+          environmentId: server.environmentId,
+        });
+        return {
+          results: [],
+          status: 'no_targets' as const,
+          targetsAttempted: 0,
+          targetsSucceeded: 0,
+          targetsFailed: 0,
+          success: false,
+        };
       }
 
       const results: Array<{
@@ -1063,20 +1110,25 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         client.disconnect();
       }
 
-      const allSuccess = results.every((r) => r.success);
+      const status = deriveSyncStatus(results);
+      const targetsAttempted = results.length;
+      const targetsSucceeded = results.filter((r) => r.success).length;
+      const targetsFailed = targetsAttempted - targetsSucceeded;
+      const allSuccess = status === 'ok';
 
       await logAudit({
         action: 'sync_files',
         resourceType: 'server',
         resourceId: server.id,
         resourceName: server.name,
-        details: { results, allSuccess, totalFiles: results.length },
+        details: { results, status, allSuccess, totalFiles: results.length },
         success: allSuccess,
         ...actorFrom(request),
         environmentId: server.environmentId,
       });
 
-      return { results, success: allSuccess };
+      // `success` is deprecated (issue #127); clients should prefer `status`.
+      return { results, status, targetsAttempted, targetsSucceeded, targetsFailed, success: allSuccess };
     }
   );
 
@@ -1089,8 +1141,9 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
       const { id } = request.params as { id: string };
 
       const outcome = await syncConfigFileToAttachedServices(id);
+      // null = the ConfigFile itself doesn't exist — true 404.
       if (!outcome) {
-        return reply.code(400).send({ error: 'Config file not found or not attached to any services' });
+        return reply.code(404).send({ error: 'Config file not found' });
       }
 
       await logAudit({
@@ -1098,13 +1151,26 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         resourceType: 'config_file',
         resourceId: id,
         resourceName: outcome.configFileName,
-        details: { results: outcome.results, allSuccess: outcome.success, syncedTo: outcome.results.length },
+        details: {
+          results: outcome.results,
+          status: outcome.status,
+          allSuccess: outcome.success,
+          syncedTo: outcome.results.length,
+        },
         success: outcome.success,
         ...actorFrom(request),
         environmentId: outcome.environmentId,
       });
 
-      return { results: outcome.results, success: outcome.success };
+      // `success` is deprecated (issue #127); clients should prefer `status`.
+      return {
+        results: outcome.results,
+        status: outcome.status,
+        targetsAttempted: outcome.targetsAttempted,
+        targetsSucceeded: outcome.targetsSucceeded,
+        targetsFailed: outcome.targetsFailed,
+        success: outcome.success,
+      };
     }
   );
 

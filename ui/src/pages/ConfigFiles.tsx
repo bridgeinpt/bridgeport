@@ -25,7 +25,7 @@ import { RefreshIcon } from '../components/Icons.js';
 import Pagination from '../components/Pagination.js';
 import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
 import { EmptyState } from '../components/EmptyState.js';
-import { OperationResultsModal, type OperationResult } from '../components/OperationResultsModal.js';
+import { OperationResultsModal, type OperationResult, type OperationStatus } from '../components/OperationResultsModal.js';
 import { ConfigFileEditor, SUPPORTED_LANGUAGES } from '../components/ConfigFileEditor.js';
 import { useToast } from '../components/Toast.js';
 
@@ -104,6 +104,9 @@ export default function ConfigFiles() {
   const [uploading, setUploading] = useState(false);
   const [syncingFile, setSyncingFile] = useState<ConfigFile | null>(null);
   const [syncResults, setSyncResults] = useState<OperationResult[] | null>(null);
+  // Tracks the terminal sync status returned by the backend (issue #127).
+  // `no_targets` triggers a yellow "did nothing" banner in the modal.
+  const [syncStatus, setSyncStatus] = useState<OperationStatus | undefined>(undefined);
   const [deleteConfirm, setDeleteConfirm] = useState<ConfigFile | null>(null);
 
   const resetCreateForm = () => {
@@ -172,8 +175,9 @@ export default function ConfigFiles() {
   const handleSyncAll = async (file: ConfigFile) => {
     setSyncingFile(file);
     setSyncResults(null);
+    setSyncStatus(undefined);
     try {
-      const { results } = await syncConfigFileToAll(file.id);
+      const { results, status } = await syncConfigFileToAll(file.id);
       // Transform ConfigFileSyncResult to OperationResult
       const operationResults: OperationResult[] = results.map((r: ConfigFileSyncResult) => ({
         id: r.serviceId || r.serviceName,
@@ -184,6 +188,7 @@ export default function ConfigFiles() {
         error: r.error,
       }));
       setSyncResults(operationResults);
+      setSyncStatus(status);
       // Reload config files to update sync status
       reload();
     } catch (err) {
@@ -193,6 +198,7 @@ export default function ConfigFiles() {
         success: false,
         error: err instanceof Error ? err.message : 'Sync failed',
       }]);
+      setSyncStatus('failed');
     }
   };
 
@@ -841,10 +847,13 @@ export default function ConfigFiles() {
         onClose={() => {
           setSyncingFile(null);
           setSyncResults(null);
+          setSyncStatus(undefined);
         }}
         title={`Sync: ${syncingFile?.name || ''}`}
         loadingMessage="Syncing to all attached services..."
         results={syncResults}
+        status={syncStatus}
+        noTargetsMessage="This config file is not attached to any service — sync did nothing."
       />
 
       {/* Filters */}

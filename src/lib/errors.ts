@@ -35,7 +35,9 @@ export type ErrorCode = (typeof ERROR_CODES)[number];
  */
 const DEFAULT_STATUS_BY_CODE: Record<ErrorCode, number> = {
   VALIDATION_ERROR: 400,
-  READONLY_FIELD: 400,
+  // 422 Unprocessable Entity: request was syntactically valid but contained
+  // semantically invalid input (a read-only/derived field). See issue #127.
+  READONLY_FIELD: 422,
   UNAUTHORIZED: 401,
   FORBIDDEN_SCOPE: 403,
   NOT_FOUND: 404,

@@ -24,6 +24,7 @@ import { pingDatabase } from '../services/database-query-executor.js';
 import {
   safeJsonParse,
   validateBody,
+  validateUpdateBody,
   findOrNotFound,
   getErrorMessage,
   handleUniqueConstraint,
@@ -146,7 +147,9 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
-      const body = validateBody(updateDatabaseSchema, request, reply);
+      // Rejects PATCH of derived/system fields (encryptedCredentials, monitoring
+      // state, etc.) atomically — see src/lib/readonly-fields.ts.
+      const body = validateUpdateBody(updateDatabaseSchema, 'database', request, reply);
       if (!body) return;
 
       try {
