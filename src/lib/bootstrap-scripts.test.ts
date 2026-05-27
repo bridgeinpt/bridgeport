@@ -152,11 +152,13 @@ describe('bootstrap-scripts', () => {
       expect(script).toContain('cp /etc/fstab /etc/fstab.bridgeport.bak');
     });
 
-    it('appends fstab line only if absent (exact line match via grep -qxF)', () => {
+    it('appends fstab line only if /swapfile is not already mounted (awk first-field match)', () => {
       const script = swapScript(1024);
-      // grep -qxF: -x exact line, -F literal string. Anything weaker (-q alone)
-      // would treat a partial substring match as already-present.
-      expect(script).toContain('grep -qxF "$FSTAB_LINE" /etc/fstab');
+      // First-field awk match tolerates whitespace variants and existing
+      // entries with different mount options ("swap" type, "defaults" opts,
+      // tab-separated). Anchored grep -qxF would false-negative those cases
+      // and append a duplicate line.
+      expect(script).toContain('awk \'$1=="/swapfile" {found=1} END{exit !found}\' /etc/fstab');
       expect(script).toContain("FSTAB_LINE='/swapfile none swap sw 0 0'");
     });
 

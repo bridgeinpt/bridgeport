@@ -14,9 +14,7 @@
 
 import { prisma } from '../lib/db.js';
 import {
-  SSHClient,
-  LocalClient,
-  isLocalhost,
+  createClientForServer,
   type CommandClient,
 } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
@@ -49,6 +47,13 @@ export interface BootstrapOptions {
   swapSizeMb?: number;
   /** Audit-log actor info; forwarded to logAudit. */
   actor?: Pick<AuditLogParams, 'userId' | 'apiTokenId' | 'serviceAccountId'>;
+  /**
+   * Internal: set by the HTTP route after `tryAcquireBootstrapLock` succeeds.
+   * Tells runBootstrap that the bootstrap lock is already held by the caller,
+   * so the function should proceed (rather than refuse) and still release the
+   * lock in its finally block. Not part of the public API.
+   */
+  _lockHeldByCaller?: boolean;
 }
 
 export type BootstrapLogger = (line: string, level?: 'info' | 'error') => void;
@@ -73,28 +78,33 @@ export const SWAP_MAX_MB = 65536; // 64 GB
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Create a CommandClient for the server — local for localhost, SSH otherwise. */
-async function createBootstrapClient(serverId: string): Promise<{
-  client: CommandClient | null;
-  error?: string;
-}> {
-  const server = await prisma.server.findUnique({ where: { id: serverId } });
-  if (!server) return { client: null, error: 'Server not found' };
+/** Set of serverIds currently running a bootstrap. Used to reject concurrent
+ *  runs at the route layer. Single-process semantics — fine for BridgePort's
+ *  single-instance deployment model. */
+const runningBootstraps = new Set<string>();
 
-  if (isLocalhost(server.hostname)) {
-    return { client: new LocalClient() };
-  }
-  const sshCreds = await getEnvironmentSshKey(server.environmentId);
-  if (!sshCreds) {
-    return { client: null, error: 'SSH key not configured for this environment' };
-  }
-  return {
-    client: new SSHClient({
-      hostname: server.hostname,
-      username: sshCreds.username,
-      privateKey: sshCreds.privateKey,
-    }),
-  };
+/** Returns true if a bootstrap is already running for this server. */
+export function isBootstrapRunning(serverId: string): boolean {
+  return runningBootstraps.has(serverId);
+}
+
+/**
+ * Atomically attempt to acquire the bootstrap lock for a server. Returns true
+ * if the caller now owns the lock (must release via `releaseBootstrapLock`),
+ * false if another caller already holds it. Use this from route handlers so
+ * the 409 decision is taken synchronously before kicking off the async
+ * `runBootstrap` (avoids the await-yield race where two parallel requests
+ * both pass an `isBootstrapRunning` check).
+ */
+export function tryAcquireBootstrapLock(serverId: string): boolean {
+  if (runningBootstraps.has(serverId)) return false;
+  runningBootstraps.add(serverId);
+  return true;
+}
+
+/** Release the bootstrap lock. Idempotent — safe to call from finally. */
+export function releaseBootstrapLock(serverId: string): void {
+  runningBootstraps.delete(serverId);
 }
 
 function emitProgress(
@@ -116,13 +126,14 @@ function emitProgress(
 // ---------------------------------------------------------------------------
 
 /**
- * Detect the target distro. Returns the cached value if a previous bootstrap
- * already recorded one and `force` is false. Updates `Server.bootstrapDistro`
- * as a side effect when it runs.
+ * Detect the target distro. Updates `Server.bootstrapDistro` as a side effect
+ * only when the detected value differs from `cachedDistro` (so a repeat probe
+ * from the GET endpoint doesn't write on every poll).
  */
 export async function detectDistro(
   client: CommandClient,
   serverId: string,
+  cachedDistro?: string | null,
 ): Promise<{ distro: string | null; supported: boolean; raw: string }> {
   const { stdout } = await client.exec(distroDetectScript());
   const raw = stdout.trim();
@@ -130,11 +141,13 @@ export async function detectDistro(
 
   const [id] = raw.split(':');
   const supported = SUPPORTED_DISTROS.has(id);
-  // Cache on the server row for fast subsequent renders.
-  await prisma.server.update({
-    where: { id: serverId },
-    data: { bootstrapDistro: raw },
-  });
+  // Cache on the server row only when the value has changed (skip no-op writes).
+  if (raw !== cachedDistro) {
+    await prisma.server.update({
+      where: { id: serverId },
+      data: { bootstrapDistro: raw },
+    });
+  }
   return { distro: id, supported, raw };
 }
 
@@ -170,14 +183,28 @@ async function streamCommand(
   command: string,
   onLine: (line: string, isStderr: boolean) => void,
 ): Promise<number> {
-  return client.execStream(command, (data, isStderr) => {
-    // Split on newlines so consumers (SSE, audit log) see one event per line.
-    const lines = data.split('\n');
-    for (const line of lines) {
+  // SSH chunks can split a single log line across two onData callbacks. Buffer
+  // the trailing partial line per stream and prepend it to the next chunk so we
+  // emit exactly one event per logical newline-terminated line.
+  let stdoutBuf = '';
+  let stderrBuf = '';
+  const code = await client.execStream(command, (data, isStderr) => {
+    const prefix = isStderr ? stderrBuf : stdoutBuf;
+    const combined = prefix + data;
+    const parts = combined.split('\n');
+    // Last element is the partial trailing fragment (no newline yet).
+    const trailing = parts.pop() ?? '';
+    if (isStderr) stderrBuf = trailing;
+    else stdoutBuf = trailing;
+    for (const line of parts) {
       if (line.length === 0) continue;
       onLine(line, isStderr);
     }
   });
+  // Flush any remaining buffered content as final lines.
+  if (stdoutBuf.length > 0) onLine(stdoutBuf, false);
+  if (stderrBuf.length > 0) onLine(stderrBuf, true);
+  return code;
 }
 
 export async function installDocker(
@@ -251,7 +278,12 @@ export async function addSwapLive(
   const server = await prisma.server.findUnique({ where: { id: serverId } });
   if (!server) return { success: false, error: 'Server not found' };
 
-  const { client, error } = await createBootstrapClient(serverId);
+  const { client, error } = await createClientForServer(
+    server.hostname,
+    server.environmentId,
+    getEnvironmentSshKey,
+    { serverType: server.serverType },
+  );
   if (!client) return { success: false, error };
 
   try {
@@ -264,7 +296,9 @@ export async function addSwapLive(
     // Reject re-runs unless caller explicitly forces.
     if (!options.force) {
       const swaponRes = await client.exec('swapon --show 2>/dev/null || true');
-      if (swaponRes.stdout.includes('/swapfile')) {
+      // Anchor on `/swapfile` at start of line followed by whitespace so we
+      // don't false-positive on `/swapfile.bak`, `/data/swapfile`, etc.
+      if (/^\/swapfile\s/m.test(swaponRes.stdout)) {
         return {
           success: false,
           before,
@@ -344,8 +378,22 @@ export async function runBootstrap(
   opts: BootstrapOptions,
   onLog: BootstrapLogger = () => {},
 ): Promise<BootstrapResult> {
+  // Acquire the lock synchronously at function entry (before any await) so
+  // direct callers can't race. The route layer uses `tryAcquireBootstrapLock`
+  // to atomically check + acquire before kicking off this call; in that case
+  // the entry below sees the lock already held and skips re-acquisition.
+  // Either way, the outer try/finally below releases the lock exactly once.
+  const acquiredHere = !runningBootstraps.has(serverId);
+  if (acquiredHere) runningBootstraps.add(serverId);
+  else if (!opts._lockHeldByCaller) {
+    return { success: false, error: 'Bootstrap already running for this server', components: {} };
+  }
+
   const server = await prisma.server.findUnique({ where: { id: serverId } });
-  if (!server) return { success: false, error: 'Server not found', components: {} };
+  if (!server) {
+    runningBootstraps.delete(serverId);
+    return { success: false, error: 'Server not found', components: {} };
+  }
 
   const envId = server.environmentId;
   const log: BootstrapLogger = (line, level = 'info') => {
@@ -353,15 +401,54 @@ export async function runBootstrap(
     emitProgress(serverId, envId, undefined, 'step', line, level);
   };
 
-  emitProgress(serverId, envId, undefined, 'start', '[bootstrap] starting');
-
-  const { client, error: clientError } = await createBootstrapClient(serverId);
-  if (!client) {
-    emitProgress(serverId, envId, undefined, 'error', clientError ?? 'no client', 'error');
+  // Centralise the cleanup + terminal-event emission shared by every early-
+  // return failure path. Always emits a final SSE event with component=undefined
+  // so the UI modal's "running=false" toggle fires (see BootstrapModal.tsx).
+  const finalizeError = async (
+    message: string,
+    auditDetails: Record<string, unknown>,
+  ): Promise<void> => {
     await prisma.server.update({
       where: { id: serverId },
       data: { bootstrapState: BOOTSTRAP_STATE.ERROR },
     });
+    await logAudit({
+      action: 'bootstrap',
+      resourceType: 'server',
+      resourceId: server.id,
+      resourceName: server.name,
+      details: auditDetails,
+      success: false,
+      error: message,
+      environmentId: envId,
+      ...opts.actor,
+    });
+    emitProgress(
+      serverId,
+      envId,
+      undefined,
+      'error',
+      `[bootstrap] aborted: ${message}`,
+      'error',
+    );
+  };
+
+  // Outer try/finally guarantees the lock is released even on early-return
+  // failure paths (unsupported distro, sudo failure, exceptions). Note: the
+  // outer body is intentionally not re-indented so the diff vs. the previous
+  // structure stays readable; only the lock-release semantics changed.
+  try {
+  emitProgress(serverId, envId, undefined, 'start', '[bootstrap] starting');
+
+  const { client, error: clientError } = await createClientForServer(
+    server.hostname,
+    server.environmentId,
+    getEnvironmentSshKey,
+    { serverType: server.serverType },
+  );
+  if (!client) {
+    const msg = clientError ?? 'no client';
+    await finalizeError(msg, { components: opts.components, error: msg });
     return { success: false, error: clientError, components: {} };
   }
 
@@ -372,7 +459,7 @@ export async function runBootstrap(
 
     // ---- 1. Distro detect ----
     emitProgress(serverId, envId, 'distro', 'start', '[distro] detecting');
-    const distroResult = await detectDistro(client, serverId);
+    const distroResult = await detectDistro(client, serverId, server.bootstrapDistro);
     emitProgress(
       serverId,
       envId,
@@ -383,20 +470,9 @@ export async function runBootstrap(
     if (!distroResult.supported) {
       const msg = `Unsupported distro: ${distroResult.raw || 'unknown'}. Bootstrap supports Ubuntu and Debian only. See docs/guides/server-bootstrap.md.`;
       emitProgress(serverId, envId, 'distro', 'error', msg, 'error');
-      await prisma.server.update({
-        where: { id: serverId },
-        data: { bootstrapState: BOOTSTRAP_STATE.ERROR },
-      });
-      await logAudit({
-        action: 'bootstrap',
-        resourceType: 'server',
-        resourceId: server.id,
-        resourceName: server.name,
-        details: { distro: distroResult.raw, components: opts.components },
-        success: false,
-        error: msg,
-        environmentId: envId,
-        ...opts.actor,
+      await finalizeError(msg, {
+        distro: distroResult.raw,
+        components: opts.components,
       });
       return { success: false, error: msg, components: {} };
     }
@@ -405,21 +481,11 @@ export async function runBootstrap(
     emitProgress(serverId, envId, 'preflight', 'start', '[sudo] preflight');
     const sudo = await preflightSudo(client);
     if (!sudo.ok) {
-      emitProgress(serverId, envId, 'preflight', 'error', sudo.error ?? 'sudo failed', 'error');
-      await prisma.server.update({
-        where: { id: serverId },
-        data: { bootstrapState: BOOTSTRAP_STATE.ERROR },
-      });
-      await logAudit({
-        action: 'bootstrap',
-        resourceType: 'server',
-        resourceId: server.id,
-        resourceName: server.name,
-        details: { components: opts.components, sudoError: sudo.error },
-        success: false,
-        error: sudo.error,
-        environmentId: envId,
-        ...opts.actor,
+      const msg = sudo.error ?? 'sudo failed';
+      emitProgress(serverId, envId, 'preflight', 'error', msg, 'error');
+      await finalizeError(msg, {
+        components: opts.components,
+        sudoError: sudo.error,
       });
       return { success: false, error: sudo.error, components: {} };
     }
@@ -469,6 +535,11 @@ export async function runBootstrap(
         results.swap = { success: false, error: 'swapSizeMb is required when swap is enabled' };
         emitProgress(serverId, envId, 'swap', 'error', results.swap.error!, 'error');
       } else {
+        // If /swapfile is already active, the swap script no-ops on size. We
+        // must not lie about size in the DB — probe first and skip the size
+        // update when an existing swapfile is present.
+        const swaponRes = await client.exec('swapon --show 2>/dev/null || true');
+        const swapAlreadyOn = /^\/swapfile\s/m.test(swaponRes.stdout);
         emitProgress(serverId, envId, 'swap', 'start', `[swap] configuring ${opts.swapSizeMb}MB`);
         const r = await configureSwap(client, opts.swapSizeMb, (line, level) => {
           onLog(line, level);
@@ -476,15 +547,33 @@ export async function runBootstrap(
         });
         results.swap = r;
         if (r.success) {
-          await prisma.server.update({
-            where: { id: serverId },
-            data: {
-              swapConfigured: true,
-              swapConfiguredAt: new Date(),
-              swapSizeMb: opts.swapSizeMb,
-            },
-          });
-          emitProgress(serverId, envId, 'swap', 'done', '[swap] done');
+          if (swapAlreadyOn) {
+            // Keep existing size — only flip the boolean + timestamp.
+            await prisma.server.update({
+              where: { id: serverId },
+              data: {
+                swapConfigured: true,
+                swapConfiguredAt: new Date(),
+              },
+            });
+            emitProgress(
+              serverId,
+              envId,
+              'swap',
+              'done',
+              '[swap] /swapfile already present — kept existing size',
+            );
+          } else {
+            await prisma.server.update({
+              where: { id: serverId },
+              data: {
+                swapConfigured: true,
+                swapConfiguredAt: new Date(),
+                swapSizeMb: opts.swapSizeMb,
+              },
+            });
+            emitProgress(serverId, envId, 'swap', 'done', '[swap] done');
+          }
         } else {
           emitProgress(serverId, envId, 'swap', 'error', r.error ?? 'swap failed', 'error');
         }
@@ -566,4 +655,7 @@ export async function runBootstrap(
   );
 
   return { success: !failed, components: results };
+  } finally {
+    runningBootstraps.delete(serverId);
+  }
 }

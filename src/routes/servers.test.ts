@@ -6,6 +6,7 @@ import { createTestServer } from '../../tests/factories/server.js';
 import { createTestContainerImage } from '../../tests/factories/container-image.js';
 import { createTestService } from '../../tests/factories/service.js';
 import { generateTestToken } from '../../tests/helpers/auth.js';
+import { tryAcquireBootstrapLock, releaseBootstrapLock } from '../services/bootstrap.js';
 
 describe('server routes', () => {
   let app: TestApp;
@@ -398,6 +399,22 @@ describe('server routes', () => {
   // ==================== GET /api/servers/:id/bootstrap (issue #113) ====================
 
   describe('GET /api/servers/:id/bootstrap', () => {
+    it('forbids viewers (operator+ required: route fires SSH probes)', async () => {
+      const server = await createTestServer(app.prisma, {
+        environmentId: envId,
+        name: 'bs-get-viewer-server',
+        hostname: '203.0.113.9',
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/servers/${server.id}/bootstrap`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+
+      expect(res.statusCode).toBe(403);
+    });
+
     it('returns cached per-component fields for a fresh server', async () => {
       const server = await createTestServer(app.prisma, {
         environmentId: envId,
@@ -411,7 +428,7 @@ describe('server routes', () => {
       const res = await app.inject({
         method: 'GET',
         url: `/api/servers/${server.id}/bootstrap`,
-        headers: { authorization: `Bearer ${viewerToken}` },
+        headers: { authorization: `Bearer ${operatorToken}` },
       });
 
       expect(res.statusCode).toBe(200);
@@ -438,6 +455,9 @@ describe('server routes', () => {
           bootstrapDistro: 'ubuntu:22.04',
           dockerInstalled: true,
           dockerInstalledAt: new Date('2026-01-01T00:00:00Z'),
+          // agentInstalled is derived from agentInstalledAt (not metricsMode)
+          // so set the timestamp directly.
+          agentInstalledAt: new Date('2026-01-01T00:01:00Z'),
           sysctlApplied: true,
           swapConfigured: true,
           swapSizeMb: 1024,
@@ -447,7 +467,7 @@ describe('server routes', () => {
       const res = await app.inject({
         method: 'GET',
         url: `/api/servers/${server.id}/bootstrap`,
-        headers: { authorization: `Bearer ${viewerToken}` },
+        headers: { authorization: `Bearer ${operatorToken}` },
       });
 
       expect(res.statusCode).toBe(200);
@@ -458,13 +478,15 @@ describe('server routes', () => {
       expect(body.sysctlApplied).toBe(true);
       expect(body.swapConfigured).toBe(true);
       expect(body.swapSizeMb).toBe(1024);
+      // agentInstalled tracks the timestamp, not metricsMode.
+      expect(body.agentInstalled).toBe(true);
     });
 
     it('returns 404 for non-existent server', async () => {
       const res = await app.inject({
         method: 'GET',
         url: '/api/servers/does-not-exist/bootstrap',
-        headers: { authorization: `Bearer ${viewerToken}` },
+        headers: { authorization: `Bearer ${operatorToken}` },
       });
 
       expect(res.statusCode).toBe(404);
@@ -563,6 +585,35 @@ describe('server routes', () => {
 
       expect(res.statusCode).toBe(202);
       expect(res.json()).toEqual({ started: true });
+    });
+
+    it('returns 409 when a bootstrap is already running for the same server', async () => {
+      const server = await createTestServer(app.prisma, {
+        environmentId: envId,
+        name: 'bs-409-server',
+        hostname: '203.0.113.25',
+      });
+
+      // Pre-acquire the lock directly so the route sees a busy state and
+      // returns 409. Driving the race through two parallel inject() calls is
+      // flaky because the first fire-and-forget runBootstrap can fail fast
+      // (no SSH key in tests) and release the lock before the second handler
+      // dispatches. Testing the route's lock-check in isolation is enough.
+      const acquired = tryAcquireBootstrapLock(server.id);
+      expect(acquired).toBe(true);
+      try {
+        const res = await app.inject({
+          method: 'POST',
+          url: `/api/servers/${server.id}/bootstrap`,
+          headers: { authorization: `Bearer ${operatorToken}` },
+          payload: { components: { docker: true } },
+        });
+
+        expect(res.statusCode).toBe(409);
+        expect(res.json().error).toMatch(/already running/i);
+      } finally {
+        releaseBootstrapLock(server.id);
+      }
     });
 
     it('returns 404 for non-existent server', async () => {

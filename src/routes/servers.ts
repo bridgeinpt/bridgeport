@@ -19,10 +19,12 @@ import {
   addSwapLive,
   detectDistro,
   preflightSudo,
+  tryAcquireBootstrapLock,
+  releaseBootstrapLock,
   SWAP_MIN_MB,
   SWAP_MAX_MB,
 } from '../services/bootstrap.js';
-import { isLocalhost, SSHClient, LocalClient, type CommandClient } from '../lib/ssh.js';
+import { createClientForServer } from '../lib/ssh.js';
 import { getEnvironmentSshKey } from './environments.js';
 import { prisma } from '../lib/db.js';
 import { bundledAgentVersion } from '../lib/version.js';
@@ -547,27 +549,17 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
 
   // ==================== Bootstrap (issue #113) ====================
 
-  // Helper: build a CommandClient for read-only bootstrap status checks.
-  async function clientFor(server: { hostname: string; environmentId: string }): Promise<{
-    client: CommandClient | null;
-    error?: string;
-  }> {
-    if (isLocalhost(server.hostname)) {
-      return { client: new LocalClient() };
-    }
-    const creds = await getEnvironmentSshKey(server.environmentId);
-    if (!creds) return { client: null, error: 'SSH key not configured for this environment' };
-    return {
-      client: new SSHClient({ hostname: server.hostname, username: creds.username, privateKey: creds.privateKey }),
-    };
-  }
-
   // GET bootstrap status: per-component flags, timestamps, distro, current memory.
   // Returns cached state immediately; runs a live distro/sudo/free probe in the
   // background only if a client can be created (best-effort).
+  //
+  // Operator+ required: the live probe fires SSH commands (distro detect, sudo
+  // preflight, `free -m`) which is a state-mutating side effect of a GET on
+  // viewer access. Read-only callers should rely on the cached fields exposed
+  // via GET /api/environments/:id.
   fastify.get(
     '/api/servers/:id/bootstrap',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const server = await findOrNotFound(
@@ -582,7 +574,10 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
         bootstrapDistro: server.bootstrapDistro,
         dockerInstalled: server.dockerInstalled,
         dockerInstalledAt: server.dockerInstalledAt,
-        agentInstalled: server.metricsMode === METRICS_MODE.AGENT,
+        // agentInstalled reflects whether the agent binary was actually
+        // installed (timestamp set by deployAgent / bootstrap). It must not
+        // flip to false when an admin toggles metricsMode to ssh.
+        agentInstalled: server.agentInstalledAt !== null,
         agentInstalledAt: server.agentInstalledAt,
         sysctlApplied: server.sysctlApplied,
         sysctlAppliedAt: server.sysctlAppliedAt,
@@ -593,12 +588,17 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
 
       // Best-effort live probe — distro detect + free -m. Failures are silent;
       // the cached fields still render.
-      const { client } = await clientFor(server);
+      const { client } = await createClientForServer(
+        server.hostname,
+        server.environmentId,
+        getEnvironmentSshKey,
+        { serverType: server.serverType },
+      );
       if (!client) return { ...cached, distro: null, memory: null, sudo: null };
       try {
         await client.connect();
         const [distro, sudo, mem] = await Promise.all([
-          detectDistro(client, id).catch(() => null),
+          detectDistro(client, id, server.bootstrapDistro).catch(() => null),
           preflightSudo(client).catch(() => null),
           client.exec('free -m').catch(() => null),
         ]);
@@ -634,23 +634,44 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
       );
       if (!server) return;
 
-      const actor = actorFrom(request);
-      await logAudit({
-        action: 'bootstrap_start',
-        resourceType: 'server',
-        resourceId: server.id,
-        resourceName: server.name,
-        details: { components: body.components, swapSizeMb: body.swapSizeMb },
-        ...actor,
-        environmentId: server.environmentId,
-      });
+      // Atomically acquire the bootstrap lock. Two parallel POSTs can both
+      // pass an `isRunning` check (await yields between check and run), so we
+      // grab the lock synchronously here and let runBootstrap release it.
+      if (!tryAcquireBootstrapLock(id)) {
+        return reply.code(409).send({ error: 'Bootstrap already running for this server' });
+      }
 
-      // Fire-and-forget — progress streams via the SSE event bus.
+      const actor = actorFrom(request);
+      try {
+        await logAudit({
+          action: 'bootstrap_start',
+          resourceType: 'server',
+          resourceId: server.id,
+          resourceName: server.name,
+          details: { components: body.components, swapSizeMb: body.swapSizeMb },
+          ...actor,
+          environmentId: server.environmentId,
+        });
+      } catch (err) {
+        // If the audit write fails, drop the lock so the bootstrap isn't
+        // permanently blocked by an orphaned reservation.
+        releaseBootstrapLock(id);
+        throw err;
+      }
+
+      // Fire-and-forget — progress streams via the SSE event bus. Pass the
+      // `_lockHeldByCaller` flag so runBootstrap proceeds (rather than seeing
+      // the lock as held by someone else) and still releases on completion.
       void runBootstrap(id, {
         components: body.components,
         swapSizeMb: body.swapSizeMb,
         actor,
+        _lockHeldByCaller: true,
       }).catch((err) => {
+        // The catch in runBootstrap's outer finally normally releases the
+        // lock; release defensively here too in case the function threw
+        // before reaching its own finally.
+        releaseBootstrapLock(id);
         console.error('[bootstrap] background run threw:', err);
       });
 

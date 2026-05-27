@@ -39,6 +39,11 @@ vi.mock('../lib/ssh.js', () => ({
   }),
   isLocalhost: vi.fn().mockReturnValue(false),
   shellEscape: (value: string) => `'${value.replace(/'/g, `'\\''`)}'`,
+  // Tests always exercise the SSH branch (non-localhost fixture). Returning the
+  // SSH mock keeps the existing assertions on mockSSHClientInstance valid.
+  createClientForServer: vi.fn().mockImplementation(async () => ({
+    client: mockSSHClientInstance,
+  })),
 }));
 
 vi.mock('../routes/environments.js', () => ({
@@ -247,6 +252,49 @@ describe('bootstrap service', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toMatch(/exited with code 1/);
+    });
+
+    it('buffers SSH chunks that split a single log line across callbacks', async () => {
+      // Regression for Finding 9: SSH execStream may deliver "[swap] hello\n"
+      // as ("[swap] he", "llo\n"). Without buffering we would emit two
+      // partial lines instead of one combined line.
+      const emittedLines: string[] = [];
+      mockSSHClientInstance.execStream.mockImplementationOnce(
+        async (_cmd: string, onData: (data: string, isStderr: boolean) => void) => {
+          // First chunk: partial line — no newline yet.
+          onData('[swap] he', false);
+          // Second chunk: completes the first line, includes a complete second.
+          onData('llo\n[swap] world\n', false);
+          return 0;
+        },
+      );
+
+      await configureSwap(mockSSHClientInstance as any, 1024, (line) => {
+        emittedLines.push(line);
+      });
+
+      // Should see exactly two reconstructed lines, NOT four partial fragments.
+      expect(emittedLines).toEqual(['[swap] starting (1024MB)', '[swap] hello', '[swap] world']);
+    });
+
+    it('flushes a trailing unterminated fragment at stream end', async () => {
+      // If the final chunk has no terminating newline the leftover buffer
+      // must still surface as a final emitted line.
+      const emittedLines: string[] = [];
+      mockSSHClientInstance.execStream.mockImplementationOnce(
+        async (_cmd: string, onData: (data: string, isStderr: boolean) => void) => {
+          onData('[swap] no-newline-at-end', false);
+          return 0;
+        },
+      );
+
+      await configureSwap(mockSSHClientInstance as any, 1024, (line) => {
+        emittedLines.push(line);
+      });
+
+      // The "[swap] starting" line is logged synchronously before execStream;
+      // then the trailing fragment must be flushed exactly once.
+      expect(emittedLines).toContain('[swap] no-newline-at-end');
     });
   });
 
@@ -511,6 +559,31 @@ describe('bootstrap service', () => {
       expect(result.before).toBe('before-mem');
       // Should NOT have run the configureSwap stream.
       expect(mockSSHClientInstance.execStream).not.toHaveBeenCalled();
+    });
+
+    it('does not false-positive on /swapfile.bak in swapon output', async () => {
+      // Regression: substring `includes('/swapfile')` would have wrongly
+      // matched a stale `/swapfile.bak` entry. The new anchored regex
+      // (`/^\/swapfile\s/m`) must reject it so we proceed with the install.
+      mockSSHClientInstance.exec.mockImplementation(async (cmd: string) => {
+        if (cmd === 'free -m') return { code: 0, stdout: 'mem', stderr: '' };
+        if (cmd.includes('swapon --show')) {
+          // No real /swapfile, but a backup file path mentions the string.
+          return {
+            code: 0,
+            stdout: 'NAME             TYPE  SIZE\n/swapfile.bak    file  1024M',
+            stderr: '',
+          };
+        }
+        if (cmd.includes('sudo -n true')) return { code: 0, stdout: '', stderr: '' };
+        return { code: 0, stdout: '', stderr: '' };
+      });
+
+      const result = await addSwapLive('server-1', 1024);
+
+      // Must proceed to install (no false-positive abort).
+      expect(result.success).toBe(true);
+      expect(mockSSHClientInstance.execStream).toHaveBeenCalled();
     });
 
     it('proceeds when swap already on but force=true', async () => {

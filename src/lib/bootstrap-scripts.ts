@@ -109,7 +109,8 @@ export function sysctlScript(): string {
  * persist it via `/etc/fstab`. Idempotent in two ways:
  *
  * 1. Skips creation if `/swapfile` is already active (`swapon --show` lists it).
- * 2. Appends the fstab line only if not already present (exact-line match).
+ * 2. Appends the fstab line only if `/swapfile` is not already mounted via
+ *    fstab (first-field awk match — tolerates whitespace / option variants).
  *
  * Backs up `/etc/fstab` to `/etc/fstab.bridgeport.bak` the first time it's
  * touched. `sizeMb` is shell-escaped — callers can pass it from untrusted
@@ -143,7 +144,10 @@ export function swapScript(sizeMb: number): string {
     '  sudo cp /etc/fstab /etc/fstab.bridgeport.bak',
     'fi',
     `FSTAB_LINE='${fstabLine}'`,
-    'if ! grep -qxF "$FSTAB_LINE" /etc/fstab; then',
+    // Use awk on the first whitespace-delimited field so a pre-existing
+    // `/swapfile swap swap defaults 0 0` (or tab-separated, different opts)
+    // is recognised — avoids appending a duplicate fstab entry.
+    'if ! awk \'$1=="/swapfile" {found=1} END{exit !found}\' /etc/fstab; then',
     '  echo "[swap] appending /etc/fstab"',
     '  echo "$FSTAB_LINE" | sudo tee -a /etc/fstab >/dev/null',
     'fi',
