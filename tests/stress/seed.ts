@@ -48,6 +48,14 @@ export interface StressSeedOptions {
   configFragments: number;
   /** Notification rows for the seeded user (drives notifications-list pagination). */
   notifications: number;
+  /** ServiceConnection rows (drives `/api/connections` list under load). */
+  connections: number;
+  /** ExternalEntity rows (drives `/api/environments/:envId/external-entities`). */
+  externalEntities: number;
+  /** ServerCluster rows with member servers (drives `/api/.../server-clusters`). */
+  serverClusters: number;
+  /** Completed backups per database (drives backup-summary's per-db take=1 lookup). */
+  backupsPerDatabase: number;
 }
 
 export const DEFAULT_SEED: StressSeedOptions = {
@@ -68,6 +76,16 @@ export const DEFAULT_SEED: StressSeedOptions = {
   databases: 8,
   configFragments: 10,
   notifications: 50,
+  // 60 edges across ~90 services + 8 dbs roughly matches the per-env
+  // connection density observed in production envs and keeps the diagram
+  // dense enough to push `findMany` past a trivial empty-table baseline.
+  connections: 60,
+  externalEntities: 5,
+  serverClusters: 3,
+  // 10 completed backups per DB gives the `(databaseId, completedAt desc) + take 1`
+  // path a non-trivial result set, which is what the dashboard's batched
+  // backup-summary query actually hits in real envs.
+  backupsPerDatabase: 10,
 };
 
 /** IDs of seeded entities that scenarios can reference via {placeholder} in URLs. */
@@ -375,6 +393,42 @@ export async function seedStressData(
     if (dbMetrics.length > 0) {
       await prisma.databaseMetrics.createMany({ data: dbMetrics });
     }
+
+    // -- Backup schedules + completed backup history. The dashboard's
+    // backup-summary endpoint joins every DB to its latest completed backup
+    // (`take: 1` ordered by completedAt desc) and its schedule — both empty
+    // by default in tests, which hides the real query cost.
+    if (options.backupsPerDatabase > 0) {
+      await prisma.backupSchedule.createMany({
+        data: dbIds.map((databaseId, i) => ({
+          databaseId,
+          cronExpression: '0 2 * * *',
+          retentionDays: 7,
+          enabled: i % 2 === 0,
+          nextRunAt: new Date(now + 3600_000),
+          lastRunAt: new Date(now - (i + 1) * 3600_000),
+        })),
+      });
+
+      const backups = dbIds.flatMap((databaseId, dbIdx) =>
+        Array.from({ length: options.backupsPerDatabase }, (_, i) => ({
+          databaseId,
+          filename: `${dbIdx}-${i}.sql.gz`,
+          size: BigInt(1_000_000 + i * 1000),
+          type: i === 0 ? 'manual' : 'scheduled',
+          status: 'completed',
+          storageType: 'local',
+          storagePath: `/var/backups/db-${dbIdx}/${i}.sql.gz`,
+          progress: 100,
+          duration: 30 + (i % 20),
+          // Spread createdAt and completedAt so the desc index has real
+          // sorting work to do.
+          createdAt: new Date(now - i * 3600_000),
+          completedAt: new Date(now - i * 3600_000 + 60_000),
+        }))
+      );
+      await prisma.databaseBackup.createMany({ data: backups });
+    }
   }
 
   // -- ConfigFragments. Env-scoped reusable text blocks (issue #115).
@@ -427,6 +481,141 @@ export async function seedStressData(
         inAppReadAt: i % 2 === 0 ? new Date(notifNow - i * 1000 + 500) : null,
       })),
     });
+  }
+
+  // -- ExternalEntity. Cheap free-form nodes that live alongside services on
+  // the diagram. Used as connection endpoints (sourceType/targetType === "external").
+  const externalEntityIds: string[] = [];
+  if (options.externalEntities > 0) {
+    const kinds = ['cloudflare', 'web', 'client', 'cdn', 'gateway'];
+    for (let i = 0; i < options.externalEntities; i++) {
+      const ent = await prisma.externalEntity.create({
+        data: {
+          environmentId: env.id,
+          kind: kinds[i % kinds.length]!,
+          label: `External ${i}`,
+          iconKey: i % 2 === 0 ? 'globe' : null,
+          x: i * 100,
+          y: i * 80,
+          width: 120,
+          height: 60,
+        },
+      });
+      externalEntityIds.push(ent.id);
+    }
+  }
+
+  // -- ServerCluster. Logical grouping of multiple servers — the list query
+  // includes `servers: { select: { id, name } }`, so each cluster needs a few
+  // members for the join to do real work.
+  if (options.serverClusters > 0 && serverIds.length > 0) {
+    const perCluster = Math.max(1, Math.floor(serverIds.length / options.serverClusters));
+    for (let i = 0; i < options.serverClusters; i++) {
+      const members = serverIds.slice(i * perCluster, (i + 1) * perCluster);
+      await prisma.serverCluster.create({
+        data: {
+          environmentId: env.id,
+          name: `cluster-${i}`,
+          color: ['#3b82f6', '#10b981', '#f59e0b'][i % 3] ?? null,
+          collapsed: false,
+          x: i * 200,
+          y: 0,
+          width: 400,
+          height: 300,
+          servers: { connect: members.map((id) => ({ id })) },
+        },
+      });
+    }
+  }
+
+  // -- DiagramLayout. One JSON blob per environment with positions for every
+  // node. Real envs always have one; an empty table would skip the parse cost.
+  {
+    const positions: Record<string, { x: number; y: number }> = {};
+    serviceIds.forEach((id, i) => {
+      positions[`service:${id}`] = { x: (i % 10) * 220, y: Math.floor(i / 10) * 140 };
+    });
+    serverIds.forEach((id, i) => {
+      positions[`server:${id}`] = { x: (i % 8) * 260, y: -200 - Math.floor(i / 8) * 160 };
+    });
+    externalEntityIds.forEach((id, i) => {
+      positions[`external:${id}`] = { x: -400, y: i * 100 };
+    });
+    await prisma.diagramLayout.create({
+      data: {
+        environmentId: env.id,
+        positions: JSON.stringify(positions),
+      },
+    });
+  }
+
+  // -- ServiceConnection. Mix of service↔service, service↔database, and
+  // external↔service edges, which is what /api/connections returns in real
+  // envs. Plain `findMany + orderBy createdAt desc`, no joins — the cost
+  // scales with row count and ORDER BY work.
+  if (options.connections > 0 && serviceIds.length >= 2) {
+    // We may not have created any databases (options.databases === 0), so
+    // refetch by env to keep the seed self-contained.
+    const dbsForConn = await prisma.database.findMany({
+      where: { environmentId: env.id },
+      select: { id: true },
+    });
+    const dbIdsForConn = dbsForConn.map((d) => d.id);
+
+    const protocols = ['tcp', 'http', 'grpc'];
+    const connData: {
+      environmentId: string;
+      sourceType: string;
+      sourceId: string;
+      targetType: string;
+      targetId: string;
+      port: number;
+      protocol: string;
+      direction: string;
+      createdAt: Date;
+    }[] = [];
+
+    for (let i = 0; i < options.connections; i++) {
+      // Rotate through three connection shapes so the data isn't homogeneous:
+      //   0: service → service
+      //   1: service → database (or service → service if no dbs seeded)
+      //   2: external → service (or service → service if no externals seeded)
+      const shape = i % 3;
+      let sourceType: string;
+      let sourceId: string;
+      let targetType = 'service';
+      let targetId = serviceIds[(i * 7) % serviceIds.length]!;
+
+      if (shape === 0) {
+        sourceType = 'service';
+        sourceId = serviceIds[(i * 3) % serviceIds.length]!;
+      } else if (shape === 1 && dbIdsForConn.length > 0) {
+        sourceType = 'service';
+        sourceId = serviceIds[(i * 3) % serviceIds.length]!;
+        targetType = 'database';
+        targetId = dbIdsForConn[i % dbIdsForConn.length]!;
+      } else if (shape === 2 && externalEntityIds.length > 0) {
+        sourceType = 'external';
+        sourceId = externalEntityIds[i % externalEntityIds.length]!;
+      } else {
+        sourceType = 'service';
+        sourceId = serviceIds[(i * 5 + 1) % serviceIds.length]!;
+      }
+      if (sourceType === targetType && sourceId === targetId) continue;
+
+      connData.push({
+        environmentId: env.id,
+        sourceType,
+        sourceId,
+        targetType,
+        targetId,
+        port: [80, 443, 5432, 6379, 8080][i % 5]!,
+        protocol: protocols[i % protocols.length]!,
+        direction: i % 2 === 0 ? 'forward' : 'none',
+        createdAt: new Date(now - i * 1000),
+      });
+    }
+    await prisma.serviceConnection.createMany({ data: connData });
   }
 
   return {
