@@ -30,8 +30,8 @@ interface FakeBatchRow {
   operations: ReadonlyArray<{ index: number; status: string; error: string | null }>;
 }
 
-const { mockPrisma } = vi.hoisted(() => ({
-  mockPrisma: {
+const { mockPrisma } = vi.hoisted(() => {
+  const prismaMock = {
     configFile: {
       findMany: vi.fn(),
       findUnique: vi.fn(),
@@ -46,12 +46,22 @@ const { mockPrisma } = vi.hoisted(() => ({
     syncBatchOperation: {
       update: vi.fn(),
     },
+    fileHistory: {
+      create: vi.fn(),
+    },
     auditLog: {
       findFirst: vi.fn(),
       update: vi.fn(),
     },
-  },
-}));
+    // The rollback path wraps DB writes in `prisma.$transaction(async (tx) => …)`.
+    // For unit tests we don't need real isolation — passing the same mock back
+    // in as `tx` lets the same mock functions record the calls.
+    $transaction: vi.fn(),
+  };
+  // Default implementation: pass the prismaMock back as tx and await the cb.
+  prismaMock.$transaction.mockImplementation(async (cb: (tx: unknown) => Promise<unknown>) => cb(prismaMock));
+  return { mockPrisma: prismaMock };
+});
 
 vi.mock('../lib/db.js', () => ({
   prisma: mockPrisma,
@@ -63,6 +73,13 @@ vi.mock('./config-file-auto-resync.js', () => ({
 
 vi.mock('./audit.js', () => ({
   logAudit: vi.fn().mockResolvedValue(undefined),
+}));
+
+// The rollback transaction calls `syncUsageForConfigFile` to refresh Secret/Var
+// usage rows after restoring content. Stub it out — unit tests don't model
+// usage tracking, they care about the batch state machine.
+vi.mock('../lib/key-usage-extraction.js', () => ({
+  syncUsageForConfigFile: vi.fn().mockResolvedValue(undefined),
 }));
 
 import {
@@ -563,15 +580,18 @@ describe('executeBatch', () => {
     expect(result.status).toBe('failed');
   });
 
-  it('audit log is written with batchId backfilled for each completed op', async () => {
+  it('audit log is written with batchId passed directly to logAudit for each completed op', async () => {
+    // The earlier implementation wrote the audit row first and then ran a
+    // findFirst+update to backfill `AuditLog.batchId`. That was racy across
+    // concurrent batches touching the same resource and wasted two queries
+    // per op. The current implementation passes `batchId` straight through
+    // to `logAudit` (via AuditLogParams.batchId), so this test asserts that
+    // the value lands on the logAudit call directly — no follow-up update.
     mockPrisma.configFile.findMany.mockResolvedValue([
       { id: 'cf-0', environmentId: 'env-1', content: 'A', isBinary: false, name: 'a' },
     ]);
     mockBatchCreate({ id: 'batch-audit', opCount: 1, ops: [{ configFileId: 'cf-0' }] });
     vi.mocked(syncConfigFileToAttachedServices).mockResolvedValueOnce(okOutcome());
-
-    // Audit backfill: simulate finding the audit row we just wrote.
-    mockPrisma.auditLog.findFirst.mockResolvedValue({ id: 'audit-row-1' });
 
     await executeBatch({
       operations: [{ type: 'config-file-sync', configFileId: 'cf-0' }],
@@ -579,20 +599,21 @@ describe('executeBatch', () => {
       actor: baseActor(),
     });
 
-    // logAudit was called with details including the batchId.
+    // logAudit was called with batchId as a top-level param.
     expect(logAudit).toHaveBeenCalledTimes(1);
     const auditCall = vi.mocked(logAudit).mock.calls[0][0];
     expect(auditCall.action).toBe('sync_files');
     expect(auditCall.resourceType).toBe('config_file');
     expect(auditCall.resourceId).toBe('cf-0');
+    expect(auditCall.batchId).toBe('batch-audit');
+    // We also surface batchId in `details` for human-readable audit display,
+    // but the canonical link is the top-level column.
     const details = auditCall.details as Record<string, unknown>;
     expect(details.batchId).toBe('batch-audit');
 
-    // The backfill step ran: update the located audit row with the batchId column.
-    expect(mockPrisma.auditLog.update).toHaveBeenCalledWith({
-      where: { id: 'audit-row-1' },
-      data: { batchId: 'batch-audit' },
-    });
+    // The old findFirst+update backfill is gone — no auditLog.update call.
+    expect(mockPrisma.auditLog.update).not.toHaveBeenCalled();
+    expect(mockPrisma.auditLog.findFirst).not.toHaveBeenCalled();
   });
 
   it('helper that throws is caught and surfaced as a per-op INTERNAL failure', async () => {

@@ -231,10 +231,13 @@ describe('sync-batch routes', () => {
       expect(postRes.statusCode).toBe(200);
       const batchId = postRes.json().batchId;
 
+      // GET is gated on requireOperator (operator-or-above) because per-op
+      // error messages can leak details from any environment and we don't
+      // currently have an env-membership check helper. Viewers get 403 here.
       const getRes = await app.inject({
         method: 'GET',
         url: `/api/sync/batch/${batchId}`,
-        headers: { authorization: `Bearer ${viewerToken}` },
+        headers: { authorization: `Bearer ${adminToken}` },
       });
       expect(getRes.statusCode).toBe(200);
       const body = getRes.json();
@@ -247,12 +250,23 @@ describe('sync-batch routes', () => {
       const res = await app.inject({
         method: 'GET',
         url: '/api/sync/batch/does-not-exist',
-        headers: { authorization: `Bearer ${viewerToken}` },
+        headers: { authorization: `Bearer ${adminToken}` },
       });
       expect(res.statusCode).toBe(404);
       // The route uses legacy {error} send — onSend reshapes into the envelope.
       const body = res.json();
       expect(body.code ?? body.error).toBeTruthy();
+    });
+
+    it('returns 403 for a viewer (operator-or-above required)', async () => {
+      // Mirrors the POST viewer-403 test — the GET handler was tightened to
+      // requireOperator alongside the POST handler.
+      const res = await app.inject({
+        method: 'GET',
+        url: '/api/sync/batch/anything',
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+      expect(res.statusCode).toBe(403);
     });
 
     it('requires authentication', async () => {

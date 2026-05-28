@@ -105,9 +105,16 @@ export async function syncBatchRoutes(fastify: FastifyInstance): Promise<void> {
   );
 
   // Fetch a persisted batch + its ops.
+  //
+  // Gated on requireOperator (operator-or-admin). Per-op error messages can
+  // leak details from any environment, and we don't currently have an
+  // environment-membership check helper to scope reads to a user's envs.
+  // Viewers (read-only role) should not be able to enumerate batch contents
+  // across the deployment; this is a deliberate conservative default until a
+  // proper env-membership check is added.
   fastify.get(
     '/api/sync/batch/:batchId',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { batchId } = request.params as { batchId: string };
 

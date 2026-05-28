@@ -13,6 +13,12 @@ export interface AuditLogParams {
   environmentId?: string;
   apiTokenId?: string;
   serviceAccountId?: string;
+  /**
+   * Issue #130: link this audit row to a SyncBatch. Passed straight through
+   * to AuditLog.batchId. Avoids a racy follow-up findFirst+update from the
+   * sync-batch executor. Null/undefined = not part of a batch (the default).
+   */
+  batchId?: string | null;
 }
 
 // Sentinel prefix for service-account-owned tokens; see auth.ts validateApiToken.
@@ -76,6 +82,7 @@ export async function logAudit(params: AuditLogParams): Promise<void> {
         environmentId: params.environmentId,
         apiTokenId: params.apiTokenId,
         serviceAccountId,
+        batchId: params.batchId ?? null,
       },
     });
   } catch (error) {

@@ -46,6 +46,10 @@ describe('audit', () => {
           error: undefined,
           userId: undefined,
           environmentId: undefined,
+          // Issue #130: AuditLog.batchId is always set explicitly (defaults to
+          // null when the caller doesn't pass one). The sync-batch executor
+          // sets this to link audit rows back to a batch.
+          batchId: null,
         },
       });
     });

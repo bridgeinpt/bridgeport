@@ -24,12 +24,14 @@
  */
 
 import { createHash } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/db.js';
 import {
   syncConfigFileToAttachedServices,
   type SyncOutcome,
 } from './config-file-auto-resync.js';
 import { logAudit } from './audit.js';
+import { syncUsageForConfigFile } from '../lib/key-usage-extraction.js';
 import { getErrorMessage } from '../lib/helpers.js';
 
 /** Actor identity fields, shape matches `actorFrom(request)` in ./audit.ts. */
@@ -246,27 +248,49 @@ export async function executeBatch(input: BatchExecuteInput): Promise<BatchExecu
   // 2. Persist the batch + its op rows up-front. This is what gives us
   // crash-recovery semantics: if the process dies mid-batch, the rows
   // already exist with status="pending".
-  const batch = await prisma.syncBatch.create({
-    data: {
-      status: 'pending',
-      rollbackOnFailure,
-      idempotencyKey: idempotencyKey ?? null,
-      idempotencyBodyHash: idempotencyBodyHash ?? null,
-      userId: actor.userId ?? null,
-      apiTokenId: actor.apiTokenId ?? null,
-      serviceAccountId: actor.serviceAccountId ?? null,
-      environmentId: environmentId ?? null,
-      operations: {
-        create: operations.map((op, index) => ({
-          index,
-          type: op.type,
-          configFileId: op.configFileId,
-          status: 'pending',
-        })),
+  //
+  // TOCTOU guard: lookupIdempotentBatch + this create are non-atomic. Two
+  // concurrent requests with the same Idempotency-Key can both pass the
+  // lookup and both reach `create`. The unique constraint on
+  // (idempotencyKey, idempotencyBodyHash) makes the second one fail with
+  // P2002. When that happens AND the caller supplied an idempotency key,
+  // re-run the lookup — the other writer has now committed and we should
+  // replay its result instead of returning 500.
+  let batch;
+  try {
+    batch = await prisma.syncBatch.create({
+      data: {
+        status: 'pending',
+        rollbackOnFailure,
+        idempotencyKey: idempotencyKey ?? null,
+        idempotencyBodyHash: idempotencyBodyHash ?? null,
+        userId: actor.userId ?? null,
+        apiTokenId: actor.apiTokenId ?? null,
+        serviceAccountId: actor.serviceAccountId ?? null,
+        environmentId: environmentId ?? null,
+        operations: {
+          create: operations.map((op, index) => ({
+            index,
+            type: op.type,
+            configFileId: op.configFileId,
+            status: 'pending',
+          })),
+        },
       },
-    },
-    include: { operations: { orderBy: { index: 'asc' } } },
-  });
+      include: { operations: { orderBy: { index: 'asc' } } },
+    });
+  } catch (err) {
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === 'P2002' &&
+      idempotencyKey &&
+      idempotencyBodyHash
+    ) {
+      const replay = await lookupIdempotentBatch(idempotencyKey, idempotencyBodyHash);
+      if (replay) return replay;
+    }
+    throw err;
+  }
 
   // Working copy of per-op state. We update DB rows in-place and mirror the
   // status into this array so we can build the final response without a
@@ -438,13 +462,46 @@ export async function executeBatch(input: BatchExecuteInput): Promise<BatchExecu
 
       try {
         // Restore prior content first (in-DB), then push to servers.
-        await prisma.configFile.update({
-          where: { id: op.configFileId },
-          data: { content: cf.content, isBinary: cf.isBinary },
+        // Wrap in a transaction so:
+        //   1. We create a FileHistory row capturing the CURRENT content
+        //      (the post-forward-sync content this rollback is replacing) —
+        //      matches PATCH /api/config-files/:id semantics where each
+        //      content change leaves a history row of the prior state.
+        //   2. We update ConfigFile.content + isBinary back to the
+        //      snapshotted previous values.
+        //   3. We re-call syncUsageForConfigFile so Secret/Var usage rows
+        //      reflect the restored content. The forward path's helper does
+        //      this, but the direct UPDATE we were doing previously bypassed
+        //      it (leaving stale usage rows pointing at the forward content).
+        await prisma.$transaction(async (tx) => {
+          // Re-read inside the tx so we record the actual current row state
+          // (the forward-sync content) as the "previous" content in history.
+          const current = await tx.configFile.findUnique({
+            where: { id: op.configFileId },
+            select: { content: true },
+          });
+          if (current) {
+            await tx.fileHistory.create({
+              data: {
+                content: current.content,
+                configFileId: op.configFileId,
+                editedById: actor.userId ?? null,
+              },
+            });
+          }
+          const restored = await tx.configFile.update({
+            where: { id: op.configFileId },
+            data: { content: cf.content, isBinary: cf.isBinary },
+          });
+          await syncUsageForConfigFile(tx, restored);
         });
 
         const restoreOutcome = await syncConfigFileToAttachedServices(op.configFileId);
-        if (!restoreOutcome || (restoreOutcome.status !== 'ok' && restoreOutcome.status !== 'no_targets')) {
+        // `no_targets` during rollback means the restore didn't actually
+        // push anywhere — treat as a rollback failure for symmetry with the
+        // forward-pass policy (issue #127): a sync that touched no targets
+        // shouldn't be silently logged as success.
+        if (!restoreOutcome || restoreOutcome.status !== 'ok') {
           const reason = restoreOutcome
             ? summarizeSyncFailure(restoreOutcome)
             : 'Config file not found during rollback';
@@ -566,12 +623,19 @@ async function persistRejectedBatch(
   reason: string,
   preloadById: Map<string, { id: string; environmentId: string }>
 ): Promise<BatchExecuteResult> {
+  // We intentionally DO NOT persist idempotencyKey / idempotencyBodyHash on
+  // rejected batches. Pre-execution validation failures must not consume the
+  // key: a client who fixes the body and retries with the same key should
+  // succeed (HTTP Idempotency-Key spec semantics — keys are tied to
+  // EXECUTED operations, not rejected submissions). Storing the key here
+  // would poison it: lookupIdempotentBatch would find the rejected row and
+  // either replay it (wrong, the new body is different) or throw a 409.
   const batch = await prisma.syncBatch.create({
     data: {
       status: 'failed',
       rollbackOnFailure: input.rollbackOnFailure,
-      idempotencyKey: input.idempotencyKey ?? null,
-      idempotencyBodyHash: input.idempotencyBodyHash ?? null,
+      idempotencyKey: null,
+      idempotencyBodyHash: null,
       userId: input.actor.userId ?? null,
       apiTokenId: input.actor.apiTokenId ?? null,
       serviceAccountId: input.actor.serviceAccountId ?? null,
@@ -593,6 +657,33 @@ async function persistRejectedBatch(
     include: { operations: { orderBy: { index: 'asc' } } },
   });
 
+  // Finding 6: rejected batches were not generating any AuditLog row, so
+  // operators had no breadcrumb in the audit trail. Write one summary row
+  // capturing why the batch was rejected. Use the new `batchId` param on
+  // logAudit (Finding 5) so the audit row is linked back to the batch.
+  const distinctEnvs = Array.from(
+    new Set(
+      input.operations
+        .map((op) => preloadById.get(op.configFileId)?.environmentId)
+        .filter((id): id is string => typeof id === 'string')
+    )
+  );
+  await logAudit({
+    action: 'sync_batch_rejected',
+    resourceType: 'sync_batch',
+    resourceId: batch.id,
+    success: false,
+    batchId: batch.id,
+    userId: input.actor.userId,
+    apiTokenId: input.actor.apiTokenId,
+    serviceAccountId: input.actor.serviceAccountId,
+    details: {
+      reason,
+      operationCount: input.operations.length,
+      environmentIds: distinctEnvs,
+    },
+  });
+
   return batchRowToResult(batch);
 }
 
@@ -612,6 +703,11 @@ async function writeAuditForOp(args: {
   opStatus: string;
   rollback?: boolean;
 }): Promise<void> {
+  // batchId is written directly via logAudit (AuditLogParams.batchId). The
+  // earlier implementation did a follow-up findFirst+update to backfill the
+  // column, which was both racy (two concurrent batches touching the same
+  // resource could swap their batchId backfills) and wasteful (two extra
+  // queries per op).
   await logAudit({
     ...args.actor,
     action: args.rollback ? 'sync_files_rollback' : 'sync_files',
@@ -626,31 +722,6 @@ async function writeAuditForOp(args: {
     },
     success: args.success,
     environmentId: args.environmentId ?? undefined,
+    batchId: args.batchId,
   });
-
-  // Backfill the dedicated batchId column. logAudit doesn't currently take it
-  // (we'd otherwise be poking through that interface for one consumer), so
-  // we patch the most-recently-inserted row owned by this batch+resource.
-  // This is a narrow follow-up update on a single indexed row.
-  try {
-    const latest = await prisma.auditLog.findFirst({
-      where: {
-        resourceType: 'config_file',
-        resourceId: args.configFileId,
-        batchId: null,
-      },
-      orderBy: { createdAt: 'desc' },
-      select: { id: true },
-    });
-    if (latest) {
-      await prisma.auditLog.update({
-        where: { id: latest.id },
-        data: { batchId: args.batchId },
-      });
-    }
-  } catch (err) {
-    // Audit backfill is best-effort — we already wrote the row, the batch
-    // result is the source of truth.
-    console.error('[sync-batch] failed to backfill audit.batchId:', err);
-  }
 }
