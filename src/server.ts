@@ -27,6 +27,7 @@ import { webhookRoutes } from './routes/webhooks.js';
 import { composeRoutes } from './routes/compose.js';
 import { auditRoutes } from './routes/audit.js';
 import { configFileRoutes } from './routes/config-files.js';
+import { configFragmentRoutes } from './routes/config-fragments.js';
 import { registryRoutes } from './routes/registries.js';
 import { userRoutes } from './routes/users.js';
 import { metricsRoutes } from './routes/metrics.js';
@@ -188,6 +189,7 @@ async function buildServer() {
   await fastify.register(composeRoutes);
   await fastify.register(auditRoutes);
   await fastify.register(configFileRoutes);
+  await fastify.register(configFragmentRoutes);
   await fastify.register(registryRoutes);
   await fastify.register(userRoutes);
   await fastify.register(metricsRoutes);

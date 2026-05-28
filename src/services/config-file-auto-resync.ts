@@ -21,6 +21,7 @@ export interface AutoResyncActor {
   serviceAccountId?: string;
 }
 import { getErrorMessage } from '../lib/helpers.js';
+import { composeFragmentedContent } from '../lib/config-fragments.js';
 
 /**
  * Result of one (service-file, server) sync attempt during an auto-resync run.
@@ -89,6 +90,13 @@ export async function syncConfigFileToAttachedServices(
   const configFile = await prisma.configFile.findUnique({
     where: { id: configFileId },
     include: {
+      // Ordered fragment includes — concatenated before the ConfigFile's own
+      // content at sync render time so both the live and dry-run paths emit
+      // the same effective blob.
+      includedFragments: {
+        include: { fragment: true },
+        orderBy: { position: 'asc' },
+      },
       services: {
         include: {
           service: { include: { serviceDeployments: { include: { server: true } } } },
@@ -200,9 +208,17 @@ export async function syncConfigFileToAttachedServices(
               stderr = writeErr instanceof Error ? writeErr.message : 'SFTP write failed';
             }
           } else {
+            const composedSource = composeFragmentedContent(
+              configFile.includedFragments.map((f) => ({
+                name: f.fragment.name,
+                content: f.fragment.content,
+              })),
+              configFile.content,
+              configFile.language,
+            );
             const { content: rawContent, missing, templateErrors } = await resolveSecretPlaceholders(
               server.environmentId,
-              configFile.content
+              composedSource
             );
             const resolvedContent = rawContent.trimEnd();
 
@@ -322,6 +338,13 @@ export async function syncConfigFileToAttachedServicesDryRun(
   const configFile = await prisma.configFile.findUnique({
     where: { id: configFileId },
     include: {
+      // Ordered fragment includes — concatenated before the ConfigFile's own
+      // content at sync render time so both the live and dry-run paths emit
+      // the same effective blob.
+      includedFragments: {
+        include: { fragment: true },
+        orderBy: { position: 'asc' },
+      },
       services: {
         include: {
           service: { include: { serviceDeployments: { include: { server: true } } } },
@@ -428,9 +451,17 @@ export async function syncConfigFileToAttachedServicesDryRun(
           continue;
         }
 
+        const composedSource = composeFragmentedContent(
+          configFile.includedFragments.map((f) => ({
+            name: f.fragment.name,
+            content: f.fragment.content,
+          })),
+          configFile.content,
+          configFile.language,
+        );
         const { content: rawContent, missing, templateErrors } = await resolveSecretPlaceholders(
           server.environmentId,
-          configFile.content
+          composedSource
         );
         const localWarnings: string[] = [];
         // Mirror the live path (`syncConfigFileToAttachedServices`) which
@@ -553,6 +584,69 @@ export async function listReferencingServiceNames(configFileId: string, serverId
 }
 
 /**
+ * Fire-and-forget: re-sync every ConfigFile that includes the given fragment
+ * and has `autoResync = true`. Editing a fragment is equivalent in effect to
+ * editing every including ConfigFile, so we fan out the sync through the same
+ * code path used by direct ConfigFile edits.
+ *
+ * Audit rows are written per-ConfigFile with `autoTriggered = true` and a
+ * `triggeredByFragmentId` discriminator so operators can see why a sync
+ * happened. SSH / per-file failures are logged via `console.error` but never
+ * thrown — callers `void`-call this.
+ */
+export async function triggerAutoResyncForFragment(
+  fragmentId: string,
+  fragmentName: string,
+  actor?: AutoResyncActor,
+): Promise<void> {
+  try {
+    const rows = await prisma.configFileFragment.findMany({
+      where: { fragmentId, configFile: { autoResync: true, isBinary: false } },
+      select: { configFileId: true, configFile: { select: { id: true, name: true } } },
+    });
+
+    if (rows.length === 0) return;
+
+    await Promise.allSettled(
+      rows.map(async (row) => {
+        try {
+          const outcome = await syncConfigFileToAttachedServices(row.configFileId);
+          if (!outcome || outcome.status === 'no_targets') return;
+
+          await logAudit({
+            ...(actor ?? {}),
+            action: 'sync_files',
+            resourceType: 'config_file',
+            resourceId: row.configFileId,
+            resourceName: outcome.configFileName,
+            details: {
+              results: outcome.results,
+              allSuccess: outcome.success,
+              syncedTo: outcome.results.length,
+              autoTriggered: true,
+              triggeredBy: `fragment:${fragmentName}`,
+              triggeredByFragmentId: fragmentId,
+            },
+            success: outcome.success,
+            environmentId: outcome.environmentId,
+          });
+        } catch (err) {
+          console.error(
+            `[auto-resync] failed for configFile=${row.configFileId} (${row.configFile.name}) fragment=${fragmentName}:`,
+            err
+          );
+        }
+      })
+    );
+  } catch (err) {
+    console.error(
+      `[auto-resync] top-level failure for fragment=${fragmentId} (${fragmentName}):`,
+      err
+    );
+  }
+}
+
+/**
  * Fire-and-forget: re-sync every ConfigFile in `environmentId` that has
  * `autoResync = true`, is text (not binary), and whose stored content
  * references `${key}`.
@@ -579,17 +673,45 @@ export async function triggerAutoResyncForKey(
     // because SQLite's LIKE treats `_` as a single-char wildcard, and Prisma does
     // NOT escape it. Without the JS filter, triggering for key `FOO_BAR` would
     // also match a file containing `${FOOXBAR}` since `_` matches any char.
+    //
+    // Two match paths now (post-#115):
+    //   1. The placeholder lives in the ConfigFile's own content.
+    //   2. The placeholder lives in any included fragment's content (which is
+    //      concatenated before the own content at render time).
+    // A `${KEY}` reference that only appears in a fragment must still trigger
+    // the cascade, otherwise editing a secret won't re-sync files that pulled
+    // it in via a shared fragment.
     const rawCandidates = await prisma.configFile.findMany({
       where: {
         environmentId,
         autoResync: true,
         isBinary: false,
-        content: { contains: placeholder },
+        OR: [
+          { content: { contains: placeholder } },
+          {
+            includedFragments: {
+              some: { fragment: { content: { contains: placeholder } } },
+            },
+          },
+        ],
       },
-      select: { id: true, name: true, content: true },
+      select: {
+        id: true,
+        name: true,
+        content: true,
+        includedFragments: {
+          select: { fragment: { select: { content: true } } },
+        },
+      },
     });
 
-    const candidates = rawCandidates.filter((cf) => cf.content.includes(placeholder));
+    // Post-filter to defeat SQLite LIKE's `_`-wildcard false positives — both
+    // for the own-content branch and the fragment branch.
+    const candidates = rawCandidates.filter(
+      (cf) =>
+        cf.content.includes(placeholder) ||
+        cf.includedFragments.some((row) => row.fragment.content.includes(placeholder))
+    );
 
     if (candidates.length === 0) return;
 

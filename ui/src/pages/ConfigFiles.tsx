@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppStore } from '../lib/store.js';
 import { usePaginatedFetch } from '../hooks/usePaginatedFetch.js';
@@ -12,10 +12,13 @@ import {
   restoreConfigFile,
   uploadAssetFile,
   syncConfigFileToAll,
+  listConfigFragments,
+  previewConfigFile,
   type ConfigFile,
   type ConfigFileServiceAttachment,
   type FileHistoryEntry,
   type ConfigFileSyncResult,
+  type ConfigFragment,
 } from '../lib/api.js';
 import { formatDistanceToNow, format } from 'date-fns';
 import { Modal } from '../components/Modal.js';
@@ -109,6 +112,29 @@ export default function ConfigFiles() {
   const [syncStatus, setSyncStatus] = useState<OperationStatus | undefined>(undefined);
   const [deleteConfirm, setDeleteConfirm] = useState<ConfigFile | null>(null);
 
+  // Fragments: env-scoped list (loaded once per env). The create/edit modals
+  // surface an ordered selector so users can include shared fragments before
+  // their own content.
+  const [availableFragments, setAvailableFragments] = useState<ConfigFragment[]>([]);
+  // Ordered list of fragment ids selected for the create form.
+  const [newFragmentIds, setNewFragmentIds] = useState<string[]>([]);
+  // Same for the edit form. `null` ≠ `[]`: undefined → don't send fragmentIds on PATCH
+  // (leave existing rows alone). The UI defaults to a real array when the editor
+  // opens, so any state change replaces them server-side via PATCH.
+  const [editFragmentIds, setEditFragmentIds] = useState<string[]>([]);
+
+  // Preview pane (rendered/merged content) for the edit modal.
+  const [previewContent, setPreviewContent] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!selectedEnvironment?.id) return;
+    listConfigFragments(selectedEnvironment.id)
+      .then((res) => setAvailableFragments(res.fragments))
+      .catch(() => setAvailableFragments([]));
+  }, [selectedEnvironment?.id]);
+
   const resetCreateForm = () => {
     setNewName('');
     setNewFilename('');
@@ -117,6 +143,7 @@ export default function ConfigFiles() {
     setNewAutoResync(true);
     setNewLanguage('plaintext');
     setNewLanguageDirty(false);
+    setNewFragmentIds([]);
   };
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -139,6 +166,9 @@ export default function ConfigFiles() {
         // Only send `language` when the user explicitly chose one — otherwise
         // let the server auto-detect from `filename`.
         ...(newLanguageDirty ? { language: newLanguage } : {}),
+        // Send fragmentIds when any are selected so the server creates the
+        // ordered include rows. Omit when empty so we don't trip extra writes.
+        ...(newFragmentIds.length > 0 ? { fragmentIds: newFragmentIds } : {}),
       });
       reload();
       setShowCreate(false);
@@ -158,10 +188,16 @@ export default function ConfigFiles() {
       // language select is hidden, so don't re-assert a (possibly stale)
       // language on every unrelated edit — let the server keep what it has.
       ...(editingFile.isBinary ? {} : { language: editLanguage }),
+      // Always send the fragmentIds list on edit (full-replace semantics).
+      // Binary files skip the selector so we leave fragments alone.
+      ...(editingFile.isBinary ? {} : { fragmentIds: editFragmentIds }),
     });
     setEditingFile(null);
     setEditContent('');
     setEditDescription('');
+    setEditFragmentIds([]);
+    setPreviewContent(null);
+    setPreviewError(null);
     reload();
   };
 
@@ -207,12 +243,68 @@ export default function ConfigFiles() {
     setViewingFile(configFile);
   };
 
-  const startEdit = (file: ConfigFile) => {
+  const startEdit = async (file: ConfigFile) => {
+    // Pull the full detail FIRST so we know which fragments are already
+    // included (the list endpoint doesn't return includedFragments to keep
+    // responses small). If this fails we MUST NOT enter edit mode with a
+    // default-empty fragment list — a subsequent Save would full-replace the
+    // existing rows with `[]`, silently wiping every fragment include on the
+    // ConfigFile. Better to refuse to open the editor.
+    let included: ConfigFile['includedFragments'];
+    try {
+      const { configFile } = await getConfigFile(file.id);
+      included = configFile.includedFragments ?? [];
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? `Failed to load config file: ${err.message}`
+          : 'Failed to load config file'
+      );
+      return;
+    }
+
     setEditingFile(file);
     setEditContent(file.content || '');
     setEditDescription(file.description || '');
     setEditAutoResync(file.autoResync ?? true);
     setEditLanguage(file.language || 'plaintext');
+    setPreviewContent(null);
+    setPreviewError(null);
+    const ids = (included ?? [])
+      .slice()
+      .sort((a, b) => a.position - b.position)
+      .map((row) => row.fragment.id);
+    setEditFragmentIds(ids);
+  };
+
+  const handlePreview = async () => {
+    if (!editingFile) return;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    try {
+      // Stateless preview: send the in-flight editor state in the body so
+      // the server renders against it without persisting. Previously we
+      // PATCH'd the row before previewing, which wrote a fileHistory entry
+      // and bumped updatedAt — flipping ServiceFile sync status to "pending"
+      // on every click.
+      const result = await previewConfigFile(
+        editingFile.id,
+        editingFile.isBinary
+          ? undefined
+          : { content: editContent, fragmentIds: editFragmentIds },
+      );
+      setPreviewContent(result.content);
+      if (result.missing.length > 0 || result.templateErrors.length > 0) {
+        const parts = [];
+        if (result.missing.length > 0) parts.push(`Missing: ${result.missing.join(', ')}`);
+        if (result.templateErrors.length > 0) parts.push(`Errors: ${result.templateErrors.join('; ')}`);
+        setPreviewError(parts.join(' — '));
+      }
+    } catch (err) {
+      setPreviewError(err instanceof Error ? err.message : 'Preview failed');
+    } finally {
+      setPreviewLoading(false);
+    }
   };
 
   const handleViewHistory = async (file: ConfigFile) => {
@@ -400,6 +492,12 @@ export default function ConfigFiles() {
               </p>
             )}
           </div>
+          <FragmentSelector
+            label="Included Fragments"
+            available={availableFragments}
+            selectedIds={newFragmentIds}
+            onChange={setNewFragmentIds}
+          />
           <div>
             <label className="flex items-center gap-2 text-sm text-slate-300">
               <input
@@ -598,6 +696,45 @@ export default function ConfigFiles() {
               />
             )}
           </div>
+          {!editingFile?.isBinary && (
+            <FragmentSelector
+              label="Included Fragments"
+              available={availableFragments}
+              selectedIds={editFragmentIds}
+              onChange={setEditFragmentIds}
+            />
+          )}
+          {!editingFile?.isBinary && (
+            <div className="border border-slate-700 rounded-lg p-3 bg-slate-800/30">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm text-slate-400">
+                  Rendered preview (fragments + content + placeholders)
+                </span>
+                <button
+                  type="button"
+                  onClick={handlePreview}
+                  disabled={previewLoading}
+                  className="btn btn-secondary text-xs py-1 px-2"
+                >
+                  {previewLoading ? 'Rendering…' : 'Preview'}
+                </button>
+              </div>
+              {previewError && (
+                <p className="text-xs text-yellow-400 mb-2">{previewError}</p>
+              )}
+              {previewContent !== null && (
+                <pre className="bg-slate-950 rounded p-2 text-xs text-slate-200 font-mono whitespace-pre-wrap max-h-64 overflow-auto">
+                  {previewContent}
+                </pre>
+              )}
+              {previewContent === null && !previewError && (
+                <p className="text-xs text-slate-500">
+                  Click Preview to render this ConfigFile&apos;s fragments + content with
+                  <code className="mx-1">{'${KEY}'}</code> placeholders resolved.
+                </p>
+              )}
+            </div>
+          )}
           <div>
             <label className="flex items-center gap-2 text-sm text-slate-300">
               <input
@@ -1008,6 +1145,135 @@ export default function ConfigFiles() {
           onPageChange={setCurrentPage}
           onPageSizeChange={setPageSize}
         />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Ordered fragment-include selector. Each row shows the fragment name with
+ * up/down arrows for reorder and a remove button. The "Add fragment" select at
+ * the bottom appends a new entry to the end of the list.
+ *
+ * Keeping this as up/down arrows (vs. native HTML5 DnD) is deliberate: the UI
+ * doesn't already depend on a drag-and-drop library, the list is small in
+ * practice (a few fragments per ConfigFile), and arrows are keyboard-friendly.
+ */
+interface FragmentSelectorProps {
+  label: string;
+  available: ConfigFragment[];
+  selectedIds: string[];
+  onChange: (ids: string[]) => void;
+}
+
+function FragmentSelector({ label, available, selectedIds, onChange }: FragmentSelectorProps) {
+  const byId = useMemo(() => new Map(available.map((f) => [f.id, f])), [available]);
+  const remaining = available.filter((f) => !selectedIds.includes(f.id));
+
+  const move = (index: number, direction: -1 | 1) => {
+    const target = index + direction;
+    if (target < 0 || target >= selectedIds.length) return;
+    const next = selectedIds.slice();
+    [next[index], next[target]] = [next[target], next[index]];
+    onChange(next);
+  };
+
+  const remove = (index: number) => {
+    const next = selectedIds.slice();
+    next.splice(index, 1);
+    onChange(next);
+  };
+
+  const add = (id: string) => {
+    if (!id) return;
+    onChange([...selectedIds, id]);
+  };
+
+  return (
+    <div>
+      <label className="block text-sm text-slate-400 mb-1">{label}</label>
+      {selectedIds.length === 0 ? (
+        <p className="text-xs text-slate-500 mb-2">
+          No fragments included. Add one below to prepend its content before this
+          ConfigFile&apos;s own content at render time.
+        </p>
+      ) : (
+        <ul className="space-y-1 mb-2">
+          {selectedIds.map((id, index) => {
+            const fragment = byId.get(id);
+            return (
+              <li
+                key={id}
+                className="flex items-center gap-2 bg-slate-800/50 border border-slate-700 rounded px-2 py-1.5"
+              >
+                <span className="text-xs text-slate-500 font-mono w-6 text-right">
+                  {index + 1}.
+                </span>
+                <span className="text-sm font-mono text-white flex-1">
+                  {fragment?.name ?? `(missing fragment ${id})`}
+                </span>
+                {fragment?.description && (
+                  <span className="text-xs text-slate-500 truncate">
+                    {fragment.description}
+                  </span>
+                )}
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    onClick={() => move(index, -1)}
+                    disabled={index === 0}
+                    className="text-slate-500 hover:text-slate-200 disabled:opacity-30 px-1"
+                    title="Move up"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => move(index, 1)}
+                    disabled={index === selectedIds.length - 1}
+                    className="text-slate-500 hover:text-slate-200 disabled:opacity-30 px-1"
+                    title="Move down"
+                  >
+                    ↓
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => remove(index)}
+                    className="text-slate-500 hover:text-red-400 px-1"
+                    title="Remove"
+                  >
+                    ×
+                  </button>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {remaining.length > 0 ? (
+        <select
+          value=""
+          onChange={(e) => {
+            add(e.target.value);
+            // Reset to placeholder so the select can be used multiple times.
+            e.target.value = '';
+          }}
+          className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm text-white"
+        >
+          <option value="">Add fragment…</option>
+          {remaining.map((f) => (
+            <option key={f.id} value={f.id}>
+              {f.name}
+              {f.description ? ` — ${f.description}` : ''}
+            </option>
+          ))}
+        </select>
+      ) : available.length > 0 ? (
+        <p className="text-xs text-slate-500">All fragments are already included.</p>
+      ) : (
+        <p className="text-xs text-slate-500">
+          No fragments defined in this environment yet — create one from the Fragments page.
+        </p>
       )}
     </div>
   );

@@ -162,6 +162,45 @@ describe('syncSecretUsageForConfigFile', () => {
     expect(createMany).not.toHaveBeenCalled();
     expect(deleteMany).not.toHaveBeenCalled();
   });
+
+  it('extracts keys that only appear in included fragments', async () => {
+    // Fragment content is part of the effective render — a `${KEY}` reference
+    // that only appears in a fragment must still produce a SecretUsage row.
+    // Without this scan, editing the secret wouldn't auto-resync ConfigFiles
+    // that pulled it in via a shared fragment.
+    const { db, createMany } = makeDb([]);
+    await syncSecretUsageForConfigFile(db, {
+      id: 'cf1',
+      environmentId: 'env1',
+      content: 'OWN=value',
+      isBinary: false,
+      includedFragments: [
+        { fragment: { content: '${FROM_FRAG}' } },
+      ],
+    });
+    expect(createMany).toHaveBeenCalledWith({
+      data: expect.arrayContaining([
+        { environmentId: 'env1', secretKey: 'FROM_FRAG', configFileId: 'cf1' },
+      ]),
+    });
+  });
+
+  it('combines keys from fragments and own content', async () => {
+    const { db, createMany } = makeDb([]);
+    await syncSecretUsageForConfigFile(db, {
+      id: 'cf1',
+      environmentId: 'env1',
+      content: '${FROM_OWN}',
+      isBinary: false,
+      includedFragments: [
+        { fragment: { content: '${FROM_FRAG_A}' } },
+        { fragment: { content: '${FROM_FRAG_B}' } },
+      ],
+    });
+    const call = createMany.mock.calls[0][0] as { data: Array<{ secretKey: string }> };
+    const keys = call.data.map((row) => row.secretKey).sort();
+    expect(keys).toEqual(['FROM_FRAG_A', 'FROM_FRAG_B', 'FROM_OWN']);
+  });
 });
 
 describe('syncVarUsageForConfigFile', () => {

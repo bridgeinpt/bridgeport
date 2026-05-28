@@ -10,6 +10,26 @@ interface ApiError {
   details?: unknown;
 }
 
+/**
+ * Error thrown by the API client for any non-2xx response. Carries the
+ * parsed body so callers that need the structured `details` payload
+ * (e.g. 409 with `details.inUseBy`) can branch on it instead of
+ * substring-matching the message. Extends Error so existing `err instanceof Error`
+ * checks keep working.
+ */
+export class ApiRequestError extends Error {
+  readonly status: number;
+  readonly code?: string;
+  readonly details?: unknown;
+  constructor(status: number, body: ApiError) {
+    super(body.message ?? body.error ?? 'Request failed');
+    this.name = 'ApiRequestError';
+    this.status = status;
+    this.code = body.code;
+    this.details = body.details;
+  }
+}
+
 interface CacheEntry<T> {
   data: T;
   expiry: number;
@@ -120,7 +140,7 @@ class ApiClient {
           statusCode: response.status,
         });
       }
-      throw new Error(apiErr.message ?? apiErr.error ?? 'Request failed');
+      throw new ApiRequestError(response.status, apiErr);
     }
 
     return data as T;
@@ -1225,6 +1245,16 @@ export interface ConfigFileSyncCounts {
   total: number;
 }
 
+export interface ConfigFileIncludedFragment {
+  id: string;
+  position: number;
+  fragment: {
+    id: string;
+    name: string;
+    description: string | null;
+  };
+}
+
 export interface ConfigFile {
   id: string;
   name: string;
@@ -1243,6 +1273,7 @@ export interface ConfigFile {
   services?: ConfigFileServiceAttachment[];
   syncStatus?: 'synced' | 'pending' | 'never' | 'not_attached';
   syncCounts?: ConfigFileSyncCounts;
+  includedFragments?: ConfigFileIncludedFragment[];
 }
 
 export interface ConfigFileInput {
@@ -1255,7 +1286,73 @@ export interface ConfigFileInput {
   fileSize?: number;
   autoResync?: boolean;
   language?: string;
+  // Ordered list of fragment ids to include. Position is derived from the
+  // array index. Omit (or send undefined) to leave existing includes unchanged
+  // on PATCH; send `[]` to clear them.
+  fragmentIds?: string[];
 }
+
+// Config Fragments
+export interface ConfigFragment {
+  id: string;
+  name: string;
+  description: string | null;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+  usedByCount?: number;
+}
+
+export interface ConfigFragmentInput {
+  name: string;
+  description?: string;
+  content: string;
+}
+
+export interface ConfigFragmentUsage {
+  configFileId: string;
+  configFileName: string;
+  configFileFilename: string;
+  position: number;
+  services: Array<{ serviceId: string; serviceName: string }>;
+}
+
+export interface ConfigFragmentDetail extends ConfigFragment {
+  usedBy: ConfigFragmentUsage[];
+}
+
+export const listConfigFragments = (envId: string) =>
+  api.get<{ fragments: ConfigFragment[] }>(`/environments/${envId}/config-fragments`);
+
+export const getConfigFragment = (id: string) =>
+  api.get<{ fragment: ConfigFragmentDetail }>(`/config-fragments/${id}`);
+
+export const createConfigFragment = (envId: string, data: ConfigFragmentInput) =>
+  api.post<{ fragment: ConfigFragment }>(`/environments/${envId}/config-fragments`, data);
+
+export const updateConfigFragment = (id: string, data: Partial<ConfigFragmentInput>) =>
+  api.patch<{ fragment: ConfigFragment }>(`/config-fragments/${id}`, data);
+
+export const deleteConfigFragment = (id: string) =>
+  api.delete<{ success: boolean }>(`/config-fragments/${id}`);
+
+export interface ConfigFilePreviewResult {
+  content: string;
+  missing: string[];
+  templateErrors: string[];
+}
+
+// Optional preview body — when present the server renders against the
+// supplied values without persisting them. Used by the editor to render
+// in-flight edits before Save (previously the UI PATCH'd the row before
+// previewing, which wrote a history row and flipped sync status).
+export interface ConfigFilePreviewBody {
+  content?: string;
+  fragmentIds?: string[];
+}
+
+export const previewConfigFile = (id: string, body?: ConfigFilePreviewBody) =>
+  api.post<ConfigFilePreviewResult>(`/config-files/${id}/preview`, body);
 
 export interface ServiceFile {
   id: string;

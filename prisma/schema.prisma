@@ -93,6 +93,7 @@ model Environment {
   secrets             Secret[]
   vars                Var[]
   configFiles         ConfigFile[]
+  configFragments     ConfigFragment[]
   auditLogs           AuditLog[]
   registryConnections RegistryConnection[]
   databases           Database[]
@@ -538,8 +539,51 @@ model ConfigFile {
   history       FileHistory[]
   secretUsages  SecretUsage[]
   varUsages     VarUsage[]
+  includedFragments ConfigFileFragment[]
 
   @@unique([environmentId, name])
+}
+
+// Env-scoped, named, reusable text blocks that ConfigFiles can include.
+// Operators maintain ~50-line `.env` ConfigFiles where most of the content is
+// identical across services; fragments let the shared portion live in one
+// place and get concatenated into each ConfigFile at deploy/sync time.
+//
+// Fragments are flat — there is no field to reference another fragment, so
+// nesting is impossible by construction (no cycle detection needed).
+model ConfigFragment {
+  id            String   @id @default(cuid())
+  environmentId String
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  name          String
+  description   String?
+  content       String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  configFiles ConfigFileFragment[]
+
+  @@unique([environmentId, name])
+}
+
+// Ordered many-to-many between ConfigFile and ConfigFragment.
+// `position` is set by the caller on every write (full replace on update);
+// fragments are concatenated in ascending `position` order before the
+// ConfigFile's own `content` at render time.
+//
+// `onDelete: Restrict` on the fragment FK is intentional — the route handler
+// pre-checks and returns a 409 with the in-use list so the UI can show which
+// ConfigFiles still reference the fragment.
+model ConfigFileFragment {
+  id           String @id @default(cuid())
+  configFileId String
+  fragmentId   String
+  position     Int
+  configFile   ConfigFile     @relation(fields: [configFileId], references: [id], onDelete: Cascade)
+  fragment     ConfigFragment @relation(fields: [fragmentId], references: [id], onDelete: Restrict)
+
+  @@unique([configFileId, fragmentId])
+  @@index([configFileId, position])
 }
 
 // Links config files to services with target path on server.

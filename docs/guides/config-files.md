@@ -12,6 +12,7 @@ Config files let you store, version, and sync configuration to your servers via 
 - [Batched Atomic Sync](#batched-atomic-sync)
 - [Secret and Variable Placeholders](#secret-and-variable-placeholders)
 - [Iterating Over Servers](#iterating-over-servers)
+- [Reusable Fragments](#reusable-fragments)
 - [Edit History and Rollback](#edit-history-and-rollback)
 - [Sync Status](#sync-status)
 - [Auto Re-sync on Value Change](#auto-re-sync-on-value-change)
@@ -478,6 +479,74 @@ peers:
 - **No nesting.** A `{{range}}` block cannot contain another `{{range}}` block; this is reported as a template error during sync.
 - **`{{range}}` and `{{end}}` are the only interpreted directives.** Any other `{{...}}` content passes through verbatim, so existing literal usages are unaffected.
 - **Unclosed `{{range}}` blocks** are reported as a template error and the unterminated content is left in place.
+
+---
+
+## Reusable Fragments
+
+Long `.env` and config files often repeat — most lines (DB URL, Redis URL, log
+config, Sentry DSN, …) are identical across services, with only a few
+service-specific keys at the end. **Fragments** are named, reusable text blocks
+that live at the environment level and get concatenated into ConfigFiles at
+deploy / sync time.
+
+### Concepts
+
+- **Env-scoped.** A fragment belongs to one environment. Names must be unique
+  per env.
+- **Flat.** A fragment cannot include another fragment — by construction, there
+  is no field to do so. No cycle detection needed.
+- **Last-definition-wins.** Fragment content is prepended; the ConfigFile's own
+  content is appended last. Duplicate keys naturally resolve to the last
+  occurrence — so a service-specific `LOG_LEVEL=debug` in the ConfigFile
+  overrides a shared `LOG_LEVEL=info` in a fragment without any parser changes.
+- **Render hygiene.** When the ConfigFile's language uses `#` comments (env,
+  yaml, toml, ini, sh, dockerfile, conf, …), BRIDGEPORT injects a
+  `# === fragment: <name> ===` header before each fragment and a
+  `# === service-specific ===` header before the ConfigFile's own content. For
+  formats that don't use `#` (json, xml, html), headers are skipped and the
+  sections are concatenated directly. ConfigFiles with **no** fragments render
+  byte-for-byte unchanged from before fragments existed.
+
+### Managing Fragments
+
+Navigate to **Configuration > Fragments** in the sidebar.
+
+- **Create** a fragment with a name, optional description, and content. Content
+  can reference `${KEY}` placeholders — they're resolved against the same
+  environment-level secrets and vars at sync time.
+- **Edit** a fragment to update its content. If the fragment is included by any
+  ConfigFile with **Auto Re-sync** enabled, an auto-resync is triggered for
+  those files (same pipeline as the secret/var auto-resync).
+- **Delete** is blocked when a fragment is in use. The API returns a 409 with
+  an `inUseBy` array listing the ConfigFiles (and their attached services)
+  that still reference the fragment.
+
+### Including Fragments in a ConfigFile
+
+In the ConfigFile create / edit modal, the **Included Fragments** section lets
+you pick fragments to prepend. Use the up/down arrows to reorder — the
+position determines render order, and the last definition of a key wins.
+
+Click **Preview** in the edit modal to see the rendered output: fragments
+concatenated in order, headers injected, and `${KEY}` placeholders resolved.
+
+### API
+
+```http
+POST   /api/environments/:envId/config-fragments
+GET    /api/environments/:envId/config-fragments
+GET    /api/config-fragments/:id
+PATCH  /api/config-fragments/:id
+DELETE /api/config-fragments/:id
+
+POST   /api/config-files/:id/preview      # Render fragments + content + placeholders
+```
+
+Include fragments by passing `fragmentIds: string[]` on
+`POST /api/environments/:envId/config-files` or
+`PATCH /api/config-files/:id`. Array order = render order. Sending an empty
+array on PATCH clears all includes; omitting the field leaves them unchanged.
 
 ---
 

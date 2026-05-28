@@ -96,6 +96,7 @@ const navigationGroups: NavGroup[] = [
       { name: 'Environment', href: '/settings', icon: SettingsIcon, adminOnly: true },
       { name: 'Secrets & Vars', href: '/secrets', icon: KeyIcon },
       { name: 'Config Files', href: '/config-files', icon: FileIcon },
+      { name: 'Fragments', href: '/fragments', icon: FileIcon },
     ],
   },
 ];

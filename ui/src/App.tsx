@@ -13,6 +13,7 @@ import Services from './pages/Services';
 import ServiceDetail from './pages/ServiceDetail';
 import Secrets from './pages/Secrets';
 import ConfigFiles from './pages/ConfigFiles';
+import Fragments from './pages/Fragments';
 import Registries from './pages/Registries';
 import Databases from './pages/Databases';
 import DatabaseDetail from './pages/DatabaseDetail';
@@ -118,6 +119,7 @@ export default function App() {
                 <Route path="/services/:id" element={<ServiceDetail />} />
                 <Route path="/secrets" element={<Secrets />} />
                 <Route path="/config-files" element={<ConfigFiles />} />
+                <Route path="/fragments" element={<Fragments />} />
                 <Route path="/registries" element={<Registries />} />
                 <Route path="/container-images" element={<ContainerImages />} />
                 <Route path="/container-images/:id" element={<ContainerImageDetail />} />

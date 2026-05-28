@@ -9,6 +9,7 @@ const routeNames: Record<string, string> = {
   'servers': 'Servers',
   'secrets': 'Secrets',
   'config-files': 'Config Files',
+  'fragments': 'Fragments',
   'registries': 'Registries',
   'databases': 'Databases',
   'settings': 'Settings',

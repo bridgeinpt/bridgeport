@@ -84,6 +84,13 @@ function buildConfigFileFixture(overrides?: {
     isBinary: overrides?.isBinary ?? false,
     environmentId: 'env-1',
     autoResync: true,
+    // New post-#115 relation — sync paths concatenate fragments before
+    // placeholder substitution. Empty here means no fragments.
+    includedFragments: [],
+    // `language` is referenced by the composer when fragments is non-empty;
+    // null is safe (default headers behavior) and matches existing ConfigFiles
+    // that were created before the language column existed.
+    language: null,
     services:
       overrides?.attached === false
         ? []
@@ -146,22 +153,38 @@ describe('triggerAutoResyncForKey', () => {
   it('queries Prisma with the correct filter shape and syncs matching files', async () => {
     const cf = buildConfigFileFixture();
     mockPrisma.configFile.findMany.mockResolvedValue([
-      { id: cf.id, name: cf.name, content: cf.content },
+      { id: cf.id, name: cf.name, content: cf.content, includedFragments: [] },
     ]);
     mockPrisma.configFile.findUnique.mockResolvedValue(cf);
 
     await triggerAutoResyncForKey('env-1', 'UPSTREAMS', 'var:UPSTREAMS:patch');
 
     // Filter must include the literal ${UPSTREAMS} so prefix matches (e.g.
-    // ${UPSTREAMS_BACKUP}) don't trigger a sync.
+    // ${UPSTREAMS_BACKUP}) don't trigger a sync. Post-#115 the filter is an
+    // OR across own-content and any-included-fragment-content so a reference
+    // that lives only in a fragment still triggers the cascade.
     expect(mockPrisma.configFile.findMany).toHaveBeenCalledWith({
       where: {
         environmentId: 'env-1',
         autoResync: true,
         isBinary: false,
-        content: { contains: '${UPSTREAMS}' },
+        OR: [
+          { content: { contains: '${UPSTREAMS}' } },
+          {
+            includedFragments: {
+              some: { fragment: { content: { contains: '${UPSTREAMS}' } } },
+            },
+          },
+        ],
       },
-      select: { id: true, name: true, content: true },
+      select: {
+        id: true,
+        name: true,
+        content: true,
+        includedFragments: {
+          select: { fragment: { select: { content: true } } },
+        },
+      },
     });
 
     // Audit log records the trigger source on the auto path.
@@ -185,7 +208,7 @@ describe('triggerAutoResyncForKey', () => {
       content: 'a ${UPSTREAMS} b ${UPSTREAMS} c ${UPSTREAMS}',
     });
     mockPrisma.configFile.findMany.mockResolvedValue([
-      { id: cf.id, name: cf.name, content: cf.content },
+      { id: cf.id, name: cf.name, content: cf.content, includedFragments: [] },
     ]);
     mockPrisma.configFile.findUnique.mockResolvedValue(cf);
 
@@ -207,8 +230,8 @@ describe('triggerAutoResyncForKey', () => {
 
   it('one failing file does not prevent the rest from syncing', async () => {
     mockPrisma.configFile.findMany.mockResolvedValue([
-      { id: 'cf-bad', name: 'bad.conf', content: '${UPSTREAMS}' },
-      { id: 'cf-good', name: 'good.conf', content: '${UPSTREAMS}' },
+      { id: 'cf-bad', name: 'bad.conf', content: '${UPSTREAMS}', includedFragments: [] },
+      { id: 'cf-good', name: 'good.conf', content: '${UPSTREAMS}', includedFragments: [] },
     ]);
 
     // First findUnique call (cf-bad) rejects; second resolves to a real file.
@@ -247,6 +270,7 @@ describe('triggerAutoResyncForKey', () => {
       id: 'cf-match',
       name: 'match.conf',
       content: 'use ${FOO_BAR} here',
+      includedFragments: [],
     };
     const falsePositiveRow = {
       id: 'cf-falsepos',
@@ -254,6 +278,7 @@ describe('triggerAutoResyncForKey', () => {
       // `_` in `FOO_BAR` matches `X` under SQL LIKE, so SQLite would surface
       // this row even though it does not literally reference ${FOO_BAR}.
       content: 'use ${FOOXBAR} here',
+      includedFragments: [],
     };
     mockPrisma.configFile.findMany.mockResolvedValue([matchingRow, falsePositiveRow]);
     mockPrisma.configFile.findUnique.mockResolvedValue(
@@ -277,7 +302,7 @@ describe('triggerAutoResyncForKey', () => {
   it('propagates actor identity fields into the audit log row', async () => {
     const cf = buildConfigFileFixture();
     mockPrisma.configFile.findMany.mockResolvedValue([
-      { id: cf.id, name: cf.name, content: cf.content },
+      { id: cf.id, name: cf.name, content: cf.content, includedFragments: [] },
     ]);
     mockPrisma.configFile.findUnique.mockResolvedValue(cf);
 
@@ -297,10 +322,41 @@ describe('triggerAutoResyncForKey', () => {
     expect(details.triggeredBy).toBe('var:UPSTREAMS:patch');
   });
 
+  it('triggers a sync when the ${KEY} reference lives only inside an included fragment', async () => {
+    // Fragment content is concatenated before the ConfigFile's own content at
+    // render time, so editing a secret referenced ONLY by a fragment must
+    // still re-sync ConfigFiles that pull in that fragment. Without this, a
+    // shared fragment's `${UPSTREAMS}` reference would be a black hole for
+    // auto-resync.
+    const cf = buildConfigFileFixture({
+      // Own content has NO placeholder — only the fragment references the key.
+      content: 'OWN=plain',
+    });
+    mockPrisma.configFile.findMany.mockResolvedValue([
+      {
+        id: cf.id,
+        name: cf.name,
+        // Own content has no `${UPSTREAMS}` — the DB OR-branch surfaced this
+        // row via the includedFragments side.
+        content: 'OWN=plain',
+        includedFragments: [
+          { fragment: { content: '${UPSTREAMS}' } },
+        ],
+      },
+    ]);
+    mockPrisma.configFile.findUnique.mockResolvedValue(cf);
+
+    await triggerAutoResyncForKey('env-1', 'UPSTREAMS', 'var:UPSTREAMS:patch');
+
+    // The row was synced (and audited) even though only the fragment matched.
+    expect(mockPrisma.configFile.findUnique).toHaveBeenCalledTimes(1);
+    expect(logAudit).toHaveBeenCalledTimes(1);
+  });
+
   it('audit details.allSuccess reflects partial server failures', async () => {
     const cf = buildConfigFileFixture();
     mockPrisma.configFile.findMany.mockResolvedValue([
-      { id: cf.id, name: cf.name, content: cf.content },
+      { id: cf.id, name: cf.name, content: cf.content, includedFragments: [] },
     ]);
     mockPrisma.configFile.findUnique.mockResolvedValue(cf);
 

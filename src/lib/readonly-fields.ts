@@ -31,6 +31,7 @@ export type ReadonlyModelName =
   | 'serviceDeployment'
   | 'server'
   | 'configFile'
+  | 'configFragment'
   | 'containerImage'
   | 'database'
   | 'registry'
@@ -145,6 +146,12 @@ export const READONLY_FIELDS_BY_MODEL: Record<ReadonlyModelName, ReadonlySet<str
     'environmentId',
     // Settable on create only — server tracks them but the PATCH schema doesn't.
     // Treat as derived from upload metadata.
+  ]),
+  configFragment: new Set([
+    'id',
+    'createdAt',
+    'updatedAt',
+    'environmentId',
   ]),
   containerImage: new Set([
     'id',

@@ -37,6 +37,31 @@ export interface ConfigFileForUsage {
   environmentId: string;
   content: string;
   isBinary: boolean;
+  /**
+   * Optional ordered fragment includes. When present, the extractor scans both
+   * the ConfigFile's own content AND each fragment's content for `${KEY}`
+   * references — otherwise a fragment-only placeholder would be invisible to
+   * the usage tracker (and to the auto-resync trigger that reads it).
+   */
+  includedFragments?: ReadonlyArray<{ fragment: { content: string } }>;
+}
+
+/**
+ * Build the "scan blob" for usage extraction: the concatenation of every
+ * included fragment's content (in caller-supplied order) plus the ConfigFile's
+ * own content. We don't need the language-aware header injection from
+ * `composeFragmentedContent` here — the regexes only care about the literal
+ * `${KEY}` etc. tokens, and headers like `# === fragment: x ===` carry no
+ * uppercase placeholders. A simple newline join keeps boundaries clean so a
+ * `^KEY=` at the start of one section can't accidentally swallow the previous
+ * section's trailing characters.
+ */
+function buildScanContent(configFile: ConfigFileForUsage): string {
+  const fragmentContent = (configFile.includedFragments ?? [])
+    .map((f) => f.fragment.content)
+    .join('\n');
+  if (!fragmentContent) return configFile.content;
+  return `${fragmentContent}\n${configFile.content}`;
 }
 
 /** Same key validation we apply on Secret/Var create (see `createSecretSchema`). */
@@ -99,8 +124,12 @@ export async function syncSecretUsageForConfigFile(
   db: Db,
   configFile: ConfigFileForUsage
 ): Promise<void> {
-  const { id: configFileId, environmentId, content, isBinary } = configFile;
-  const referencedKeys = isBinary ? new Set<string>() : extractReferencedKeys(content);
+  const { id: configFileId, environmentId, isBinary } = configFile;
+  // Scan fragment contents + own content so a `${KEY}` reference that lives
+  // only inside an included fragment still produces a SecretUsage row.
+  const referencedKeys = isBinary
+    ? new Set<string>()
+    : extractReferencedKeys(buildScanContent(configFile));
 
   const existing = await db.secretUsage.findMany({
     where: { configFileId },
@@ -155,8 +184,12 @@ export async function syncVarUsageForConfigFile(
   db: Db,
   configFile: ConfigFileForUsage
 ): Promise<void> {
-  const { id: configFileId, environmentId, content, isBinary } = configFile;
-  const referencedKeys = isBinary ? new Set<string>() : extractReferencedKeys(content);
+  const { id: configFileId, environmentId, isBinary } = configFile;
+  // See syncSecretUsageForConfigFile — same scan over fragment content +
+  // own content so fragment-only references aren't invisible.
+  const referencedKeys = isBinary
+    ? new Set<string>()
+    : extractReferencedKeys(buildScanContent(configFile));
 
   const existing = await db.varUsage.findMany({
     where: { configFileId },
