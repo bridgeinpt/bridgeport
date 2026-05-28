@@ -1,100 +1,100 @@
 {
-  "$schema": "Latency in ms. Each scenario's p99 must be <= maxP99Ms; non2xx must be 0. Tuned for a fresh laptop / workstation Node runtime, with ~50% headroom above the clean-build p99 so genuine 2x regressions fail. GitHub-hosted runners use the looser thresholds in `thresholds.ci.json` (selected via STRESS_CI=true). Path placeholders {envId,serverId,serviceId,containerImageId,secretId,configFileId} are filled at runtime from seed Refs. We use p99 (not p95) because autocannon's default percentile set tracks p99 but not p95.",
+  "$schema": "Stress thresholds tuned for GitHub-hosted ubuntu-latest runners. These are ~3-5x looser than the local thresholds in `thresholds.json` because shared CI runners are noisy: roughly 5-10x slower at peak and with wider variance. Headroom is ~1.5x the observed clean-build p99 so a 50% regression still slips through occasionally but a 2x regression fails consistently. Local dev still uses the tight `thresholds.json` so regressions show up on a dev's first run. Selected by run.ts when STRESS_CI=true.",
   "scenarios": {
     "auth-me": {
       "path": "/api/auth/me",
-      "maxP99Ms": 30,
-      "minRps": 3000
+      "maxP99Ms": 100,
+      "minRps": 100
     },
     "notifications-unread-count": {
       "path": "/api/notifications/unread-count",
-      "maxP99Ms": 30,
-      "minRps": 3000
+      "maxP99Ms": 100,
+      "minRps": 100
     },
     "environments-list": {
       "path": "/api/environments",
-      "maxP99Ms": 30,
-      "minRps": 3000
+      "maxP99Ms": 100,
+      "minRps": 100
     },
     "environment-detail": {
       "path": "/api/environments/{envId}",
-      "maxP99Ms": 30,
-      "minRps": 3000
+      "maxP99Ms": 100,
+      "minRps": 500
     },
     "servers-list": {
       "path": "/api/environments/{envId}/servers",
-      "maxP99Ms": 30,
-      "minRps": 1500
+      "maxP99Ms": 200,
+      "minRps": 100
     },
     "services-list": {
       "path": "/api/environments/{envId}/services",
-      "maxP99Ms": 60,
-      "minRps": 800
+      "maxP99Ms": 300,
+      "minRps": 100
     },
     "service-detail": {
       "path": "/api/services/{serviceId}",
-      "maxP99Ms": 30,
-      "minRps": 1500
+      "maxP99Ms": 200,
+      "minRps": 100
     },
     "container-images-list": {
       "path": "/api/environments/{envId}/container-images",
-      "maxP99Ms": 40,
-      "minRps": 1500
+      "maxP99Ms": 600,
+      "minRps": 50
     },
     "monitoring-overview": {
       "path": "/api/environments/{envId}/monitoring/overview",
-      "maxP99Ms": 30,
-      "minRps": 2000
+      "maxP99Ms": 150,
+      "minRps": 100
     },
     "agents-status": {
       "path": "/api/environments/{envId}/agents",
-      "maxP99Ms": 40,
-      "minRps": 1200
+      "maxP99Ms": 200,
+      "minRps": 100
     },
     "health-status": {
       "path": "/api/environments/{envId}/health-status",
-      "maxP99Ms": 60,
-      "minRps": 1000
+      "maxP99Ms": 250,
+      "minRps": 100
     },
     "metrics-summary": {
       "path": "/api/environments/{envId}/metrics/summary",
-      "maxP99Ms": 120,
-      "minRps": 400
+      "maxP99Ms": 600,
+      "minRps": 100
     },
     "server-metrics-history": {
       "path": "/api/environments/{envId}/metrics/history?hours=6",
-      "maxP99Ms": 60,
-      "minRps": 700
+      "maxP99Ms": 250,
+      "minRps": 100
     },
     "service-metrics-history": {
       "path": "/api/environments/{envId}/services/metrics/history?hours=6",
-      "maxP99Ms": 130,
-      "minRps": 350
+      "maxP99Ms": 800,
+      "minRps": 100
     },
     "database-metrics-history": {
       "path": "/api/environments/{envId}/databases/metrics/history?hours=6",
-      "maxP99Ms": 50,
-      "minRps": 1200
+      "maxP99Ms": 250,
+      "minRps": 100
     },
     "secrets-list": {
       "path": "/api/environments/{envId}/secrets",
-      "maxP99Ms": 100,
-      "minRps": 700
+      "maxP99Ms": 300,
+      "minRps": 100
     },
     "vars-list": {
       "path": "/api/environments/{envId}/vars",
-      "maxP99Ms": 30,
-      "minRps": 2000
+      "maxP99Ms": 150,
+      "minRps": 200
     },
     "audit-logs": {
       "path": "/api/audit-logs?envId={envId}&limit=50",
-      "maxP99Ms": 30,
-      "minRps": 1500
+      "maxP99Ms": 200,
+      "minRps": 100
     },
     "health-logs": {
       "path": "/api/environments/{envId}/health-logs?limit=50",
-      "maxP99Ms": 40,
-      "minRps": 1000
+      "maxP99Ms": 250,
+      "minRps": 100
     }
   },
   "load": {

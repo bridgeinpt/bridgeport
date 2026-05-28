@@ -424,7 +424,7 @@ export default function Services() {
           <>
             {filteredServices.map((service) => {
               const ports = parseExposedPorts(service.exposedPorts ?? null);
-              const deploymentCount = service.serviceDeployments?.length ?? (service.serverId ? 1 : 0);
+              const deploymentCount = service.serviceDeployments?.length ?? 0;
               const targetTag = service.containerImage?.bestTag ?? null;
               const hasUpdate = !!(
                 service.containerImage?.updateAvailable && targetTag && targetTag !== service.imageTag
@@ -485,16 +485,7 @@ export default function Services() {
                         </div>
                         {/* Row 2: Server + Type + Image */}
                         <p className="text-slate-400 text-sm mt-1">
-                          {service.serverId ? (
-                            <Link
-                              to={`/servers/${service.serverId}`}
-                              className="hover:text-primary-400"
-                            >
-                              {service.serverName}
-                            </Link>
-                          ) : (
-                            <span>{deploymentCount > 0 ? `${deploymentCount} deployment${deploymentCount === 1 ? '' : 's'}` : 'No deployments'}</span>
-                          )}
+                          <span>{deploymentCount > 0 ? `${deploymentCount} deployment${deploymentCount === 1 ? '' : 's'}` : 'No deployments'}</span>
                           <span className="text-slate-500"> · </span>
                           <span>{service.serviceType?.displayName || 'Generic'}</span>
                           <span className="text-slate-500"> · </span>

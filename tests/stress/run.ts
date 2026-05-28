@@ -85,9 +85,24 @@ interface ScenarioReport {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const thresholdsPath = join(__dirname, 'thresholds.json');
+const ciThresholdsPath = join(__dirname, 'thresholds.ci.json');
 const reportPath = join(process.cwd(), 'stress-report.json');
 
+/**
+ * STRESS_CI=true picks `thresholds.ci.json`, which carries the looser
+ * GitHub-hosted-runner targets. The local file stays tight so dev machines
+ * notice regressions immediately; CI gets headroom for shared-runner noise.
+ * Falls back to `thresholds.json` if the CI file is absent.
+ */
 function readThresholds(): ThresholdsFile {
+  const useCi = process.env.STRESS_CI === 'true';
+  if (useCi) {
+    try {
+      return require(ciThresholdsPath) as ThresholdsFile;
+    } catch {
+      // Fall through to the default file.
+    }
+  }
   return require(thresholdsPath) as ThresholdsFile;
 }
 

@@ -71,6 +71,11 @@ jobs:
           STRESS_SERVERS: ${{ github.event.inputs.servers || '30' }}
           STRESS_SERVICES_PER_SERVER: ${{ github.event.inputs.services_per_server || '3' }}
           STRESS_METRICS_PER_ENTITY: '12'
+          # Use the looser ci thresholds (`tests/stress/thresholds.ci.json`)
+          # tuned for GitHub-hosted runners. Local dev still uses the tight
+          # `thresholds.json` so regressions surface on the first dev-machine
+          # run.
+          STRESS_CI: 'true'
           # Soft mode on PRs only; manual + scheduled runs enforce thresholds.
           STRESS_SOFT: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
         run: npm run test:stress

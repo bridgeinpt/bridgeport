@@ -1260,9 +1260,14 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
                   continue;
                 }
 
-                ({ code, stderr } = await client.exec(
-                  `cat > ${shellEscape(targetPath)} << 'CONFIGFILE_EOF'\n${resolvedContent}\nCONFIGFILE_EOF`
-                ));
+                try {
+                  await client.writeFile(targetPath, Buffer.from(resolvedContent, 'utf8'));
+                  code = 0;
+                  stderr = '';
+                } catch (writeErr) {
+                  code = 1;
+                  stderr = writeErr instanceof Error ? writeErr.message : 'SFTP write failed';
+                }
               }
 
               if (code !== 0) {
@@ -1585,9 +1590,14 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
                 continue;
               }
 
-              ({ code, stderr } = await client.exec(
-                `cat > ${shellEscape(sf.targetPath)} << 'CONFIGFILE_EOF'\n${resolvedContent}\nCONFIGFILE_EOF`
-              ));
+              try {
+                await client.writeFile(sf.targetPath, Buffer.from(resolvedContent, 'utf8'));
+                code = 0;
+                stderr = '';
+              } catch (writeErr) {
+                code = 1;
+                stderr = writeErr instanceof Error ? writeErr.message : 'SFTP write failed';
+              }
             }
 
             if (code !== 0) {

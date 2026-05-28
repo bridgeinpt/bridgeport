@@ -106,12 +106,11 @@ export async function syncBatchRoutes(fastify: FastifyInstance): Promise<void> {
 
   // Fetch a persisted batch + its ops.
   //
-  // Gated on requireOperator (operator-or-admin). Per-op error messages can
-  // leak details from any environment, and we don't currently have an
-  // environment-membership check helper to scope reads to a user's envs.
-  // Viewers (read-only role) should not be able to enumerate batch contents
-  // across the deployment; this is a deliberate conservative default until a
-  // proper env-membership check is added.
+  // Gated on requireOperator (operator-or-admin) AND env-scope: an env-scoped
+  // API token can only read a batch whose `environmentId` is in its allowed
+  // envs. We return 404 (not 403) for forbidden access so existence isn't
+  // leaked. JWT-session users — who currently aren't env-scoped — bypass the
+  // env check by design.
   fastify.get(
     '/api/sync/batch/:batchId',
     { preHandler: [fastify.authenticate, requireOperator] },
@@ -125,6 +124,16 @@ export async function syncBatchRoutes(fastify: FastifyInstance): Promise<void> {
 
       if (!row) {
         return reply.code(404).send({ error: 'Sync batch not found' });
+      }
+
+      const scope = request.authUser?.scope;
+      if (scope && !scope.allEnvironments) {
+        const allowed = row.environmentId
+          ? scope.environmentIds.includes(row.environmentId)
+          : false;
+        if (!allowed) {
+          return reply.code(404).send({ error: 'Sync batch not found' });
+        }
       }
 
       return batchRowToResult(row);

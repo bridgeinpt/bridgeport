@@ -1322,7 +1322,9 @@ export interface ConfigFragmentDetail extends ConfigFragment {
 }
 
 export const listConfigFragments = (envId: string) =>
-  api.get<{ fragments: ConfigFragment[] }>(`/environments/${envId}/config-fragments`);
+  api.get<{ fragments: ConfigFragment[]; total: number; limit: number; offset: number }>(
+    `/environments/${envId}/config-fragments?limit=200`
+  );
 
 export const getConfigFragment = (id: string) =>
   api.get<{ fragment: ConfigFragmentDetail }>(`/config-fragments/${id}`);

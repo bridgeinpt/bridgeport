@@ -117,7 +117,12 @@ export async function getContainerImage(id: string): Promise<ContainerImage & { 
 export async function listContainerImages(
   environmentId: string,
   options?: { limit?: number; offset?: number }
-): Promise<{ images: (ContainerImage & { services: Service[] })[]; total: number }> {
+): Promise<{
+  images: (ContainerImage & {
+    services: Pick<Service, 'id' | 'name' | 'containerImageId'>[];
+  })[];
+  total: number;
+}> {
   const limit = options?.limit ?? 25;
   const offset = options?.offset ?? 0;
   const where = { environmentId };
@@ -140,14 +145,13 @@ export async function listContainerImages(
   const imageIds = pageImages.map((img) => img.id);
 
   const [services, latestDigests, latestHistory] = await Promise.all([
-    // Service.server moved to ServiceDeployment in 2.0; eager-load deployments
-    // here so the page render still has access to each (service, server) pair
-    // without an N+1.
+    // The Container Images list view only renders {id, name} per linked
+    // service. Skipping the deployment+server tree here is a >5x payload
+    // reduction at typical scale — full deployment data lives on the
+    // service detail route, which is what the link goes to.
     prisma.service.findMany({
       where: { containerImageId: { in: imageIds } },
-      include: {
-        serviceDeployments: { include: { server: true } },
-      },
+      select: { id: true, name: true, containerImageId: true },
     }),
     // For each image, the digest with the max(pushedAt). One groupBy +
     // targeted findMany keeps this linear in image count.
@@ -201,7 +205,12 @@ export async function listContainerImages(
     };
   });
 
-  return { images: images as (ContainerImage & { services: Service[] })[], total };
+  return {
+    images: images as (ContainerImage & {
+      services: Pick<Service, 'id' | 'name' | 'containerImageId'>[];
+    })[],
+    total,
+  };
 }
 
 /**
