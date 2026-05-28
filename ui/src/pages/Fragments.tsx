@@ -15,6 +15,7 @@ import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { PencilIcon, TrashIcon } from '../components/Icons.js';
 import { useToast } from '../components/Toast.js';
+import { getErrorMessage } from '../lib/helpers.js';
 
 /**
  * Env-scoped ConfigFragments: named, reusable text blocks that ConfigFiles can
@@ -103,7 +104,7 @@ export default function Fragments() {
       closeForm();
       loadData();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Save failed');
+      toast.error(getErrorMessage(err, 'Save failed'));
     } finally {
       setSaving(false);
     }
@@ -132,8 +133,7 @@ export default function Fragments() {
           return;
         }
       }
-      const message = err instanceof Error ? err.message : 'Delete failed';
-      toast.error(message);
+      toast.error(getErrorMessage(err, 'Delete failed'));
     }
   };
 

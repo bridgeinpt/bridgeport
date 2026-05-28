@@ -33,6 +33,7 @@ Learn how to use each feature. Every guide includes a quick start, step-by-step 
 |-----|-------------|
 | [Environments](guides/environments.md) | Create and configure environments with SSH keys and per-module settings |
 | [Servers](guides/servers.md) | Add servers, configure SSH or Docker socket, enable metrics |
+| [Server Bootstrap](guides/server-bootstrap.md) | Install Docker, compose, the agent, sysctl, and swap on a fresh server |
 | [Services](guides/services.md) | Deploy containers, configure health checks, attach config files |
 | [Container Images](guides/container-images.md) | Central image management, tag history, auto-update |
 | [Registries](guides/registries.md) | Connect Docker Hub, GHCR, and private registries |

@@ -248,6 +248,8 @@ Use these instead of reimplementing:
 - Per-environment settings are created eagerly on environment creation via `createDefaultSettings()`
 - Admin pages use a separate layout (`AdminLayout` + `AdminSidebar`) at `/admin/*` routes
 - ContainerImage is required for every Service - central entity for image management
+- Service is a template (image, env, health, compose, container-image link); per-server runtime lives on ServiceDeployment (containerName, status, discovery, ports). UI/API back-compat: a `service.server`-style accessor still resolves to the first deployment's server, but new code should read from `serviceDeployments[]`
+- ConfigFragment is env-scoped, reusable text shared across config files; when an in-use fragment is deleted/edited the dependent files are auto-resynced
 - **Docs stay in sync with code.** When you change `src/routes/**`, `src/services/**`, `prisma/schema.prisma`, `ui/src/pages/**`, or settings, update the matching file under `docs/guides/` or `docs/reference/` in the same PR. A Stop hook (`scripts/check-docs-drift.sh`) prints a reminder when code paths change without any `docs/` update.
 
 ## UI/UX Guidelines
