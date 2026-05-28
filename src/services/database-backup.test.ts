@@ -233,7 +233,7 @@ describe('database-backup', () => {
           schedule: { select: { enabled: true, nextRunAt: true } },
           backups: {
             where: { status: 'completed' },
-            orderBy: { createdAt: 'desc' },
+            orderBy: { completedAt: 'desc' },
             take: 1,
             select: {
               id: true,

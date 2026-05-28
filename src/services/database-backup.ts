@@ -331,7 +331,12 @@ export async function listEnvironmentBackupSummary(
       schedule: { select: { enabled: true, nextRunAt: true } },
       backups: {
         where: { status: 'completed' },
-        orderBy: { createdAt: 'desc' },
+        // Order by completedAt (not createdAt) — for the "last completed backup"
+        // we want the one that finished most recently, which can differ from
+        // createdAt order when a slower earlier run finishes after a later one.
+        // Loses the (databaseId, createdAt desc) index optimization, but with
+        // take=1 and modest per-DB history this is acceptable.
+        orderBy: { completedAt: 'desc' },
         take: 1,
         select: {
           id: true,
@@ -348,9 +353,7 @@ export async function listEnvironmentBackupSummary(
     name: db.name,
     supportsBackup: !!db.databaseType?.backupCommand,
     lastBackup: db.backups[0] || null,
-    schedule: db.schedule
-      ? { enabled: db.schedule.enabled, nextRunAt: db.schedule.nextRunAt }
-      : null,
+    schedule: db.schedule,
   }));
 }
 

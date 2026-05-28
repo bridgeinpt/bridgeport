@@ -92,32 +92,51 @@ export default function Dashboard() {
     setDatabasesLoading(true);
     setBackupSummaryLoading(true);
 
+    // Guard every setter so a late response from a previous env can't overwrite
+    // state after the user has switched environments.
+    let cancelled = false;
+
     // Fire every fetch in parallel; each one updates its own state on resolve.
     // There is intentionally no top-level Promise.all — a slow section must
     // not block the rest of the page.
-    getEnvironment(envId).then((res) => setEnvironment(res.environment));
+    getEnvironment(envId)
+      .then((res) => { if (!cancelled) setEnvironment(res.environment); })
+      .catch((err) => { if (!cancelled) console.error('Failed to load environment:', err); });
 
     listServers(envId, { includeServicesCount: true, limit: 1000 })
-      .then((res) => setServers(res.servers))
-      .finally(() => setServersLoading(false));
+      .then((res) => { if (!cancelled) setServers(res.servers); })
+      .catch((err) => { if (!cancelled) console.error('Failed to load servers:', err); })
+      .finally(() => { if (!cancelled) setServersLoading(false); });
 
     listServices(envId, { limit: 5000 })
-      .then((res) => setServices(res.services))
-      .finally(() => setServicesLoading(false));
+      .then((res) => { if (!cancelled) setServices(res.services); })
+      .catch((err) => { if (!cancelled) console.error('Failed to load services:', err); })
+      .finally(() => { if (!cancelled) setServicesLoading(false); });
 
-    getEnvironmentMetricsSummary(envId).then((res) => setMetrics(res.servers));
+    getEnvironmentMetricsSummary(envId)
+      .then((res) => { if (!cancelled) setMetrics(res.servers); })
+      .catch((err) => { if (!cancelled) console.error('Failed to load metrics:', err); });
 
-    getAuditLogs({ environmentId: envId, limit: 15 }).then((res) => setAuditLogs(res.logs));
+    getAuditLogs({ environmentId: envId, limit: 15 })
+      .then((res) => { if (!cancelled) setAuditLogs(res.logs); })
+      .catch((err) => { if (!cancelled) console.error('Failed to load audit logs:', err); });
 
-    listDatabases(envId)
-      .then((res) => setDatabases(res.databases))
-      .finally(() => setDatabasesLoading(false));
+    // Pass an explicit high limit so all databases in the env are loaded — the
+    // server defaults to 25 via parsePaginationQuery, which would desync the
+    // backed-up chip denominator and topology counts on envs with >25 DBs.
+    listDatabases(envId, { limit: 1000 })
+      .then((res) => { if (!cancelled) setDatabases(res.databases); })
+      .catch((err) => { if (!cancelled) console.error('Failed to load databases:', err); })
+      .finally(() => { if (!cancelled) setDatabasesLoading(false); });
 
     // Batched: one call returns last completed backup + schedule per database.
     // Replaces the previous per-database N+1 fan-out.
     getDatabaseBackupSummary(envId)
-      .then((res) => setBackupSummary(res.databases))
-      .finally(() => setBackupSummaryLoading(false));
+      .then((res) => { if (!cancelled) setBackupSummary(res.databases); })
+      .catch((err) => { if (!cancelled) console.error('Failed to load backup summary:', err); })
+      .finally(() => { if (!cancelled) setBackupSummaryLoading(false); });
+
+    return () => { cancelled = true; };
   }, [selectedEnvironment?.id]);
 
   // Index backup summary by databaseId for O(1) per-card lookup.
@@ -491,9 +510,11 @@ export default function Dashboard() {
       )}
 
       {/* Service Topology Diagram. Renders a placeholder while the underlying
-          servers/services/databases fetches are still in flight so the rest of
-          the page doesn't shift around once they resolve. */}
-      {serversLoading || servicesLoading || databasesLoading ? (
+          servers/services fetches are still in flight so the rest of the page
+          doesn't shift around once they resolve. `databases` is optional —
+          topology renders without DBs and they appear when their fetch
+          completes — so we don't gate on databasesLoading here. */}
+      {serversLoading || servicesLoading ? (
         <div className="panel mb-5 animate-pulse">
           <div className="h-7 w-48 bg-slate-700 rounded mb-4"></div>
           <div className="h-64 bg-slate-800 rounded-lg"></div>
