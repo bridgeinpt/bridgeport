@@ -84,6 +84,10 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      # setup-node@v6 ships npm 10, which silently ignores `.npmrc`'s
+      # `min-release-age` key (added in npm 11.10). Install the modern npm
+      # globally so subsequent `npm ci` honours the supply-chain cooldown.
+      - run: npm install -g npm@latest
       - run: npm ci
       # .npmrc sets ignore-scripts=true; rebuild native deps explicitly.
       - run: npm rebuild better-sqlite3
