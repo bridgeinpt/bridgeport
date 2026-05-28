@@ -2,6 +2,7 @@ import { initSentry, captureException, flushSentry, getSentryConfig } from './li
 
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import { buildCorsOptions } from './lib/cors.js';
 import jwt from '@fastify/jwt';
 import multipart from '@fastify/multipart';
 import rateLimit from '@fastify/rate-limit';
@@ -108,14 +109,7 @@ async function buildServer() {
       'Set CORS_ORIGIN to your UI origin(s) (comma-separated) if the UI is served from a different origin.'
     );
   }
-  await fastify.register(cors, {
-    origin: config.NODE_ENV === 'development'
-      ? true
-      : config.CORS_ORIGIN
-        ? config.CORS_ORIGIN.split(',').map(s => s.trim())
-        : false,
-    credentials: true,
-  });
+  await fastify.register(cors, buildCorsOptions(config));
 
   await fastify.register(jwt, {
     secret: config.JWT_SECRET,

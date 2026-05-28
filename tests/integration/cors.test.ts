@@ -2,34 +2,21 @@
  * Integration tests for @fastify/cors registration (issue #165).
  *
  * Locks in the CORS behavior configured in src/server.ts so that future
- * @fastify/cors major bumps don't silently change response semantics.
- *
- * The production registration is:
- *
- *   await fastify.register(cors, {
- *     origin: config.NODE_ENV === 'development'
- *       ? true
- *       : config.CORS_ORIGIN
- *         ? config.CORS_ORIGIN.split(',').map(s => s.trim())
- *         : false,
- *     credentials: true,
- *   });
- *
- * These tests reproduce that exact expression against a minimal Fastify
- * instance so the real @fastify/cors plugin runs end-to-end (preflight +
- * actual request) without pulling in the full app — buildTestApp() uses
- * `origin: true` which would mask the production branches.
+ * @fastify/cors major bumps don't silently change response semantics. The
+ * test imports `buildCorsOptions` from src/lib/cors.ts — the same function
+ * src/server.ts calls — so the production and test configurations are
+ * guaranteed to stay in sync.
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
+import { buildCorsOptions } from '../../src/lib/cors.js';
 
 type NodeEnv = 'development' | 'production' | 'test';
 
 /**
- * Builds a Fastify app whose CORS registration mirrors src/server.ts exactly.
- * Mirrors are kept in lockstep with the production expression — if you change
- * one, change the other.
+ * Builds a Fastify app whose CORS registration mirrors src/server.ts exactly
+ * by calling the shared buildCorsOptions helper.
  */
 async function buildAppWithCors(opts: {
   NODE_ENV: NodeEnv;
@@ -37,14 +24,7 @@ async function buildAppWithCors(opts: {
 }): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
 
-  await app.register(cors, {
-    origin: opts.NODE_ENV === 'development'
-      ? true
-      : opts.CORS_ORIGIN
-        ? opts.CORS_ORIGIN.split(',').map(s => s.trim())
-        : false,
-    credentials: true,
-  });
+  await app.register(cors, buildCorsOptions(opts));
 
   app.get('/ping', async () => ({ ok: true }));
   await app.ready();
@@ -83,6 +63,7 @@ describe('@fastify/cors registration (src/server.ts)', () => {
         'https://bridgeport.example.com',
       );
       expect(res.headers['access-control-allow-credentials']).toBe('true');
+      expect(res.headers['access-control-allow-methods']).toBe('GET,HEAD,PUT,PATCH,POST,DELETE');
     });
 
     it('actual GET from the allowed origin sets allow-origin + credentials', async () => {
@@ -118,6 +99,7 @@ describe('@fastify/cors registration (src/server.ts)', () => {
 
       // The request still resolves (CORS is browser-enforced via headers), but
       // the browser-blocking signal — absent allow-origin header — must hold.
+      expect(res.statusCode).toBe(200);
       expect(res.headers['access-control-allow-origin']).toBeUndefined();
     });
   });
@@ -144,6 +126,7 @@ describe('@fastify/cors registration (src/server.ts)', () => {
         });
         expect(res.headers['access-control-allow-origin']).toBe(origin);
         expect(res.headers['access-control-allow-credentials']).toBe('true');
+        expect(res.headers['access-control-allow-methods']).toBe('GET,HEAD,PUT,PATCH,POST,DELETE');
       }
     });
 
@@ -189,6 +172,7 @@ describe('@fastify/cors registration (src/server.ts)', () => {
         },
       });
 
+      expect(res.statusCode).toBe(404);
       expect(res.headers['access-control-allow-origin']).toBeUndefined();
     });
   });
