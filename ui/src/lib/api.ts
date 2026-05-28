@@ -1928,6 +1928,26 @@ export const setBackupSchedule = (
 export const deleteBackupSchedule = (databaseId: string) =>
   api.delete<{ success: boolean }>(`/databases/${databaseId}/schedule`);
 
+// Backup summary: one row per database in the environment with the last
+// completed backup and schedule state. Replaces the dashboard's per-db loop.
+export interface DatabaseBackupSummaryItem {
+  databaseId: string;
+  name: string;
+  supportsBackup: boolean;
+  lastBackup: {
+    id: string;
+    completedAt: string | null;
+    createdAt: string;
+    status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  } | null;
+  schedule: { enabled: boolean; nextRunAt: string | null } | null;
+}
+
+export const getDatabaseBackupSummary = (envId: string) =>
+  api.get<{ databases: DatabaseBackupSummaryItem[] }>(
+    `/environments/${envId}/databases/backup-summary`
+  );
+
 // Notifications
 export interface NotificationType {
   id: string;

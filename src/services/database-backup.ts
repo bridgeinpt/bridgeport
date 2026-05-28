@@ -301,6 +301,59 @@ export async function deleteDatabase(id: string): Promise<void> {
   await prisma.database.delete({ where: { id } });
 }
 
+export interface DatabaseBackupSummaryItem {
+  databaseId: string;
+  name: string;
+  supportsBackup: boolean;
+  lastBackup: {
+    id: string;
+    completedAt: Date | null;
+    createdAt: Date;
+    status: string;
+  } | null;
+  schedule: { enabled: boolean; nextRunAt: Date | null } | null;
+}
+
+/**
+ * Return one row per database in the environment with the last completed
+ * backup and the schedule's enabled/nextRunAt. One query — replaces the
+ * dashboard's per-database N+1 fan-out (listDatabaseBackups + getBackupSchedule)
+ * by leveraging the `(databaseId, createdAt desc)` index on DatabaseBackup.
+ */
+export async function listEnvironmentBackupSummary(
+  environmentId: string
+): Promise<DatabaseBackupSummaryItem[]> {
+  const databases = await prisma.database.findMany({
+    where: { environmentId },
+    orderBy: { name: 'asc' },
+    include: {
+      databaseType: { select: { backupCommand: true } },
+      schedule: { select: { enabled: true, nextRunAt: true } },
+      backups: {
+        where: { status: 'completed' },
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+        select: {
+          id: true,
+          completedAt: true,
+          createdAt: true,
+          status: true,
+        },
+      },
+    },
+  });
+
+  return databases.map((db) => ({
+    databaseId: db.id,
+    name: db.name,
+    supportsBackup: !!db.databaseType?.backupCommand,
+    lastBackup: db.backups[0] || null,
+    schedule: db.schedule
+      ? { enabled: db.schedule.enabled, nextRunAt: db.schedule.nextRunAt }
+      : null,
+  }));
+}
+
 function toOutput(db: {
   id: string;
   name: string;

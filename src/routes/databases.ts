@@ -14,6 +14,7 @@ import {
   getBackupSchedule,
   deleteBackupSchedule,
   getBackupDownload,
+  listEnvironmentBackupSummary,
 } from '../services/database-backup.js';
 import { logAudit, actorFrom } from '../services/audit.js';
 import { userIdForFk } from '../services/auth.js';
@@ -722,6 +723,19 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
       });
 
       return { types };
+    }
+  );
+
+  // Get backup summary for all databases in an environment.
+  // Single batched call backing the dashboard's "Database Backups" card —
+  // replaces the per-database N+1 fan-out (listDatabaseBackups + getBackupSchedule).
+  fastify.get(
+    '/api/environments/:envId/databases/backup-summary',
+    { preHandler: [fastify.authenticate] },
+    async (request) => {
+      const { envId } = request.params as { envId: string };
+      const databases = await listEnvironmentBackupSummary(envId);
+      return { databases };
     }
   );
 

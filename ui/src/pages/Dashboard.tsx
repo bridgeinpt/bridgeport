@@ -8,8 +8,7 @@ import {
   listDatabases,
   listServers,
   listServices,
-  listDatabaseBackups,
-  getBackupSchedule,
+  getDatabaseBackupSummary,
   deployService,
   checkServiceUpdates,
   type EnvironmentDetail,
@@ -19,8 +18,7 @@ import {
   type MetricsSummaryServer,
   type AuditLog,
   type Database,
-  type DatabaseBackup,
-  type BackupSchedule,
+  type DatabaseBackupSummaryItem,
   type Service,
   type ServiceWithServerName,
 } from '../lib/api';
@@ -57,22 +55,24 @@ interface ServiceWithUpdate extends Service {
   targetTag: string;
 }
 
-interface DatabaseWithBackups extends Database {
-  lastBackup: DatabaseBackup | null;
-  schedule: BackupSchedule | null;
-}
-
 export default function Dashboard() {
   const { selectedEnvironment, dismissedAlerts, dismissAlert, clearDismissedAlerts } = useAppStore();
   const { user } = useAuthStore();
   const toast = useToast();
+  // Each section loads independently — no top-level gate. The page chrome and
+  // per-card skeletons render immediately; cards swap to their loaded content
+  // as soon as their own fetch resolves.
   const [environment, setEnvironment] = useState<EnvironmentDetail | null>(null);
   const [servers, setServers] = useState<ServerWithServicesCount[]>([]);
+  const [serversLoading, setServersLoading] = useState(true);
   const [services, setServices] = useState<ServiceWithServerName[]>([]);
+  const [servicesLoading, setServicesLoading] = useState(true);
   const [metrics, setMetrics] = useState<MetricsSummaryServer[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
-  const [databases, setDatabases] = useState<DatabaseWithBackups[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [databases, setDatabases] = useState<Database[]>([]);
+  const [databasesLoading, setDatabasesLoading] = useState(true);
+  const [backupSummary, setBackupSummary] = useState<DatabaseBackupSummaryItem[]>([]);
+  const [backupSummaryLoading, setBackupSummaryLoading] = useState(true);
   const [deploying, setDeploying] = useState<string | null>(null);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
 
@@ -81,57 +81,51 @@ export default function Dashboard() {
   const [deployAllResults, setDeployAllResults] = useState<DeployAllResult[] | null>(null);
   const [showDeployAllResults, setShowDeployAllResults] = useState(false);
 
-  const fetchData = async (isRefresh = false) => {
-    if (!selectedEnvironment?.id) return;
-    if (!isRefresh) setLoading(true);
-
-    try {
-      const [envRes, serversRes, servicesRes, metricsRes, logsRes, dbRes] = await Promise.all([
-        getEnvironment(selectedEnvironment.id),
-        listServers(selectedEnvironment.id, { includeServicesCount: true, limit: 1000 }),
-        listServices(selectedEnvironment.id, { limit: 5000 }),
-        getEnvironmentMetricsSummary(selectedEnvironment.id),
-        getAuditLogs({ environmentId: selectedEnvironment.id, limit: 15 }),
-        listDatabases(selectedEnvironment.id),
-      ]);
-
-      setEnvironment(envRes.environment);
-      setServers(serversRes.servers);
-      setServices(servicesRes.services);
-      setMetrics(metricsRes.servers);
-      setAuditLogs(logsRes.logs);
-
-      // Fetch backup info for each database (skip types without backup support)
-      const dbsWithBackups = await Promise.all(
-        dbRes.databases.map(async (db) => {
-          if (db.databaseType?.hasBackupCommand === false) {
-            return { ...db, lastBackup: null, schedule: null };
-          }
-          try {
-            const [backupsRes, scheduleRes] = await Promise.all([
-              listDatabaseBackups(db.id, 1, 0),
-              getBackupSchedule(db.id),
-            ]);
-            const completedBackups = backupsRes.backups.filter(b => b.status === 'completed');
-            return {
-              ...db,
-              lastBackup: completedBackups[0] || null,
-              schedule: scheduleRes.schedule,
-            };
-          } catch {
-            return { ...db, lastBackup: null, schedule: null };
-          }
-        })
-      );
-      setDatabases(dbsWithBackups);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    fetchData();
+    const envId = selectedEnvironment?.id;
+    if (!envId) return;
+
+    // Reset per-section state when switching environments — keeps each card's
+    // skeleton visible until that section's own fetch resolves.
+    setServersLoading(true);
+    setServicesLoading(true);
+    setDatabasesLoading(true);
+    setBackupSummaryLoading(true);
+
+    // Fire every fetch in parallel; each one updates its own state on resolve.
+    // There is intentionally no top-level Promise.all — a slow section must
+    // not block the rest of the page.
+    getEnvironment(envId).then((res) => setEnvironment(res.environment));
+
+    listServers(envId, { includeServicesCount: true, limit: 1000 })
+      .then((res) => setServers(res.servers))
+      .finally(() => setServersLoading(false));
+
+    listServices(envId, { limit: 5000 })
+      .then((res) => setServices(res.services))
+      .finally(() => setServicesLoading(false));
+
+    getEnvironmentMetricsSummary(envId).then((res) => setMetrics(res.servers));
+
+    getAuditLogs({ environmentId: envId, limit: 15 }).then((res) => setAuditLogs(res.logs));
+
+    listDatabases(envId)
+      .then((res) => setDatabases(res.databases))
+      .finally(() => setDatabasesLoading(false));
+
+    // Batched: one call returns last completed backup + schedule per database.
+    // Replaces the previous per-database N+1 fan-out.
+    getDatabaseBackupSummary(envId)
+      .then((res) => setBackupSummary(res.databases))
+      .finally(() => setBackupSummaryLoading(false));
   }, [selectedEnvironment?.id]);
+
+  // Index backup summary by databaseId for O(1) per-card lookup.
+  const backupSummaryById = useMemo(() => {
+    const map = new Map<string, DatabaseBackupSummaryItem>();
+    for (const item of backupSummary) map.set(item.databaseId, item);
+    return map;
+  }, [backupSummary]);
 
   // Compute alerts from metrics and environment data
   const alerts = useMemo<Alert[]>(() => {
@@ -391,22 +385,10 @@ export default function Dashboard() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="p-6">
-        <div className="animate-pulse">
-          <div className="h-7 w-48 bg-slate-700 rounded mb-5"></div>
-          <div className="grid grid-cols-3 gap-4">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="h-32 bg-slate-800 rounded-lg"></div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!environment) {
+  // Distinguish "no environment selected at all" from "environment selected
+  // but its detail is still loading". The first is a terminal empty state; the
+  // second renders chrome + skeletons while data streams in.
+  if (!selectedEnvironment?.id) {
     return (
       <div className="p-6">
         <div className="panel text-center py-12">
@@ -417,15 +399,16 @@ export default function Dashboard() {
   }
 
   // Prefer `_count.servers` from the env-detail response for the displayed total
-  // (cheap, always accurate). Fall back to the page length if it's missing.
+  // (cheap, always accurate). Fall back to the page length if it's missing or
+  // the env detail hasn't finished loading yet.
   // healthyServers necessarily reflects only the loaded page.
-  const serverCount = environment._count?.servers ?? servers.length;
+  const serverCount = environment?._count?.servers ?? servers.length;
   const healthyServers = servers.filter((s) => s.status === 'healthy').length;
   const serversTruncated = serverCount > servers.length;
   // Same idea for services. `serviceHealthCounts.total` (above) is page-length;
   // we override the displayed total here for honesty when the env has more services
   // than were loaded.
-  const serviceTotal = environment._count?.services ?? serviceHealthCounts.total;
+  const serviceTotal = environment?._count?.services ?? serviceHealthCounts.total;
   const servicesTruncated = serviceTotal > serviceHealthCounts.total;
 
   return (
@@ -507,17 +490,24 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Service Topology Diagram */}
-      {servers.length > 0 && (
+      {/* Service Topology Diagram. Renders a placeholder while the underlying
+          servers/services/databases fetches are still in flight so the rest of
+          the page doesn't shift around once they resolve. */}
+      {serversLoading || servicesLoading || databasesLoading ? (
+        <div className="panel mb-5 animate-pulse">
+          <div className="h-7 w-48 bg-slate-700 rounded mb-4"></div>
+          <div className="h-64 bg-slate-800 rounded-lg"></div>
+        </div>
+      ) : servers.length > 0 ? (
         <div className="mb-5">
           <TopologyDiagram
             servers={serversWithServices}
             databases={databases}
-            environmentId={environment.id}
+            environmentId={selectedEnvironment.id}
             userRole={user?.role || 'viewer'}
           />
         </div>
-      )}
+      ) : null}
 
       {/* Deploy All Results Modal */}
       <Modal
@@ -702,7 +692,16 @@ export default function Dashboard() {
       )}
 
       {/* Servers Health Grid */}
-      {servers.length > 0 && (
+      {serversLoading ? (
+        <div className="panel mb-5 animate-pulse">
+          <div className="h-6 w-40 bg-slate-700 rounded mb-4"></div>
+          <div className="flex flex-wrap gap-2">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-9 w-28 bg-slate-800 rounded-lg"></div>
+            ))}
+          </div>
+        </div>
+      ) : servers.length > 0 ? (
         <div className="panel mb-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-white flex items-center gap-2">
@@ -735,10 +734,19 @@ export default function Dashboard() {
             })}
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Services Health Grid */}
-      {allServices.length > 0 && (
+      {servicesLoading ? (
+        <div className="panel mb-5 animate-pulse">
+          <div className="h-6 w-40 bg-slate-700 rounded mb-4"></div>
+          <div className="flex flex-wrap gap-2">
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="h-9 w-28 bg-slate-800 rounded-lg"></div>
+            ))}
+          </div>
+        </div>
+      ) : allServices.length > 0 ? (
         <div className="panel mb-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-white flex items-center gap-2">
@@ -771,19 +779,29 @@ export default function Dashboard() {
             })}
           </div>
         </div>
-      )}
+      ) : null}
 
-      {/* Databases Health Grid */}
-      {databases.length > 0 && (
+      {/* Databases Health Grid. Backup status is derived from the batched
+          backup-summary endpoint via backupSummaryById. */}
+      {databasesLoading ? (
+        <div className="panel mb-5 animate-pulse">
+          <div className="h-6 w-40 bg-slate-700 rounded mb-4"></div>
+          <div className="flex flex-wrap gap-2">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-9 w-28 bg-slate-800 rounded-lg"></div>
+            ))}
+          </div>
+        </div>
+      ) : databases.length > 0 ? (
         <div className="panel mb-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-white flex items-center gap-2">
               <DatabaseIcon className="w-5 h-5 text-purple-400" />
               Databases Health
-              {databases.some((db) => db.databaseType?.hasBackupCommand !== false) && (
-              <span className="text-sm font-normal text-slate-400">
-                ({databases.filter((db) => db.databaseType?.hasBackupCommand !== false && db.lastBackup !== null).length}/{databases.filter((db) => db.databaseType?.hasBackupCommand !== false).length} backed up)
-              </span>
+              {!backupSummaryLoading && backupSummary.some((s) => s.supportsBackup) && (
+                <span className="text-sm font-normal text-slate-400">
+                  ({backupSummary.filter((s) => s.supportsBackup && s.lastBackup !== null).length}/{backupSummary.filter((s) => s.supportsBackup).length} backed up)
+                </span>
               )}
             </h2>
             <Link to="/databases" className="text-sm text-primary-400 hover:text-primary-300">
@@ -792,11 +810,30 @@ export default function Dashboard() {
           </div>
           <div className="flex flex-wrap gap-2">
             {databases.map((db) => {
-              const supportsBackup = db.databaseType?.hasBackupCommand !== false;
-              const hasBackup = db.lastBackup !== null;
-              const hasSchedule = db.schedule?.enabled;
-              const statusColor = !supportsBackup ? 'bg-slate-500' : hasBackup ? 'bg-green-500' : hasSchedule ? 'bg-yellow-500' : 'bg-red-500';
-              const statusTitle = !supportsBackup ? 'Backups not supported' : hasBackup ? 'Backed up' : hasSchedule ? 'Scheduled, no backup yet' : 'No backup';
+              const summary = backupSummaryById.get(db.id);
+              // Fall back to the Database row's hasBackupCommand flag while the
+              // batched summary is still loading.
+              const supportsBackup = summary?.supportsBackup ?? (db.databaseType?.hasBackupCommand !== false);
+              const hasBackup = summary?.lastBackup != null;
+              const hasSchedule = summary?.schedule?.enabled === true;
+              const statusColor = !supportsBackup
+                ? 'bg-slate-500'
+                : backupSummaryLoading
+                ? 'bg-slate-600 animate-pulse'
+                : hasBackup
+                ? 'bg-green-500'
+                : hasSchedule
+                ? 'bg-yellow-500'
+                : 'bg-red-500';
+              const statusTitle = !supportsBackup
+                ? 'Backups not supported'
+                : backupSummaryLoading
+                ? 'Loading backup status...'
+                : hasBackup
+                ? 'Backed up'
+                : hasSchedule
+                ? 'Scheduled, no backup yet'
+                : 'No backup';
               return (
                 <Link
                   key={db.id}
@@ -811,10 +848,10 @@ export default function Dashboard() {
             })}
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Recent Activity & Database Backups - Side by side */}
-      {(recentActivity.length > 0 || databases.length > 0) && (
+      {(recentActivity.length > 0 || databases.length > 0 || backupSummaryLoading) && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
           {/* Recent Activity */}
           {recentActivity.length > 0 && (
@@ -860,7 +897,16 @@ export default function Dashboard() {
           )}
 
           {/* Database Backups */}
-          {databases.some((db) => db.databaseType?.hasBackupCommand !== false) && (
+          {backupSummaryLoading ? (
+            <div className="panel animate-pulse">
+              <div className="h-6 w-40 bg-slate-700 rounded mb-4"></div>
+              <div className="space-y-3">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="h-16 bg-slate-800 rounded-lg"></div>
+                ))}
+              </div>
+            </div>
+          ) : backupSummary.some((s) => s.supportsBackup) ? (
             <div className="panel">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold text-white">Database Backups</h2>
@@ -869,20 +915,20 @@ export default function Dashboard() {
                 </Link>
               </div>
               <div className="space-y-4">
-                {databases.filter((db) => db.databaseType?.hasBackupCommand !== false).map((db) => (
+                {backupSummary.filter((s) => s.supportsBackup).map((s) => (
                   <div
-                    key={db.id}
+                    key={s.databaseId}
                     className="p-3 bg-slate-800/50 rounded-lg border border-slate-700"
                   >
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm font-medium text-white">{db.name}</p>
+                        <p className="text-sm font-medium text-white">{s.name}</p>
                         <div className="flex items-center gap-4 mt-1">
                           <p className="text-xs text-slate-400">
                             Last backup:{' '}
-                            {db.lastBackup ? (
+                            {s.lastBackup ? (
                               <span className="text-slate-300">
-                                {formatDistanceToNow(new Date(db.lastBackup.completedAt || db.lastBackup.createdAt), {
+                                {formatDistanceToNow(new Date(s.lastBackup.completedAt || s.lastBackup.createdAt), {
                                   addSuffix: true,
                                 })}
                               </span>
@@ -890,27 +936,27 @@ export default function Dashboard() {
                               <span className="text-yellow-400">Never</span>
                             )}
                           </p>
-                          {db.schedule?.enabled && db.schedule.nextRunAt && (
+                          {s.schedule?.enabled && s.schedule.nextRunAt && (
                             <p className="text-xs text-slate-400">
                               Next:{' '}
                               <span className="text-slate-300">
-                                {formatDistanceToNow(new Date(db.schedule.nextRunAt), { addSuffix: true })}
+                                {formatDistanceToNow(new Date(s.schedule.nextRunAt), { addSuffix: true })}
                               </span>
                             </p>
                           )}
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {!db.schedule?.enabled && (
+                        {!s.schedule?.enabled && (
                           <Link
-                            to={`/databases/${db.id}`}
+                            to={`/databases/${s.databaseId}`}
                             className="text-xs text-yellow-400 hover:text-yellow-300"
                           >
                             Configure schedule
                           </Link>
                         )}
                         <Link
-                          to={`/databases/${db.id}`}
+                          to={`/databases/${s.databaseId}`}
                           className="btn btn-sm btn-secondary"
                         >
                           Backup Now
@@ -921,7 +967,7 @@ export default function Dashboard() {
                 ))}
               </div>
             </div>
-          )}
+          ) : null}
         </div>
       )}
 

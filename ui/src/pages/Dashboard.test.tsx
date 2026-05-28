@@ -76,6 +76,13 @@ vi.mock('../lib/api', async () => {
     getEnvironmentMetricsSummary: vi.fn().mockResolvedValue({ servers: [] }),
     getAuditLogs: vi.fn().mockResolvedValue({ logs: [], total: 0 }),
     listDatabases: vi.fn().mockResolvedValue({ databases: [], total: 0 }),
+    // Batched endpoint replacing the per-database fan-out
+    // (listDatabaseBackups + getBackupSchedule). Dashboard no longer calls
+    // those two from this page — see the "no per-database fan-out" assertion
+    // below.
+    getDatabaseBackupSummary: vi.fn().mockResolvedValue({ databases: [] }),
+    // Still mocked because they remain exports of `../lib/api`. The assertion
+    // below verifies Dashboard never invokes them.
     listDatabaseBackups: vi.fn().mockResolvedValue({ backups: [] }),
     getBackupSchedule: vi.fn().mockResolvedValue({ schedule: null }),
     deployService: vi.fn(),
@@ -87,6 +94,10 @@ const Dashboard = (await import('./Dashboard')).default;
 
 describe('Dashboard', () => {
   beforeEach(() => {
+    // Reset call counts between tests so per-test mock assertions
+    // (toHaveBeenCalledTimes / toHaveBeenCalledWith) don't accumulate. The
+    // default mocks defined in vi.mock above are preserved by clearAllMocks.
+    vi.clearAllMocks();
     useAppStore.setState({
       selectedEnvironment: {
         id: 'env-1',
@@ -302,5 +313,158 @@ describe('Dashboard', () => {
     expect(
       within(missingRow).getByText(/lost-worker on compute-host: container not found/)
     ).toBeInTheDocument();
+  });
+
+  // ==================== Lazy backup summary (issue #172 perf fix) ====================
+  //
+  // The Dashboard previously fanned out one `listDatabaseBackups` +
+  // `getBackupSchedule` call per database from inside `fetchData`. That's been
+  // replaced by a single batched `getDatabaseBackupSummary(envId)` call, and
+  // each card now loads independently (per-section state + skeletons).
+  describe('lazy backup summary', () => {
+    it('calls getDatabaseBackupSummary exactly once on mount with the env id', async () => {
+      const api = await import('../lib/api');
+      renderWithProviders(<Dashboard />);
+
+      // Wait for the effect to have run — every section fetch fires inside
+      // the same useEffect so any data-bound assertion is a safe gate.
+      await waitFor(() => {
+        expect(vi.mocked(api.getDatabaseBackupSummary)).toHaveBeenCalled();
+      });
+
+      expect(vi.mocked(api.getDatabaseBackupSummary)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(api.getDatabaseBackupSummary)).toHaveBeenCalledWith('env-1');
+    });
+
+    it('does not fan out per-database listDatabaseBackups / getBackupSchedule from the Dashboard', async () => {
+      const api = await import('../lib/api');
+      // Seed a couple of databases — the old fan-out would have fired one
+      // listDatabaseBackups + one getBackupSchedule per row. The new path
+      // delegates entirely to getDatabaseBackupSummary.
+      vi.mocked(api.listDatabases).mockResolvedValueOnce({
+        databases: [
+          {
+            id: 'db-1',
+            name: 'primary',
+            type: 'postgres',
+            databaseType: { id: 'dt-1', name: 'postgres', displayName: 'PostgreSQL', hasBackupCommand: true },
+          },
+          {
+            id: 'db-2',
+            name: 'cache',
+            type: 'redis',
+            databaseType: { id: 'dt-2', name: 'redis', displayName: 'Redis', hasBackupCommand: false },
+          },
+        ],
+        total: 2,
+      } as Awaited<ReturnType<typeof api.listDatabases>>);
+
+      renderWithProviders(<Dashboard />);
+
+      await waitFor(() => {
+        expect(vi.mocked(api.getDatabaseBackupSummary)).toHaveBeenCalled();
+      });
+
+      // Give any (hypothetical) downstream per-db effects a tick to fire,
+      // then assert they never did. Using a microtask boundary keeps the test
+      // fast while still letting a stray promise resolve.
+      await Promise.resolve();
+      expect(vi.mocked(api.listDatabaseBackups)).not.toHaveBeenCalled();
+      expect(vi.mocked(api.getBackupSchedule)).not.toHaveBeenCalled();
+    });
+
+    it('renders the Topology section synchronously (skeleton) before data resolves', () => {
+      // Mock topology was registered above as a div with data-testid
+      // "topology-diagram", but the placeholder skeleton sits in the same
+      // slot until serversLoading || servicesLoading || databasesLoading flips
+      // false. The placeholder uses animate-pulse — assert it's present in
+      // the *synchronous* return of render(), without awaiting anything.
+      const { container } = renderWithProviders(<Dashboard />);
+
+      // The topology section is wrapped in a `panel` with `animate-pulse`
+      // while loading. This is the most reliable always-rendered chrome
+      // element while data is still in flight.
+      const pulsing = container.querySelectorAll('.animate-pulse');
+      expect(pulsing.length).toBeGreaterThan(0);
+
+      // Topology diagram itself must NOT yet be visible — the data is gated.
+      expect(screen.queryByTestId('topology-diagram')).not.toBeInTheDocument();
+    });
+
+    it('shows backup info from the batched response once it resolves', async () => {
+      const api = await import('../lib/api');
+      vi.mocked(api.listDatabases).mockResolvedValueOnce({
+        databases: [
+          {
+            id: 'db-1',
+            name: 'primary',
+            type: 'postgres',
+            databaseType: { id: 'dt-1', name: 'postgres', displayName: 'PostgreSQL', hasBackupCommand: true },
+          },
+        ],
+        total: 1,
+      } as Awaited<ReturnType<typeof api.listDatabases>>);
+      vi.mocked(api.getDatabaseBackupSummary).mockResolvedValueOnce({
+        databases: [
+          {
+            databaseId: 'db-1',
+            name: 'primary',
+            supportsBackup: true,
+            lastBackup: {
+              id: 'bk-1',
+              completedAt: new Date('2024-06-01T10:00:00Z').toISOString(),
+              createdAt: new Date('2024-06-01T09:55:00Z').toISOString(),
+              status: 'completed',
+            },
+            schedule: { enabled: true, nextRunAt: new Date('2030-12-31T10:00:00Z').toISOString() },
+          },
+        ],
+      });
+
+      renderWithProviders(<Dashboard />);
+
+      // The "Database Backups" card title only appears once the summary has
+      // resolved AND it reports at least one supportsBackup row.
+      await waitFor(() => {
+        expect(screen.getByText('Database Backups')).toBeInTheDocument();
+      });
+
+      // The database name appears in the card body.
+      expect(screen.getAllByText('primary').length).toBeGreaterThan(0);
+    });
+
+    it('renders the backup card skeleton while getDatabaseBackupSummary is pending', async () => {
+      const api = await import('../lib/api');
+      // Keep getDatabaseBackupSummary unresolved so we can observe the
+      // skeleton without it being swapped out. The other fetches resolve
+      // normally — proving the cards transition independently.
+      let resolveBackup: (val: { databases: never[] }) => void;
+      vi.mocked(api.getDatabaseBackupSummary).mockReturnValueOnce(
+        new Promise((res) => {
+          resolveBackup = res;
+        }) as ReturnType<typeof api.getDatabaseBackupSummary>
+      );
+
+      const { container } = renderWithProviders(<Dashboard />);
+
+      // Other sections resolve and we observe their data — e.g. the api
+      // service row from the default listServices mock.
+      await waitFor(() => {
+        expect(screen.getByText('api')).toBeInTheDocument();
+      });
+
+      // While the backup fetch is still pending, an animate-pulse skeleton
+      // must still be in the DOM (the backup card placeholder).
+      const pulsing = container.querySelectorAll('.animate-pulse');
+      expect(pulsing.length).toBeGreaterThan(0);
+      // "Database Backups" heading must NOT be visible yet — that string is
+      // gated on backupSummaryLoading === false.
+      expect(screen.queryByText('Database Backups')).not.toBeInTheDocument();
+
+      // Resolve and let it land; the skeleton flips to "no supportsBackup"
+      // (empty list) which collapses the card entirely — that's fine, the
+      // assertion above already proved the loading branch rendered.
+      resolveBackup!({ databases: [] });
+    });
   });
 });

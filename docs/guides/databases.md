@@ -192,6 +192,42 @@ Authorization: Bearer <token>
 
 The backup runs asynchronously. Monitor progress on the database detail page or via `GET /api/backups/:id`.
 
+### Backup Summary
+
+For dashboard-style views that need the latest completed backup and schedule state for every database in an environment in a single round-trip, use the batched summary endpoint instead of fanning out per-database `GET /api/databases/:id/backups` + `GET /api/databases/:id/schedule` calls.
+
+**API:**
+```http
+GET /api/environments/:envId/databases/backup-summary
+Authorization: Bearer <token>
+```
+
+**Response:**
+```json
+{
+  "databases": [
+    {
+      "databaseId": "db123",
+      "name": "Production API DB",
+      "supportsBackup": true,
+      "lastBackup": {
+        "id": "bkp456",
+        "completedAt": "2026-05-28T02:00:31.000Z",
+        "createdAt": "2026-05-28T02:00:00.000Z",
+        "status": "completed"
+      },
+      "schedule": { "enabled": true, "nextRunAt": "2026-05-29T02:00:00.000Z" }
+    }
+  ]
+}
+```
+
+- `supportsBackup` is `false` for database types whose plugin does not define a `backupCommand`.
+- `lastBackup` is the most recent `status: "completed"` backup (`null` if none has ever completed).
+- `schedule` is `null` when no schedule has been configured for the database.
+
+The endpoint is read-only and requires any authenticated user.
+
 ### Backup Storage
 
 Backups can be stored locally on the server or uploaded to S3-compatible object storage.
