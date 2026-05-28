@@ -48,6 +48,8 @@ npm install
 cd ui && npm install && cd ..
 ```
 
+The repo ships `.npmrc` files that disable npm lifecycle scripts (`ignore-scripts=true`) and enforce a one-day release-age cooldown as supply-chain defenses. If a dependency needs a native rebuild after install, run `npm rebuild <pkg> --ignore-scripts=false` (notably `npm rebuild better-sqlite3 --ignore-scripts=false` for the backend — `.npmrc` also gates `npm rebuild`, so the flag is required). See [docs/development/supply-chain.md](docs/development/supply-chain.md) for the full rationale and escape hatches.
+
 ### Configure Environment
 
 Create a `.env` file in the project root:

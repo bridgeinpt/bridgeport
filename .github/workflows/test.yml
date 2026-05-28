@@ -34,7 +34,14 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      # setup-node@v6 ships npm 10, which silently ignores `.npmrc`'s
+      # `min-release-age` key (added in npm 11.10). Install the modern npm
+      # globally so subsequent `npm ci` honours the supply-chain cooldown.
+      - run: npm install -g npm@latest
       - run: npm ci
+      # .npmrc sets ignore-scripts=true (which also gates `npm rebuild`),
+      # so force scripts on here so the native binding actually gets built.
+      - run: npm rebuild better-sqlite3 --ignore-scripts=false
       - run: npx prisma generate
       - run: npx vitest run --config config/vitest.unit.config.ts
 
@@ -48,6 +55,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      - run: npm install -g npm@latest
       - run: cd ui && npm ci
       - run: cd ui && npx vitest run 'src/lib/'
 
@@ -75,7 +83,9 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      - run: npm install -g npm@latest
       - run: npm ci
+      - run: npm rebuild better-sqlite3 --ignore-scripts=false
       - run: npx prisma generate
       - run: npx vitest run --config config/vitest.config.ts --reporter=github-actions
         env:
@@ -93,6 +103,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      - run: npm install -g npm@latest
       - run: cd ui && npm ci
       - run: cd ui && npx vitest run --coverage --reporter=github-actions
       - uses: codecov/codecov-action@v6
@@ -111,7 +122,9 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      - run: npm install -g npm@latest
       - run: npm ci
+      - run: npm rebuild better-sqlite3 --ignore-scripts=false
       - run: npx vitest run --config config/vitest.config.ts tests/migrations/
 
   # ── Tier 3: System Tests (nightly) ──────────────────────
@@ -129,7 +142,9 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: '1.25'
+      - run: npm install -g npm@latest
       - run: npm ci
+      - run: npm rebuild better-sqlite3 --ignore-scripts=false
       - run: npx prisma generate
       - run: npx vitest run --config config/vitest.unit.config.ts
       - run: npx vitest run --config config/vitest.config.ts
@@ -151,7 +166,10 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      - run: npm install -g npm@latest
       - run: npm ci
+      # `tsc` and Vite don't load the native better-sqlite3 binding, so no
+      # rebuild needed here — saves ~10s per build.
       - run: npx prisma generate
       - run: npm run build
       - run: cd ui && npm ci && npm run build
@@ -167,7 +185,9 @@ jobs:
         with:
           node-version: 20
           cache: npm
+      - run: npm install -g npm@latest
       - run: npm ci
+      # Typecheck doesn't load the native better-sqlite3 binding.
       - run: npx prisma generate
       - run: npx tsc --noEmit
       - run: cd ui && npm ci && npx tsc --noEmit

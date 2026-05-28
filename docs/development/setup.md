@@ -21,7 +21,7 @@ Get BRIDGEPORT running locally for development in under 10 minutes.
 | Tool | Version | Purpose | Install |
 |------|---------|---------|---------|
 | **Node.js** | 20+ | Backend and frontend | [nodejs.org](https://nodejs.org) |
-| **npm** | 10+ | Package management | Comes with Node.js |
+| **npm** | 11.10+ | Package management ([why](supply-chain.md#requirements)) | `npm install -g npm@latest` |
 | **Go** | 1.22+ | Agent and CLI (optional) | [go.dev](https://go.dev/dl/) |
 | **SQLite3** | 3.x | Database (dev/prod) | Usually pre-installed on macOS/Linux |
 
@@ -42,6 +42,10 @@ npm install
 
 # Install frontend dependencies
 cd ui && npm install && cd ..
+
+# .npmrc sets ignore-scripts=true; pass --ignore-scripts=false on rebuild so
+# the native SQLite binding actually gets built.
+npm rebuild better-sqlite3 --ignore-scripts=false
 ```
 
 Expected output (last few lines of `npm install`):
@@ -49,6 +53,9 @@ Expected output (last few lines of `npm install`):
 ```
 added 312 packages in 8s
 ```
+
+> [!NOTE]
+> The `.npmrc` files in `/` and `/ui` set `ignore-scripts=true` and `min-release-age=1` as supply-chain defenses. If a dependency needs a native rebuild (notably `better-sqlite3`), run `npm rebuild better-sqlite3 --ignore-scripts=false` after install — the `.npmrc` setting also gates `npm rebuild`, so the flag is required. See [supply-chain.md](supply-chain.md) for details and escape hatches.
 
 ---
 
