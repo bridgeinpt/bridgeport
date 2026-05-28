@@ -140,6 +140,31 @@
       "path": "/api/notifications?limit=50",
       "maxP99Ms": 200,
       "minRps": 100
+    },
+    "connections-list": {
+      "path": "/api/connections?environmentId={envId}",
+      "maxP99Ms": 150,
+      "minRps": 200
+    },
+    "diagram-layout": {
+      "path": "/api/diagram-layout?environmentId={envId}",
+      "maxP99Ms": 100,
+      "minRps": 300
+    },
+    "backup-summary": {
+      "path": "/api/environments/{envId}/databases/backup-summary",
+      "maxP99Ms": 250,
+      "minRps": 100
+    },
+    "external-entities-list": {
+      "path": "/api/environments/{envId}/external-entities",
+      "maxP99Ms": 150,
+      "minRps": 200
+    },
+    "server-clusters-list": {
+      "path": "/api/environments/{envId}/server-clusters",
+      "maxP99Ms": 150,
+      "minRps": 200
     }
   },
   "load": {

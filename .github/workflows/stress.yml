@@ -54,11 +54,11 @@ env:
   SCHEDULER_ENABLED: 'false'
 
 jobs:
-  # The 19 scenarios are split across two parallel shards so end-to-end
-  # workflow time is bound by the slower shard (~half the sequential run).
-  # Each shard boots its own app + DB and seeds independently — they share
-  # nothing at runtime. The aggregator below downloads both reports, merges
-  # them, and is the one place that writes the step summary + PR comment.
+  # Scenarios are split across two parallel shards so end-to-end workflow
+  # time is bound by the slower shard (~half the sequential run). Each shard
+  # boots its own app + DB and seeds independently — they share nothing at
+  # runtime. The aggregator below downloads both reports, merges them, and
+  # is the one place that writes the step summary + PR comment.
   stress:
     name: Stress (${{ matrix.shard }})
     runs-on: ubuntu-latest
@@ -69,15 +69,15 @@ jobs:
         include:
           # Per-scenario wall time is ~10s of autocannon regardless of
           # weight (duration is fixed in thresholds.json), so balance by
-          # count, not by per-scenario expense. 14 + 14 keeps both shards
-          # at ~3m40s end-to-end.
+          # count, not by per-scenario expense. Keep the two shards within
+          # a scenario or two of each other.
           - shard: light
             # Cheap reads: auth/scope, single-entity detail, fast lists.
-            scenarios: 'auth-me,notifications-unread-count,environments-list,environment-detail,servers-list,service-detail,vars-list,audit-logs,health-logs,services-per-server,service-deployments-history,users-list,notifications-list,config-fragments-list'
+            scenarios: 'auth-me,notifications-unread-count,environments-list,environment-detail,servers-list,service-detail,vars-list,audit-logs,health-logs,services-per-server,service-deployments-history,users-list,notifications-list,config-fragments-list,connections-list,diagram-layout,external-entities-list,server-clusters-list'
           - shard: heavy
             # Joins, aggregations, history matrices, and the deeper list
             # endpoints (services, container-images, monitoring/health).
-            scenarios: 'services-list,container-images-list,monitoring-overview,agents-status,health-status,metrics-summary,server-metrics-history,service-metrics-history,database-metrics-history,secrets-list,databases-list,database-monitoring-summary,config-files-list,dependency-graph'
+            scenarios: 'services-list,container-images-list,monitoring-overview,agents-status,health-status,metrics-summary,server-metrics-history,service-metrics-history,database-metrics-history,secrets-list,databases-list,database-monitoring-summary,config-files-list,dependency-graph,backup-summary'
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
