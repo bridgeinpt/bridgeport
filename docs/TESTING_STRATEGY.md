@@ -1321,7 +1321,7 @@ jobs:
           cache: npm
       - run: npm ci
       # .npmrc sets ignore-scripts=true; rebuild native deps explicitly.
-      - run: npm rebuild better-sqlite3
+      - run: npm rebuild better-sqlite3 --ignore-scripts=false
       - run: npx prisma generate
       - run: npx vitest run --project backend --testPathPattern='src/lib/.*\\.test\\.ts$' --reporter=github-actions
 
@@ -1363,7 +1363,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm rebuild better-sqlite3
+      - run: npm rebuild better-sqlite3 --ignore-scripts=false
       - run: npx prisma generate
       - run: npx vitest run --project backend --coverage --reporter=github-actions
         env:
@@ -1407,7 +1407,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm rebuild better-sqlite3
+      - run: npm rebuild better-sqlite3 --ignore-scripts=false
       - run: npx vitest run tests/migrations/
 
   # ── Tier 3: System Tests (nightly) ──────────────────────
@@ -1426,7 +1426,7 @@ jobs:
         with:
           go-version: '1.22'
       - run: npm ci
-      - run: npm rebuild better-sqlite3
+      - run: npm rebuild better-sqlite3 --ignore-scripts=false
       - run: npx prisma generate
       - run: npx vitest run --project system
         env:

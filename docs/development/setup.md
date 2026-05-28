@@ -43,8 +43,9 @@ npm install
 # Install frontend dependencies
 cd ui && npm install && cd ..
 
-# .npmrc sets ignore-scripts=true; rebuild the native SQLite binding explicitly.
-npm rebuild better-sqlite3
+# .npmrc sets ignore-scripts=true; pass --ignore-scripts=false on rebuild so
+# the native SQLite binding actually gets built.
+npm rebuild better-sqlite3 --ignore-scripts=false
 ```
 
 Expected output (last few lines of `npm install`):
@@ -54,7 +55,7 @@ added 312 packages in 8s
 ```
 
 > [!NOTE]
-> The `.npmrc` files in `/` and `/ui` set `ignore-scripts=true` and `min-release-age=1` as supply-chain defenses. If a dependency needs a native rebuild (notably `better-sqlite3`), run `npm rebuild better-sqlite3` after install. See [supply-chain.md](supply-chain.md) for details and escape hatches.
+> The `.npmrc` files in `/` and `/ui` set `ignore-scripts=true` and `min-release-age=1` as supply-chain defenses. If a dependency needs a native rebuild (notably `better-sqlite3`), run `npm rebuild better-sqlite3 --ignore-scripts=false` after install — the `.npmrc` setting also gates `npm rebuild`, so the flag is required. See [supply-chain.md](supply-chain.md) for details and escape hatches.
 
 ---
 

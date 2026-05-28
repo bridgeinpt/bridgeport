@@ -39,8 +39,9 @@ jobs:
       # globally so subsequent `npm ci` honours the supply-chain cooldown.
       - run: npm install -g npm@latest
       - run: npm ci
-      # .npmrc sets ignore-scripts=true; rebuild native deps explicitly.
-      - run: npm rebuild better-sqlite3
+      # .npmrc sets ignore-scripts=true (which also gates `npm rebuild`),
+      # so force scripts on here so the native binding actually gets built.
+      - run: npm rebuild better-sqlite3 --ignore-scripts=false
       - run: npx prisma generate
       - run: npx vitest run --config config/vitest.unit.config.ts
 
@@ -84,7 +85,7 @@ jobs:
           cache: npm
       - run: npm install -g npm@latest
       - run: npm ci
-      - run: npm rebuild better-sqlite3
+      - run: npm rebuild better-sqlite3 --ignore-scripts=false
       - run: npx prisma generate
       - run: npx vitest run --config config/vitest.config.ts --reporter=github-actions
         env:
@@ -123,7 +124,7 @@ jobs:
           cache: npm
       - run: npm install -g npm@latest
       - run: npm ci
-      - run: npm rebuild better-sqlite3
+      - run: npm rebuild better-sqlite3 --ignore-scripts=false
       - run: npx vitest run --config config/vitest.config.ts tests/migrations/
 
   # ── Tier 3: System Tests (nightly) ──────────────────────
@@ -143,7 +144,7 @@ jobs:
           go-version: '1.25'
       - run: npm install -g npm@latest
       - run: npm ci
-      - run: npm rebuild better-sqlite3
+      - run: npm rebuild better-sqlite3 --ignore-scripts=false
       - run: npx prisma generate
       - run: npx vitest run --config config/vitest.unit.config.ts
       - run: npx vitest run --config config/vitest.config.ts

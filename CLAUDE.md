@@ -146,8 +146,9 @@ Backend in `src/` (lib, routes, services, plugins), frontend in `ui/`, Go agent 
 # Install dependencies
 npm install
 cd ui && npm install && cd ..
-# .npmrc disables install scripts; rebuild native deps explicitly. See docs/development/supply-chain.md.
-npm rebuild better-sqlite3
+# .npmrc disables install scripts; pass --ignore-scripts=false on rebuild so the
+# native binding actually gets built. See docs/development/supply-chain.md.
+npm rebuild better-sqlite3 --ignore-scripts=false
 
 # Generate Prisma client (required after schema changes)
 npm run db:generate

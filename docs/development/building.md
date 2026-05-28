@@ -127,9 +127,10 @@ The backend is compiled from TypeScript to JavaScript using `tsc`:
 # Install dependencies
 npm install
 
-# .npmrc sets ignore-scripts=true; rebuild native deps explicitly.
+# .npmrc sets ignore-scripts=true (which also gates `npm rebuild`); pass
+# --ignore-scripts=false so the native SQLite binding gets built.
 # See docs/development/supply-chain.md.
-npm rebuild better-sqlite3
+npm rebuild better-sqlite3 --ignore-scripts=false
 
 # Generate Prisma client (required before build)
 npm run db:generate
