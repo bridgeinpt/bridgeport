@@ -238,6 +238,8 @@ Authorization: Bearer <token>
 - `containerAction` is `"start"` (no container running), `"cycle"` (running, would be recreated by `compose up`), or `"no-op"`.
 - Secret VALUES are replaced with `***` in both `composeContent` and `env`. `${KEY}` references in the template stay visible in the source compose template's substitution path; once resolved, the substituted value is redacted.
 - The endpoint still writes an audit-log entry with `details.dryRun = true` so operators can see who probed which deployment.
+- The request body's `imageTag` (if provided) is honored — the preview reflects the tag that the real deploy would have used. Plan dry-runs use the per-step `targetTag` the same way.
+- When the real deploy would have failed at artifact generation (missing secrets, template errors in a config file), the response carries `"wouldSucceed": false` and an `"error"` string describing the blocker. The preview is still returned (so operators can see what is broken) but callers should treat this as a hard block before running the real path.
 
 For the service-wide `POST /api/services/:id/sync-files` endpoint, the dry-run response shape is:
 

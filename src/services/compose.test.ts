@@ -19,16 +19,19 @@ vi.mock('../lib/crypto.js', () => ({
 
 vi.mock('./secrets.js', () => ({
   resolveSecretPlaceholders: vi.fn().mockResolvedValue({ content: 'resolved', missing: [], templateErrors: [] }),
+  getSecretsForEnv: vi.fn().mockResolvedValue({}),
 }));
 
 import YAML from 'yaml';
 import { prisma } from '../lib/db.js';
 import {
   generateDeploymentArtifacts,
+  previewDryRunArtifacts,
   saveDeploymentArtifacts,
   getDeploymentArtifacts,
   serializeExposedPorts,
 } from './compose.js';
+import { resolveSecretPlaceholders } from './secrets.js';
 
 const mockPrisma = vi.mocked(prisma);
 
@@ -460,6 +463,132 @@ describe('compose', () => {
     it('returns empty array when no artifacts exist', async () => {
       mockPrisma.deploymentArtifact.findMany.mockResolvedValue([]);
       expect(await getDeploymentArtifacts('dep-1')).toEqual([]);
+    });
+  });
+
+  describe('template variable substitution', () => {
+    // Regression: the previous regex-based substitution
+    // (`replace(regex, value)`) interpreted `$&`, `$$`, `$1`, etc. in `value`
+    // as backreferences. With a function replacer, `$`-sequences in the
+    // substituted value are inserted literally.
+    it('substitutes template values containing `$&` literally without regex backreference interpretation', async () => {
+      mockPrisma.serviceDeployment.findUniqueOrThrow.mockResolvedValue(
+        buildDeployment({
+          // ContainerName carries the troublesome `$&` sequence — if regex
+          // backreferences were honored, the output would contain the matched
+          // `${CONTAINER_NAME}` token rather than the literal `$&`.
+          containerName: 'foo$&bar',
+          composeTemplate: 'services:\n  web:\n    container_name: ${CONTAINER_NAME}\n',
+        }) as any
+      );
+
+      const artifacts = await generateDeploymentArtifacts('dep-1');
+      expect(artifacts.compose.content).toContain('container_name: foo$&bar');
+      expect(artifacts.compose.content).not.toContain('${CONTAINER_NAME}');
+    });
+  });
+
+  describe('previewDryRunArtifacts', () => {
+    it('honors options.imageTag override for IMAGE_TAG / FULL_IMAGE in template substitution', async () => {
+      // The Service template carries `imageTag: 'v1.0'`, but the dry-run is
+      // invoked with `imageTag: 'v2.0'`. The substituted template MUST use
+      // the override — otherwise plan dry-runs would preview the current
+      // Service tag, not `step.targetTag`.
+      mockPrisma.serviceDeployment.findUniqueOrThrow.mockResolvedValue(
+        buildDeployment({
+          imageTag: 'v1.0',
+          imageName: 'registry.com/web-app',
+          composeTemplate: 'services:\n  web:\n    image: ${FULL_IMAGE}\n    labels:\n      tag: ${IMAGE_TAG}\n',
+        }) as any
+      );
+
+      const preview = await previewDryRunArtifacts('dep-1', { imageTag: 'v2.0' });
+
+      expect(preview.composeContent).toContain('registry.com/web-app:v2.0');
+      expect(preview.composeContent).toContain('tag: v2.0');
+      expect(preview.composeContent).not.toContain('v1.0');
+    });
+
+    it('honors options.imageTag override for the default-compose image field', async () => {
+      mockPrisma.serviceDeployment.findUniqueOrThrow.mockResolvedValue(
+        buildDeployment({ imageTag: 'v1.0', imageName: 'registry.com/web-app' }) as any
+      );
+
+      const preview = await previewDryRunArtifacts('dep-1', { imageTag: 'v2.0' });
+      const parsed = YAML.parse(preview.composeContent);
+      expect(parsed.services['web-app'].image).toBe('registry.com/web-app:v2.0');
+    });
+
+    it('falls back to service.imageTag when no override is provided', async () => {
+      mockPrisma.serviceDeployment.findUniqueOrThrow.mockResolvedValue(
+        buildDeployment({ imageTag: 'v3.0', imageName: 'registry.com/web-app' }) as any
+      );
+
+      const preview = await previewDryRunArtifacts('dep-1');
+      const parsed = YAML.parse(preview.composeContent);
+      expect(parsed.services['web-app'].image).toBe('registry.com/web-app:v3.0');
+    });
+
+    it('sets wouldFail when a config file has missing secrets (live path would refuse)', async () => {
+      vi.mocked(resolveSecretPlaceholders).mockResolvedValueOnce({
+        content: 'token=${MISSING}',
+        missing: ['MISSING'],
+        templateErrors: [],
+      });
+      mockPrisma.serviceDeployment.findUniqueOrThrow.mockResolvedValue(
+        buildDeployment({
+          files: [
+            {
+              configFileId: 'cf-1',
+              serviceDeploymentId: null,
+              targetPath: '/etc/app/config',
+              configFile: { filename: 'config', content: 'token=${MISSING}', isBinary: false },
+            },
+          ],
+        }) as any
+      );
+
+      const preview = await previewDryRunArtifacts('dep-1');
+
+      expect(preview.wouldFail).toBe(true);
+      expect(preview.failureReason).toMatch(/MISSING/);
+      // Warnings keep the human-readable form for back-compat surfaces.
+      expect(preview.warnings.some((w) => /MISSING/.test(w))).toBe(true);
+    });
+
+    it('sets wouldFail when a config file has template errors (live path would throw)', async () => {
+      vi.mocked(resolveSecretPlaceholders).mockResolvedValueOnce({
+        content: 'partial',
+        missing: [],
+        templateErrors: ['malformed range'],
+      });
+      mockPrisma.serviceDeployment.findUniqueOrThrow.mockResolvedValue(
+        buildDeployment({
+          files: [
+            {
+              configFileId: 'cf-1',
+              serviceDeploymentId: null,
+              targetPath: '/etc/app/config',
+              configFile: { filename: 'config', content: '{{range bad}}', isBinary: false },
+            },
+          ],
+        }) as any
+      );
+
+      const preview = await previewDryRunArtifacts('dep-1');
+
+      expect(preview.wouldFail).toBe(true);
+      expect(preview.failureReason).toMatch(/template errors/i);
+    });
+
+    it('does NOT set wouldFail on the happy path (no missing secrets, no template errors)', async () => {
+      mockPrisma.serviceDeployment.findUniqueOrThrow.mockResolvedValue(
+        buildDeployment({ imageTag: 'v1.0' }) as any
+      );
+
+      const preview = await previewDryRunArtifacts('dep-1');
+      expect(preview.wouldFail).toBeUndefined();
+      expect(preview.failureReason).toBeUndefined();
     });
   });
 });

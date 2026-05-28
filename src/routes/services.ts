@@ -735,7 +735,10 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
       // can see who probed which deployment.
       if (isDryRun(request)) {
         try {
-          const report = await deployServiceDryRun(depId);
+          // Honor body.imageTag the same way the real path does — otherwise a
+          // caller previewing "deploy v2.0" would still see the current
+          // template tag in the rendered compose.
+          const report = await deployServiceDryRun(depId, { imageTag: body.imageTag });
           await logAudit({
             action: 'deploy',
             resourceType: 'service_deployment',

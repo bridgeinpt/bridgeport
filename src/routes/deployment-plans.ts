@@ -109,6 +109,14 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
       const plan = await findOrNotFound(prisma.deploymentPlan.findUnique({ where: { id } }), 'Deployment plan', reply);
       if (!plan) return;
 
+      // Gate BOTH dry-run and real execute on PENDING status. Previewing a
+      // RUNNING/COMPLETED/FAILED plan returns a stale snapshot that no longer
+      // matches anything the system would actually do — operators reading
+      // the report would get a misleading picture.
+      if (plan.status !== PLAN_STATUS.PENDING) {
+        return reply.code(400).send({ error: `Cannot execute plan with status: ${plan.status}` });
+      }
+
       // Dry-run: walk the plan's deploy steps synchronously, return the
       // per-step preview report. Plan status stays PENDING — the real execute
       // is still a valid follow-up. Step rows are not touched.
@@ -140,10 +148,6 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
           });
           return reply.code(500).send({ error: message });
         }
-      }
-
-      if (plan.status !== PLAN_STATUS.PENDING) {
-        return reply.code(400).send({ error: `Cannot execute plan with status: ${plan.status}` });
       }
 
       await logAudit({

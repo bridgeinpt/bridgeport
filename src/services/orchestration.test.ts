@@ -907,10 +907,42 @@ describe('executePlanDryRun (issue #128)', () => {
       serviceName: 'worker',
       serviceDeploymentId: 'sd-b',
     });
-    // The per-deployment dry-run was called once per deploy step.
+    // The per-deployment dry-run was called once per deploy step, and the
+    // step.targetTag is passed through so each preview reflects the planned
+    // tag (not the current Service tag).
     expect(mockDeployServiceDryRun).toHaveBeenCalledTimes(2);
-    expect(mockDeployServiceDryRun).toHaveBeenNthCalledWith(1, 'sd-a');
-    expect(mockDeployServiceDryRun).toHaveBeenNthCalledWith(2, 'sd-b');
+    expect(mockDeployServiceDryRun).toHaveBeenNthCalledWith(1, 'sd-a', { imageTag: undefined });
+    expect(mockDeployServiceDryRun).toHaveBeenNthCalledWith(2, 'sd-b', { imageTag: undefined });
+  });
+
+  it('passes step.targetTag through to deployServiceDryRun so the preview matches what executePlan would deploy', async () => {
+    // The live `executePlan` path passes `{ imageTag: step.targetTag }` into
+    // `deployService`. The dry-run must mirror that — without this, the
+    // preview would render the current Service.imageTag, NOT the tag the
+    // real run would deploy.
+    mockPrisma.deploymentPlan.findUniqueOrThrow.mockResolvedValue({
+      id: 'plan-1',
+      name: 'Deploy v2.0',
+      steps: [
+        {
+          id: 'step-1',
+          order: 0,
+          action: 'deploy',
+          targetTag: 'v2.0',
+          serviceDeployment: {
+            id: 'sd-1',
+            server: { name: 'srv-a' },
+            service: { name: 'web' },
+          },
+        },
+      ],
+    } as any);
+    mockDeployServiceDryRun.mockResolvedValue(makeDryRunReport({ serviceDeploymentId: 'sd-1', imageTag: 'v2.0' }));
+
+    const report = await executePlanDryRun('plan-1');
+
+    expect(mockDeployServiceDryRun).toHaveBeenCalledWith('sd-1', { imageTag: 'v2.0' });
+    expect(report.steps[0].imageTag).toBe('v2.0');
   });
 
   it('skips non-deploy steps (e.g. health_check) — only deploy actions get a dry-run report', async () => {

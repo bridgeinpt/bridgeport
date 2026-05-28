@@ -283,6 +283,8 @@ The plan is created and execution begins asynchronously. The response includes t
 
 `POST /api/deployment-plans/:id/execute?dryRun=true` (or `X-Dry-Run: true`) walks the same ordered deploy steps **synchronously** and returns a per-step preview report — no plan status transition, no step rows written, no SSH writes, no `docker pull`. Plan status stays `pending` so a real execute is still a valid follow-up.
 
+Like the real execute path, the dry-run requires the plan to be in `pending` status — previewing a `running`, `completed`, `failed`, or `cancelled` plan returns `400 Bad Request`. Each step's preview uses the plan's per-step `targetTag` (the tag the real run would deploy), not the current `Service.imageTag`.
+
 ```http
 POST /api/deployment-plans/:id/execute?dryRun=true
 Authorization: Bearer <token>
@@ -315,6 +317,8 @@ Authorization: Bearer <token>
 ```
 
 Health-check steps are not part of the preview (no container is actually deployed, so there's nothing to check). The endpoint writes an audit entry with `details.dryRun = true`.
+
+If any step would have failed at artifact generation (missing secrets or template errors in a config file), that step's entry includes `"wouldSucceed": false` and an `"error"` string with the reason. The preview is still produced so operators can see what is broken before running the real execute.
 
 ---
 

@@ -508,7 +508,13 @@ export async function executePlanDryRun(planId: string): Promise<PlanDryRunRepor
   const steps: PlanDryRunReport['steps'] = [];
   for (const step of plan.steps) {
     if (step.action !== 'deploy' || !step.serviceDeployment) continue;
-    const report = await deployServiceDryRun(step.serviceDeployment.id);
+    // Pass `step.targetTag` through so the preview matches what the live
+    // `executePlan` path would deploy (it passes `imageTag: step.targetTag`
+    // to `deployService`). Without this, the dry-run would render the
+    // service's CURRENT tag, not the planned target.
+    const report = await deployServiceDryRun(step.serviceDeployment.id, {
+      imageTag: step.targetTag ?? undefined,
+    });
     steps.push({
       ...report,
       stepOrder: step.order,

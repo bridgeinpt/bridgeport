@@ -432,14 +432,45 @@ export async function syncConfigFileToAttachedServicesDryRun(
           server.environmentId,
           configFile.content
         );
-        const renderedContent = redactSecretValues(rawContent.trimEnd(), secretValues);
         const localWarnings: string[] = [];
+        // Mirror the live path (`syncConfigFileToAttachedServices`) which
+        // treats template errors and missing secrets as hard failures
+        // (`success: false, error: '...'`). The dry-run keeps the warning
+        // for back-compat but ALSO surfaces a structured `error` so callers
+        // don't render a green diff for a sync that the live path would
+        // refuse to perform.
+        let hardError: string | null = null;
         if (templateErrors.length > 0) {
-          localWarnings.push(`Template errors: ${templateErrors.join('; ')}`);
+          const msg = `Template errors: ${templateErrors.join('; ')}`;
+          localWarnings.push(msg);
+          hardError = msg;
         }
         if (missing.length > 0) {
-          localWarnings.push(`Missing secrets: ${missing.join(', ')}`);
+          const msg = `Missing secrets: ${missing.join(', ')}`;
+          localWarnings.push(msg);
+          hardError = hardError ? `${hardError}; ${msg}` : msg;
         }
+
+        if (hardError) {
+          // Skip the SSH `cat` + diff computation: the live path wouldn't
+          // write to this target at all, so there's no meaningful diff to
+          // compute. The result row still carries `referencingServices` and
+          // the warnings so operators can see what's broken.
+          results.push({
+            serverName: server.name,
+            serviceName: p.serviceName,
+            configFileName: configFile.name,
+            hostPath: targetPath,
+            diff: '',
+            exists: false,
+            referencingServices,
+            warnings: [...warnings, ...localWarnings],
+            error: hardError,
+          });
+          continue;
+        }
+
+        const renderedContent = redactSecretValues(rawContent.trimEnd(), secretValues);
 
         // Read the current host file (best-effort). Use `cat` and check the
         // exit code so a missing file shows up as an empty `before`.
@@ -498,7 +529,7 @@ export async function syncConfigFileToAttachedServicesDryRun(
  * server (via their ServiceDeployment). Used by the dry-run sync preview so
  * callers see the blast radius of a single config-file change.
  */
-async function listReferencingServiceNames(configFileId: string, serverId: string): Promise<string[]> {
+export async function listReferencingServiceNames(configFileId: string, serverId: string): Promise<string[]> {
   const rows = await prisma.serviceFile.findMany({
     where: {
       configFileId,

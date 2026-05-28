@@ -222,7 +222,9 @@ export async function generateDeploymentArtifacts(
     });
 
     for (const [key, value] of Object.entries(vars)) {
-      composeContent = composeContent.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), value);
+      // Use a function replacer so `$&`, `$$`, `$1`, etc. in `value` are NOT
+      // interpreted as regex backreferences in the replacement string.
+      composeContent = composeContent.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), () => value);
     }
   } else {
     // Generate default compose structure
@@ -334,10 +336,32 @@ export interface DryRunArtifactsPreview {
   env: Record<string, string>;
   configFiles: Array<{ name: string; mountPath: string; content: string; isBinary: boolean }>;
   warnings: string[];
+  /**
+   * `true` when the real deploy would have thrown during artifact generation
+   * (template errors or missing secrets in a config file). The preview is
+   * still produced so callers can render the (partial) result, but they
+   * should surface this flag as a hard block instead of silently shipping a
+   * compose that the live path would have rejected.
+   */
+  wouldFail?: boolean;
+  /** Reason populated when `wouldFail === true`. */
+  failureReason?: string;
+}
+
+export interface PreviewDryRunArtifactsOptions {
+  /**
+   * Override the image tag used in the rendered compose (mirrors
+   * `DeployOptions.imageTag`). When unset, falls back to the Service template's
+   * own `imageTag`. Used by plan dry-runs so each step previews the tag the
+   * real `executePlan` would have used (`step.targetTag`), not the current
+   * template tag.
+   */
+  imageTag?: string;
 }
 
 export async function previewDryRunArtifacts(
-  serviceDeploymentId: string
+  serviceDeploymentId: string,
+  options: PreviewDryRunArtifactsOptions = {}
 ): Promise<DryRunArtifactsPreview> {
   const deployment = await prisma.serviceDeployment.findUniqueOrThrow({
     where: { id: serviceDeploymentId },
@@ -355,6 +379,16 @@ export async function previewDryRunArtifacts(
   const service = deployment.service;
   const environmentId = deployment.server.environmentId;
   const warnings: string[] = [];
+  // Track conditions that would make the real `generateDeploymentArtifacts`
+  // path throw. Reported back via wouldFail/failureReason so callers can
+  // mark the dry-run preview as a hard would-fail (rather than silently
+  // rendering an artifact that the live path would refuse).
+  const failureReasons: string[] = [];
+
+  // Resolve image tag override (mirrors DeployOptions.imageTag in the real
+  // path). Without this, plan dry-runs would preview the current Service tag
+  // instead of `step.targetTag`.
+  const imageTag = options.imageTag ?? service.imageTag;
 
   // Pull all secret VALUES once so we can redact them out of the rendered
   // compose YAML and env map. Secrets win over vars during resolution, so a
@@ -390,10 +424,19 @@ export async function previewDryRunArtifacts(
       sf.configFile.content
     );
     if (templateErrors.length > 0) {
-      warnings.push(`Config file "${sf.configFile.filename}" template errors: ${templateErrors.join('; ')}`);
+      const msg = `Config file "${sf.configFile.filename}" template errors: ${templateErrors.join('; ')}`;
+      warnings.push(msg);
+      // The live path throws on template errors — surface that structurally.
+      failureReasons.push(msg);
     }
     if (missing.length > 0) {
-      warnings.push(`Config file "${sf.configFile.filename}" missing secrets: ${missing.join(', ')}`);
+      const msg = `Config file "${sf.configFile.filename}" missing secrets: ${missing.join(', ')}`;
+      warnings.push(msg);
+      // The live config-file sync path treats missing secrets as a hard
+      // failure (`success: false, error: 'Missing secrets: ...'`), and the
+      // real artifact generation path would render the placeholder verbatim
+      // into the file — either way, callers should see this as a would-fail.
+      failureReasons.push(msg);
     }
     configFiles.push({
       name: sf.configFile.filename,
@@ -418,21 +461,22 @@ export async function previewDryRunArtifacts(
       SERVICE_NAME: service.name,
       CONTAINER_NAME: deployment.containerName,
       IMAGE_NAME: imageName,
-      IMAGE_TAG: service.imageTag,
-      FULL_IMAGE: `${imageName}:${service.imageTag}`,
+      IMAGE_TAG: imageTag,
+      FULL_IMAGE: `${imageName}:${imageTag}`,
     };
     configFiles.forEach((cf, i) => {
       vars[`CONFIG_FILE_${i}`] = cf.mountPath;
       vars[`CONFIG_FILE_${i}_NAME`] = cf.name;
     });
     for (const [key, value] of Object.entries(vars)) {
-      composeContent = composeContent.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), value);
+      // Function replacer avoids `$&`, `$$`, `$1` interpretation in `value`.
+      composeContent = composeContent.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), () => value);
     }
   } else {
     const composeConfig: ComposeConfig = {
       services: {
         [service.name]: {
-          image: `${imageName}:${service.imageTag}`,
+          image: `${imageName}:${imageTag}`,
           container_name: deployment.containerName,
           restart: 'unless-stopped',
         },
@@ -461,10 +505,14 @@ export async function previewDryRunArtifacts(
   // custom composeTemplate could embed secrets via variable substitution.)
   composeContent = redactSecretValues(composeContent, secretValues);
 
+  const wouldFail = failureReasons.length > 0;
   return {
     composeContent,
     env: redactedEnv,
     configFiles,
     warnings,
+    ...(wouldFail
+      ? { wouldFail: true, failureReason: failureReasons.join('; ') }
+      : {}),
   };
 }

@@ -241,6 +241,7 @@ Authorization: Bearer <token>
 - `exists` is `false` if the file does not yet exist on the host — `diff` then shows the full rendered content as additions.
 - Secret VALUES in the rendered content are replaced with `***`. `${KEY}` placeholders that resolve to a secret are substituted then redacted.
 - Binary files are not diffed; they report an empty diff with a warning.
+- When the live sync path would have refused this target (missing secrets, template errors), the response carries an `"error"` string and omits the diff. The live path returns `success: false, error: '...'` for the same conditions — the dry-run mirrors that so callers do not render a green preview for a sync that would be rejected.
 - The dry-run writes an audit-log entry with `details.dryRun = true`. The same flag works on `POST /api/services/:id/sync-files`.
 
 ### What Happens During Sync

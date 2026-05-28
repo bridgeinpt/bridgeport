@@ -11,6 +11,7 @@ import {
   syncConfigFileToAttachedServices,
   syncConfigFileToAttachedServicesDryRun,
   deriveSyncStatus,
+  listReferencingServiceNames,
 } from '../services/config-file-auto-resync.js';
 import { validateBody, validateUpdateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery } from '../lib/helpers.js';
 import { detectLanguage } from '../lib/config-file-language.js';
@@ -699,6 +700,20 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
             { serverType: sd.server.serverType }
           );
 
+          // Resolve referencingServices once per (configFile, server) — the
+          // inputs are invariant for this scope, so hoist the call out of the
+          // per-target loops and out of each failure branch. Without this we
+          // were either hardcoding `[service.name]` (wrong blast radius) or
+          // running the same query 3× per file.
+          const referencingByConfigFile = new Map<string, string[]>();
+          const getReferencing = async (configFileId: string): Promise<string[]> => {
+            const cached = referencingByConfigFile.get(configFileId);
+            if (cached) return cached;
+            const names = await listReferencingServiceNames(configFileId, sd.server.id);
+            referencingByConfigFile.set(configFileId, names);
+            return names;
+          };
+
           if (!client) {
             for (const sf of filesByConfig.values()) {
               results.push({
@@ -708,7 +723,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
                 hostPath: sf.targetPath,
                 diff: '',
                 exists: false,
-                referencingServices: [service.name],
+                referencingServices: await getReferencing(sf.configFile.id),
                 warnings: [clientError || 'Failed to create SSH client'],
               });
             }
@@ -719,6 +734,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
             await client.connect();
             for (const sf of filesByConfig.values()) {
               const warnings: string[] = [];
+              const referencingServices = await getReferencing(sf.configFile.id);
               let renderedContent: string;
 
               if (sf.configFile.isBinary) {
@@ -729,7 +745,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
                   hostPath: sf.targetPath,
                   diff: '',
                   exists: false,
-                  referencingServices: [service.name],
+                  referencingServices,
                   warnings: ['Binary file — diff omitted'],
                 });
                 continue;
@@ -739,13 +755,37 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
                 sd.server.environmentId,
                 sf.configFile.content
               );
-              renderedContent = redactSecretValues(rawContent.trimEnd(), secretValues);
+              // Mirror the live path: template errors / missing secrets are
+              // hard failures, not warnings. Surface them via `error` and
+              // skip the diff (the live path wouldn't write to this target).
+              let hardError: string | null = null;
               if (templateErrors.length > 0) {
-                warnings.push(`Template errors: ${templateErrors.join('; ')}`);
+                const msg = `Template errors: ${templateErrors.join('; ')}`;
+                warnings.push(msg);
+                hardError = msg;
               }
               if (missing.length > 0) {
-                warnings.push(`Missing secrets: ${missing.join(', ')}`);
+                const msg = `Missing secrets: ${missing.join(', ')}`;
+                warnings.push(msg);
+                hardError = hardError ? `${hardError}; ${msg}` : msg;
               }
+
+              if (hardError) {
+                results.push({
+                  serverName: sd.server.name,
+                  serviceName: service.name,
+                  configFileName: sf.configFile.name,
+                  hostPath: sf.targetPath,
+                  diff: '',
+                  exists: false,
+                  referencingServices,
+                  warnings,
+                  error: hardError,
+                });
+                continue;
+              }
+
+              renderedContent = redactSecretValues(rawContent.trimEnd(), secretValues);
 
               let currentContent = '';
               let exists = false;
@@ -774,7 +814,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
                 hostPath: sf.targetPath,
                 diff,
                 exists,
-                referencingServices: [service.name],
+                referencingServices,
                 warnings,
               });
             }
@@ -787,7 +827,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
                 hostPath: sf.targetPath,
                 diff: '',
                 exists: false,
-                referencingServices: [service.name],
+                referencingServices: await getReferencing(sf.configFile.id),
                 warnings: [getErrorMessage(err, 'Connection failed')],
               });
             }

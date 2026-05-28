@@ -616,13 +616,13 @@ describe('syncConfigFileToAttachedServicesDryRun (issue #128)', () => {
     expect(target.diff).toContain('***');
   });
 
-  it('surfaces missing-secret warnings without blocking the diff', async () => {
+  it('marks targets with missing secrets as would-fail (error set, diff omitted) so callers do not render a green preview', async () => {
+    // The live `syncConfigFileToAttachedServices` path treats missing secrets
+    // as a hard failure (`success: false, error: 'Missing secrets: ...'`).
+    // The dry-run must mirror that — surfacing the warning AND a structured
+    // `error` field, and skipping the diff entirely (there is no meaningful
+    // before/after when the rendered content would never be written).
     mockPrisma.configFile.findUnique.mockResolvedValue(buildConfigFileFixture());
-    mockSSHClientInstance.exec.mockResolvedValue({
-      code: 0,
-      stdout: '',
-      stderr: '',
-    });
     vi.mocked(resolveSecretPlaceholders).mockResolvedValue({
       content: 'upstream { server ${SECRET_A}; }',
       missing: ['SECRET_A'],
@@ -633,12 +633,34 @@ describe('syncConfigFileToAttachedServicesDryRun (issue #128)', () => {
 
     const target = result!.results[0];
     expect(target.warnings.some((w) => /SECRET_A/.test(w))).toBe(true);
-    // The dry-run still produces a result row even with missing secrets —
-    // the operator should see what would happen and which secrets are needed.
-    expect(target.serverName).toBe('host-a');
-    expect(target.hostPath).toBe('/etc/nginx/nginx.conf');
+    // CRITICAL: would-fail surfaces as a structured error, not just a warning.
+    expect(target.error).toMatch(/SECRET_A/);
+    // Diff is omitted because the live path would refuse to write — there's
+    // nothing meaningful to compare against the host file.
+    expect(target.diff).toBe('');
+    expect(target.exists).toBe(false);
+    // We never run `cat` on the host when the artifact would not be written.
+    expect(mockSSHClientInstance.exec).not.toHaveBeenCalled();
     // No mutation under any circumstances.
     expect(mockPrisma.serviceFile.update).not.toHaveBeenCalled();
+  });
+
+  it('marks targets with template errors as would-fail (error set, diff omitted)', async () => {
+    mockPrisma.configFile.findUnique.mockResolvedValue(buildConfigFileFixture());
+    vi.mocked(resolveSecretPlaceholders).mockResolvedValue({
+      content: 'upstream { ... }',
+      missing: [],
+      templateErrors: ['unknown filter "upper"'],
+    });
+
+    const result = await syncConfigFileToAttachedServicesDryRun('cf-1');
+
+    const target = result!.results[0];
+    expect(target.error).toMatch(/Template errors/);
+    expect(target.error).toMatch(/unknown filter/);
+    expect(target.diff).toBe('');
+    // The live path throws — no host-file read attempted here either.
+    expect(mockSSHClientInstance.exec).not.toHaveBeenCalled();
   });
 
   it('records a warning (not a result mutation) when SSH client creation fails', async () => {

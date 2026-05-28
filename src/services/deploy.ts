@@ -491,8 +491,18 @@ async function resolveDigestAndAction(
  * `${KEY}` references in the source template that would normally be substituted
  * remain visible via the substituted-then-redacted form.
  */
+export interface DeployServiceDryRunOptions {
+  /**
+   * Override the image tag previewed by the dry-run (mirrors
+   * `DeployOptions.imageTag` on the real path). Used by plan dry-runs so each
+   * step previews `step.targetTag` rather than the current Service tag.
+   */
+  imageTag?: string;
+}
+
 export async function deployServiceDryRun(
-  serviceDeploymentId: string
+  serviceDeploymentId: string,
+  options: DeployServiceDryRunOptions = {}
 ): Promise<DeployDryRunReport> {
   const deployment = await prisma.serviceDeployment.findUniqueOrThrow({
     where: { id: serviceDeploymentId },
@@ -503,11 +513,15 @@ export async function deployServiceDryRun(
   });
 
   const service = deployment.service;
-  const imageTag = service.imageTag;
+  // Resolve the effective tag the real `deployService` would have used given
+  // these options. The override must flow into BOTH digest resolution and the
+  // compose preview — otherwise the report would show one tag in `imageTag`
+  // and another in the rendered compose.
+  const imageTag = options.imageTag || service.imageTag;
 
   // Render the artifacts with secrets redacted. previewDryRunArtifacts mirrors
   // generateDeploymentArtifacts but replaces secret values with `***`.
-  const preview = await previewDryRunArtifacts(serviceDeploymentId);
+  const preview = await previewDryRunArtifacts(serviceDeploymentId, { imageTag });
 
   const { digest, action, warnings } = await resolveDigestAndAction(
     {
@@ -535,6 +549,12 @@ export async function deployServiceDryRun(
     env: preview.env,
     containerAction: action,
     warnings: [...preview.warnings, ...warnings],
+    // Propagate would-fail status from the artifact preview. The live deploy
+    // throws on template errors and refuses missing secrets — surface that
+    // structurally so the dry-run report doesn't look "green" when it isn't.
+    ...(preview.wouldFail
+      ? { wouldSucceed: false, error: preview.failureReason ?? 'Artifact generation would fail' }
+      : {}),
   };
 }
 

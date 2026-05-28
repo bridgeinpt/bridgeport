@@ -66,6 +66,16 @@ export interface DeployDryRunReport {
   containerAction: ContainerAction;
   /** Non-fatal issues surfaced during resolution (missing secrets, no digest, etc.). */
   warnings: string[];
+  /**
+   * `false` when the real deploy would have failed at artifact generation (e.g.
+   * missing secrets, template errors). The dry-run still returns the report
+   * (so operators see what is broken) but callers can short-circuit and treat
+   * a `wouldSucceed: false` preview as a hard block before running the real
+   * path. Omitted/`true` means no would-fail conditions were detected.
+   */
+  wouldSucceed?: boolean;
+  /** Error message when `wouldSucceed === false`. */
+  error?: string;
 }
 
 /**
@@ -95,6 +105,14 @@ export interface ConfigSyncTarget {
   referencingServices: string[];
   /** Non-fatal issues (missing secrets, SSH error, etc.). */
   warnings: string[];
+  /**
+   * Hard-fail reason that would cause the real sync to refuse this target
+   * (e.g. missing secrets, template errors). When set, the diff is omitted
+   * (no useful comparison possible) and callers should surface this as a
+   * blocking condition rather than a warning. Mirrors how the real path
+   * returns `success: false, error: '...'` for the same conditions.
+   */
+  error?: string;
 }
 
 export interface ConfigSyncDryRunReport {
