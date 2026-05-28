@@ -21,7 +21,7 @@ Get BRIDGEPORT running locally for development in under 10 minutes.
 | Tool | Version | Purpose | Install |
 |------|---------|---------|---------|
 | **Node.js** | 20+ | Backend and frontend | [nodejs.org](https://nodejs.org) |
-| **npm** | 10+ | Package management | Comes with Node.js |
+| **npm** | 11.10+ | Package management ([why](supply-chain.md#requirements)) | `npm install -g npm@latest` |
 | **Go** | 1.22+ | Agent and CLI (optional) | [go.dev](https://go.dev/dl/) |
 | **SQLite3** | 3.x | Database (dev/prod) | Usually pre-installed on macOS/Linux |
 
@@ -42,6 +42,9 @@ npm install
 
 # Install frontend dependencies
 cd ui && npm install && cd ..
+
+# .npmrc sets ignore-scripts=true; rebuild the native SQLite binding explicitly.
+npm rebuild better-sqlite3
 ```
 
 Expected output (last few lines of `npm install`):

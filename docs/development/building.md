@@ -127,6 +127,10 @@ The backend is compiled from TypeScript to JavaScript using `tsc`:
 # Install dependencies
 npm install
 
+# .npmrc sets ignore-scripts=true; rebuild native deps explicitly.
+# See docs/development/supply-chain.md.
+npm rebuild better-sqlite3
+
 # Generate Prisma client (required before build)
 npm run db:generate
 

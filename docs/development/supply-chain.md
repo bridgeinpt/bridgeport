@@ -2,6 +2,18 @@
 
 BRIDGEPORT applies a few defensive defaults to reduce the blast radius of compromised npm packages (typosquats, malicious post-install scripts, and freshly-published-then-yanked versions). This page explains the defaults, the trade-offs, and the escape hatches.
 
+## Requirements
+
+You need **npm 11.10 or newer**. The `min-release-age` setting we use (see [Defaults](#defaults)) was added in npm 11.10.0; older npm versions silently ignore the key and the cooldown is **not enforced**.
+
+Check your version with `npm --version`. If it is below 11.10:
+
+```bash
+npm install -g npm@latest
+```
+
+Node.js 20.x ships with npm 10. CI installs `npm@latest` after `actions/setup-node` for the same reason — see [`.github/workflows/test.yml`](../../.github/workflows/test.yml).
+
 ## Defaults
 
 Both `/.npmrc` and `/ui/.npmrc` set:
