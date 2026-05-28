@@ -1,19 +1,22 @@
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../lib/store';
 import {
   getDatabaseMonitoringSummary,
   getDatabaseMetricsHistory,
   type DatabaseMonitoringSummaryItem,
+  type DatabaseMetricsHistoryResponse,
   type DatabaseMetricsTypeGroup,
   type DatabaseQueryMeta,
 } from '../lib/api';
 import { format } from 'date-fns';
 import ChartCard from '../components/monitoring/ChartCard';
+import ChartCardSkeleton from '../components/monitoring/ChartCardSkeleton';
 import TimeRangeSelector from '../components/monitoring/TimeRangeSelector';
 import AutoRefreshToggle from '../components/monitoring/AutoRefreshToggle';
 import EmptyState from '../components/EmptyState';
 import { DatabaseIcon } from '../components/Icons';
+import { useMetricResource } from '../hooks/useMetricResource';
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';
@@ -49,38 +52,61 @@ export default function MonitoringDatabases() {
 
   const navigate = useNavigate();
 
-  const [summary, setSummary] = useState<DatabaseMonitoringSummaryItem[]>([]);
-  const [typeGroups, setTypeGroups] = useState<DatabaseMetricsTypeGroup[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const envId = selectedEnvironment?.id;
+  const depKey = useMemo(
+    () => `${envId ?? ''}|${monitoringTimeRange}`,
+    [envId, monitoringTimeRange]
+  );
 
-  const fetchData = async (isRefresh = false) => {
-    if (!selectedEnvironment?.id) return;
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
-
-    try {
-      const [summaryRes, historyRes] = await Promise.all([
-        getDatabaseMonitoringSummary(selectedEnvironment.id),
-        getDatabaseMetricsHistory(selectedEnvironment.id, monitoringTimeRange),
-      ]);
-      setSummary(summaryRes.databases);
-      setTypeGroups(historyRes.types);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+  // Issue #171 — independent resources for summary (table list of dbs) and
+  // history (charts). Delta-merging for the databases endpoint is more
+  // involved because of nested `types` groups — we always do a full reload
+  // on tick instead. Auto-refresh still works; just at full-response cost
+  // (which is now LTTB-capped to 120 points per scalar series).
+  const summaryResource = useMetricResource<{
+    databases: DatabaseMonitoringSummaryItem[];
+    until?: string;
+  }>(
+    useCallback(async () => {
+      if (!envId) return { databases: [] };
+      return getDatabaseMonitoringSummary(envId);
+    }, [envId]),
+    {
+      autoRefreshMs: autoRefreshEnabled ? 30000 : 0,
+      depKey: envId ?? '',
+      enabled: !!envId,
     }
-  };
+  );
 
-  useEffect(() => {
-    fetchData();
-  }, [selectedEnvironment?.id, monitoringTimeRange]);
+  const historyResource = useMetricResource<DatabaseMetricsHistoryResponse>(
+    useCallback(async () => {
+      // We intentionally don't pass `since` for the databases endpoint —
+      // merging delta payloads across nested type groups + dynamic series
+      // keys (one per query) would be its own merge helper. The full
+      // response is already LTTB-capped to maxPoints=120 per scalar series.
+      if (!envId) return { types: [] };
+      return getDatabaseMetricsHistory(envId, monitoringTimeRange, {
+        maxPoints: 120,
+      });
+    }, [envId, monitoringTimeRange]),
+    {
+      autoRefreshMs: autoRefreshEnabled ? 30000 : 0,
+      depKey,
+      enabled: !!envId,
+    }
+  );
 
-  useEffect(() => {
-    if (!autoRefreshEnabled) return;
-    const interval = setInterval(() => fetchData(true), 30000);
-    return () => clearInterval(interval);
-  }, [selectedEnvironment?.id, monitoringTimeRange, autoRefreshEnabled]);
+  const summary: DatabaseMonitoringSummaryItem[] = summaryResource.data?.databases ?? [];
+  const typeGroups: DatabaseMetricsTypeGroup[] = historyResource.data?.types ?? [];
+  const loading = summaryResource.loading;
+  const historyLoading = historyResource.loading;
+  const historyRefreshing = historyResource.refreshing;
+  const refreshing = historyRefreshing || summaryResource.refreshing;
+
+  const reloadAll = useCallback(() => {
+    historyResource.reload();
+    summaryResource.reload();
+  }, [historyResource, summaryResource]);
 
   // Resolve active tab
   const activeType = useMemo(() => {
@@ -252,16 +278,25 @@ export default function MonitoringDatabases() {
     );
   }
 
+  // Page-level render gate dropped (issue #171). The "no databases" empty
+  // state needs the summary to actually have loaded — keep that gate but
+  // base it on `summaryResource.loading` so we don't flash an empty state
+  // while the first fetch is still in flight.
   if (loading) {
     return (
-      <div className="p-8">
-        <div className="animate-pulse">
-          <div className="h-6 w-64 bg-slate-700 rounded mb-6"></div>
-          <div className="grid grid-cols-2 gap-6">
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="h-64 bg-slate-800 rounded-xl"></div>
-            ))}
-          </div>
+      <div className="p-6">
+        <div className="flex items-center justify-end mb-5">
+          <AutoRefreshToggle
+            enabled={autoRefreshEnabled}
+            onChange={setAutoRefreshEnabled}
+            onRefresh={reloadAll}
+            refreshing={refreshing}
+          />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {[0, 1, 2, 3].map((i) => (
+            <ChartCardSkeleton key={i} />
+          ))}
         </div>
       </div>
     );
@@ -287,7 +322,7 @@ export default function MonitoringDatabases() {
         <AutoRefreshToggle
           enabled={autoRefreshEnabled}
           onChange={setAutoRefreshEnabled}
-          onRefresh={() => fetchData(true)}
+          onRefresh={reloadAll}
           refreshing={refreshing}
         />
       </div>
@@ -347,8 +382,17 @@ export default function MonitoringDatabases() {
         )}
       </div>
 
-      {/* Charts */}
-      {activeGroup && filteredDatabases.length > 0 && activeGroup.timestamps.length > 0 ? (
+      {/* Charts — per-card loading skeletons (issue #171). When the
+          history is still fetching but the summary already returned, we
+          show placeholder skeletons in the chart grid rather than a
+          blank gap. */}
+      {historyLoading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {[0, 1, 2, 3].map((i) => (
+            <ChartCardSkeleton key={i} />
+          ))}
+        </div>
+      ) : activeGroup && filteredDatabases.length > 0 && activeGroup.timestamps.length > 0 ? (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {activeGroup.queryMeta.filter(m => m.resultType === 'scalar').map(meta => {
@@ -366,6 +410,7 @@ export default function MonitoringDatabases() {
                   formatTime={formatTime}
                   unit={getChartUnit(meta)}
                   domain={getChartDomain(meta)}
+                  refreshing={historyRefreshing}
                 />
               );
             })}

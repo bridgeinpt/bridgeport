@@ -30,6 +30,7 @@ import {
   handleUniqueConstraint,
   parsePaginationQuery,
 } from '../lib/helpers.js';
+import { downsampleColumnar } from '../lib/metrics-downsample.js';
 
 const storageTypeSchema = z.enum(['local', 'spaces']);
 const backupFormatSchema = z.enum(['plain', 'custom', 'tar']);
@@ -477,6 +478,9 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
                   },
                 },
               },
+              // Issue #171 — delta-refresh additions, see /metrics/history.
+              mode: { type: 'string', enum: ['full', 'delta'] },
+              until: { type: 'string' },
             },
           },
         },
@@ -484,10 +488,29 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
     },
     async (request) => {
       const { envId } = request.params as { envId: string };
-      const { hours } = request.query as { hours?: string };
+      const { hours, since: sinceIso, maxPoints: maxPointsRaw } = request.query as {
+        hours?: string;
+        since?: string;
+        maxPoints?: string;
+      };
       const hoursNum = hours ? parseInt(hours) : 24;
-      const since = new Date();
-      since.setHours(since.getHours() - hoursNum);
+      // Clamp maxPoints to the same [10, 2000] range as the other history
+      // endpoints. Default 120 keeps the chart point count manageable.
+      const maxPointsParsed = maxPointsRaw ? parseInt(maxPointsRaw) : 120;
+      const maxPoints = Number.isFinite(maxPointsParsed)
+        ? Math.min(2000, Math.max(10, maxPointsParsed))
+        : 120;
+      const isDelta = !!sinceIso;
+      const since = sinceIso
+        ? new Date(sinceIso)
+        : (() => {
+            const d = new Date();
+            d.setHours(d.getHours() - hoursNum);
+            return d;
+          })();
+      // Capture server-now before reading metrics so the next delta starts
+      // exactly where this response left off.
+      const until = new Date().toISOString();
 
       // Get all monitored databases with server and type info
       const databases = await prisma.database.findMany({
@@ -503,13 +526,15 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
       // which blocked the ≥800 RPS / p99 ≤30 ms target. Matches the pattern
       // used by /metrics/history in routes/monitoring.ts.
       const databaseIds = databases.map((d) => d.id);
+      // Delta requests use a strict `gt` so the boundary row isn't replayed
+      // (the client already has it). Full-window requests use `gte`.
       const allMetrics =
         databaseIds.length === 0
           ? []
           : await prisma.databaseMetrics.findMany({
               where: {
                 databaseId: { in: databaseIds },
-                collectedAt: { gte: since },
+                collectedAt: isDelta ? { gt: since } : { gte: since },
               },
               orderBy: { collectedAt: 'asc' },
             });
@@ -706,6 +731,55 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
           }
         });
 
+        // Apply LTTB downsampling to scalar series in full-window responses.
+        // `rows` queries hold structural snapshots (UI uses the latest point
+        // only — see `getRowsPerDatabase` in MonitoringDatabases.tsx), so
+        // downsampling them would lose history with no chart benefit.
+        // Delta payloads return as-is so the merge step on the client stays
+        // a simple append.
+        let outTimestamps = timestamps;
+        let outSeries: Record<string, unknown> = series;
+        if (!isDelta && scalarKeys.size > 0 && timestamps.length > maxPoints) {
+          const scalarKeyList = Array.from(scalarKeys);
+          const flatRows: Array<Array<number | null>> = [];
+          const counts: number[] = [];
+          for (const key of scalarKeyList) {
+            const arr = series[key] as Array<Array<number | null>>;
+            counts.push(arr.length);
+            for (const r of arr) flatRows.push(r);
+          }
+          const ds = downsampleColumnar(timestamps, flatRows, maxPoints);
+          outTimestamps = ds.timestamps;
+
+          // Build the projected series: downsampled scalars + project rows
+          // onto the picked indices (latest-snapshot reads still work as
+          // long as the final picked index carries the latest sample, which
+          // LTTB preserves by always keeping index n-1).
+          const projected: Record<string, unknown> = {};
+          let cursor = 0;
+          scalarKeyList.forEach((key, i) => {
+            projected[key] = ds.rows.slice(cursor, cursor + counts[i]);
+            cursor += counts[i];
+          });
+
+          // For rows-keys we don't have a numeric axis, so project onto the
+          // picked indices by index lookup. Resolve picked indices by
+          // searching the original `timestamps` for each new timestamp —
+          // O(maxPoints) per row but maxPoints is small.
+          if (rowsKeys.size > 0) {
+            const tsToOldIdx = new Map<string, number>();
+            timestamps.forEach((t, i) => tsToOldIdx.set(t, i));
+            const pickedOldIdx = outTimestamps.map((t) => tsToOldIdx.get(t)!);
+            for (const key of rowsKeys) {
+              const slot = series[key] as { rows: unknown[][] };
+              projected[key] = {
+                rows: slot.rows.map((dbRow) => pickedOldIdx.map((oi) => dbRow[oi] ?? null)),
+              };
+            }
+          }
+          outSeries = projected;
+        }
+
         return {
           type: group.type,
           typeName: group.typeName,
@@ -716,12 +790,12 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
             serverId: db.serverId,
             serverName: db.serverName,
           })),
-          timestamps,
-          series,
+          timestamps: outTimestamps,
+          series: outSeries,
         };
       });
 
-      return { types };
+      return { types, mode: isDelta ? 'delta' : 'full', until };
     }
   );
 

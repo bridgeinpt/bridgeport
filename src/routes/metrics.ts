@@ -206,11 +206,16 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
+      // Issue #171 — callers that only render server-level data (e.g.
+      // /monitoring/servers page) pass `?includeServices=false` to skip the
+      // per-deployment ServiceMetrics window query.
+      const { includeServices } = request.query as { includeServices?: string };
+      const includeServicesFlag = includeServices !== 'false';
 
       const env = await findOrNotFound(prisma.environment.findUnique({ where: { id: envId } }), 'Environment', reply);
       if (!env) return;
 
-      const summary = await getEnvironmentMetricsSummary(envId);
+      const summary = await getEnvironmentMetricsSummary(envId, { includeServices: includeServicesFlag });
       return { servers: summary };
     }
   );

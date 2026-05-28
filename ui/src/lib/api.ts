@@ -1748,8 +1748,20 @@ export const getServiceMetrics = (id: string, from?: string, to?: string, limit?
   return api.get<{ metrics: ServiceMetrics[] }>(`/services/${id}/metrics${query ? `?${query}` : ''}`);
 };
 
-export const getEnvironmentMetricsSummary = (envId: string) =>
-  api.get<{ servers: MetricsSummaryServer[] }>(`/environments/${envId}/metrics/summary`);
+export const getEnvironmentMetricsSummary = (
+  envId: string,
+  options?: { includeServices?: boolean }
+) => {
+  // Issue #171 — pages that don't render the per-server services[] block
+  // (e.g. /monitoring/servers) pass `includeServices: false` so the backend
+  // skips the ServiceDeployment + ServiceMetrics window queries.
+  const params = new URLSearchParams();
+  if (options?.includeServices === false) params.append('includeServices', 'false');
+  const qs = params.toString();
+  return api.get<{ servers: MetricsSummaryServer[] }>(
+    `/environments/${envId}/metrics/summary${qs ? `?${qs}` : ''}`
+  );
+};
 
 export const collectServerMetrics = (id: string) =>
   api.post<{ serverMetrics: string; services: Array<{ service: string; success: boolean }> }>(
@@ -2784,12 +2796,31 @@ export interface MetricsHistoryResponse {
   servers: MetricsHistoryServer[];
   timestamps: string[];
   series: Partial<Record<ServerMetricKey, Array<Array<number | null>>>>;
+  // Issue #171 — delta-refresh metadata.
+  mode?: 'full' | 'delta';
+  until?: string;
 }
 
-export const getMetricsHistory = (envId: string, hours: number = 24, metric?: 'cpu' | 'memory' | 'disk' | 'load') => {
+export interface MetricsHistoryOptions {
+  metric?: 'cpu' | 'memory' | 'disk' | 'load';
+  // Strict-greater-than ISO timestamp — return only points after this.
+  since?: string;
+  // LTTB cap for the full-window response. Ignored when `since` is set.
+  maxPoints?: number;
+}
+
+export const getMetricsHistory = (
+  envId: string,
+  hours: number = 24,
+  options?: MetricsHistoryOptions | 'cpu' | 'memory' | 'disk' | 'load'
+) => {
+  // Back-compat: callers used to pass the metric as the third arg.
+  const opts: MetricsHistoryOptions = typeof options === 'string' ? { metric: options } : options ?? {};
   const params = new URLSearchParams();
   params.append('hours', hours.toString());
-  if (metric) params.append('metric', metric);
+  if (opts.metric) params.append('metric', opts.metric);
+  if (opts.since) params.append('since', opts.since);
+  if (opts.maxPoints != null) params.append('maxPoints', opts.maxPoints.toString());
   return api.get<MetricsHistoryResponse>(`/environments/${envId}/metrics/history?${params.toString()}`);
 };
 
@@ -2814,11 +2845,25 @@ export interface ServiceMetricsHistoryResponse {
   services: ServiceMetricsHistoryItem[];
   timestamps: string[];
   series: Partial<Record<ServiceMetricKey, Array<Array<number | null>>>>;
+  // Issue #171 — delta-refresh metadata.
+  mode?: 'full' | 'delta';
+  until?: string;
 }
 
-export const getServiceMetricsHistory = (envId: string, hours: number = 24) => {
+export interface ServiceMetricsHistoryOptions {
+  since?: string;
+  maxPoints?: number;
+}
+
+export const getServiceMetricsHistory = (
+  envId: string,
+  hours: number = 24,
+  options?: ServiceMetricsHistoryOptions
+) => {
   const params = new URLSearchParams();
   params.append('hours', hours.toString());
+  if (options?.since) params.append('since', options.since);
+  if (options?.maxPoints != null) params.append('maxPoints', options.maxPoints.toString());
   return api.get<ServiceMetricsHistoryResponse>(`/environments/${envId}/services/metrics/history?${params.toString()}`);
 };
 
@@ -3129,10 +3174,28 @@ export interface DatabaseMetricsTypeGroup {
   series: Record<string, DatabaseSeriesEntry>;
 }
 
-export const getDatabaseMetricsHistory = (envId: string, hours: number = 24) => {
+export interface DatabaseMetricsHistoryOptions {
+  since?: string;
+  maxPoints?: number;
+}
+
+export interface DatabaseMetricsHistoryResponse {
+  types: DatabaseMetricsTypeGroup[];
+  // Issue #171 — delta-refresh metadata.
+  mode?: 'full' | 'delta';
+  until?: string;
+}
+
+export const getDatabaseMetricsHistory = (
+  envId: string,
+  hours: number = 24,
+  options?: DatabaseMetricsHistoryOptions
+) => {
   const params = new URLSearchParams();
   params.append('hours', hours.toString());
-  return api.get<{ types: DatabaseMetricsTypeGroup[] }>(
+  if (options?.since) params.append('since', options.since);
+  if (options?.maxPoints != null) params.append('maxPoints', options.maxPoints.toString());
+  return api.get<DatabaseMetricsHistoryResponse>(
     `/environments/${envId}/databases/metrics/history?${params.toString()}`
   );
 };
