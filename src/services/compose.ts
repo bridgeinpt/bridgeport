@@ -4,6 +4,7 @@ import YAML from 'yaml';
 import { resolveSecretPlaceholders, getSecretsForEnv } from './secrets.js';
 import { safeJsonParse } from '../lib/helpers.js';
 import { redactEnvSecrets, redactSecretValues } from '../lib/dry-run.js';
+import { composeFragmentedContent } from '../lib/config-fragments.js';
 
 export interface ComposeConfig {
   version?: string;
@@ -131,7 +132,22 @@ export async function generateDeploymentArtifacts(
       server: { include: { environment: true } },
       service: {
         include: {
-          files: { include: { configFile: true } },
+          files: {
+            include: {
+              configFile: {
+                include: {
+                  // Ordered fragment includes — concatenated before the
+                  // ConfigFile's own content at render time. orderBy is
+                  // critical: ordering controls last-definition-wins on
+                  // duplicate keys.
+                  includedFragments: {
+                    include: { fragment: true },
+                    orderBy: { position: 'asc' },
+                  },
+                },
+              },
+            },
+          },
           containerImage: true,
         },
       },
@@ -169,9 +185,19 @@ export async function generateDeploymentArtifacts(
       // templateErrors indicate the template syntax itself is broken (malformed
       // {{range}}, unknown filter, etc); the rendered content would ship with
       // raw directive text or empty bodies and is unsafe to deploy — fail loudly.
+      // Compose fragments + own content first so placeholder substitution runs
+      // over the merged blob (fragments share the same `${KEY}` semantics).
+      const composedSource = composeFragmentedContent(
+        sf.configFile.includedFragments.map((f) => ({
+          name: f.fragment.name,
+          content: f.fragment.content,
+        })),
+        sf.configFile.content,
+        sf.configFile.language,
+      );
       const { content: resolvedContent, templateErrors } = await resolveSecretPlaceholders(
         environmentId,
-        sf.configFile.content
+        composedSource
       );
       if (templateErrors.length > 0) {
         throw new Error(
@@ -369,7 +395,22 @@ export async function previewDryRunArtifacts(
       server: { include: { environment: true } },
       service: {
         include: {
-          files: { include: { configFile: true } },
+          files: {
+            include: {
+              configFile: {
+                include: {
+                  // Ordered fragment includes — concatenated before the
+                  // ConfigFile's own content at render time. orderBy is
+                  // critical: ordering controls last-definition-wins on
+                  // duplicate keys.
+                  includedFragments: {
+                    include: { fragment: true },
+                    orderBy: { position: 'asc' },
+                  },
+                },
+              },
+            },
+          },
           containerImage: true,
         },
       },
@@ -419,9 +460,20 @@ export async function previewDryRunArtifacts(
       });
       continue;
     }
+    // Compose fragments + own content before resolving placeholders. Same
+    // contract as the live path — without this the dry-run would preview a
+    // rendered file that differs from what a real deploy actually writes.
+    const composedSource = composeFragmentedContent(
+      sf.configFile.includedFragments.map((f) => ({
+        name: f.fragment.name,
+        content: f.fragment.content,
+      })),
+      sf.configFile.content,
+      sf.configFile.language,
+    );
     const { content: resolved, missing, templateErrors } = await resolveSecretPlaceholders(
       environmentId,
-      sf.configFile.content
+      composedSource
     );
     if (templateErrors.length > 0) {
       const msg = `Config file "${sf.configFile.filename}" template errors: ${templateErrors.join('; ')}`;

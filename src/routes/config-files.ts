@@ -16,6 +16,7 @@ import {
 import { validateBody, validateUpdateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery } from '../lib/helpers.js';
 import { detectLanguage } from '../lib/config-file-language.js';
 import { syncUsageForConfigFile } from '../lib/key-usage-extraction.js';
+import { composeFragmentedContent } from '../lib/config-fragments.js';
 import {
   isDryRun,
   redactSecretValues,
@@ -34,6 +35,9 @@ const createConfigFileSchema = z.object({
   fileSize: z.number().int().positive().optional(),
   autoResync: z.boolean().optional(),
   language: z.string().min(1).optional(),
+  // Ordered fragment ids to include in this ConfigFile's effective content.
+  // Position is derived from array index. Empty/omitted = no fragments.
+  fragmentIds: z.array(z.string()).optional(),
 });
 
 const updateConfigFileSchema = z.object({
@@ -46,6 +50,9 @@ const updateConfigFileSchema = z.object({
   fileSize: z.number().int().positive().nullable().optional(),
   autoResync: z.boolean().optional(),
   language: z.string().min(1).optional(),
+  // Full-replace semantics: when provided, all existing ConfigFileFragment
+  // rows for this ConfigFile are deleted and re-created in array order.
+  fragmentIds: z.array(z.string()).optional(),
 });
 
 const attachFileSchema = z.object({
@@ -172,6 +179,16 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
                 },
               },
             },
+            // Surface the ordered fragment includes so the editor UI can show
+            // (and reorder) them without a second round-trip.
+            includedFragments: {
+              orderBy: { position: 'asc' },
+              include: {
+                fragment: {
+                  select: { id: true, name: true, description: true },
+                },
+              },
+            },
           },
         }),
         'Config file',
@@ -218,10 +235,11 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         // Wrap content write + usage sync in a transaction so they commit or
         // roll back together — otherwise a sync failure would leave the file
         // saved with no usage rows tracked.
+        const { fragmentIds, ...createData } = body;
         const configFile = await prisma.$transaction(async (tx) => {
           const cf = await tx.configFile.create({
             data: {
-              ...body,
+              ...createData,
               ...(language !== undefined ? { language } : {}),
               environmentId: envId,
             },
@@ -230,6 +248,17 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           // can resolve "where is this key used?" via a join instead of
           // scanning content. Binary files skip extraction inside the helper.
           await syncUsageForConfigFile(tx, cf);
+          // Persist ordered fragment includes. Position is the array index
+          // (caller controls order).
+          if (fragmentIds && fragmentIds.length > 0) {
+            await tx.configFileFragment.createMany({
+              data: fragmentIds.map((fragmentId, position) => ({
+                configFileId: cf.id,
+                fragmentId,
+                position,
+              })),
+            });
+          }
           return cf;
         });
 
@@ -283,17 +312,32 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           });
         }
 
-        // Wrap content write + usage sync in a single transaction so both
-        // commit or roll back together.
+        // Wrap content write + usage sync + fragment-include replacement in a
+        // single transaction so all three commit or roll back together.
+        const { fragmentIds, ...updateData } = body;
         const configFile = await prisma.$transaction(async (tx) => {
           const cf = await tx.configFile.update({
             where: { id },
-            data: body,
+            data: updateData,
           });
           // Re-sync Secret/VarUsage rows whenever the content or isBinary flag
           // could have changed. Cheap when nothing changed (single findMany).
           if (body.content !== undefined || body.isBinary !== undefined) {
             await syncUsageForConfigFile(tx, cf);
+          }
+          // Full-replace fragment includes when caller supplied the list.
+          // Undefined = leave existing rows alone (PATCH semantics).
+          if (fragmentIds !== undefined) {
+            await tx.configFileFragment.deleteMany({ where: { configFileId: id } });
+            if (fragmentIds.length > 0) {
+              await tx.configFileFragment.createMany({
+                data: fragmentIds.map((fragmentId, position) => ({
+                  configFileId: id,
+                  fragmentId,
+                  position,
+                })),
+              });
+            }
           }
           return cf;
         });
@@ -318,6 +362,59 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         }
         throw error;
       }
+    }
+  );
+
+  // Preview rendered/merged content: fragments concatenated (in position
+  // order) before the ConfigFile's own content, with `${KEY}` placeholders
+  // resolved against the environment's vars/secrets. Used by the editor to
+  // show what will actually be written to the server before save/deploy.
+  //
+  // Secret values appear in clear in this preview — callers should treat the
+  // response as sensitive (the route requires authentication via the global
+  // auth handler). The compose dry-run preview is the redacted equivalent.
+  fastify.post(
+    '/api/config-files/:id/preview',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      const configFile = await findOrNotFound(
+        prisma.configFile.findUnique({
+          where: { id },
+          include: {
+            includedFragments: {
+              include: { fragment: { select: { name: true, content: true } } },
+              orderBy: { position: 'asc' },
+            },
+          },
+        }),
+        'Config file',
+        reply
+      );
+      if (!configFile) return;
+
+      // Binary files don't go through substitution / fragment composition;
+      // there's nothing meaningful to preview.
+      if (configFile.isBinary) {
+        return reply.code(400).send({ error: 'Preview is not supported for binary files' });
+      }
+
+      const composed = composeFragmentedContent(
+        configFile.includedFragments.map((f) => ({
+          name: f.fragment.name,
+          content: f.fragment.content,
+        })),
+        configFile.content,
+        configFile.language,
+      );
+
+      const { content, missing, templateErrors } = await resolveSecretPlaceholders(
+        configFile.environmentId,
+        composed
+      );
+
+      return { content, missing, templateErrors };
     }
   );
 
@@ -664,7 +761,20 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           where: { id },
           include: {
             serviceDeployments: { include: { server: true } },
-            files: { include: { configFile: true } },
+            files: {
+              include: {
+                configFile: {
+                  include: {
+                    // Ordered fragment includes — concatenated before the
+                    // ConfigFile's own content at render time.
+                    includedFragments: {
+                      include: { fragment: true },
+                      orderBy: { position: 'asc' },
+                    },
+                  },
+                },
+              },
+            },
           },
         }),
         'Service',
@@ -751,9 +861,17 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
                 continue;
               }
 
+              const composedSource = composeFragmentedContent(
+                sf.configFile.includedFragments.map((f) => ({
+                  name: f.fragment.name,
+                  content: f.fragment.content,
+                })),
+                sf.configFile.content,
+                sf.configFile.language,
+              );
               const { content: rawContent, missing, templateErrors } = await resolveSecretPlaceholders(
                 sd.server.environmentId,
-                sf.configFile.content
+                composedSource
               );
               // Mirror the live path: template errors / missing secrets are
               // hard failures, not warnings. Surface them via `error` and
@@ -928,9 +1046,17 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
                   stderr = writeErr instanceof Error ? writeErr.message : 'SFTP write failed';
                 }
               } else {
+                const composedSource = composeFragmentedContent(
+                  configFile.includedFragments.map((f) => ({
+                    name: f.fragment.name,
+                    content: f.fragment.content,
+                  })),
+                  configFile.content,
+                  configFile.language,
+                );
                 const { content: rawContent, missing, templateErrors } = await resolveSecretPlaceholders(
                   sd.server.environmentId,
-                  configFile.content
+                  composedSource
                 );
                 const resolvedContent = rawContent.trimEnd();
 
@@ -1134,7 +1260,22 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           include: {
             serviceDeployments: {
               include: {
-                service: { include: { files: { include: { configFile: true } } } },
+                service: {
+                  include: {
+                    files: {
+                      include: {
+                        configFile: {
+                          include: {
+                            includedFragments: {
+                              include: { fragment: true },
+                              orderBy: { position: 'asc' },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
               },
             },
           },
@@ -1230,9 +1371,17 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
                 stderr = writeErr instanceof Error ? writeErr.message : 'SFTP write failed';
               }
             } else {
+              const composedSource = composeFragmentedContent(
+                configFile.includedFragments.map((f) => ({
+                  name: f.fragment.name,
+                  content: f.fragment.content,
+                })),
+                configFile.content,
+                configFile.language,
+              );
               const { content: rawContent, missing, templateErrors } = await resolveSecretPlaceholders(
                 server.environmentId,
-                configFile.content
+                composedSource
               );
               const resolvedContent = rawContent.trimEnd();
 

@@ -21,6 +21,7 @@ export interface AutoResyncActor {
   serviceAccountId?: string;
 }
 import { getErrorMessage } from '../lib/helpers.js';
+import { composeFragmentedContent } from '../lib/config-fragments.js';
 
 /**
  * Result of one (service-file, server) sync attempt during an auto-resync run.
@@ -89,6 +90,13 @@ export async function syncConfigFileToAttachedServices(
   const configFile = await prisma.configFile.findUnique({
     where: { id: configFileId },
     include: {
+      // Ordered fragment includes — concatenated before the ConfigFile's own
+      // content at sync render time so both the live and dry-run paths emit
+      // the same effective blob.
+      includedFragments: {
+        include: { fragment: true },
+        orderBy: { position: 'asc' },
+      },
       services: {
         include: {
           service: { include: { serviceDeployments: { include: { server: true } } } },
@@ -200,9 +208,17 @@ export async function syncConfigFileToAttachedServices(
               stderr = writeErr instanceof Error ? writeErr.message : 'SFTP write failed';
             }
           } else {
+            const composedSource = composeFragmentedContent(
+              configFile.includedFragments.map((f) => ({
+                name: f.fragment.name,
+                content: f.fragment.content,
+              })),
+              configFile.content,
+              configFile.language,
+            );
             const { content: rawContent, missing, templateErrors } = await resolveSecretPlaceholders(
               server.environmentId,
-              configFile.content
+              composedSource
             );
             const resolvedContent = rawContent.trimEnd();
 
@@ -322,6 +338,13 @@ export async function syncConfigFileToAttachedServicesDryRun(
   const configFile = await prisma.configFile.findUnique({
     where: { id: configFileId },
     include: {
+      // Ordered fragment includes — concatenated before the ConfigFile's own
+      // content at sync render time so both the live and dry-run paths emit
+      // the same effective blob.
+      includedFragments: {
+        include: { fragment: true },
+        orderBy: { position: 'asc' },
+      },
       services: {
         include: {
           service: { include: { serviceDeployments: { include: { server: true } } } },
@@ -428,9 +451,17 @@ export async function syncConfigFileToAttachedServicesDryRun(
           continue;
         }
 
+        const composedSource = composeFragmentedContent(
+          configFile.includedFragments.map((f) => ({
+            name: f.fragment.name,
+            content: f.fragment.content,
+          })),
+          configFile.content,
+          configFile.language,
+        );
         const { content: rawContent, missing, templateErrors } = await resolveSecretPlaceholders(
           server.environmentId,
-          configFile.content
+          composedSource
         );
         const localWarnings: string[] = [];
         // Mirror the live path (`syncConfigFileToAttachedServices`) which
@@ -550,6 +581,69 @@ export async function listReferencingServiceNames(configFileId: string, serverId
     if (r.service?.name) seen.add(r.service.name);
   }
   return [...seen].sort();
+}
+
+/**
+ * Fire-and-forget: re-sync every ConfigFile that includes the given fragment
+ * and has `autoResync = true`. Editing a fragment is equivalent in effect to
+ * editing every including ConfigFile, so we fan out the sync through the same
+ * code path used by direct ConfigFile edits.
+ *
+ * Audit rows are written per-ConfigFile with `autoTriggered = true` and a
+ * `triggeredByFragmentId` discriminator so operators can see why a sync
+ * happened. SSH / per-file failures are logged via `console.error` but never
+ * thrown — callers `void`-call this.
+ */
+export async function triggerAutoResyncForFragment(
+  fragmentId: string,
+  fragmentName: string,
+  actor?: AutoResyncActor,
+): Promise<void> {
+  try {
+    const rows = await prisma.configFileFragment.findMany({
+      where: { fragmentId, configFile: { autoResync: true, isBinary: false } },
+      select: { configFileId: true, configFile: { select: { id: true, name: true } } },
+    });
+
+    if (rows.length === 0) return;
+
+    await Promise.allSettled(
+      rows.map(async (row) => {
+        try {
+          const outcome = await syncConfigFileToAttachedServices(row.configFileId);
+          if (!outcome || outcome.status === 'no_targets') return;
+
+          await logAudit({
+            ...(actor ?? {}),
+            action: 'sync_files',
+            resourceType: 'config_file',
+            resourceId: row.configFileId,
+            resourceName: outcome.configFileName,
+            details: {
+              results: outcome.results,
+              allSuccess: outcome.success,
+              syncedTo: outcome.results.length,
+              autoTriggered: true,
+              triggeredBy: `fragment:${fragmentName}`,
+              triggeredByFragmentId: fragmentId,
+            },
+            success: outcome.success,
+            environmentId: outcome.environmentId,
+          });
+        } catch (err) {
+          console.error(
+            `[auto-resync] failed for configFile=${row.configFileId} (${row.configFile.name}) fragment=${fragmentName}:`,
+            err
+          );
+        }
+      })
+    );
+  } catch (err) {
+    console.error(
+      `[auto-resync] top-level failure for fragment=${fragmentId} (${fragmentName}):`,
+      err
+    );
+  }
 }
 
 /**

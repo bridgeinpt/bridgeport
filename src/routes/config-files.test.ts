@@ -370,4 +370,195 @@ describe('config-files routes', () => {
       expect(afterRow!.content).toBe('BEFORE=1');
     });
   });
+
+  // ==================== fragments: create / PATCH / GET shape ====================
+
+  describe('fragmentIds (create + PATCH + GET round-trip)', () => {
+    it('accepts fragmentIds on create and returns them via GET in array (position) order', async () => {
+      // Seed two fragments, attach both at create time, then GET to confirm
+      // the include round-trips with the right position + fragment payload.
+      const f1 = await app.prisma.configFragment.create({
+        data: { environmentId: envId, name: 'create-frag-a', content: 'A=1' },
+      });
+      const f2 = await app.prisma.configFragment.create({
+        data: { environmentId: envId, name: 'create-frag-b', content: 'B=1' },
+      });
+
+      const createRes = await app.inject({
+        method: 'POST',
+        url: `/api/environments/${envId}/config-files`,
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: {
+          name: 'with-fragments-create',
+          filename: 'with-fragments.env',
+          content: 'OWN=1',
+          fragmentIds: [f1.id, f2.id],
+        },
+      });
+      expect(createRes.statusCode).toBe(200);
+      const cfId = createRes.json().configFile.id;
+
+      // GET fetches with includedFragments
+      const getRes = await app.inject({
+        method: 'GET',
+        url: `/api/config-files/${cfId}`,
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+      expect(getRes.statusCode).toBe(200);
+      const included = getRes.json().configFile.includedFragments;
+      expect(Array.isArray(included)).toBe(true);
+      expect(included).toHaveLength(2);
+      // Position is array index at create time.
+      expect(included[0].position).toBe(0);
+      expect(included[1].position).toBe(1);
+      expect(included[0].fragment).toMatchObject({ id: f1.id, name: 'create-frag-a' });
+      expect(included[1].fragment).toMatchObject({ id: f2.id, name: 'create-frag-b' });
+    });
+
+    it('replaces fragmentIds on PATCH with the new order persisted via position', async () => {
+      // Seed three fragments and a ConfigFile that starts including [A, B].
+      const fA = await app.prisma.configFragment.create({
+        data: { environmentId: envId, name: 'patch-frag-a', content: 'A=1' },
+      });
+      const fB = await app.prisma.configFragment.create({
+        data: { environmentId: envId, name: 'patch-frag-b', content: 'B=1' },
+      });
+      const fC = await app.prisma.configFragment.create({
+        data: { environmentId: envId, name: 'patch-frag-c', content: 'C=1' },
+      });
+      const createRes = await app.inject({
+        method: 'POST',
+        url: `/api/environments/${envId}/config-files`,
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: {
+          name: 'with-fragments-patch',
+          filename: 'patch.env',
+          content: 'OWN=1',
+          fragmentIds: [fA.id, fB.id],
+        },
+      });
+      const cfId = createRes.json().configFile.id;
+
+      // Full-replace to [B, C, A] — different set AND different order.
+      const patchRes = await app.inject({
+        method: 'PATCH',
+        url: `/api/config-files/${cfId}`,
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { fragmentIds: [fB.id, fC.id, fA.id] },
+      });
+      expect(patchRes.statusCode).toBe(200);
+
+      const getRes = await app.inject({
+        method: 'GET',
+        url: `/api/config-files/${cfId}`,
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+      const included = getRes.json().configFile.includedFragments;
+      expect(included).toHaveLength(3);
+      expect(included.map((x: { fragment: { id: string } }) => x.fragment.id)).toEqual([
+        fB.id,
+        fC.id,
+        fA.id,
+      ]);
+      expect(included.map((x: { position: number }) => x.position)).toEqual([0, 1, 2]);
+    });
+
+    it('returns includedFragments: [] on GET for a ConfigFile with no fragments (back-compat)', async () => {
+      // Pre-fragments ConfigFiles must still GET cleanly with an empty array.
+      const cf = await app.prisma.configFile.create({
+        data: {
+          environmentId: envId,
+          name: 'backcompat-no-fragments',
+          filename: 'plain.env',
+          content: 'X=1',
+        },
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/config-files/${cf.id}`,
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().configFile.includedFragments).toEqual([]);
+    });
+  });
+
+  // ==================== POST /api/config-files/:id/preview ====================
+
+  describe('POST /api/config-files/:id/preview', () => {
+    it('returns the composed content with fragment headers + own content interpolated', async () => {
+      // Build a ConfigFile that includes a fragment so the preview output
+      // must reflect both pieces in the canonical layout.
+      const frag = await app.prisma.configFragment.create({
+        data: {
+          environmentId: envId,
+          name: 'preview-frag',
+          content: 'SHARED=hello',
+        },
+      });
+      const cf = await app.prisma.configFile.create({
+        data: {
+          environmentId: envId,
+          name: 'preview-cf',
+          filename: 'preview.env',
+          content: 'OWN=world',
+          // Force the language so the composer emits headers we can assert on.
+          language: 'env',
+        },
+      });
+      await app.prisma.configFileFragment.create({
+        data: { configFileId: cf.id, fragmentId: frag.id, position: 0 },
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/config-files/${cf.id}/preview`,
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(typeof body.content).toBe('string');
+      // Fragment header + content
+      expect(body.content).toContain('# === fragment: preview-frag ===');
+      expect(body.content).toContain('SHARED=hello');
+      // Service-specific header + own content
+      expect(body.content).toContain('# === service-specific ===');
+      expect(body.content).toContain('OWN=world');
+      // The route surfaces missing/templateErrors arrays so the editor can
+      // show a banner when placeholder resolution wasn't clean.
+      expect(Array.isArray(body.missing)).toBe(true);
+      expect(Array.isArray(body.templateErrors)).toBe(true);
+    });
+
+    it('returns 400 for binary files (preview not supported)', async () => {
+      const cf = await app.prisma.configFile.create({
+        data: {
+          environmentId: envId,
+          name: 'preview-binary',
+          filename: 'binary.bin',
+          content: 'AAAA',
+          isBinary: true,
+          mimeType: 'application/octet-stream',
+        },
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/config-files/${cf.id}/preview`,
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('returns 404 when the ConfigFile does not exist', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/config-files/does-not-exist/preview',
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+      expect(res.statusCode).toBe(404);
+    });
+  });
 });

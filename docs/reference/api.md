@@ -319,6 +319,7 @@ BRIDGEPORT's API is organized into the following categories. Each category corre
 | **Registries** | `/api/environments/:envId/registries/*` | Container registry connections |
 | **Secrets** | `/api/environments/:envId/secrets/*` | Encrypted secret management |
 | **Config Files** | `/api/environments/:envId/config-files/*` | Configuration file management with history |
+| **Config Fragments** | `/api/environments/:envId/config-fragments/*` | Env-scoped reusable text blocks included by ConfigFiles |
 | **Sync Batches** | `/api/sync/batch[, /:batchId]` | Atomic multi-file syncs with optional rollback and `Idempotency-Key` support ([guide](../guides/config-files.md#batched-atomic-sync)) |
 | **Databases** | `/api/environments/:envId/databases/*` | Database management, backups, monitoring |
 | **Metrics** | `/api/metrics/*` | Server/service metrics, agent ingest endpoint |

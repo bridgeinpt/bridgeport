@@ -32,6 +32,7 @@ import { webhookRoutes } from '../../src/routes/webhooks.js';
 import { composeRoutes } from '../../src/routes/compose.js';
 import { auditRoutes } from '../../src/routes/audit.js';
 import { configFileRoutes } from '../../src/routes/config-files.js';
+import { configFragmentRoutes } from '../../src/routes/config-fragments.js';
 import { registryRoutes } from '../../src/routes/registries.js';
 import { userRoutes } from '../../src/routes/users.js';
 import { metricsRoutes } from '../../src/routes/metrics.js';
@@ -128,6 +129,7 @@ export async function buildTestApp(options: BuildTestAppOptions = {}): Promise<T
   await fastify.register(composeRoutes);
   await fastify.register(auditRoutes);
   await fastify.register(configFileRoutes);
+  await fastify.register(configFragmentRoutes);
   await fastify.register(registryRoutes);
   await fastify.register(userRoutes);
   await fastify.register(metricsRoutes);

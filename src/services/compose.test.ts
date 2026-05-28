@@ -260,6 +260,9 @@ describe('compose', () => {
                 filename: 'app.conf',
                 content: '{{range servers tag="web"}}{{range servers tag="db"}}x{{end}}{{end}}',
                 isBinary: false,
+                // New post-#115 relation — render paths concatenate fragments
+                // before placeholder substitution. Empty here means no fragments.
+                includedFragments: [],
               },
             },
           ],
@@ -313,13 +316,13 @@ describe('compose', () => {
               configFileId: 'cf-1',
               serviceDeploymentId: null,
               targetPath: '/etc/app/config.json',
-              configFile: { filename: 'config.json', content: 'BASE', isBinary: false },
+              configFile: { filename: 'config.json', content: 'BASE', isBinary: false, includedFragments: [] },
             },
             {
               configFileId: 'cf-1',
               serviceDeploymentId: 'dep-1',
               targetPath: '/etc/app/config.override.json',
-              configFile: { filename: 'config.json', content: 'OVERRIDE', isBinary: false },
+              configFile: { filename: 'config.json', content: 'OVERRIDE', isBinary: false, includedFragments: [] },
             },
           ],
         }) as any
@@ -542,7 +545,7 @@ describe('compose', () => {
               configFileId: 'cf-1',
               serviceDeploymentId: null,
               targetPath: '/etc/app/config',
-              configFile: { filename: 'config', content: 'token=${MISSING}', isBinary: false },
+              configFile: { filename: 'config', content: 'token=${MISSING}', isBinary: false, includedFragments: [] },
             },
           ],
         }) as any
@@ -569,7 +572,7 @@ describe('compose', () => {
               configFileId: 'cf-1',
               serviceDeploymentId: null,
               targetPath: '/etc/app/config',
-              configFile: { filename: 'config', content: '{{range bad}}', isBinary: false },
+              configFile: { filename: 'config', content: '{{range bad}}', isBinary: false, includedFragments: [] },
             },
           ],
         }) as any

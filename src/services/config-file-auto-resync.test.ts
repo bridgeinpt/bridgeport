@@ -84,6 +84,13 @@ function buildConfigFileFixture(overrides?: {
     isBinary: overrides?.isBinary ?? false,
     environmentId: 'env-1',
     autoResync: true,
+    // New post-#115 relation — sync paths concatenate fragments before
+    // placeholder substitution. Empty here means no fragments.
+    includedFragments: [],
+    // `language` is referenced by the composer when fragments is non-empty;
+    // null is safe (default headers behavior) and matches existing ConfigFiles
+    // that were created before the language column existed.
+    language: null,
     services:
       overrides?.attached === false
         ? []
