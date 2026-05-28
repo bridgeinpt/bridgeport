@@ -85,6 +85,8 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      # .npmrc sets ignore-scripts=true; rebuild native deps explicitly.
+      - run: npm rebuild better-sqlite3
       - run: npx prisma generate
       - name: Run stress tests (${{ matrix.shard }})
         env:

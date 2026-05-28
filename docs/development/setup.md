@@ -50,6 +50,9 @@ Expected output (last few lines of `npm install`):
 added 312 packages in 8s
 ```
 
+> [!NOTE]
+> The `.npmrc` files in `/` and `/ui` set `ignore-scripts=true` and `min-release-age=1` as supply-chain defenses. If a dependency needs a native rebuild (notably `better-sqlite3`), run `npm rebuild better-sqlite3` after install. See [supply-chain.md](supply-chain.md) for details and escape hatches.
+
 ---
 
 ## Configure Environment
