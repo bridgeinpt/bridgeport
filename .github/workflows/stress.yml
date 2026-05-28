@@ -67,15 +67,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Per-scenario wall time is ~10s of autocannon regardless of
+          # weight (duration is fixed in thresholds.json), so balance by
+          # count, not by per-scenario expense. 14 + 14 keeps both shards
+          # at ~3m40s end-to-end.
           - shard: light
-            # Cheap reads + the smaller list endpoints. Roughly half the
-            # sequential time of the full suite.
-            scenarios: 'auth-me,notifications-unread-count,environments-list,environment-detail,servers-list,services-list,service-detail,container-images-list,monitoring-overview,agents-status,health-status,vars-list,audit-logs,health-logs,services-per-server,service-deployments-history,users-list,notifications-list,config-fragments-list'
+            # Cheap reads: auth/scope, single-entity detail, fast lists.
+            scenarios: 'auth-me,notifications-unread-count,environments-list,environment-detail,servers-list,service-detail,vars-list,audit-logs,health-logs,services-per-server,service-deployments-history,users-list,notifications-list,config-fragments-list'
           - shard: heavy
-            # Metrics histories, secrets list, and the list endpoints with
-            # the heavier joins / aggregations (databases, config-files,
-            # dependency-graph). Each scenario does more work; smaller count.
-            scenarios: 'metrics-summary,server-metrics-history,service-metrics-history,database-metrics-history,secrets-list,databases-list,database-monitoring-summary,config-files-list,dependency-graph'
+            # Joins, aggregations, history matrices, and the deeper list
+            # endpoints (services, container-images, monitoring/health).
+            scenarios: 'services-list,container-images-list,monitoring-overview,agents-status,health-status,metrics-summary,server-metrics-history,service-metrics-history,database-metrics-history,secrets-list,databases-list,database-monitoring-summary,config-files-list,dependency-graph'
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
