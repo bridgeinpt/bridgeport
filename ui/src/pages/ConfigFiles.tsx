@@ -244,6 +244,25 @@ export default function ConfigFiles() {
   };
 
   const startEdit = async (file: ConfigFile) => {
+    // Pull the full detail FIRST so we know which fragments are already
+    // included (the list endpoint doesn't return includedFragments to keep
+    // responses small). If this fails we MUST NOT enter edit mode with a
+    // default-empty fragment list — a subsequent Save would full-replace the
+    // existing rows with `[]`, silently wiping every fragment include on the
+    // ConfigFile. Better to refuse to open the editor.
+    let included: ConfigFile['includedFragments'];
+    try {
+      const { configFile } = await getConfigFile(file.id);
+      included = configFile.includedFragments ?? [];
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? `Failed to load config file: ${err.message}`
+          : 'Failed to load config file'
+      );
+      return;
+    }
+
     setEditingFile(file);
     setEditContent(file.content || '');
     setEditDescription(file.description || '');
@@ -251,18 +270,11 @@ export default function ConfigFiles() {
     setEditLanguage(file.language || 'plaintext');
     setPreviewContent(null);
     setPreviewError(null);
-    // Pull the full detail so we know which fragments are already included
-    // (the list endpoint doesn't return includedFragments to keep responses small).
-    try {
-      const { configFile } = await getConfigFile(file.id);
-      const ids = (configFile.includedFragments ?? [])
-        .slice()
-        .sort((a, b) => a.position - b.position)
-        .map((row) => row.fragment.id);
-      setEditFragmentIds(ids);
-    } catch {
-      setEditFragmentIds([]);
-    }
+    const ids = (included ?? [])
+      .slice()
+      .sort((a, b) => a.position - b.position)
+      .map((row) => row.fragment.id);
+    setEditFragmentIds(ids);
   };
 
   const handlePreview = async () => {
@@ -270,17 +282,17 @@ export default function ConfigFiles() {
     setPreviewLoading(true);
     setPreviewError(null);
     try {
-      // Persist any pending edit first so the preview reflects the in-flight
-      // changes (content + fragmentIds). Without this, users would see the
-      // last-saved render instead of what they're about to save.
-      await updateConfigFile(editingFile.id, {
-        content: editContent,
-        description: editDescription || undefined,
-        autoResync: editAutoResync,
-        ...(editingFile.isBinary ? {} : { language: editLanguage }),
-        ...(editingFile.isBinary ? {} : { fragmentIds: editFragmentIds }),
-      });
-      const result = await previewConfigFile(editingFile.id);
+      // Stateless preview: send the in-flight editor state in the body so
+      // the server renders against it without persisting. Previously we
+      // PATCH'd the row before previewing, which wrote a fileHistory entry
+      // and bumped updatedAt — flipping ServiceFile sync status to "pending"
+      // on every click.
+      const result = await previewConfigFile(
+        editingFile.id,
+        editingFile.isBinary
+          ? undefined
+          : { content: editContent, fragmentIds: editFragmentIds },
+      );
       setPreviewContent(result.content);
       if (result.missing.length > 0 || result.templateErrors.length > 0) {
         const parts = [];

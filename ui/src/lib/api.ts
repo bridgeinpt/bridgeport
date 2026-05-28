@@ -1342,8 +1342,17 @@ export interface ConfigFilePreviewResult {
   templateErrors: string[];
 }
 
-export const previewConfigFile = (id: string) =>
-  api.post<ConfigFilePreviewResult>(`/config-files/${id}/preview`);
+// Optional preview body — when present the server renders against the
+// supplied values without persisting them. Used by the editor to render
+// in-flight edits before Save (previously the UI PATCH'd the row before
+// previewing, which wrote a history row and flipped sync status).
+export interface ConfigFilePreviewBody {
+  content?: string;
+  fragmentIds?: string[];
+}
+
+export const previewConfigFile = (id: string, body?: ConfigFilePreviewBody) =>
+  api.post<ConfigFilePreviewResult>(`/config-files/${id}/preview`, body);
 
 export interface ServiceFile {
   id: string;

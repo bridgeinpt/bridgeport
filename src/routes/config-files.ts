@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import { prisma, isPrismaNotFoundError } from '../lib/db.js';
 import { createClientForServer, shellEscape, type CommandClient } from '../lib/ssh.js';
@@ -59,6 +59,51 @@ const attachFileSchema = z.object({
   configFileId: z.string(),
   targetPath: z.string().min(1),
 });
+
+/**
+ * Validate `fragmentIds` payload before any write. Three failure modes the
+ * Prisma layer used to surface as 500/409 with wrong messages:
+ *
+ *  1. Duplicate ids → P2002 surfaced as a misleading "Config file with this
+ *     name already exists" 409 (POST) or a bare 500 (PATCH).
+ *  2. Non-existent ids → P2003 (FK violation) surfaced as a bare 500 on both.
+ *  3. Cross-environment ids — a fragment from env B attached to a ConfigFile
+ *     in env A. The DB does not enforce this (no compound FK across env), so
+ *     without this check the include silently links across environments.
+ *
+ * We do all three checks in a single findMany (returns the subset of
+ * caller-supplied ids that exist AND belong to `environmentId`).
+ *
+ * Returns `null` on success; the reply has already been sent with a 400 on
+ * failure. Caller should `return` when this returns true. Mirrors the
+ * `validateBody` / `findOrNotFound` pattern in `src/lib/helpers.ts`.
+ */
+async function rejectInvalidFragmentIds(
+  fragmentIds: ReadonlyArray<string>,
+  environmentId: string,
+  reply: FastifyReply
+): Promise<boolean> {
+  // Duplicate ids would race two createMany rows with the same composite
+  // (configFileId, fragmentId), which Prisma rejects with P2002.
+  if (new Set(fragmentIds).size !== fragmentIds.length) {
+    reply.code(400).send({ error: 'fragmentIds must not contain duplicates' });
+    return true;
+  }
+  // Single findMany validates both existence and env scope. We don't `select`
+  // the env id back because the where clause already constrains it — the
+  // result count is the only signal we need.
+  const found = await prisma.configFragment.findMany({
+    where: { id: { in: [...fragmentIds] }, environmentId },
+    select: { id: true },
+  });
+  if (found.length !== fragmentIds.length) {
+    reply.code(400).send({
+      error: 'One or more fragmentIds are invalid or belong to a different environment',
+    });
+    return true;
+  }
+  return false;
+}
 
 export async function configFileRoutes(fastify: FastifyInstance): Promise<void> {
   // List config files for environment
@@ -225,6 +270,24 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
       const body = validateBody(createConfigFileSchema, request, reply);
       if (!body) return;
 
+      // Binary ConfigFiles bypass `composeFragmentedContent` at render
+      // time (compose / sync paths route around the text branch), so
+      // accepting fragmentIds would silently drop them at render. Reject
+      // explicitly — the operator either meant a text file (uncheck
+      // isBinary) or didn't mean to include fragments.
+      if (body.isBinary && body.fragmentIds && body.fragmentIds.length > 0) {
+        return reply.code(400).send({
+          error: 'Binary ConfigFiles cannot include fragments',
+        });
+      }
+
+      // Validate fragmentIds: no duplicates, no cross-env, no non-existent.
+      // Doing this before the transaction keeps DB error translation simple
+      // (no P2002/P2003 leakage as 500/409) and gives the user a clear 400.
+      if (body.fragmentIds && body.fragmentIds.length > 0) {
+        if (await rejectInvalidFragmentIds(body.fragmentIds, envId, reply)) return;
+      }
+
       try {
         // Auto-detect syntax-highlighting language from filename when the
         // caller didn't supply one. Binary files always fall back to the
@@ -244,12 +307,13 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
               environmentId: envId,
             },
           });
-          // Populate Secret/VarUsage rows so the secrets/vars list endpoints
-          // can resolve "where is this key used?" via a join instead of
-          // scanning content. Binary files skip extraction inside the helper.
-          await syncUsageForConfigFile(tx, cf);
-          // Persist ordered fragment includes. Position is the array index
-          // (caller controls order).
+          // Persist ordered fragment includes BEFORE usage sync so the
+          // extractor scans fragment content too — otherwise a `${KEY}`
+          // reference that lives only in a fragment would be invisible to
+          // SecretUsage / VarUsage and to the auto-resync trigger that
+          // reads them.
+          // Position is the array index (caller controls order).
+          let fragmentContents: Array<{ fragment: { content: string } }> = [];
           if (fragmentIds && fragmentIds.length > 0) {
             await tx.configFileFragment.createMany({
               data: fragmentIds.map((fragmentId, position) => ({
@@ -258,7 +322,22 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
                 position,
               })),
             });
+            // Re-read the fragment content (preserving caller order) so the
+            // usage extractor below sees the full scan blob.
+            const rows = await tx.configFragment.findMany({
+              where: { id: { in: fragmentIds }, environmentId: envId },
+              select: { id: true, content: true },
+            });
+            const byId = new Map(rows.map((r) => [r.id, r.content]));
+            fragmentContents = fragmentIds
+              .map((id) => byId.get(id))
+              .filter((c): c is string => c !== undefined)
+              .map((content) => ({ fragment: { content } }));
           }
+          // Populate Secret/VarUsage rows so the secrets/vars list endpoints
+          // can resolve "where is this key used?" via a join instead of
+          // scanning content. Binary files skip extraction inside the helper.
+          await syncUsageForConfigFile(tx, { ...cf, includedFragments: fragmentContents });
           return cf;
         });
 
@@ -293,14 +372,36 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
       const body = validateUpdateBody(updateConfigFileSchema, 'configFile', request, reply);
       if (!body) return;
 
-      try {
-        const existing = await findOrNotFound(
-          prisma.configFile.findUnique({ where: { id } }),
-          'Config file',
-          reply
-        );
-        if (!existing) return;
+      const existing = await findOrNotFound(
+        prisma.configFile.findUnique({ where: { id } }),
+        'Config file',
+        reply
+      );
+      if (!existing) return;
 
+      // Binary ConfigFiles bypass `composeFragmentedContent` at render time
+      // (compose / sync paths route around the text branch), so accepting
+      // fragmentIds for one would silently drop them. Reject when either
+      // the existing row is binary OR the PATCH is flipping isBinary to
+      // true AND any fragments are supplied. We don't try to auto-detach
+      // — the explicit reject forces the operator to be intentional.
+      const effectiveIsBinary = body.isBinary ?? existing.isBinary;
+      if (effectiveIsBinary && body.fragmentIds && body.fragmentIds.length > 0) {
+        return reply.code(400).send({
+          error: 'Binary ConfigFiles cannot include fragments',
+        });
+      }
+
+      // Validate fragmentIds against the ConfigFile's environment (not any
+      // environmentId from the PATCH body, which is read-only and would be
+      // rejected upstream by validateUpdateBody anyway).
+      if (body.fragmentIds && body.fragmentIds.length > 0) {
+        if (await rejectInvalidFragmentIds(body.fragmentIds, existing.environmentId, reply)) {
+          return;
+        }
+      }
+
+      try {
         // Save history if content is being updated
         if (body.content !== undefined && body.content !== existing.content) {
           await prisma.fileHistory.create({
@@ -320,13 +421,9 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
             where: { id },
             data: updateData,
           });
-          // Re-sync Secret/VarUsage rows whenever the content or isBinary flag
-          // could have changed. Cheap when nothing changed (single findMany).
-          if (body.content !== undefined || body.isBinary !== undefined) {
-            await syncUsageForConfigFile(tx, cf);
-          }
-          // Full-replace fragment includes when caller supplied the list.
-          // Undefined = leave existing rows alone (PATCH semantics).
+          // Full-replace fragment includes BEFORE usage sync when caller
+          // supplied the list, so the extractor sees the new fragment
+          // content. Undefined = leave existing rows alone (PATCH semantics).
           if (fragmentIds !== undefined) {
             await tx.configFileFragment.deleteMany({ where: { configFileId: id } });
             if (fragmentIds.length > 0) {
@@ -338,6 +435,24 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
                 })),
               });
             }
+          }
+          // Re-sync Secret/VarUsage rows whenever the content or isBinary flag
+          // could have changed, OR when fragmentIds changed (fragment content
+          // contributes to the scan blob — a swap of fragments must re-extract).
+          if (
+            body.content !== undefined ||
+            body.isBinary !== undefined ||
+            fragmentIds !== undefined
+          ) {
+            // Re-read the current fragment includes (ordered) so the
+            // extractor scans fragment content along with the ConfigFile's
+            // own content. Cheap join — one row per included fragment.
+            const includedFragments = await tx.configFileFragment.findMany({
+              where: { configFileId: id },
+              orderBy: { position: 'asc' },
+              select: { fragment: { select: { content: true } } },
+            });
+            await syncUsageForConfigFile(tx, { ...cf, includedFragments });
           }
           return cf;
         });
@@ -370,14 +485,33 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // resolved against the environment's vars/secrets. Used by the editor to
   // show what will actually be written to the server before save/deploy.
   //
-  // Secret values appear in clear in this preview — callers should treat the
-  // response as sensitive (the route requires authentication via the global
-  // auth handler). The compose dry-run preview is the redacted equivalent.
+  // STATELESS by design (issue #115 follow-up): the preview accepts an
+  // optional body with in-flight `content` / `fragmentIds` so the editor
+  // can render what's currently in the form WITHOUT persisting it first.
+  // Previously the UI PATCH'd the row before calling preview, which wrote
+  // a fileHistory row + bumped updatedAt (flipping ServiceFile sync status
+  // to "pending") on every Preview click.
+  //
+  // Secret values are REDACTED in the response so the preview can't be
+  // used as a back-channel to reveal secrets without an audit trail
+  // (mirrors the compose dry-run preview — see `redactSecretValues` in
+  // `src/lib/dry-run.ts`).
+  const previewBodySchema = z.object({
+    content: z.string().optional(),
+    fragmentIds: z.array(z.string()).optional(),
+  });
   fastify.post(
     '/api/config-files/:id/preview',
     { preHandler: [fastify.authenticate] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
+      // Body is optional — when absent the preview renders the saved state.
+      // When present, fields override the saved values without persisting.
+      const parsed = previewBodySchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        return reply.code(400).send({ error: 'Invalid preview body' });
+      }
+      const overrides = parsed.data;
 
       const configFile = await findOrNotFound(
         prisma.configFile.findUnique({
@@ -400,19 +534,63 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         return reply.code(400).send({ error: 'Preview is not supported for binary files' });
       }
 
-      const composed = composeFragmentedContent(
-        configFile.includedFragments.map((f) => ({
+      // Validate any supplied fragmentIds the same way POST/PATCH do —
+      // no duplicates, no cross-env, no non-existent. Without this a
+      // caller could compose a preview from a fragment in another env.
+      let fragmentsForRender: Array<{ name: string; content: string }>;
+      if (overrides.fragmentIds !== undefined) {
+        if (overrides.fragmentIds.length > 0) {
+          if (await rejectInvalidFragmentIds(
+            overrides.fragmentIds,
+            configFile.environmentId,
+            reply,
+          )) {
+            return;
+          }
+        }
+        // Re-fetch fragment content in caller order. We can't reuse the
+        // ConfigFile's `includedFragments` because the caller may have
+        // changed the set or order.
+        const rows = overrides.fragmentIds.length > 0
+          ? await prisma.configFragment.findMany({
+              where: {
+                id: { in: overrides.fragmentIds },
+                environmentId: configFile.environmentId,
+              },
+              select: { id: true, name: true, content: true },
+            })
+          : [];
+        const byId = new Map(rows.map((r) => [r.id, r]));
+        fragmentsForRender = overrides.fragmentIds
+          .map((fid) => byId.get(fid))
+          .filter((r): r is { id: string; name: string; content: string } => r !== undefined)
+          .map((r) => ({ name: r.name, content: r.content }));
+      } else {
+        fragmentsForRender = configFile.includedFragments.map((f) => ({
           name: f.fragment.name,
           content: f.fragment.content,
-        })),
-        configFile.content,
+        }));
+      }
+
+      const ownContent = overrides.content ?? configFile.content;
+
+      const composed = composeFragmentedContent(
+        fragmentsForRender,
+        ownContent,
         configFile.language,
       );
 
-      const { content, missing, templateErrors } = await resolveSecretPlaceholders(
+      const { content: rawContent, missing, templateErrors } = await resolveSecretPlaceholders(
         configFile.environmentId,
         composed
       );
+
+      // Redact secret values from the preview — see route comment above
+      // and `redactSecretValues` in `src/lib/dry-run.ts`. The placeholders
+      // (`${KEY}`) themselves are left intact for missing/unresolved keys
+      // so operators can still see which references didn't resolve.
+      const secretValues = Object.values(await getSecretsForEnv(configFile.environmentId));
+      const content = redactSecretValues(rawContent, secretValues);
 
       return { content, missing, templateErrors };
     }

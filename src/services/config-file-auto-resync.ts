@@ -673,17 +673,45 @@ export async function triggerAutoResyncForKey(
     // because SQLite's LIKE treats `_` as a single-char wildcard, and Prisma does
     // NOT escape it. Without the JS filter, triggering for key `FOO_BAR` would
     // also match a file containing `${FOOXBAR}` since `_` matches any char.
+    //
+    // Two match paths now (post-#115):
+    //   1. The placeholder lives in the ConfigFile's own content.
+    //   2. The placeholder lives in any included fragment's content (which is
+    //      concatenated before the own content at render time).
+    // A `${KEY}` reference that only appears in a fragment must still trigger
+    // the cascade, otherwise editing a secret won't re-sync files that pulled
+    // it in via a shared fragment.
     const rawCandidates = await prisma.configFile.findMany({
       where: {
         environmentId,
         autoResync: true,
         isBinary: false,
-        content: { contains: placeholder },
+        OR: [
+          { content: { contains: placeholder } },
+          {
+            includedFragments: {
+              some: { fragment: { content: { contains: placeholder } } },
+            },
+          },
+        ],
       },
-      select: { id: true, name: true, content: true },
+      select: {
+        id: true,
+        name: true,
+        content: true,
+        includedFragments: {
+          select: { fragment: { select: { content: true } } },
+        },
+      },
     });
 
-    const candidates = rawCandidates.filter((cf) => cf.content.includes(placeholder));
+    // Post-filter to defeat SQLite LIKE's `_`-wildcard false positives — both
+    // for the own-content branch and the fragment branch.
+    const candidates = rawCandidates.filter(
+      (cf) =>
+        cf.content.includes(placeholder) ||
+        cf.includedFragments.some((row) => row.fragment.content.includes(placeholder))
+    );
 
     if (candidates.length === 0) return;
 
