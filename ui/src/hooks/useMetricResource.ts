@@ -90,7 +90,19 @@ export function useMetricResource<T extends { until?: string }>(
           dataRef.current = result;
           setData(result);
         }
-        if (result.until) lastUntilRef.current = result.until;
+        if (result.until) {
+          lastUntilRef.current = result.until;
+        } else if (isRefresh) {
+          // A missing `until` on a refresh tick means the delta cursor can't
+          // advance — every subsequent tick would re-fetch from the same
+          // point. Surface this so a backend regression (e.g. dropped field
+          // in a downsample pass) is observable in the browser console
+          // rather than silently stalling the chart.
+          // eslint-disable-next-line no-console
+          console.warn(
+            'useMetricResource: missing `until` on response; auto-refresh delta cursor will not advance'
+          );
+        }
       } catch (err) {
         if (token !== requestTokenRef.current) return;
         setError(err instanceof Error ? err : new Error(String(err)));

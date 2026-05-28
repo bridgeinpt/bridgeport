@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { mergeColumnarHistory, type ColumnarHistory } from './metricsMerge';
+import {
+  mergeColumnarHistory,
+  mergeDatabaseHistory,
+  type ColumnarHistory,
+  type DatabaseHistory,
+} from './metricsMerge';
 
 /**
  * Tests for the client-side delta stitcher (issue #171).
@@ -300,5 +305,343 @@ describe('mergeColumnarHistory', () => {
         expect(row.length).toBe(merged.timestamps.length);
       }
     }
+  });
+
+  // Regression for the "shape mismatch on second delta tick" crash. The
+  // monitoring page callers feed the previous merge output back in as `prev`
+  // — this test simulates that path on the columnar helper directly,
+  // proving that successive merges keep the `entities` field populated (and
+  // therefore the page-side rename to `servers` / `services` keeps working).
+  it('regression: a second delta tick still has entities (no shape drift)', () => {
+    const initial: ColumnarHistory<{ id: string; name: string }, 'cpu'> = {
+      entities: [
+        { id: 's1', name: 'srv1' },
+        { id: 's2', name: 'srv2' },
+      ],
+      timestamps: [ts(0), ts(1)],
+      series: {
+        cpu: [
+          [10, 11],
+          [20, 21],
+        ],
+      },
+      mode: 'full',
+      until: ts(1),
+    };
+    const delta1: ColumnarHistory<{ id: string; name: string }, 'cpu'> = {
+      entities: [
+        { id: 's1', name: 'srv1' },
+        { id: 's2', name: 'srv2' },
+      ],
+      timestamps: [ts(2)],
+      series: { cpu: [[12], [22]] },
+      mode: 'delta',
+      until: ts(2),
+    };
+    const merged1 = mergeColumnarHistory(initial, delta1);
+    expect(merged1.entities.map((e) => e.id)).toEqual(['s1', 's2']);
+
+    // Second tick — feed merged1 back in as prev. This is the exact path the
+    // hook takes; if mergeColumnarHistory dropped or renamed `entities`, the
+    // page-level caller's `prev.servers` access would crash before this
+    // call even ran. Here we assert that the helper itself preserves the
+    // field on round trip.
+    const delta2: ColumnarHistory<{ id: string; name: string }, 'cpu'> = {
+      entities: [
+        { id: 's1', name: 'srv1' },
+        { id: 's2', name: 'srv2' },
+      ],
+      timestamps: [ts(3)],
+      series: { cpu: [[13], [23]] },
+      mode: 'delta',
+      until: ts(3),
+    };
+    const merged2 = mergeColumnarHistory(merged1, delta2);
+
+    expect(merged2.entities).toBeDefined();
+    expect(merged2.entities.map((e) => e.id)).toEqual(['s1', 's2']);
+    expect(merged2.timestamps).toEqual([ts(0), ts(1), ts(2), ts(3)]);
+    expect(merged2.series.cpu).toEqual([
+      [10, 11, 12, 13],
+      [20, 21, 22, 23],
+    ]);
+    expect(merged2.until).toBe(ts(3));
+  });
+});
+
+describe('mergeDatabaseHistory', () => {
+  const baseTime = Date.UTC(2026, 0, 1, 0, 0, 0);
+  const ts = (i: number): string => new Date(baseTime + i * 60_000).toISOString();
+
+  it('appends new timestamps + per-database scalar values, dedupes timestamps', () => {
+    const prev: DatabaseHistory = {
+      types: [
+        {
+          type: 'postgres',
+          typeName: 'PostgreSQL',
+          queryMeta: [{ name: 'active_connections', displayName: 'Active', resultType: 'scalar' }],
+          databases: [
+            { id: 'db1', name: 'app' },
+            { id: 'db2', name: 'jobs' },
+          ],
+          timestamps: [ts(0), ts(1)],
+          series: {
+            active_connections: [
+              [5, 6],
+              [1, 2],
+            ],
+          },
+        },
+      ],
+      mode: 'full',
+      until: ts(1),
+    };
+    const delta: DatabaseHistory = {
+      types: [
+        {
+          type: 'postgres',
+          typeName: 'PostgreSQL',
+          queryMeta: [{ name: 'active_connections', displayName: 'Active', resultType: 'scalar' }],
+          databases: [
+            { id: 'db1', name: 'app' },
+            { id: 'db2', name: 'jobs' },
+          ],
+          timestamps: [ts(2), ts(3)],
+          series: {
+            active_connections: [
+              [7, 8],
+              [3, 4],
+            ],
+          },
+        },
+      ],
+      mode: 'delta',
+      until: ts(3),
+    };
+
+    const merged = mergeDatabaseHistory(prev, delta);
+    expect(merged.types.length).toBe(1);
+    const group = merged.types[0];
+    expect(group.timestamps).toEqual([ts(0), ts(1), ts(2), ts(3)]);
+    expect(group.series.active_connections).toEqual([
+      [5, 6, 7, 8],
+      [1, 2, 3, 4],
+    ]);
+    expect(merged.until).toBe(ts(3));
+    // Mode normalizes to 'full' — the merged object represents a complete
+    // window again.
+    expect(merged.mode).toBe('full');
+  });
+
+  it('preserves database order and appends a new db from delta', () => {
+    const prev: DatabaseHistory = {
+      types: [
+        {
+          type: 'postgres',
+          typeName: 'PostgreSQL',
+          queryMeta: [{ name: 'active', displayName: 'Active', resultType: 'scalar' }],
+          databases: [{ id: 'db1', name: 'app' }],
+          timestamps: [ts(0)],
+          series: { active: [[5]] },
+        },
+      ],
+      until: ts(0),
+    };
+    const delta: DatabaseHistory = {
+      types: [
+        {
+          type: 'postgres',
+          typeName: 'PostgreSQL',
+          queryMeta: [{ name: 'active', displayName: 'Active', resultType: 'scalar' }],
+          databases: [
+            { id: 'db1', name: 'app' },
+            { id: 'db2', name: 'jobs' }, // new
+          ],
+          timestamps: [ts(1)],
+          series: {
+            active: [[6], [3]],
+          },
+        },
+      ],
+      until: ts(1),
+    };
+
+    const merged = mergeDatabaseHistory(prev, delta);
+    const group = merged.types[0];
+    expect(group.databases.map((d) => d.id)).toEqual(['db1', 'db2']);
+    // db2 was absent during prev's window, so it backfills with null.
+    expect(group.series.active).toEqual([
+      [5, 6],
+      [null, 3],
+    ]);
+  });
+
+  it('merges rows-snapshot series (e.g. top tables) keeping the latest entries', () => {
+    const prev: DatabaseHistory = {
+      types: [
+        {
+          type: 'postgres',
+          typeName: 'PostgreSQL',
+          queryMeta: [{ name: 'top_tables', displayName: 'Top Tables', resultType: 'rows' }],
+          databases: [{ id: 'db1', name: 'app' }],
+          timestamps: [ts(0)],
+          series: {
+            top_tables: { rows: [[[{ table: 't1', size: 100 }]]] },
+          },
+        },
+      ],
+      until: ts(0),
+    };
+    const delta: DatabaseHistory = {
+      types: [
+        {
+          type: 'postgres',
+          typeName: 'PostgreSQL',
+          queryMeta: [{ name: 'top_tables', displayName: 'Top Tables', resultType: 'rows' }],
+          databases: [{ id: 'db1', name: 'app' }],
+          timestamps: [ts(1)],
+          series: {
+            top_tables: { rows: [[[{ table: 't1', size: 110 }]]] },
+          },
+        },
+      ],
+      until: ts(1),
+    };
+
+    const merged = mergeDatabaseHistory(prev, delta);
+    const group = merged.types[0];
+    expect(group.timestamps).toEqual([ts(0), ts(1)]);
+    const entry = group.series.top_tables as { rows: Array<Array<unknown>> };
+    expect(entry.rows.length).toBe(1);
+    expect(entry.rows[0]!.length).toBe(2);
+    expect(entry.rows[0]![1]).toEqual([{ table: 't1', size: 110 }]);
+  });
+
+  it('keeps a prev-only type group intact when delta has no matching group', () => {
+    const prev: DatabaseHistory = {
+      types: [
+        {
+          type: 'postgres',
+          typeName: 'PostgreSQL',
+          queryMeta: [],
+          databases: [{ id: 'db1', name: 'app' }],
+          timestamps: [ts(0)],
+          series: {},
+        },
+        {
+          type: 'mysql',
+          typeName: 'MySQL',
+          queryMeta: [],
+          databases: [{ id: 'db2', name: 'analytics' }],
+          timestamps: [ts(0)],
+          series: {},
+        },
+      ],
+      until: ts(0),
+    };
+    const delta: DatabaseHistory = {
+      types: [
+        {
+          type: 'postgres',
+          typeName: 'PostgreSQL',
+          queryMeta: [],
+          databases: [{ id: 'db1', name: 'app' }],
+          timestamps: [ts(1)],
+          series: {},
+        },
+      ],
+      until: ts(1),
+    };
+
+    const merged = mergeDatabaseHistory(prev, delta);
+    // Both type groups still present, in prev order. MySQL is untouched.
+    expect(merged.types.map((g) => g.type)).toEqual(['postgres', 'mysql']);
+    expect(merged.types[1].timestamps).toEqual([ts(0)]);
+  });
+
+  it('windowSize trims merged timestamps + rows to the most recent N points', () => {
+    const prev: DatabaseHistory = {
+      types: [
+        {
+          type: 'postgres',
+          typeName: 'PostgreSQL',
+          queryMeta: [{ name: 'active', displayName: 'Active', resultType: 'scalar' }],
+          databases: [{ id: 'db1', name: 'app' }],
+          timestamps: [ts(0), ts(1), ts(2), ts(3)],
+          series: { active: [[1, 2, 3, 4]] },
+        },
+      ],
+      until: ts(3),
+    };
+    const delta: DatabaseHistory = {
+      types: [
+        {
+          type: 'postgres',
+          typeName: 'PostgreSQL',
+          queryMeta: [{ name: 'active', displayName: 'Active', resultType: 'scalar' }],
+          databases: [{ id: 'db1', name: 'app' }],
+          timestamps: [ts(4), ts(5)],
+          series: { active: [[5, 6]] },
+        },
+      ],
+      until: ts(5),
+    };
+
+    const merged = mergeDatabaseHistory(prev, delta, { windowSize: 3 });
+    const group = merged.types[0];
+    expect(group.timestamps).toEqual([ts(3), ts(4), ts(5)]);
+    expect(group.series.active).toEqual([[4, 5, 6]]);
+  });
+
+  it('survives a second delta tick (feeds merged result back in as prev)', () => {
+    const initial: DatabaseHistory = {
+      types: [
+        {
+          type: 'postgres',
+          typeName: 'PostgreSQL',
+          queryMeta: [{ name: 'active', displayName: 'Active', resultType: 'scalar' }],
+          databases: [{ id: 'db1', name: 'app' }],
+          timestamps: [ts(0)],
+          series: { active: [[1]] },
+        },
+      ],
+      mode: 'full',
+      until: ts(0),
+    };
+    const delta1: DatabaseHistory = {
+      types: [
+        {
+          type: 'postgres',
+          typeName: 'PostgreSQL',
+          queryMeta: [{ name: 'active', displayName: 'Active', resultType: 'scalar' }],
+          databases: [{ id: 'db1', name: 'app' }],
+          timestamps: [ts(1)],
+          series: { active: [[2]] },
+        },
+      ],
+      mode: 'delta',
+      until: ts(1),
+    };
+    const merged1 = mergeDatabaseHistory(initial, delta1);
+    const delta2: DatabaseHistory = {
+      types: [
+        {
+          type: 'postgres',
+          typeName: 'PostgreSQL',
+          queryMeta: [{ name: 'active', displayName: 'Active', resultType: 'scalar' }],
+          databases: [{ id: 'db1', name: 'app' }],
+          timestamps: [ts(2)],
+          series: { active: [[3]] },
+        },
+      ],
+      mode: 'delta',
+      until: ts(2),
+    };
+    const merged2 = mergeDatabaseHistory(merged1, delta2);
+
+    const group = merged2.types[0];
+    expect(group.timestamps).toEqual([ts(0), ts(1), ts(2)]);
+    expect(group.series.active).toEqual([[1, 2, 3]]);
+    expect(merged2.until).toBe(ts(2));
   });
 });

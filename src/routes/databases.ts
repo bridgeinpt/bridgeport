@@ -75,6 +75,17 @@ const scheduleSchema = z.object({
   enabled: z.boolean().optional(),
 });
 
+// Query schema for the database /metrics/history endpoint. Mirrors the shape
+// used by /api/environments/:envId/metrics/history in routes/monitoring.ts so
+// `since` gets the same strict ISO-datetime check (rejecting malformed input
+// at the API edge instead of letting `new Date('garbage')` silently widen the
+// query window to "Invalid Date").
+const databaseMetricsHistoryQuerySchema = z.object({
+  hours: z.coerce.number().min(1).max(168).default(24),
+  since: z.string().datetime().optional(),
+  maxPoints: z.coerce.number().min(10).max(2000).default(120),
+});
+
 export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // List databases for environment
   fastify.get(
@@ -483,23 +494,26 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
               until: { type: 'string' },
             },
           },
+          400: {
+            type: 'object',
+            properties: {
+              error: { type: 'string' },
+              details: {},
+            },
+          },
         },
       },
     },
-    async (request) => {
+    async (request, reply) => {
       const { envId } = request.params as { envId: string };
-      const { hours, since: sinceIso, maxPoints: maxPointsRaw } = request.query as {
-        hours?: string;
-        since?: string;
-        maxPoints?: string;
-      };
-      const hoursNum = hours ? parseInt(hours) : 24;
-      // Clamp maxPoints to the same [10, 2000] range as the other history
-      // endpoints. Default 120 keeps the chart point count manageable.
-      const maxPointsParsed = maxPointsRaw ? parseInt(maxPointsRaw) : 120;
-      const maxPoints = Number.isFinite(maxPointsParsed)
-        ? Math.min(2000, Math.max(10, maxPointsParsed))
-        : 120;
+      // Reject malformed query params at the edge so callers see a 400 rather
+      // than a silent fallback to an "Invalid Date" window. Mirrors the
+      // monitoring.ts /metrics/history validation.
+      const query = databaseMetricsHistoryQuerySchema.safeParse(request.query);
+      if (!query.success) {
+        return reply.code(400).send({ error: 'Invalid query', details: query.error.issues });
+      }
+      const { hours: hoursNum, since: sinceIso, maxPoints } = query.data;
       const isDelta = !!sinceIso;
       const since = sinceIso
         ? new Date(sinceIso)

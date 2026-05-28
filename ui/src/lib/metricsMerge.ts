@@ -91,6 +91,13 @@ export function mergeColumnarHistory<E extends { id: string }, K extends string 
   const tsToDeltaIdx = new Map<string, number>();
   delta.timestamps.forEach((t, j) => tsToDeltaIdx.set(t, j));
 
+  // Pre-build entity-id → row-index maps once so the inner loops do an O(1)
+  // lookup instead of a per-entity `findIndex` (formerly O(K · E²)).
+  const prevIdToIdx = new Map<string, number>();
+  prev.entities.forEach((e, i) => prevIdToIdx.set(e.id, i));
+  const deltaIdToIdx = new Map<string, number>();
+  delta.entities.forEach((e, i) => deltaIdToIdx.set(e.id, i));
+
   for (const key of allKeys) {
     const prevRows = prev.series[key];
     const deltaRows = delta.series[key];
@@ -100,8 +107,8 @@ export function mergeColumnarHistory<E extends { id: string }, K extends string 
       // For each entity slot, pull the prev row by its prev-index and the
       // delta row by its delta-index, then concatenate the delta-new points.
       const e = entities[i];
-      const prevIdx = prev.entities.findIndex((p) => p.id === e.id);
-      const deltaIdx = delta.entities.findIndex((p) => p.id === e.id);
+      const prevIdx = prevIdToIdx.get(e.id) ?? -1;
+      const deltaIdx = deltaIdToIdx.get(e.id) ?? -1;
 
       const prevRow: Array<number | null> = prevIdx >= 0 && prevRows
         ? prevRows[prevIdx] ?? new Array(prev.timestamps.length).fill(null)
@@ -136,4 +143,205 @@ export function mergeColumnarHistory<E extends { id: string }, K extends string 
     mode: 'full',
     until: delta.until ?? prev.until,
   } as ColumnarHistory<E, K>;
+}
+
+/**
+ * Delta-merge helper for the /databases/metrics/history response shape
+ * (issue #171). The wire shape nests one columnar group per database type:
+ *
+ *   {
+ *     types: [
+ *       {
+ *         type, typeName, queryMeta, databases[], timestamps[],
+ *         series: Record<string, number[][] | { rows: unknown[][] }>
+ *       },
+ *       ...
+ *     ],
+ *     mode, until,
+ *   }
+ *
+ * For each group we:
+ *  1. Match prev and delta by `type` (groups present in only one are kept).
+ *  2. Merge `databases[]` preserving prev order, append new dbs from delta.
+ *  3. Dedupe `timestamps` (delta uses strict `gt` on the backend; defensive).
+ *  4. Concatenate per-series rows. Each series key is either `number[][]`
+ *     (scalar / row-flatten) or `{ rows: unknown[][] }` (array snapshot).
+ */
+type DatabaseEntity = { id: string; name: string; serverId?: string | null; serverName?: string | null };
+type ScalarRows = Array<Array<number | null>>;
+type RowsSnapshot = { rows: Array<Array<unknown>> };
+type DatabaseSeriesEntry = ScalarRows | RowsSnapshot;
+type DatabaseQueryMeta = {
+  name: string;
+  displayName: string;
+  resultType: 'scalar' | 'row' | 'rows';
+  unit?: string;
+  chartGroup?: string;
+  resultMapping?: Record<string, string>;
+};
+export interface DatabaseTypeGroupHistory {
+  type: string;
+  typeName: string;
+  queryMeta: DatabaseQueryMeta[];
+  databases: DatabaseEntity[];
+  timestamps: string[];
+  series: Record<string, DatabaseSeriesEntry>;
+}
+export interface DatabaseHistory {
+  types: DatabaseTypeGroupHistory[];
+  mode?: 'full' | 'delta';
+  until?: string;
+}
+
+function isScalarRows(entry: DatabaseSeriesEntry): entry is ScalarRows {
+  return Array.isArray(entry);
+}
+
+function mergeOneTypeGroup(
+  prev: DatabaseTypeGroupHistory,
+  delta: DatabaseTypeGroupHistory,
+  windowSize?: number
+): DatabaseTypeGroupHistory {
+  // Same entity-merge logic as mergeColumnarHistory: keep prev order, append
+  // brand-new databases from delta.
+  const databases: DatabaseEntity[] = [...prev.databases];
+  const prevIdToIdx = new Map<string, number>();
+  prev.databases.forEach((d, i) => prevIdToIdx.set(d.id, i));
+  for (const d of delta.databases) {
+    if (!prevIdToIdx.has(d.id)) {
+      databases.push(d);
+    }
+  }
+  const deltaIdToIdx = new Map<string, number>();
+  delta.databases.forEach((d, i) => deltaIdToIdx.set(d.id, i));
+
+  // Dedupe timestamps.
+  const seen = new Set<string>(prev.timestamps);
+  const newTs: string[] = [];
+  for (const t of delta.timestamps) {
+    if (!seen.has(t)) {
+      seen.add(t);
+      newTs.push(t);
+    }
+  }
+  const mergedTimestamps = [...prev.timestamps, ...newTs];
+  const cap = windowSize;
+  const trimFrom = cap != null && mergedTimestamps.length > cap ? mergedTimestamps.length - cap : 0;
+  const finalTimestamps = trimFrom > 0 ? mergedTimestamps.slice(trimFrom) : mergedTimestamps;
+
+  // Delta timestamp -> index lookup, built once per group.
+  const tsToDeltaIdx = new Map<string, number>();
+  delta.timestamps.forEach((t, j) => tsToDeltaIdx.set(t, j));
+
+  const mergedSeries: Record<string, DatabaseSeriesEntry> = {};
+  const allKeys = new Set<string>([
+    ...Object.keys(prev.series),
+    ...Object.keys(delta.series),
+  ]);
+
+  for (const key of allKeys) {
+    const prevEntry = prev.series[key];
+    const deltaEntry = delta.series[key];
+
+    // Determine shape: prefer prev's shape; fall back to delta's.
+    const scalar = prevEntry ? isScalarRows(prevEntry) : deltaEntry ? isScalarRows(deltaEntry) : true;
+
+    if (scalar) {
+      const prevRows = (prevEntry as ScalarRows | undefined) ?? undefined;
+      const deltaRows = (deltaEntry as ScalarRows | undefined) ?? undefined;
+      const out: ScalarRows = new Array(databases.length);
+      for (let i = 0; i < databases.length; i++) {
+        const db = databases[i];
+        const prevIdx = prevIdToIdx.get(db.id) ?? -1;
+        const deltaIdx = deltaIdToIdx.get(db.id) ?? -1;
+        const prevRow: Array<number | null> =
+          prevIdx >= 0 && prevRows ? prevRows[prevIdx] ?? new Array(prev.timestamps.length).fill(null) : new Array(prev.timestamps.length).fill(null);
+        const deltaRow: Array<number | null> = new Array(newTs.length).fill(null);
+        if (deltaIdx >= 0 && deltaRows) {
+          const dr = deltaRows[deltaIdx];
+          if (dr) {
+            newTs.forEach((t, j) => {
+              const di = tsToDeltaIdx.get(t);
+              deltaRow[j] = di != null ? dr[di] ?? null : null;
+            });
+          }
+        }
+        const concat = prevRow.concat(deltaRow);
+        out[i] = trimFrom > 0 ? concat.slice(trimFrom) : concat;
+      }
+      mergedSeries[key] = out;
+    } else {
+      // Rows snapshot — { rows: unknown[][] } indexed by [dbIdx][tIdx].
+      const prevRowsMatrix = (prevEntry as RowsSnapshot | undefined)?.rows;
+      const deltaRowsMatrix = (deltaEntry as RowsSnapshot | undefined)?.rows;
+      const rows: Array<Array<unknown>> = new Array(databases.length);
+      for (let i = 0; i < databases.length; i++) {
+        const db = databases[i];
+        const prevIdx = prevIdToIdx.get(db.id) ?? -1;
+        const deltaIdx = deltaIdToIdx.get(db.id) ?? -1;
+        const prevRow: Array<unknown> =
+          prevIdx >= 0 && prevRowsMatrix ? prevRowsMatrix[prevIdx] ?? new Array(prev.timestamps.length).fill(null) : new Array(prev.timestamps.length).fill(null);
+        const deltaRow: Array<unknown> = new Array(newTs.length).fill(null);
+        if (deltaIdx >= 0 && deltaRowsMatrix) {
+          const dr = deltaRowsMatrix[deltaIdx];
+          if (dr) {
+            newTs.forEach((t, j) => {
+              const di = tsToDeltaIdx.get(t);
+              deltaRow[j] = di != null ? dr[di] ?? null : null;
+            });
+          }
+        }
+        const concat = prevRow.concat(deltaRow);
+        rows[i] = trimFrom > 0 ? concat.slice(trimFrom) : concat;
+      }
+      mergedSeries[key] = { rows };
+    }
+  }
+
+  return {
+    type: prev.type,
+    typeName: prev.typeName,
+    // Prefer delta's queryMeta when present (config might have changed).
+    queryMeta: delta.queryMeta.length > 0 ? delta.queryMeta : prev.queryMeta,
+    databases,
+    timestamps: finalTimestamps,
+    series: mergedSeries,
+  };
+}
+
+export function mergeDatabaseHistory(
+  prev: DatabaseHistory,
+  delta: DatabaseHistory,
+  options?: { windowSize?: number }
+): DatabaseHistory {
+  // Index prev type groups by type name so we can match O(1).
+  const prevByType = new Map<string, DatabaseTypeGroupHistory>();
+  for (const g of prev.types) prevByType.set(g.type, g);
+
+  const mergedTypes: DatabaseTypeGroupHistory[] = [];
+  const seenTypes = new Set<string>();
+
+  // Iterate prev groups first so the existing tab order is preserved.
+  for (const prevGroup of prev.types) {
+    const deltaGroup = delta.types.find((g) => g.type === prevGroup.type);
+    if (deltaGroup) {
+      mergedTypes.push(mergeOneTypeGroup(prevGroup, deltaGroup, options?.windowSize));
+    } else {
+      mergedTypes.push(prevGroup);
+    }
+    seenTypes.add(prevGroup.type);
+  }
+  // Append type groups that only appeared in delta (e.g. a new db type added
+  // after initial load).
+  for (const deltaGroup of delta.types) {
+    if (!seenTypes.has(deltaGroup.type)) {
+      mergedTypes.push(deltaGroup);
+    }
+  }
+
+  return {
+    types: mergedTypes,
+    mode: 'full',
+    until: delta.until ?? prev.until,
+  };
 }

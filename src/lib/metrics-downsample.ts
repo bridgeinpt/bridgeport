@@ -89,6 +89,29 @@ export function downsampleColumnar(
     const nextStart = bucket + 1 < interior ? boundaries[bucket + 1][0] : n - 1;
     const nextEnd = bucket + 1 < interior ? boundaries[bucket + 1][1] : n;
 
+    // Precompute the per-row next-bucket average once per bucket — the
+    // value doesn't depend on `candidate`, so hoisting it out of the inner
+    // loop drops complexity from O(rows × candidates × nextWidth) to
+    // O(rows × (candidates + nextWidth)). Identical numeric outputs.
+    const nextAvgPerRow: Array<{ nxAvg: number; nyAvg: number; hasData: boolean }> = new Array(rows.length);
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r];
+      let nxSum = 0;
+      let nySum = 0;
+      let nCount = 0;
+      for (let j = nextStart; j < nextEnd; j++) {
+        const v = row[j];
+        if (v == null) continue;
+        nxSum += x(j);
+        nySum += v;
+        nCount++;
+      }
+      nextAvgPerRow[r] =
+        nCount > 0
+          ? { nxAvg: nxSum / nCount, nyAvg: nySum / nCount, hasData: true }
+          : { nxAvg: 0, nyAvg: 0, hasData: false };
+    }
+
     let bestIdx = bStart;
     let bestScore = -Infinity;
 
@@ -106,20 +129,10 @@ export function downsampleColumnar(
         const py = row[pIdx];
         if (py == null) continue;
 
-        // Average of valid next-bucket samples for this row.
-        let nxSum = 0;
-        let nySum = 0;
-        let nCount = 0;
-        for (let j = nextStart; j < nextEnd; j++) {
-          const v = row[j];
-          if (v == null) continue;
-          nxSum += x(j);
-          nySum += v;
-          nCount++;
-        }
-        if (nCount === 0) continue;
-        const nx = nxSum / nCount;
-        const ny = nySum / nCount;
+        const nextAvg = nextAvgPerRow[r];
+        if (!nextAvg.hasData) continue;
+        const nx = nextAvg.nxAvg;
+        const ny = nextAvg.nyAvg;
 
         const px = x(pIdx);
         // Triangle area = |(px - nx) * (cy - py) - (px - cx) * (ny - py)| / 2.

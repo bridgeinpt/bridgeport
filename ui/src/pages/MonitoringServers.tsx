@@ -17,6 +17,16 @@ import AutoRefreshToggle from '../components/monitoring/AutoRefreshToggle';
 import { useMetricResource } from '../hooks/useMetricResource';
 import { mergeColumnarHistory } from '../lib/metricsMerge';
 
+// Stable empty-history fallback so the `historyResource.data ?? EMPTY_HISTORY`
+// below produces the same object identity across renders — prevents downstream
+// memos (cpuChart, memoryChart, ...) from invalidating every render while the
+// initial fetch is in flight.
+const EMPTY_HISTORY: MetricsHistoryResponse = Object.freeze({
+  servers: [],
+  timestamps: [],
+  series: {},
+}) as MetricsHistoryResponse;
+
 export default function MonitoringServers() {
   const {
     selectedEnvironment,
@@ -56,24 +66,38 @@ export default function MonitoringServers() {
       // Merge delta points onto the existing full window using the columnar
       // merge helper; cap the visible window at a generous 1000 points so
       // long-running auto-refresh sessions don't grow unbounded.
-      merge: (prev, next) =>
-        next.mode === 'delta'
-          ? mergeColumnarHistory(
-              {
-                entities: prev.servers,
-                timestamps: prev.timestamps,
-                series: prev.series,
-                until: prev.until,
-              },
-              {
-                entities: next.servers,
-                timestamps: next.timestamps,
-                series: next.series,
-                until: next.until,
-              },
-              { windowSize: 1000 }
-            ) as unknown as MetricsHistoryResponse
-          : next,
+      //
+      // The columnar helper works on a generic `entities` field; we adapt
+      // the response's `servers` field to `entities` going in and rename it
+      // back going out so subsequent ticks (which feed the merged shape
+      // back in as `prev`) keep finding `prev.servers`. Without this
+      // explicit rename the second delta tick would crash with
+      // `history.servers is undefined`.
+      merge: (prev, next) => {
+        if (next.mode !== 'delta') return next;
+        const merged = mergeColumnarHistory(
+          {
+            entities: prev.servers,
+            timestamps: prev.timestamps,
+            series: prev.series,
+            until: prev.until,
+          },
+          {
+            entities: next.servers ?? [],
+            timestamps: next.timestamps,
+            series: next.series,
+            until: next.until,
+          },
+          { windowSize: 1000 }
+        );
+        return {
+          servers: merged.entities,
+          timestamps: merged.timestamps,
+          series: merged.series,
+          mode: merged.mode,
+          until: merged.until,
+        } as MetricsHistoryResponse;
+      },
     }
   );
 
@@ -109,11 +133,7 @@ export default function MonitoringServers() {
     };
   }, [envId]);
 
-  const history: MetricsHistoryResponse = historyResource.data ?? {
-    servers: [],
-    timestamps: [],
-    series: {},
-  };
+  const history: MetricsHistoryResponse = historyResource.data ?? EMPTY_HISTORY;
   const servers: MetricsSummaryServer[] = summaryResource.data?.servers ?? [];
   const historyLoading = historyResource.loading;
   const historyRefreshing = historyResource.refreshing;

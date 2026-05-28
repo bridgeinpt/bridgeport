@@ -17,6 +17,12 @@ import AutoRefreshToggle from '../components/monitoring/AutoRefreshToggle';
 import EmptyState from '../components/EmptyState';
 import { DatabaseIcon } from '../components/Icons';
 import { useMetricResource } from '../hooks/useMetricResource';
+import { mergeDatabaseHistory } from '../lib/metricsMerge';
+
+// Stable empty fallback arrays so destructuring downstream doesn't create a
+// new array identity on every render before the resources resolve.
+const EMPTY_DATABASES: DatabaseMonitoringSummaryItem[] = Object.freeze([] as DatabaseMonitoringSummaryItem[]) as DatabaseMonitoringSummaryItem[];
+const EMPTY_TYPE_GROUPS: DatabaseMetricsTypeGroup[] = Object.freeze([] as DatabaseMetricsTypeGroup[]) as DatabaseMetricsTypeGroup[];
 
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';
@@ -79,25 +85,31 @@ export default function MonitoringDatabases() {
   );
 
   const historyResource = useMetricResource<DatabaseMetricsHistoryResponse>(
-    useCallback(async () => {
-      // We intentionally don't pass `since` for the databases endpoint —
-      // merging delta payloads across nested type groups + dynamic series
-      // keys (one per query) would be its own merge helper. The full
-      // response is already LTTB-capped to maxPoints=120 per scalar series.
-      if (!envId) return { types: [] };
-      return getDatabaseMetricsHistory(envId, monitoringTimeRange, {
-        maxPoints: 120,
-      });
-    }, [envId, monitoringTimeRange]),
+    useCallback(
+      async (since) => {
+        if (!envId) return { types: [] };
+        return getDatabaseMetricsHistory(envId, monitoringTimeRange, {
+          since,
+          maxPoints: 120,
+        });
+      },
+      [envId, monitoringTimeRange]
+    ),
     {
       autoRefreshMs: autoRefreshEnabled ? 30000 : 0,
       depKey,
       enabled: !!envId,
+      // Merge delta points onto the existing window via the database-specific
+      // helper (nested type groups + scalar/rows mixed series shapes).
+      merge: (prev, next) => {
+        if (next.mode !== 'delta') return next;
+        return mergeDatabaseHistory(prev, next, { windowSize: 1000 }) as DatabaseMetricsHistoryResponse;
+      },
     }
   );
 
-  const summary: DatabaseMonitoringSummaryItem[] = summaryResource.data?.databases ?? [];
-  const typeGroups: DatabaseMetricsTypeGroup[] = historyResource.data?.types ?? [];
+  const summary: DatabaseMonitoringSummaryItem[] = summaryResource.data?.databases ?? EMPTY_DATABASES;
+  const typeGroups: DatabaseMetricsTypeGroup[] = historyResource.data?.types ?? EMPTY_TYPE_GROUPS;
   const loading = summaryResource.loading;
   const historyLoading = historyResource.loading;
   const historyRefreshing = historyResource.refreshing;

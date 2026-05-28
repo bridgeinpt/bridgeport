@@ -3,6 +3,7 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
 import ChartCardSkeleton from './ChartCardSkeleton';
+import RefreshingDot from './RefreshingDot';
 
 const COLORS = ['#60a5fa', '#34d399', '#fbbf24', '#f472b6', '#a78bfa', '#f87171'];
 
@@ -34,12 +35,7 @@ const ChartCard = memo(function ChartCard({ title, data, names, formatTime, unit
       <div className="card relative">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-medium text-white">{title}</h3>
-          {refreshing && (
-            <span
-              className="inline-block w-3 h-3 border-2 border-slate-600 border-t-brand-400 rounded-full animate-spin"
-              aria-label="Refreshing"
-            />
-          )}
+          {refreshing && <RefreshingDot />}
         </div>
         <div className="h-56 flex items-center justify-center text-slate-500">
           No data available

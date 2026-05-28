@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import RefreshingDot from './RefreshingDot';
 
 /**
  * Card-shaped skeleton used while a metric card's initial data is loading.
@@ -23,12 +24,7 @@ const ChartCardSkeleton = memo(function ChartCardSkeleton({ title, refreshing }:
         ) : (
           <div className="h-4 w-24 bg-slate-700 rounded animate-pulse" />
         )}
-        {refreshing && (
-          <span
-            className="inline-block w-3 h-3 border-2 border-slate-600 border-t-brand-400 rounded-full animate-spin"
-            aria-label="Refreshing"
-          />
-        )}
+        {refreshing && <RefreshingDot />}
       </div>
       <div className="h-56 animate-pulse bg-slate-800/50 rounded" />
     </div>

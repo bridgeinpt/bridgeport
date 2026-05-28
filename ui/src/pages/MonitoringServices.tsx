@@ -16,6 +16,13 @@ import AutoRefreshToggle from '../components/monitoring/AutoRefreshToggle';
 import { useMetricResource } from '../hooks/useMetricResource';
 import { mergeColumnarHistory } from '../lib/metricsMerge';
 
+// Stable empty-history fallback (see MonitoringServers for rationale).
+const EMPTY_HISTORY: ServiceMetricsHistoryResponse = Object.freeze({
+  services: [],
+  timestamps: [],
+  series: {},
+}) as ServiceMetricsHistoryResponse;
+
 export default function MonitoringServices() {
   const {
     selectedEnvironment,
@@ -51,24 +58,35 @@ export default function MonitoringServices() {
       autoRefreshMs: autoRefreshEnabled ? 30000 : 0,
       depKey,
       enabled: !!envId,
-      merge: (prev, next) =>
-        next.mode === 'delta'
-          ? mergeColumnarHistory(
-              {
-                entities: prev.services,
-                timestamps: prev.timestamps,
-                series: prev.series,
-                until: prev.until,
-              },
-              {
-                entities: next.services,
-                timestamps: next.timestamps,
-                series: next.series,
-                until: next.until,
-              },
-              { windowSize: 1000 }
-            ) as unknown as ServiceMetricsHistoryResponse
-          : next,
+      // See MonitoringServers for the rationale on the explicit rename —
+      // mergeColumnarHistory works on a generic `entities` field, and we
+      // need to project it back to `services` so subsequent ticks (which
+      // feed the merged shape back in as `prev`) keep finding `prev.services`.
+      merge: (prev, next) => {
+        if (next.mode !== 'delta') return next;
+        const merged = mergeColumnarHistory(
+          {
+            entities: prev.services,
+            timestamps: prev.timestamps,
+            series: prev.series,
+            until: prev.until,
+          },
+          {
+            entities: next.services ?? [],
+            timestamps: next.timestamps,
+            series: next.series,
+            until: next.until,
+          },
+          { windowSize: 1000 }
+        );
+        return {
+          services: merged.entities,
+          timestamps: merged.timestamps,
+          series: merged.series,
+          mode: merged.mode,
+          until: merged.until,
+        } as ServiceMetricsHistoryResponse;
+      },
     }
   );
 
@@ -87,11 +105,7 @@ export default function MonitoringServices() {
   );
 
   const servers: MetricsSummaryServer[] = summaryResource.data?.servers ?? [];
-  const history: ServiceMetricsHistoryResponse = historyResource.data ?? {
-    services: [],
-    timestamps: [],
-    series: {},
-  };
+  const history: ServiceMetricsHistoryResponse = historyResource.data ?? EMPTY_HISTORY;
   const historyLoading = historyResource.loading;
   const historyRefreshing = historyResource.refreshing;
   const refreshing = historyRefreshing || summaryResource.refreshing;
