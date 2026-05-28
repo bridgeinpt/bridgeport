@@ -33,6 +33,8 @@ data/
 test-uploads/
 stress-uploads/
 stress-report*.json
+coverage/
+ui/coverage/
 
 # Specs (local design docs)
 specs/

@@ -54,10 +54,27 @@ env:
   SCHEDULER_ENABLED: 'false'
 
 jobs:
+  # The 19 scenarios are split across two parallel shards so end-to-end
+  # workflow time is bound by the slower shard (~half the sequential run).
+  # Each shard boots its own app + DB and seeds independently — they share
+  # nothing at runtime. The aggregator below downloads both reports, merges
+  # them, and is the one place that writes the step summary + PR comment.
   stress:
-    name: Monitoring history endpoints
+    name: Stress (${{ matrix.shard }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: light
+            # Cheap reads + the smaller list endpoints. Roughly half the
+            # sequential time of the full suite.
+            scenarios: 'auth-me,notifications-unread-count,environments-list,environment-detail,servers-list,services-list,service-detail,container-images-list,monitoring-overview,agents-status,health-status,vars-list,audit-logs,health-logs'
+          - shard: heavy
+            # Metrics histories + the secrets list (deep nested include).
+            # Smaller scenario count but each scenario does more work.
+            scenarios: 'metrics-summary,server-metrics-history,service-metrics-history,database-metrics-history,secrets-list'
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -66,11 +83,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx prisma generate
-      - name: Run stress tests
+      - name: Run stress tests (${{ matrix.shard }})
         env:
           STRESS_SERVERS: ${{ github.event.inputs.servers || '30' }}
           STRESS_SERVICES_PER_SERVER: ${{ github.event.inputs.services_per_server || '3' }}
           STRESS_METRICS_PER_ENTITY: '12'
+          STRESS_SCENARIOS: ${{ matrix.scenarios }}
           # Use the looser ci thresholds (`tests/stress/thresholds.ci.json`)
           # tuned for GitHub-hosted runners. Local dev still uses the tight
           # `thresholds.json` so regressions surface on the first dev-machine
@@ -80,8 +98,60 @@ jobs:
           STRESS_SOFT: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
         run: npm run test:stress
 
-      - name: Upload stress report
+      - name: Upload stress report (${{ matrix.shard }})
         if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: stress-report-${{ matrix.shard }}
+          path: stress-report.json
+          retention-days: 30
+
+  aggregate:
+    name: Stress (aggregate)
+    runs-on: ubuntu-latest
+    needs: stress
+    if: always()
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Download all shard reports
+        uses: actions/download-artifact@v7
+        with:
+          pattern: stress-report-*
+          path: shards
+
+      - name: Merge shard reports
+        id: merge
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          inputs=(shards/stress-report-*/stress-report.json)
+          if [ ${#inputs[@]} -eq 0 ]; then
+            echo "::warning::No shard reports found — leaving aggregate empty."
+            exit 0
+          fi
+          # Concatenate scenarios from all shards into one report. `passed`
+          # and `soft` are reduced (AND for passed, OR for soft — any soft
+          # shard means the overall is soft). Metadata (seed, load) is
+          # taken from the first shard since they're identical inputs.
+          jq -s '
+            {
+              generatedAt: (map(.generatedAt) | max),
+              seed: .[0].seed,
+              load: .[0].load,
+              # Sort by name so the table order doesn'"'"'t depend on which
+              # shard finished first or how the glob expanded.
+              scenarios: (map(.scenarios) | add | sort_by(.name)),
+              passed: (map(.passed) | all),
+              soft: (map(.soft) | any)
+            }
+          ' "${inputs[@]}" > stress-report.json
+          echo "Merged $(jq '.scenarios | length' stress-report.json) scenarios across ${#inputs[@]} shard(s)."
+
+      - name: Upload merged report
+        if: hashFiles('stress-report.json') != ''
         uses: actions/upload-artifact@v7
         with:
           name: stress-report
@@ -89,7 +159,7 @@ jobs:
           retention-days: 30
 
       - name: Write workflow run summary
-        if: always()
+        if: hashFiles('stress-report.json') != ''
         run: |
           if [ -f stress-report.json ]; then
             soft=$(jq -r '.soft // false' stress-report.json)
@@ -118,8 +188,18 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      - name: Fail aggregate when thresholds breached (hard mode only)
+        if: hashFiles('stress-report.json') != ''
+        run: |
+          passed=$(jq -r '.passed' stress-report.json)
+          soft=$(jq -r '.soft // false' stress-report.json)
+          if [ "$passed" != "true" ] && [ "$soft" != "true" ]; then
+            echo "::error::Stress thresholds breached and soft mode is off."
+            exit 1
+          fi
+
       - name: Post sticky PR comment (only when thresholds breached)
-        if: always() && github.event_name == 'pull_request'
+        if: hashFiles('stress-report.json') != '' && github.event_name == 'pull_request'
         uses: actions/github-script@v8
         with:
           script: |
