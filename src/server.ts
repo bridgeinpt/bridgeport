@@ -53,6 +53,7 @@ import { eventRoutes } from './routes/events.js';
 import { configScanRoutes } from './routes/config-scan.js';
 import { serviceAccountRoutes } from './routes/service-accounts.js';
 import { apiTokenRoutes } from './routes/api-tokens.js';
+import { syncBatchRoutes } from './routes/sync-batch.js';
 import { sshPool } from './lib/ssh.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -210,6 +211,7 @@ async function buildServer() {
   await fastify.register(configScanRoutes);
   await fastify.register(serviceAccountRoutes);
   await fastify.register(apiTokenRoutes);
+  await fastify.register(syncBatchRoutes);
   // Health check
   fastify.get('/health', async () => {
     return {

@@ -9,6 +9,7 @@ Config files let you store, version, and sync configuration to your servers via 
 - [Creating Config Files](#creating-config-files)
 - [Attaching Files to Services](#attaching-files-to-services)
 - [Syncing Files to Servers](#syncing-files-to-servers)
+- [Batched Atomic Sync](#batched-atomic-sync)
 - [Secret and Variable Placeholders](#secret-and-variable-placeholders)
 - [Iterating Over Servers](#iterating-over-servers)
 - [Edit History and Rollback](#edit-history-and-rollback)
@@ -298,6 +299,87 @@ All three sync endpoints return the same envelope. Branch on `status`, not `succ
 
 > [!NOTE]
 > Syncing a file does **not** restart the service. After syncing, you may need to restart or reload the service for changes to take effect (e.g., `docker compose up -d` or `nginx -s reload`).
+
+---
+
+## Batched Atomic Sync
+
+When a single change touches multiple config files (a coordinated certificate rotation, an env-wide TLS switch, a redeploy that needs three compose files updated together), use the **batch sync** endpoint to apply them as a single transactional unit.
+
+A batch is **single-environment scope** — every config file referenced by the batch must live in the same BRIDGEPORT environment. v1 supports `config-file-sync` operations only; other op types are rejected with `VALIDATION_ERROR`.
+
+### Endpoint
+
+```http
+POST /api/sync/batch
+Authorization: Bearer <token>
+Idempotency-Key: <optional opaque string>
+Content-Type: application/json
+
+{
+  "operations": [
+    { "type": "config-file-sync", "configFileId": "ck_abc1" },
+    { "type": "config-file-sync", "configFileId": "ck_abc2" }
+  ],
+  "rollbackOnFailure": true
+}
+```
+
+### Response
+
+```json
+{
+  "batchId": "ck_batch_xyz",
+  "status": "ok",
+  "operations": [
+    { "index": 0, "status": "ok" },
+    { "index": 1, "status": "ok" }
+  ]
+}
+```
+
+Branch on `status`, not on the per-op array length:
+
+| Batch `status` | Meaning |
+|---------------|---------|
+| `ok` | Every op succeeded. |
+| `partial` | At least one op succeeded and at least one failed. With `rollbackOnFailure: true`, this means some rollbacks themselves failed and the environment may be inconsistent — investigate. |
+| `rolled_back` | An op failed and all previously successful ops were successfully reverted. The environment is back where it started. |
+| `failed` | Every attempted op failed (or `rollbackOnFailure: true` and the very first op failed). |
+
+Per-op `status` is one of: `ok`, `failed`, `skipped` (didn't run because an earlier op failed in `rollbackOnFailure: true` mode), `rolled_back` (was reverted), `rollback_failed` (revert attempt itself failed — manual intervention may be required).
+
+### Rollback semantics
+
+With `rollbackOnFailure: true`:
+
+1. BRIDGEPORT snapshots `ConfigFile.content` **before** each op runs.
+2. On the first op failure, the forward loop stops; remaining ops are marked `skipped`.
+3. Already-successful ops are walked back in reverse order: prior content is restored to the database, then re-synced to the same servers.
+4. If every revert succeeds, the batch ends as `rolled_back`. If any revert fails, the batch ends as `partial` and the failing op carries a `rollback_failed` status.
+
+With `rollbackOnFailure: false` (best-effort):
+
+- Every op is attempted regardless of earlier failures.
+- The batch ends as `ok` (all succeeded), `partial` (mixed), or `failed` (all failed).
+
+### Idempotency
+
+Pass an `Idempotency-Key` header on retries to make the call safe to repeat:
+
+- **Same key + same canonicalized body** → returns the original batch result without re-executing.
+- **Same key + different body** → returns HTTP `409` with `code: "IDEMPOTENCY_KEY_REUSED"`.
+
+The canonicalization sorts JSON object keys recursively before hashing, so whitespace and key ordering don't affect the dedupe.
+
+### Inspecting a batch
+
+```http
+GET /api/sync/batch/:batchId
+Authorization: Bearer <token>
+```
+
+Returns the same payload shape as the `POST` response. Audit-log entries written by the batch carry a `details.batchId` field so you can correlate individual file syncs back to their batch.
 
 ---
 

@@ -599,6 +599,12 @@ model AuditLog {
   serviceAccountId String?
   serviceAccount   ServiceAccount? @relation(fields: [serviceAccountId], references: [id], onDelete: SetNull)
 
+  // Issue #130: link audit rows to a sync batch so operators can trace which
+  // file syncs were part of which transactional batch. Plain String? (no
+  // relation): the batch table is operational metadata and we don't want a
+  // cascade from AuditLog into it.
+  batchId String?
+
   @@index([createdAt(sort: Desc)])
   @@index([resourceType, resourceId])
   @@index([userId])
@@ -607,6 +613,7 @@ model AuditLog {
   @@index([serviceAccountId])
   @@index([environmentId, createdAt(sort: Desc)])
   @@index([resourceType, createdAt(sort: Desc)])
+  @@index([batchId])
 }
 
 // Edit history for config files
@@ -1381,5 +1388,78 @@ model ServerCluster {
 
   @@unique([environmentId, name])
   @@index([environmentId])
+}
+
+// Atomic multi-resource sync batch (issue #130).
+//
+// A batch is an all-or-nothing wrapper around N config-file syncs in the same
+// environment. Persisted before any op runs so a server crash mid-batch leaves
+// a "pending" row + per-op rows for forensics.
+//
+// Actor fields (userId / apiTokenId / serviceAccountId) and `environmentId`
+// are plain String? — no @relation — to keep the batch table independent of
+// cascade rules on the parent rows. The audit-log entries written by the
+// service carry the same actor + environment plus a `batchId` for tracing.
+model SyncBatch {
+  id                  String   @id @default(cuid())
+  // "pending" | "ok" | "partial" | "rolled_back" | "failed"
+  status              String
+  rollbackOnFailure   Boolean  @default(true)
+  // Optional caller-supplied idempotency key (HTTP header `Idempotency-Key`).
+  // Combined with `idempotencyBodyHash` to detect same-key replays vs.
+  // same-key-different-body conflicts.
+  idempotencyKey      String?
+  idempotencyBodyHash String?
+  userId              String?
+  apiTokenId          String?
+  serviceAccountId    String?
+  environmentId       String?
+  createdAt           DateTime @default(now())
+  completedAt         DateTime?
+
+  operations SyncBatchOperation[]
+
+  @@unique([idempotencyKey, idempotencyBodyHash])
+  @@index([createdAt])
+  @@index([environmentId])
+}
+
+// One operation row inside a SyncBatch. v1 only supports config-file-sync ops.
+model SyncBatchOperation {
+  id      String    @id @default(cuid())
+  batchId String
+  batch   SyncBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  index Int    // 0-based position in the original batch request
+  type  String // "config-file-sync"
+  configFileId String?
+
+  // "pending" | "ok" | "failed" | "skipped" | "rolled_back" | "rollback_failed"
+  status String
+
+  // JSON `{code?, message}` from the failure (when status="failed" or
+  // "rollback_failed"). Plain String to mirror AuditLog.details.
+  error String?
+
+  // Snapshot of ConfigFile.content captured BEFORE running this op, used to
+  // restore the prior state during rollback. Nullable for ops that haven't run
+  // yet (still "pending" / "skipped") or where we couldn't capture (e.g.
+  // missing config file). For binary files we still snapshot the base64 blob.
+  previousContent  String?
+  previousIsBinary Boolean @default(false)
+
+  // JSON of the per-target results from syncConfigFileToAttachedServices —
+  // mirrors the shape returned by the existing sync routes so consumers can
+  // reuse the same client code.
+  results String?
+
+  // If rollback was attempted but the restore-sync itself failed, surface why.
+  rollbackError String?
+
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  @@index([batchId, index])
+  @@index([configFileId])
 }
 

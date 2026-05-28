@@ -1,0 +1,133 @@
+/**
+ * Atomic multi-resource sync batch endpoints (issue #130).
+ *
+ * - POST /api/sync/batch
+ *     Body: { operations: [{type:"config-file-sync", configFileId}], rollbackOnFailure }
+ *     Header: Idempotency-Key (optional)
+ *     Response: { batchId, status, operations:[{index, status, error?}] }
+ *
+ * - GET /api/sync/batch/:batchId
+ *     Replays the persisted batch + ops for inspection.
+ *
+ * v1 only supports `config-file-sync` ops; other op types are rejected at
+ * validation time. See `src/services/sync-batch.ts` for the execution model.
+ */
+
+import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
+import { prisma } from '../lib/db.js';
+import { requireOperator } from '../plugins/authorize.js';
+import { actorFrom } from '../services/audit.js';
+import { ApiError } from '../lib/errors.js';
+import { validateBody } from '../lib/helpers.js';
+import {
+  executeBatch,
+  hashCanonicalBody,
+  lookupIdempotentBatch,
+  IdempotencyKeyConflictError,
+  batchRowToResult,
+} from '../services/sync-batch.js';
+
+const operationSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('config-file-sync'),
+    configFileId: z.string().min(1),
+  }),
+  // Reject unknown op types loudly with VALIDATION_ERROR.
+]);
+
+const batchBodySchema = z.object({
+  operations: z.array(operationSchema).min(1, 'At least one operation is required').max(50),
+  rollbackOnFailure: z.boolean().default(true),
+});
+
+/** Trim & sanity-check an Idempotency-Key header. */
+function readIdempotencyKey(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  // Cap key length to defend against header abuse. 200 chars is more than
+  // enough for any UUID / opaque token a client would pass.
+  if (trimmed.length > 200) {
+    throw new ApiError('VALIDATION_ERROR', 'Idempotency-Key header is too long', {
+      field: 'Idempotency-Key',
+    });
+  }
+  return trimmed;
+}
+
+export async function syncBatchRoutes(fastify: FastifyInstance): Promise<void> {
+  // Execute (or replay) a transactional batch of config-file syncs.
+  fastify.post(
+    '/api/sync/batch',
+    { preHandler: [fastify.authenticate, requireOperator] },
+    async (request, reply) => {
+      const body = validateBody(batchBodySchema, request, reply);
+      if (!body) return;
+
+      const idempotencyKey = readIdempotencyKey(
+        // Fastify lowercases header names by default.
+        request.headers['idempotency-key']
+      );
+
+      const bodyHash = hashCanonicalBody(body);
+
+      // Idempotency replay: same key + same body → return the cached result.
+      // Same key + different body → 409 CONFLICT (we never re-execute).
+      if (idempotencyKey) {
+        try {
+          const replay = await lookupIdempotentBatch(idempotencyKey, bodyHash);
+          if (replay) {
+            return replay;
+          }
+        } catch (err) {
+          if (err instanceof IdempotencyKeyConflictError) {
+            throw new ApiError(
+              'IDEMPOTENCY_KEY_REUSED',
+              'Idempotency-Key was already used with a different request body',
+              { field: 'Idempotency-Key' }
+            );
+          }
+          throw err;
+        }
+      }
+
+      const result = await executeBatch({
+        operations: body.operations,
+        rollbackOnFailure: body.rollbackOnFailure,
+        actor: actorFrom(request),
+        ...(idempotencyKey ? { idempotencyKey } : {}),
+        ...(idempotencyKey ? { idempotencyBodyHash: bodyHash } : {}),
+      });
+
+      return result;
+    }
+  );
+
+  // Fetch a persisted batch + its ops.
+  //
+  // Gated on requireOperator (operator-or-admin). Per-op error messages can
+  // leak details from any environment, and we don't currently have an
+  // environment-membership check helper to scope reads to a user's envs.
+  // Viewers (read-only role) should not be able to enumerate batch contents
+  // across the deployment; this is a deliberate conservative default until a
+  // proper env-membership check is added.
+  fastify.get(
+    '/api/sync/batch/:batchId',
+    { preHandler: [fastify.authenticate, requireOperator] },
+    async (request, reply) => {
+      const { batchId } = request.params as { batchId: string };
+
+      const row = await prisma.syncBatch.findUnique({
+        where: { id: batchId },
+        include: { operations: { orderBy: { index: 'asc' } } },
+      });
+
+      if (!row) {
+        return reply.code(404).send({ error: 'Sync batch not found' });
+      }
+
+      return batchRowToResult(row);
+    }
+  );
+}
