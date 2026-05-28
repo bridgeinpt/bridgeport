@@ -70,11 +70,12 @@ jobs:
           - shard: light
             # Cheap reads + the smaller list endpoints. Roughly half the
             # sequential time of the full suite.
-            scenarios: 'auth-me,notifications-unread-count,environments-list,environment-detail,servers-list,services-list,service-detail,container-images-list,monitoring-overview,agents-status,health-status,vars-list,audit-logs,health-logs'
+            scenarios: 'auth-me,notifications-unread-count,environments-list,environment-detail,servers-list,services-list,service-detail,container-images-list,monitoring-overview,agents-status,health-status,vars-list,audit-logs,health-logs,services-per-server,service-deployments-history,users-list,notifications-list,config-fragments-list'
           - shard: heavy
-            # Metrics histories + the secrets list (deep nested include).
-            # Smaller scenario count but each scenario does more work.
-            scenarios: 'metrics-summary,server-metrics-history,service-metrics-history,database-metrics-history,secrets-list'
+            # Metrics histories, secrets list, and the list endpoints with
+            # the heavier joins / aggregations (databases, config-files,
+            # dependency-graph). Each scenario does more work; smaller count.
+            scenarios: 'metrics-summary,server-metrics-history,service-metrics-history,database-metrics-history,secrets-list,databases-list,database-monitoring-summary,config-files-list,dependency-graph'
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6

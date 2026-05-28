@@ -44,6 +44,10 @@ export interface StressSeedOptions {
   healthLogsPerResource: number;
   /** Monitored databases per environment (drives database-metrics-history). */
   databases: number;
+  /** ConfigFragment rows (env-scoped reusable text blocks). */
+  configFragments: number;
+  /** Notification rows for the seeded user (drives notifications-list pagination). */
+  notifications: number;
 }
 
 export const DEFAULT_SEED: StressSeedOptions = {
@@ -62,6 +66,8 @@ export const DEFAULT_SEED: StressSeedOptions = {
   auditLogs: 200,
   healthLogsPerResource: 5,
   databases: 8,
+  configFragments: 10,
+  notifications: 50,
 };
 
 /** IDs of seeded entities that scenarios can reference via {placeholder} in URLs. */
@@ -369,6 +375,58 @@ export async function seedStressData(
     if (dbMetrics.length > 0) {
       await prisma.databaseMetrics.createMany({ data: dbMetrics });
     }
+  }
+
+  // -- ConfigFragments. Env-scoped reusable text blocks (issue #115).
+  // The list endpoint paginates; we seed enough rows to exercise the
+  // page + total query under load. `_count.configFiles` resolves to 0
+  // since no fragment is linked to a ConfigFile (that's the empty side
+  // of the most common case).
+  if (options.configFragments > 0) {
+    await prisma.configFragment.createMany({
+      data: Array.from({ length: options.configFragments }, (_, i) => ({
+        environmentId: env.id,
+        name: `fragment-${i}`,
+        description: i % 3 === 0 ? `Fragment ${i} description` : null,
+        content: `# Fragment ${i}\nEXAMPLE_VAR_${i}=value-${i}\n`,
+      })),
+    });
+  }
+
+  // -- Notifications. The list endpoint paginates by user; create enough
+  // rows to make the `userId + createdAt DESC` index actually do work.
+  // Needs a NotificationType — pick a deterministic code and upsert.
+  if (options.notifications > 0) {
+    const notifType = await prisma.notificationType.upsert({
+      where: { code: 'stress.test' },
+      create: {
+        code: 'stress.test',
+        category: 'system',
+        name: 'Stress Test',
+        description: 'Synthetic type for stress seeding',
+        template: 'stress {entity}',
+        defaultChannels: JSON.stringify(['in_app']),
+        severity: 'info',
+        bounceEnabled: false,
+        bounceThreshold: 0,
+        bounceCooldown: 0,
+      },
+      update: {},
+    });
+    const notifNow = Date.now();
+    await prisma.notification.createMany({
+      data: Array.from({ length: options.notifications }, (_, i) => ({
+        typeId: notifType.id,
+        userId: user.id,
+        title: `Notification ${i}`,
+        message: `Stress-seeded notification ${i}`,
+        environmentId: env.id,
+        // Spread timestamps so the DESC index has a meaningful sort.
+        createdAt: new Date(notifNow - i * 1000),
+        // Roughly half read / half unread to make the index split realistic.
+        inAppReadAt: i % 2 === 0 ? new Date(notifNow - i * 1000 + 500) : null,
+      })),
+    });
   }
 
   return {

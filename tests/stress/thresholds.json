@@ -95,6 +95,51 @@
       "path": "/api/environments/{envId}/health-logs?limit=50",
       "maxP99Ms": 40,
       "minRps": 1000
+    },
+    "databases-list": {
+      "path": "/api/environments/{envId}/databases",
+      "maxP99Ms": 40,
+      "minRps": 1200
+    },
+    "database-monitoring-summary": {
+      "path": "/api/environments/{envId}/databases/monitoring-summary",
+      "maxP99Ms": 50,
+      "minRps": 1000
+    },
+    "config-files-list": {
+      "path": "/api/environments/{envId}/config-files",
+      "maxP99Ms": 50,
+      "minRps": 800
+    },
+    "config-fragments-list": {
+      "path": "/api/environments/{envId}/config-fragments",
+      "maxP99Ms": 30,
+      "minRps": 2000
+    },
+    "services-per-server": {
+      "path": "/api/servers/{serverId}/services",
+      "maxP99Ms": 30,
+      "minRps": 2000
+    },
+    "service-deployments-history": {
+      "path": "/api/services/{serviceId}/deployments-history",
+      "maxP99Ms": 30,
+      "minRps": 2000
+    },
+    "dependency-graph": {
+      "path": "/api/environments/{envId}/dependency-graph",
+      "maxP99Ms": 100,
+      "minRps": 400
+    },
+    "users-list": {
+      "path": "/api/users",
+      "maxP99Ms": 30,
+      "minRps": 2000
+    },
+    "notifications-list": {
+      "path": "/api/notifications?limit=50",
+      "maxP99Ms": 40,
+      "minRps": 1200
     }
   },
   "load": {
