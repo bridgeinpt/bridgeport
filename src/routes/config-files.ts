@@ -795,7 +795,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
                 // chance of touching the host file.
                 const { stdout, code } = await client.exec(`cat ${shellEscape(sf.targetPath)} 2>/dev/null`);
                 if (code === 0) {
-                  currentContent = stdout.replace(/\n$/, '');
+                  currentContent = redactSecretValues(stdout.replace(/\n$/, ''), secretValues);
                   exists = true;
                 }
               } catch (err) {

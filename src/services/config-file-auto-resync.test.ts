@@ -616,6 +616,35 @@ describe('syncConfigFileToAttachedServicesDryRun (issue #128)', () => {
     expect(target.diff).toContain('***');
   });
 
+  it('redacts secret values from the host-side (before) content in the diff', async () => {
+    // After a prior live sync, the host file contains the resolved secret
+    // values verbatim. The dry-run reads them back via `cat`, and they must
+    // be redacted before they reach the `-` lines of the diff — otherwise the
+    // dry-run becomes a back-channel reveal that bypasses the
+    // `allowSecretReveal` / `neverReveal` controls on /api/secrets/:id/value.
+    vi.mocked(getSecretsForEnv).mockResolvedValue({ API_TOKEN: 'super-s3cr3t' });
+    mockPrisma.configFile.findUnique.mockResolvedValue(buildConfigFileFixture());
+    mockSSHClientInstance.exec.mockResolvedValue({
+      code: 0,
+      stdout: 'token=super-s3cr3t\nother=line\n',
+      stderr: '',
+    });
+    vi.mocked(resolveSecretPlaceholders).mockResolvedValue({
+      content: 'token=super-s3cr3t\nrenamed=line\n',
+      missing: [],
+      templateErrors: [],
+    });
+
+    const result = await syncConfigFileToAttachedServicesDryRun('cf-1');
+    const target = result!.results[0];
+
+    expect(target.exists).toBe(true);
+    // Critical: the verbatim secret must not appear ANYWHERE in the diff,
+    // including the `-` (removed) lines that came from the live host file.
+    expect(target.diff).not.toContain('super-s3cr3t');
+    expect(target.diff).toContain('***');
+  });
+
   it('marks targets with missing secrets as would-fail (error set, diff omitted) so callers do not render a green preview', async () => {
     // The live `syncConfigFileToAttachedServices` path treats missing secrets
     // as a hard failure (`success: false, error: 'Missing secrets: ...'`).

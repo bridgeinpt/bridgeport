@@ -480,7 +480,7 @@ export async function syncConfigFileToAttachedServicesDryRun(
         try {
           const { stdout, code } = await client.exec(`cat ${shellEscape(targetPath)} 2>/dev/null`);
           if (code === 0) {
-            currentContent = stdout.replace(/\n$/, '');
+            currentContent = redactSecretValues(stdout.replace(/\n$/, ''), secretValues);
             exists = true;
           }
         } catch (err) {
