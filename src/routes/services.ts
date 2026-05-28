@@ -1226,35 +1226,36 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
       );
       if (!service) return;
 
-      const logs = await prisma.auditLog.findMany({
-        where: {
-          OR: [
-            { resourceType: 'service', resourceId: id },
-            { resourceType: 'service_deployment', details: { contains: `"serviceId":"${id}"` } },
-          ],
-          action: { in: ['deploy', 'restart', 'health_check', 'update', 'create'] },
-        },
-        orderBy: { createdAt: 'desc' },
-        take: limit ? parseInt(limit, 10) : 50,
-        include: {
-          user: { select: { id: true, email: true, name: true } },
-        },
-      });
-
-      const deployments = await prisma.deployment.findMany({
-        where: { serviceId: id },
-        orderBy: { startedAt: 'desc' },
-        take: limit ? parseInt(limit, 10) : 20,
-        select: {
-          id: true,
-          imageTag: true,
-          status: true,
-          triggeredBy: true,
-          startedAt: true,
-          completedAt: true,
-          serviceDeploymentId: true,
-        },
-      });
+      const [logs, deployments] = await Promise.all([
+        prisma.auditLog.findMany({
+          where: {
+            OR: [
+              { resourceType: 'service', resourceId: id },
+              { resourceType: 'service_deployment', details: { contains: `"serviceId":"${id}"` } },
+            ],
+            action: { in: ['deploy', 'restart', 'health_check', 'update', 'create'] },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: limit ? parseInt(limit, 10) : 50,
+          include: {
+            user: { select: { id: true, email: true, name: true } },
+          },
+        }),
+        prisma.deployment.findMany({
+          where: { serviceId: id },
+          orderBy: { startedAt: 'desc' },
+          take: limit ? parseInt(limit, 10) : 20,
+          select: {
+            id: true,
+            imageTag: true,
+            status: true,
+            triggeredBy: true,
+            startedAt: true,
+            completedAt: true,
+            serviceDeploymentId: true,
+          },
+        }),
+      ]);
 
       return { logs, deployments };
     }

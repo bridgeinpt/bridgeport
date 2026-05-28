@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
+import pLimit from 'p-limit';
 import { prisma } from '../lib/db.js';
 import { checkServerHealth } from '../services/servers.js';
 import { checkServiceHealth } from '../services/services.js';
@@ -11,6 +12,13 @@ import { logHealthCheck } from '../services/health-checks.js';
 import { SERVER_STATUS, HEALTH_STATUS, CONTAINER_STATUS, HEALTH_CHECK_STATUS, DISCOVERY_STATUS, type ServerStatus } from '../lib/constants.js';
 import { validateBody, findOrNotFound, getErrorMessage } from '../lib/helpers.js';
 import { downsampleColumnar } from '../lib/metrics-downsample.js';
+
+// Caps concurrent SSH/HTTP fan-out when running on-demand health checks across
+// many servers/deployments. 8 was picked empirically: enough to overlap latency
+// of slow targets, low enough that an env with 50+ servers won't open 50
+// simultaneous SSH handshakes (each one consumes a Docker exec slot on the
+// target plus an FD on the BRIDGEPORT host).
+const HEALTH_CHECK_CONCURRENCY = 8;
 
 const healthLogQuerySchema = z.object({
   type: z.enum(['server', 'service', 'container']).optional(),
@@ -163,6 +171,8 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
 
       const { type } = body;
 
+      const limit = pLimit(HEALTH_CHECK_CONCURRENCY);
+
       // Run server health checks
       if (type === 'all' || type === 'servers') {
         const servers = await prisma.server.findMany({
@@ -170,7 +180,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
           select: { id: true, name: true },
         });
 
-        for (const server of servers) {
+        await Promise.all(servers.map((server) => limit(async () => {
           const start = Date.now();
           try {
             const result = await checkServerHealth(server.id);
@@ -217,7 +227,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
               error: errorMessage,
             });
           }
-        }
+        })));
       }
 
       // Run service-deployment health checks (per-server runtime)
@@ -229,7 +239,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
           select: { id: true, service: { select: { name: true } } },
         });
 
-        for (const sd of deployments) {
+        await Promise.all(deployments.map((sd) => limit(async () => {
           const start = Date.now();
           try {
             const result = await checkServiceHealth(sd.id);
@@ -279,7 +289,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
               error: errorMessage,
             });
           }
-        }
+        })));
       }
 
       await logAudit({
@@ -1030,17 +1040,21 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
       const env = await findOrNotFound(prisma.environment.findUnique({ where: { id: envId } }), 'Environment', reply);
       if (!env) return;
 
-      // Get server stats
-      const servers = await prisma.server.findMany({
-        where: { environmentId: envId },
-        select: { id: true, status: true },
-      });
-
       // Service runtime now lives on ServiceDeployment — count per-deployment.
-      const deployments = await prisma.serviceDeployment.findMany({
-        where: { service: { environmentId: envId } },
-        select: { id: true, status: true, healthStatus: true, containerStatus: true },
-      });
+      const [servers, deployments, databases] = await Promise.all([
+        prisma.server.findMany({
+          where: { environmentId: envId },
+          select: { id: true, status: true },
+        }),
+        prisma.serviceDeployment.findMany({
+          where: { service: { environmentId: envId } },
+          select: { id: true, status: true, healthStatus: true, containerStatus: true },
+        }),
+        prisma.database.findMany({
+          where: { environmentId: envId },
+          select: { monitoringEnabled: true, monitoringStatus: true },
+        }),
+      ]);
 
       const healthyServers = servers.filter((s) => s.status === SERVER_STATUS.HEALTHY).length;
       const healthyServices = deployments.filter(
@@ -1051,12 +1065,6 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
       const unhealthyServices = deployments.filter(
         (d) => d.healthStatus === HEALTH_STATUS.UNHEALTHY || d.containerStatus === CONTAINER_STATUS.EXITED || d.containerStatus === CONTAINER_STATUS.DEAD
       ).length;
-
-      // Get database monitoring stats
-      const databases = await prisma.database.findMany({
-        where: { environmentId: envId },
-        select: { monitoringEnabled: true, monitoringStatus: true },
-      });
 
       const monitoredDatabases = databases.filter(d => d.monitoringEnabled);
       const connectedDatabases = monitoredDatabases.filter(d => d.monitoringStatus === 'connected').length;
@@ -1100,7 +1108,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
       // on Server / ServiceDeployment. logHealthCheck keeps them atomically in sync
       // with HealthCheckLog, so we no longer have to scan (and dedupe) the log
       // table — p99 stays flat regardless of log retention.
-      const [servers, services] = await Promise.all([
+      const [servers, services, databases] = await Promise.all([
         prisma.server.findMany({
           where: { environmentId: envId },
           select: {
@@ -1124,6 +1132,19 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
             lastHealthCheckType: true,
             lastHealthCheckDurationMs: true,
             lastHealthCheckError: true,
+          },
+        }),
+        prisma.database.findMany({
+          where: { environmentId: envId, monitoringEnabled: true },
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            monitoringStatus: true,
+            lastCollectedAt: true,
+            lastMonitoringError: true,
+            server: { select: { name: true } },
+            databaseType: { select: { displayName: true } },
           },
         }),
       ]);
@@ -1177,21 +1198,6 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         serverName: d.server.name,
         lastCheck: toLastCheck(d),
       }));
-
-      // Get all monitored databases in this environment
-      const databases = await prisma.database.findMany({
-        where: { environmentId: envId, monitoringEnabled: true },
-        select: {
-          id: true,
-          name: true,
-          type: true,
-          monitoringStatus: true,
-          lastCollectedAt: true,
-          lastMonitoringError: true,
-          server: { select: { name: true } },
-          databaseType: { select: { displayName: true } },
-        },
-      });
 
       const databaseHealthStatus = databases.map((db) => {
         let status: ServerStatus = SERVER_STATUS.UNKNOWN;
