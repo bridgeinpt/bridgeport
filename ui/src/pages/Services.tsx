@@ -424,7 +424,6 @@ export default function Services() {
           <>
             {filteredServices.map((service) => {
               const ports = parseExposedPorts(service.exposedPorts ?? null);
-              const deploymentCount = service.serviceDeployments?.length ?? (service.serverId ? 1 : 0);
               const targetTag = service.containerImage?.bestTag ?? null;
               const hasUpdate = !!(
                 service.containerImage?.updateAvailable && targetTag && targetTag !== service.imageTag
@@ -485,16 +484,22 @@ export default function Services() {
                         </div>
                         {/* Row 2: Server + Type + Image */}
                         <p className="text-slate-400 text-sm mt-1">
-                          {service.serverId ? (
-                            <Link
-                              to={`/servers/${service.serverId}`}
-                              className="hover:text-primary-400"
-                            >
-                              {service.serverName}
-                            </Link>
-                          ) : (
-                            <span>{deploymentCount > 0 ? `${deploymentCount} deployment${deploymentCount === 1 ? '' : 's'}` : 'No deployments'}</span>
-                          )}
+                          {(() => {
+                            // Prefer deployment-shaped servers from the API
+                            // (post-Service-split shape); fall back to the
+                            // single `server` field that the back-compat layer
+                            // surfaces for legacy callers.
+                            const servers = service.serviceDeployments
+                              ?.map((d) => d.server?.name)
+                              .filter((n): n is string => !!n) ?? [];
+                            if (servers.length === 0 && service.server?.name) {
+                              servers.push(service.server.name);
+                            }
+                            if (servers.length === 0) {
+                              return <span>No deployments</span>;
+                            }
+                            return <span>{servers.join(', ')}</span>;
+                          })()}
                           <span className="text-slate-500"> · </span>
                           <span>{service.serviceType?.displayName || 'Generic'}</span>
                           <span className="text-slate-500"> · </span>

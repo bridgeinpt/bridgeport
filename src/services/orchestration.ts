@@ -26,10 +26,22 @@ type ServiceWithDeps = Service & {
 };
 
 /**
+ * Minimal shape `resolveDependencyOrder` actually reads — just `id`, `name`
+ * (used in cycle-error messages), and the `dependsOnId` of each dependency.
+ * Existing fat callers still satisfy this structurally; tight callers (like
+ * the dependency-graph endpoint) can query with a narrow `select`.
+ */
+type ServiceOrderInput = {
+  id: string;
+  name: string;
+  dependencies: { dependsOnId: string }[];
+};
+
+/**
  * Detect cycles in the dependency graph using DFS
  */
 function detectCycle(
-  services: Map<string, ServiceWithDeps>,
+  services: Map<string, ServiceOrderInput>,
   serviceId: string,
   visited: Set<string>,
   recursionStack: Set<string>
@@ -63,10 +75,10 @@ function detectCycle(
  * Topological sort using Kahn's algorithm
  * Returns services grouped by their level (services at same level can deploy in parallel)
  */
-export function resolveDependencyOrder(services: ServiceWithDeps[]): ServiceWithDeps[][] {
+export function resolveDependencyOrder<T extends ServiceOrderInput>(services: T[]): T[][] {
   if (services.length === 0) return [];
 
-  const serviceMap = new Map<string, ServiceWithDeps>();
+  const serviceMap = new Map<string, T>();
   const inDegree = new Map<string, number>();
   const adjacencyList = new Map<string, string[]>();
 
@@ -98,12 +110,12 @@ export function resolveDependencyOrder(services: ServiceWithDeps[]): ServiceWith
     }
   }
 
-  const levels: ServiceWithDeps[][] = [];
+  const levels: T[][] = [];
   let queue = services.filter((s) => inDegree.get(s.id) === 0);
 
   while (queue.length > 0) {
     levels.push(queue);
-    const nextQueue: ServiceWithDeps[] = [];
+    const nextQueue: T[] = [];
 
     for (const service of queue) {
       const dependents = adjacencyList.get(service.id) || [];

@@ -22,20 +22,19 @@
 
 import type { AuthUser, UserRole } from '../services/auth.js';
 
-const READ_RESOURCES = ['services', 'secrets', 'servers', 'environments'] as const;
-const WRITE_RESOURCES = ['services', 'secrets', 'servers', 'environments'] as const;
+const RESOURCES = ['services', 'secrets', 'servers', 'environments'] as const;
 
 function scopesForRole(role: UserRole): string[] {
   const out: string[] = [];
 
   // Everyone authenticated gets read access to operational resources.
   if (role === 'admin' || role === 'operator' || role === 'viewer') {
-    for (const r of READ_RESOURCES) out.push(`${r}:read`);
+    for (const r of RESOURCES) out.push(`${r}:read`);
   }
 
   // Operators and admins can write to operational resources.
   if (role === 'admin' || role === 'operator') {
-    for (const r of WRITE_RESOURCES) out.push(`${r}:write`);
+    for (const r of RESOURCES) out.push(`${r}:write`);
   }
 
   // Admin-only.

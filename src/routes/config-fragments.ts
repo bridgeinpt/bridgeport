@@ -8,6 +8,7 @@ import {
   validateUpdateBody,
   findOrNotFound,
   handleUniqueConstraint,
+  parsePaginationQuery,
 } from '../lib/helpers.js';
 import { triggerAutoResyncForFragment } from '../services/config-file-auto-resync.js';
 
@@ -37,26 +38,36 @@ const updateFragmentSchema = z.object({
  * `{error}` reshape in `src/plugins/error-handler.ts` for <500 statuses.
  */
 export async function configFragmentRoutes(fastify: FastifyInstance): Promise<void> {
-  // List fragments for environment
+  // List fragments for environment. Paginated because fragments can carry
+  // large `content` bodies; an unbounded list grows linearly with adoption.
   fastify.get(
     '/api/environments/:envId/config-fragments',
     { preHandler: [fastify.authenticate] },
     async (request) => {
       const { envId } = request.params as { envId: string };
+      const { limit, offset } = parsePaginationQuery(
+        request.query as Record<string, unknown>
+      );
+      const where = { environmentId: envId };
 
-      const fragments = await prisma.configFragment.findMany({
-        where: { environmentId: envId },
-        orderBy: { name: 'asc' },
-        select: {
-          id: true,
-          name: true,
-          description: true,
-          content: true,
-          createdAt: true,
-          updatedAt: true,
-          _count: { select: { configFiles: true } },
-        },
-      });
+      const [fragments, total] = await Promise.all([
+        prisma.configFragment.findMany({
+          where,
+          orderBy: { name: 'asc' },
+          take: limit,
+          skip: offset,
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            content: true,
+            createdAt: true,
+            updatedAt: true,
+            _count: { select: { configFiles: true } },
+          },
+        }),
+        prisma.configFragment.count({ where }),
+      ]);
 
       // Shape `usedByCount` so the UI can show "in use by N ConfigFiles"
       // without exposing the Prisma `_count` quirk.
@@ -65,7 +76,7 @@ export async function configFragmentRoutes(fastify: FastifyInstance): Promise<vo
         return { ...rest, usedByCount: _count.configFiles };
       });
 
-      return { fragments: shaped };
+      return { fragments: shaped, total, limit, offset };
     }
   );
 

@@ -21,7 +21,11 @@ export function DependencyEditor({ serviceId, serviceName = 'This service', onUp
   const toast = useToast();
   const [dependencies, setDependencies] = useState<ServiceDependency[]>([]);
   const [dependents, setDependents] = useState<ServiceDependent[]>([]);
-  const [available, setAvailable] = useState<(Service & { server: { name: string } })[]>([]);
+  const [available, setAvailable] = useState<
+    (Omit<Service, 'serviceDeployments'> & {
+      serviceDeployments: Array<{ server: { name: string } }>;
+    })[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [addingId, setAddingId] = useState<string | null>(null);
@@ -124,16 +128,20 @@ export function DependencyEditor({ serviceId, serviceName = 'This service', onUp
                 <p className="text-sm text-slate-500">No available services to depend on</p>
               ) : (
                 <div className="space-y-1 max-h-32 overflow-y-auto">
-                  {available.map((service) => (
+                  {available.map((service) => {
+                    const servers = service.serviceDeployments
+                      .map((d) => d.server.name)
+                      .join(', ');
+                    return (
                     <div
                       key={service.id}
                       className="flex items-center justify-between p-2 bg-slate-800 rounded"
                     >
                       <div>
                         <span className="text-white text-sm">{service.name}</span>
-                        <span className="text-slate-500 text-xs ml-2">
-                          on {service.server.name}
-                        </span>
+                        {servers && (
+                          <span className="text-slate-500 text-xs ml-2">on {servers}</span>
+                        )}
                       </div>
                       <button
                         onClick={() => handleAdd(service.id)}
@@ -143,7 +151,8 @@ export function DependencyEditor({ serviceId, serviceName = 'This service', onUp
                         {addingId === service.id ? '...' : 'Add'}
                       </button>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>

@@ -7,6 +7,7 @@ import {
 } from '../lib/api';
 import { useEventSource } from '../lib/useEventSource';
 import { useToast } from './Toast';
+import { getErrorMessage } from '../lib/helpers';
 
 interface BootstrapProgressEvent {
   serverId: string;
@@ -105,7 +106,7 @@ export function BootstrapModal({
       });
       toast.success('Bootstrap started');
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Bootstrap failed to start';
+      const msg = getErrorMessage(err, 'Bootstrap failed to start');
       toast.error(msg);
       setRunning(false);
       setLogs((prev) => [...prev, { text: msg, level: 'error', ts: Date.now() }]);

@@ -85,9 +85,24 @@ interface ScenarioReport {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const thresholdsPath = join(__dirname, 'thresholds.json');
+const ciThresholdsPath = join(__dirname, 'thresholds.ci.json');
 const reportPath = join(process.cwd(), 'stress-report.json');
 
+/**
+ * STRESS_CI=true picks `thresholds.ci.json`, which carries the looser
+ * GitHub-hosted-runner targets. The local file stays tight so dev machines
+ * notice regressions immediately; CI gets headroom for shared-runner noise.
+ * Falls back to `thresholds.json` if the CI file is absent.
+ */
 function readThresholds(): ThresholdsFile {
+  const useCi = process.env.STRESS_CI === 'true';
+  if (useCi) {
+    try {
+      return require(ciThresholdsPath) as ThresholdsFile;
+    } catch {
+      // Fall through to the default file.
+    }
+  }
   return require(thresholdsPath) as ThresholdsFile;
 }
 
@@ -210,8 +225,23 @@ async function main(): Promise<number> {
     });
 
     const refsRecord = refs as unknown as Record<string, string>;
+    // STRESS_SCENARIOS is a comma-separated allowlist used by the matrix
+    // shards in stress.yml to parallelise the workflow. Unknown names abort
+    // so a typo in the workflow YAML can't silently turn into "0 scenarios."
+    const filter = (process.env.STRESS_SCENARIOS ?? '').trim();
+    const allowedScenarios = filter
+      ? new Set(filter.split(',').map((s) => s.trim()).filter(Boolean))
+      : null;
+    if (allowedScenarios) {
+      const known = new Set(Object.keys(thresholds.scenarios));
+      const unknown = [...allowedScenarios].filter((n) => !known.has(n));
+      if (unknown.length > 0) {
+        throw new Error(`STRESS_SCENARIOS lists unknown scenario(s): ${unknown.join(', ')}`);
+      }
+    }
     const reports: ScenarioReport[] = [];
     for (const [name, scenario] of Object.entries(thresholds.scenarios)) {
+      if (allowedScenarios && !allowedScenarios.has(name)) continue;
       console.log(`\n▶ scenario: ${name}`);
       const r = await runScenario(
         name,

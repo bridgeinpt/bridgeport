@@ -15,17 +15,7 @@ import type { FastifyRequest } from 'fastify';
 export function isDryRun(request: FastifyRequest): boolean {
   const query = request.query as Record<string, unknown> | undefined;
   const headers = request.headers as Record<string, unknown> | undefined;
-
-  if (query && typeof query.dryRun === 'string' && query.dryRun === 'true') {
-    return true;
-  }
-
-  const headerValue = headers?.['x-dry-run'];
-  if (typeof headerValue === 'string' && headerValue === 'true') {
-    return true;
-  }
-
-  return false;
+  return query?.dryRun === 'true' || headers?.['x-dry-run'] === 'true';
 }
 
 /**

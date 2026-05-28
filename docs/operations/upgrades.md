@@ -132,6 +132,17 @@ The following migration(s) have been applied:
 | **Configuration** | Your `.env` file and volume mounts remain unchanged. |
 | **Agent/CLI** | These are separate binaries. Check for updates after upgrading BRIDGEPORT (see [Agent Upgrades](#agent-upgrades)). |
 
+### What's new in v1.4
+
+The v1.3 → v1.4 upgrade introduces several schema changes. All are applied automatically by the entrypoint — no manual steps required.
+
+- **Service → ServiceDeployment split.** Each pre-existing Service is backfilled with one ServiceDeployment row per server, carrying over container name, ports, env overrides, status, and discovery state. The Service row keeps the shared template (image, env, health, compose); per-server runtime moves to its deployments. UI and API are backward-compatible: legacy `service.server` callers still see the first deployment's server.
+- **Denormalized health status.** `Server.lastHealthCheckStatus` / `lastHealthCheckAt` and `ServiceDeployment.lastHealthCheckStatus` / `lastHealthCheckAt` are populated from the latest `HealthCheckLog` row at migration time, and kept current by the health-check writer. Monitoring overview no longer scans `HealthCheckLog` on the hot path.
+- **SecretUsage / VarUsage join tables.** Secrets and Vars list endpoints stop doing GLOB scans over config-file content; the migration backfills usage rows by pattern-matching once.
+- **Compound indexes** added to `HealthCheckLog`, `AuditLog`, and `Database` for the most common query shapes.
+- **Notification fan-out queue.** `sendSystemNotification` writes to an in-process queue and returns immediately; delivery happens off the request thread.
+- **New features.** ConfigFile fragments (env-scoped reusable text blocks), atomic multi-resource sync batches, dry-run preview for deploys / plans / config-file syncs, server bootstrap (Docker + agent + sysctl + swap), free-form Service type tagging, OpenAPI spec at `/openapi.json` with a `code/message/field/hint` error envelope.
+
 > [!TIP]
 > Always back up your database before upgrading, especially for major version jumps. A simple file copy is sufficient:
 > ```bash

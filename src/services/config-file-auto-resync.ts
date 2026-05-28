@@ -246,9 +246,14 @@ export async function syncConfigFileToAttachedServices(
               continue;
             }
 
-            ({ code, stderr } = await client.exec(
-              `cat > ${shellEscape(sf.targetPath)} << 'CONFIGFILE_EOF'\n${resolvedContent}\nCONFIGFILE_EOF`
-            ));
+            try {
+              await client.writeFile(sf.targetPath, Buffer.from(resolvedContent, 'utf8'));
+              code = 0;
+              stderr = '';
+            } catch (writeErr) {
+              code = 1;
+              stderr = writeErr instanceof Error ? writeErr.message : 'SFTP write failed';
+            }
           }
 
           if (code !== 0) {

@@ -480,12 +480,11 @@ describe('syncConfigFileToAttachedServices', () => {
     expect(mockSSHClientInstance.disconnect).toHaveBeenCalledTimes(1);
   });
 
-  it('non-zero exec exit code surfaces as a failed result with stderr', async () => {
+  it('writeFile rejection surfaces as a failed result with the error message', async () => {
     mockPrisma.configFile.findUnique.mockResolvedValue(buildConfigFileFixture());
-    // First exec is mkdir (ok), second is the cat-heredoc write (fails).
-    mockSSHClientInstance.exec
-      .mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' })
-      .mockResolvedValueOnce({ code: 1, stdout: '', stderr: 'permission denied' });
+    // mkdir (ok); the SFTP writeFile call rejects.
+    mockSSHClientInstance.exec.mockResolvedValueOnce({ code: 0, stdout: '', stderr: '' });
+    mockSSHClientInstance.writeFile.mockRejectedValueOnce(new Error('permission denied'));
 
     const result = await syncConfigFileToAttachedServices('cf-1');
 

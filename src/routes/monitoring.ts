@@ -379,52 +379,73 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
 
       // Fetch all metrics in one query, then bucket by serverId.
       // Sentry BRIDGEPORT-BE-2 was an N+1 here when this loop ran per-server.
+      // We use $queryRaw to bypass Prisma's full row hydration — at 30 servers
+      // × 12+ points = 360+ rows per request, the per-row JS object/coercion
+      // cost is what shows up as the p99 tail under high concurrency.
       const serverIds = servers.map((s) => s.id);
-      const rows =
+      interface ServerMetricRow {
+        serverId: string;
+        cpuPercent: number | null;
+        memoryUsedMb: number | null;
+        memoryTotalMb: number | null;
+        swapUsedMb: number | null;
+        swapTotalMb: number | null;
+        diskUsedGb: number | null;
+        diskTotalGb: number | null;
+        loadAvg1: number | null;
+        loadAvg5: number | null;
+        loadAvg15: number | null;
+        openFds: number | null;
+        maxFds: number | null;
+        tcpEstablished: number | null;
+        tcpListen: number | null;
+        tcpTimeWait: number | null;
+        tcpCloseWait: number | null;
+        tcpTotal: number | null;
+        collectedAt: Date;
+      }
+      const rows: ServerMetricRow[] =
         serverIds.length === 0
           ? []
-          : await prisma.serverMetrics.findMany({
-              where: {
-                serverId: { in: serverIds },
-                collectedAt: { gte: since },
-              },
-              orderBy: { collectedAt: 'asc' },
-              select: {
-                serverId: true,
-                cpuPercent: true,
-                memoryUsedMb: true,
-                memoryTotalMb: true,
-                swapUsedMb: true,
-                swapTotalMb: true,
-                diskUsedGb: true,
-                diskTotalGb: true,
-                loadAvg1: true,
-                loadAvg5: true,
-                loadAvg15: true,
-                openFds: true,
-                maxFds: true,
-                tcpEstablished: true,
-                tcpListen: true,
-                tcpTimeWait: true,
-                tcpCloseWait: true,
-                tcpTotal: true,
-                collectedAt: true,
-              },
-            });
+          : await prisma.$queryRaw<ServerMetricRow[]>`
+              SELECT "serverId", "cpuPercent", "memoryUsedMb", "memoryTotalMb",
+                     "swapUsedMb", "swapTotalMb", "diskUsedGb", "diskTotalGb",
+                     "loadAvg1", "loadAvg5", "loadAvg15", "openFds", "maxFds",
+                     "tcpEstablished", "tcpListen", "tcpTimeWait", "tcpCloseWait",
+                     "tcpTotal", "collectedAt"
+              FROM "ServerMetrics"
+              WHERE "serverId" IN (${Prisma.join(serverIds)})
+                AND "collectedAt" >= ${since}
+              ORDER BY "collectedAt" ASC
+            `;
 
       // Collect the union of timestamps across all servers so every series row
-      // aligns to the same `timestamps[]` index.
+      // aligns to the same `timestamps[]` index. `$queryRaw` can hand back
+      // `collectedAt` as either Date or string depending on the SQLite driver.
+      const isoOf = (v: Date | string): string =>
+        v instanceof Date ? v.toISOString() : new Date(v).toISOString();
       const timestampSet = new Set<string>();
-      for (const row of rows) timestampSet.add(row.collectedAt.toISOString());
+      const isoByRow = new Array<string>(rows.length);
+      for (let i = 0; i < rows.length; i++) {
+        const iso = isoOf(rows[i].collectedAt);
+        isoByRow[i] = iso;
+        timestampSet.add(iso);
+      }
       const timestamps = Array.from(timestampSet).sort();
       const tsIndex = new Map<string, number>();
       timestamps.forEach((t, i) => tsIndex.set(t, i));
 
-      // Bucket metric rows by server, then by timestamp index, so we can fill
-      // per-server arrays of length `timestamps.length` with `null` for gaps.
-      const byServer = new Map<string, typeof rows>();
+      // Bucket metric rows by server. We keep a parallel array of pre-resolved
+      // timestamp indices so the per-row hot loop doesn't repeat the iso/get
+      // dance — it just reads `tIndexByRow[i]` once.
+      interface BucketRow { tIndex: number; row: ServerMetricRow }
+      const byServer = new Map<string, BucketRow[]>();
       for (const id of serverIds) byServer.set(id, []);
-      for (const row of rows) byServer.get(row.serverId)?.push(row);
+      for (let i = 0; i < rows.length; i++) {
+        const ti = tsIndex.get(isoByRow[i]);
+        if (ti === undefined) continue;
+        byServer.get(rows[i].serverId)?.push({ tIndex: ti, row: rows[i] });
+      }
 
       const T = timestamps.length;
       const newNullRow = (): Array<number | null> => new Array<number | null>(T).fill(null);
@@ -472,9 +493,9 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         const rowByKey: Partial<Record<SeriesKey, Array<number | null>>> = {};
         for (const key of keysToEmit) rowByKey[key] = newNullRow();
 
-        for (const m of metrics) {
-          const ti = tsIndex.get(m.collectedAt.toISOString());
-          if (ti === undefined) continue;
+        for (const b of metrics) {
+          const m = b.row;
+          const ti = b.tIndex;
 
           const memPercent =
             m.memoryUsedMb && m.memoryTotalMb
@@ -593,24 +614,31 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
 
       // Metrics are per-deployment in 2.0. Each row pairs the runtime with
       // its template name so the chart legend can show "<service> @ <server>".
-      const deployments = envServerIds.length === 0
+      // $queryRaw to skip Prisma's hydration + JOIN materialisation cost at
+      // ~90 deployments per env — that hydration was the dominant cost in
+      // this route's p99 tail under concurrency.
+      interface DeploymentRow {
+        id: string;
+        serverId: string;
+        serviceId: string;
+        serviceName: string;
+      }
+      const deploymentRows: DeploymentRow[] = envServerIds.length === 0
         ? []
-        : (await prisma.serviceDeployment.findMany({
-            where: {
-              serverId: { in: envServerIds },
-              discoveryStatus: DISCOVERY_STATUS.FOUND,
-            },
-            select: {
-              id: true,
-              serverId: true,
-              service: { select: { id: true, name: true } },
-            },
-          })).map((d) => ({
-            id: d.id,
-            serviceId: d.service.id,
-            serviceName: d.service.name,
-            server: { id: d.serverId, name: serverNameById.get(d.serverId) ?? '' },
-          }));
+        : await prisma.$queryRaw<DeploymentRow[]>`
+            SELECT sd."id", sd."serverId",
+                   s."id" AS "serviceId", s."name" AS "serviceName"
+            FROM "ServiceDeployment" sd
+            JOIN "Service" s ON s."id" = sd."serviceId"
+            WHERE sd."serverId" IN (${Prisma.join(envServerIds)})
+              AND sd."discoveryStatus" = ${DISCOVERY_STATUS.FOUND}
+          `;
+      const deployments = deploymentRows.map((d) => ({
+        id: d.id,
+        serviceId: d.serviceId,
+        serviceName: d.serviceName,
+        server: { id: d.serverId, name: serverNameById.get(d.serverId) ?? '' },
+      }));
 
       // Fetch all metrics in one query, then bucket by deployment.
       // Sentry BRIDGEPORT-BE-5 was an N+1 here when this loop ran per-row.
@@ -641,20 +669,31 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
             `;
 
       // Union of all timestamps so every service row is the same length.
+      // `$queryRaw` can hand back `collectedAt` as either Date or string;
+      // resolve to ISO once per row and reuse the value when bucketing.
+      const isoOf = (v: Date | string): string =>
+        v instanceof Date ? v.toISOString() : new Date(v).toISOString();
       const timestampSet = new Set<string>();
-      for (const row of rows) {
-        const iso = row.collectedAt instanceof Date
-          ? row.collectedAt.toISOString()
-          : new Date(row.collectedAt).toISOString();
+      const isoByRow = new Array<string>(rows.length);
+      for (let i = 0; i < rows.length; i++) {
+        const iso = isoOf(rows[i].collectedAt);
+        isoByRow[i] = iso;
         timestampSet.add(iso);
       }
       const timestamps = Array.from(timestampSet).sort();
       const tsIndex = new Map<string, number>();
       timestamps.forEach((t, i) => tsIndex.set(t, i));
 
-      const byDeployment = new Map<string, MetricRow[]>();
+      // Bucket by deployment with the resolved timestamp index already in
+      // hand, so the per-deployment hot loop doesn't repeat the iso/lookup.
+      interface BucketRow { tIndex: number; row: MetricRow }
+      const byDeployment = new Map<string, BucketRow[]>();
       for (const id of deploymentIds) byDeployment.set(id, []);
-      for (const row of rows) byDeployment.get(row.serviceDeploymentId)?.push(row);
+      for (let i = 0; i < rows.length; i++) {
+        const ti = tsIndex.get(isoByRow[i]);
+        if (ti === undefined) continue;
+        byDeployment.get(rows[i].serviceDeploymentId)?.push({ tIndex: ti, row: rows[i] });
+      }
 
       const T = timestamps.length;
       const cpu: Array<Array<number | null>> = [];
@@ -665,7 +704,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
       const restartCount: Array<Array<number | null>> = [];
 
       const serviceMeta = deployments.map((d) => {
-        const metrics = byDeployment.get(d.id) ?? [];
+        const buckets = byDeployment.get(d.id) ?? [];
         const cpuRow = new Array<number | null>(T).fill(null);
         const memRow = new Array<number | null>(T).fill(null);
         const memLimitRow = new Array<number | null>(T).fill(null);
@@ -673,12 +712,9 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         const txRow = new Array<number | null>(T).fill(null);
         const restartRow = new Array<number | null>(T).fill(null);
 
-        for (const m of metrics) {
-          const iso = m.collectedAt instanceof Date
-            ? m.collectedAt.toISOString()
-            : new Date(m.collectedAt).toISOString();
-          const ti = tsIndex.get(iso);
-          if (ti === undefined) continue;
+        for (const b of buckets) {
+          const m = b.row;
+          const ti = b.tIndex;
           cpuRow[ti] = m.cpuPercent;
           memRow[ti] = m.memoryUsedMb;
           memLimitRow[ti] = m.memoryLimitMb;

@@ -223,12 +223,11 @@ export default function Registries() {
   };
 
   const handleUpdateService = async (service: RegistryService) => {
-    if (!service.latestAvailableTag) return;
+    if (!service.containerImage?.updateAvailable) return;
     setUpdatingService(service.id);
     try {
-      await deployService(service.id, { imageTag: service.latestAvailableTag, pullImage: true });
-      toast.success(`Updated ${service.name} to ${service.latestAvailableTag}`);
-      // Refresh services list
+      await deployService(service.id, { pullImage: true });
+      toast.success(`Redeployed ${service.name} across all deployments`);
       if (viewingServices) {
         const { services } = await getRegistryServices(viewingServices);
         setLinkedServices(services);
@@ -392,7 +391,11 @@ export default function Registries() {
                   ) : (
                     <div className="space-y-2">
                       {linkedServices.map((service) => {
-                        const hasUpdate = service.latestAvailableTag && service.latestAvailableTag !== service.imageTag;
+                        const image = service.containerImage;
+                        const hasUpdate = !!image?.updateAvailable;
+                        const servers = service.serviceDeployments
+                          .map((d) => d.server.name)
+                          .join(', ');
                         return (
                           <div
                             key={service.id}
@@ -406,8 +409,10 @@ export default function Registries() {
                                 >
                                   {service.name}
                                 </Link>
-                                <span className="text-slate-500 text-sm">on {service.server.name}</span>
-                                {service.autoUpdate && (
+                                {servers && (
+                                  <span className="text-slate-500 text-sm">on {servers}</span>
+                                )}
+                                {image?.autoUpdate && (
                                   <span className="badge bg-primary-500/20 text-primary-400 text-xs">Auto-update</span>
                                 )}
                                 {hasUpdate && (
@@ -415,22 +420,20 @@ export default function Registries() {
                                 )}
                               </div>
                               <p className="text-xs text-slate-400 font-mono mt-1 truncate">
-                                {service.containerImage?.imageName}
+                                {image?.imageName}
                               </p>
                               <div className="flex items-center gap-4 mt-1 text-xs text-slate-500">
                                 <span className="font-mono">
-                                  Current: <span className="text-slate-300">{service.imageTag}</span>
+                                  Tag: <span className="text-slate-300">{service.imageTag}</span>
                                 </span>
-                                {service.latestAvailableTag && (
+                                {image?.tagFilter && (
                                   <span className="font-mono">
-                                    Latest: <span className={hasUpdate ? 'text-yellow-400' : 'text-slate-300'}>
-                                      {service.latestAvailableTag}
-                                    </span>
+                                    Filter: <span className="text-slate-300">{image.tagFilter}</span>
                                   </span>
                                 )}
-                                {service.lastUpdateCheckAt && (
+                                {image?.lastCheckedAt && (
                                   <span>
-                                    Checked {formatDistanceToNow(new Date(service.lastUpdateCheckAt), { addSuffix: true })}
+                                    Checked {formatDistanceToNow(new Date(image.lastCheckedAt), { addSuffix: true })}
                                   </span>
                                 )}
                               </div>

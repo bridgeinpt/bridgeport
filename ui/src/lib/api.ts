@@ -1322,7 +1322,9 @@ export interface ConfigFragmentDetail extends ConfigFragment {
 }
 
 export const listConfigFragments = (envId: string) =>
-  api.get<{ fragments: ConfigFragment[] }>(`/environments/${envId}/config-fragments`);
+  api.get<{ fragments: ConfigFragment[]; total: number; limit: number; offset: number }>(
+    `/environments/${envId}/config-fragments?limit=200`
+  );
 
 export const getConfigFragment = (id: string) =>
   api.get<{ fragment: ConfigFragmentDetail }>(`/config-fragments/${id}`);
@@ -1588,12 +1590,16 @@ export interface RegistryService {
   id: string;
   name: string;
   imageTag: string;
-  autoUpdate: boolean;
-  latestAvailableTag: string | null;
-  latestAvailableDigest: string | null;
-  lastUpdateCheckAt: string | null;
-  server: { id: string; name: string };
-  containerImage?: { id: string; name: string; imageName: string } | null;
+  serviceDeployments: Array<{ id: string; server: { id: string; name: string } }>;
+  containerImage?: {
+    id: string;
+    name: string;
+    imageName: string;
+    tagFilter: string;
+    lastCheckedAt: string | null;
+    updateAvailable: boolean;
+    autoUpdate: boolean;
+  } | null;
 }
 
 export const getRegistryServices = (id: string) =>
@@ -2243,9 +2249,11 @@ export const removeServiceDependency = (dependencyId: string) =>
   api.delete<{ success: boolean }>(`/dependencies/${dependencyId}`);
 
 export const getAvailableDependencies = (serviceId: string) =>
-  api.get<{ services: (Service & { server: { name: string } })[] }>(
-    `/services/${serviceId}/available-dependencies`
-  );
+  api.get<{
+    services: (Omit<Service, 'serviceDeployments'> & {
+      serviceDeployments: Array<{ server: { name: string } }>;
+    })[];
+  }>(`/services/${serviceId}/available-dependencies`);
 
 export interface DependencyGraphNode {
   id: string;

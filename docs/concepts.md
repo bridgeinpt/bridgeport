@@ -69,7 +69,13 @@ Related: [Servers Guide](guides/servers.md)
 
 ### Service
 
-A Docker container running on a server. Every service is linked to a **Container Image** that determines what gets deployed. Services track deployment history, health status, and can have dependencies on other services for orchestrated deployments.
+A **template** that describes how to run a Docker container — image, compose, health checks, ports, env. Each service has one or more **Service Deployments**, one per server the service runs on. The Service holds the shared definition; each Service Deployment holds per-server runtime state (status, container name, discovery, last deploy).
+
+Related: [Services Guide](guides/services.md)
+
+### Service Deployment
+
+A per-server instance of a Service. When you deploy a Service that targets three servers, BRIDGEPORT creates one Service Deployment per server and reports health, status, and deploy history independently for each. Deployments share their parent Service's image, env, and health-check config.
 
 Related: [Services Guide](guides/services.md)
 
@@ -121,7 +127,8 @@ erDiagram
     Environment ||--o{ Database : registers
     Environment ||--o{ ContainerImage : tracks
 
-    Server ||--o{ Service : runs
+    Service ||--o{ ServiceDeployment : "deployed as"
+    ServiceDeployment }o--|| Server : "runs on"
     Service }o--|| ContainerImage : "linked to"
     Service }o--o{ Secret : uses
     Service }o--o{ ConfigFile : attaches
@@ -137,8 +144,8 @@ erDiagram
 **Key relationships:**
 
 - An **Environment** contains servers, secrets, config files, databases, and container images. Everything lives within an environment.
-- A **Server** runs services. Each service is a Docker container on that server.
-- A **Service** is always linked to a **Container Image**. The image determines what tag gets deployed.
+- A **Server** runs **Service Deployments** — the per-server instances of a Service template.
+- A **Service** is a template (image, env, health, compose) with one **Service Deployment** per target server. The Service is always linked to a **Container Image**.
 - A **Container Image** can be linked to a **Registry** for automatic update detection.
 - **Services** can depend on other services, which controls deployment ordering in **Deployment Plans**.
 - **Databases** can be linked to services to track which services use which databases.
@@ -166,7 +173,8 @@ erDiagram
 | **Registry** | A container registry connection that BRIDGEPORT polls for new image tags. | [Registries](guides/registries.md) |
 | **Secret** | An encrypted key-value pair, stored with AES-256-GCM encryption. Injected into services as environment variables. | [Secrets](guides/secrets.md) |
 | **Server** | A machine managed by BRIDGEPORT, connected via SSH or Docker socket. | [Servers](guides/servers.md) |
-| **Service** | A Docker container on a server, linked to a Container Image. The core deployable unit. | [Services](guides/services.md) |
+| **Service** | A template describing how to run a container (image, env, health, compose). Linked to a Container Image. Has one Service Deployment per server. | [Services](guides/services.md) |
+| **Service Deployment** | The per-server instance of a Service. Holds container name, runtime status, discovery state, and deploy history for one server. | [Services](guides/services.md) |
 | **Service Dependency** | A relationship between two services that controls deployment ordering: `health_before` (check health first) or `deploy_after` (deploy in sequence). | [Deployment Plans](guides/deployment-plans.md) |
 | **Service Type** | A plugin-defined service category (Django, Node.js, etc.) with predefined commands (shell, migrate, etc.). | [Plugin Reference](reference/plugins.md) |
 | **SSH Mode** | A connection mode for managing containers on remote servers. BRIDGEPORT runs Docker commands over SSH. | [Servers](guides/servers.md) |
