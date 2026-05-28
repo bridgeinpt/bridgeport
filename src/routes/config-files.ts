@@ -7,10 +7,22 @@ import { requireOperator } from '../plugins/authorize.js';
 import { logAudit, actorFrom } from '../services/audit.js';
 import { userIdForFk } from '../services/auth.js';
 import { resolveSecretPlaceholders } from '../services/secrets.js';
-import { syncConfigFileToAttachedServices, deriveSyncStatus } from '../services/config-file-auto-resync.js';
+import {
+  syncConfigFileToAttachedServices,
+  syncConfigFileToAttachedServicesDryRun,
+  deriveSyncStatus,
+  listReferencingServiceNames,
+} from '../services/config-file-auto-resync.js';
 import { validateBody, validateUpdateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery } from '../lib/helpers.js';
 import { detectLanguage } from '../lib/config-file-language.js';
 import { syncUsageForConfigFile } from '../lib/key-usage-extraction.js';
+import {
+  isDryRun,
+  redactSecretValues,
+  unifiedDiff,
+  type ConfigSyncTarget,
+} from '../lib/dry-run.js';
+import { getSecretsForEnv } from '../services/secrets.js';
 
 const createConfigFileSchema = z.object({
   name: z.string().min(1),
@@ -660,6 +672,183 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
       );
       if (!service) return;
 
+      // Dry-run preview: render rendered (redacted) content + diff against
+      // current host file per (deployment, file). Skips all writes, doesn't
+      // touch `lastSyncedAt`, doesn't fail the audit log if a target is unreachable.
+      if (isDryRun(request)) {
+        const results: ConfigSyncTarget[] = [];
+
+        for (const sd of service.serviceDeployments) {
+          // Same override/base file resolution as the live path.
+          const filesByConfig = new Map<string, typeof service.files[number]>();
+          for (const sf of service.files) {
+            if (sf.serviceDeploymentId === sd.id) {
+              filesByConfig.set(sf.configFileId, sf);
+            } else if (sf.serviceDeploymentId === null && !filesByConfig.has(sf.configFileId)) {
+              filesByConfig.set(sf.configFileId, sf);
+            }
+          }
+
+          if (filesByConfig.size === 0) continue;
+
+          const secretValues = Object.values(await getSecretsForEnv(sd.server.environmentId));
+
+          const { client, error: clientError } = await createClientForServer(
+            sd.server.hostname,
+            sd.server.environmentId,
+            getEnvironmentSshKey,
+            { serverType: sd.server.serverType }
+          );
+
+          // Resolve referencingServices once per (configFile, server) — the
+          // inputs are invariant for this scope, so hoist the call out of the
+          // per-target loops and out of each failure branch. Without this we
+          // were either hardcoding `[service.name]` (wrong blast radius) or
+          // running the same query 3× per file.
+          const referencingByConfigFile = new Map<string, string[]>();
+          const getReferencing = async (configFileId: string): Promise<string[]> => {
+            const cached = referencingByConfigFile.get(configFileId);
+            if (cached) return cached;
+            const names = await listReferencingServiceNames(configFileId, sd.server.id);
+            referencingByConfigFile.set(configFileId, names);
+            return names;
+          };
+
+          if (!client) {
+            for (const sf of filesByConfig.values()) {
+              results.push({
+                serverName: sd.server.name,
+                serviceName: service.name,
+                configFileName: sf.configFile.name,
+                hostPath: sf.targetPath,
+                diff: '',
+                exists: false,
+                referencingServices: await getReferencing(sf.configFile.id),
+                warnings: [clientError || 'Failed to create SSH client'],
+              });
+            }
+            continue;
+          }
+
+          try {
+            await client.connect();
+            for (const sf of filesByConfig.values()) {
+              const warnings: string[] = [];
+              const referencingServices = await getReferencing(sf.configFile.id);
+              let renderedContent: string;
+
+              if (sf.configFile.isBinary) {
+                results.push({
+                  serverName: sd.server.name,
+                  serviceName: service.name,
+                  configFileName: sf.configFile.name,
+                  hostPath: sf.targetPath,
+                  diff: '',
+                  exists: false,
+                  referencingServices,
+                  warnings: ['Binary file — diff omitted'],
+                });
+                continue;
+              }
+
+              const { content: rawContent, missing, templateErrors } = await resolveSecretPlaceholders(
+                sd.server.environmentId,
+                sf.configFile.content
+              );
+              // Mirror the live path: template errors / missing secrets are
+              // hard failures, not warnings. Surface them via `error` and
+              // skip the diff (the live path wouldn't write to this target).
+              let hardError: string | null = null;
+              if (templateErrors.length > 0) {
+                const msg = `Template errors: ${templateErrors.join('; ')}`;
+                warnings.push(msg);
+                hardError = msg;
+              }
+              if (missing.length > 0) {
+                const msg = `Missing secrets: ${missing.join(', ')}`;
+                warnings.push(msg);
+                hardError = hardError ? `${hardError}; ${msg}` : msg;
+              }
+
+              if (hardError) {
+                results.push({
+                  serverName: sd.server.name,
+                  serviceName: service.name,
+                  configFileName: sf.configFile.name,
+                  hostPath: sf.targetPath,
+                  diff: '',
+                  exists: false,
+                  referencingServices,
+                  warnings,
+                  error: hardError,
+                });
+                continue;
+              }
+
+              renderedContent = redactSecretValues(rawContent.trimEnd(), secretValues);
+
+              let currentContent = '';
+              let exists = false;
+              try {
+                // shellEscape() is mandatory: targetPath is user-supplied. `cat`
+                // is the read-only equivalent of the real path's write — no
+                // chance of touching the host file.
+                const { stdout, code } = await client.exec(`cat ${shellEscape(sf.targetPath)} 2>/dev/null`);
+                if (code === 0) {
+                  currentContent = redactSecretValues(stdout.replace(/\n$/, ''), secretValues);
+                  exists = true;
+                }
+              } catch (err) {
+                warnings.push(`Could not read host file: ${getErrorMessage(err, 'unknown error')}`);
+              }
+
+              const diff = unifiedDiff(currentContent, renderedContent, {
+                fromLabel: `a${sf.targetPath}`,
+                toLabel: `b${sf.targetPath}`,
+              });
+
+              results.push({
+                serverName: sd.server.name,
+                serviceName: service.name,
+                configFileName: sf.configFile.name,
+                hostPath: sf.targetPath,
+                diff,
+                exists,
+                referencingServices,
+                warnings,
+              });
+            }
+          } catch (err) {
+            for (const sf of filesByConfig.values()) {
+              results.push({
+                serverName: sd.server.name,
+                serviceName: service.name,
+                configFileName: sf.configFile.name,
+                hostPath: sf.targetPath,
+                diff: '',
+                exists: false,
+                referencingServices: await getReferencing(sf.configFile.id),
+                warnings: [getErrorMessage(err, 'Connection failed')],
+              });
+            }
+          } finally {
+            client.disconnect();
+          }
+        }
+
+        await logAudit({
+          action: 'sync_files',
+          resourceType: 'service',
+          resourceId: service.id,
+          resourceName: service.name,
+          details: { dryRun: true, results: results.length },
+          ...actorFrom(request),
+          environmentId: service.environmentId,
+        });
+
+        return { dryRun: true, results };
+      }
+
       // Zero-target syncs used to return 400 — surface as 200 + no_targets so
       // the UI can render a yellow warning ("nothing to sync") instead of a
       // red error. See issue #127.
@@ -1139,6 +1328,29 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
     { preHandler: [fastify.authenticate, requireOperator] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
+
+      if (isDryRun(request)) {
+        const report = await syncConfigFileToAttachedServicesDryRun(id);
+        if (!report) {
+          return reply.code(404).send({ error: 'Config file not found' });
+        }
+        // Look up the env for audit attribution. The dry-run helper doesn't
+        // return it (it only returns target reports), so fetch it cheaply.
+        const cf = await prisma.configFile.findUnique({
+          where: { id },
+          select: { environmentId: true, name: true },
+        });
+        await logAudit({
+          action: 'sync_files',
+          resourceType: 'config_file',
+          resourceId: id,
+          resourceName: cf?.name ?? id,
+          details: { dryRun: true, results: report.results.length },
+          ...actorFrom(request),
+          environmentId: cf?.environmentId,
+        });
+        return report;
+      }
 
       const outcome = await syncConfigFileToAttachedServices(id);
       // null = the ConfigFile itself doesn't exist — true 404.

@@ -278,6 +278,7 @@ vi.mock('../lib/db.js', () => ({
 
 vi.mock('./deploy.js', () => ({
   deployService: vi.fn(),
+  deployServiceDryRun: vi.fn(),
 }));
 
 vi.mock('./health-verification.js', () => ({
@@ -301,14 +302,21 @@ vi.mock('../lib/event-bus.js', () => ({
 }));
 
 import { prisma } from '../lib/db.js';
-import { deployService } from './deploy.js';
+import { deployService, deployServiceDryRun } from './deploy.js';
 import { verifyServiceHealth } from './health-verification.js';
 import { sendSystemNotification } from './notifications.js';
 import { eventBus } from '../lib/event-bus.js';
-import { buildDeploymentPlan, executePlan, rollbackPlan, cancelPlan } from './orchestration.js';
+import {
+  buildDeploymentPlan,
+  executePlan,
+  executePlanDryRun,
+  rollbackPlan,
+  cancelPlan,
+} from './orchestration.js';
 
 const mockPrisma = vi.mocked(prisma);
 const mockDeployService = vi.mocked(deployService);
+const mockDeployServiceDryRun = vi.mocked(deployServiceDryRun);
 const mockVerifyHealth = vi.mocked(verifyServiceHealth);
 const mockSendNotification = vi.mocked(sendSystemNotification);
 
@@ -789,5 +797,209 @@ describe('rollbackPlan', () => {
       'env-1',
       expect.objectContaining({ rollback: true })
     );
+  });
+});
+
+describe('executePlanDryRun (issue #128)', () => {
+  // Critical invariants the dry-run path must honor:
+  //   - Plan status is NOT transitioned (no `deploymentPlan.update`).
+  //   - Step rows are NOT written (no `deploymentPlanStep.update`).
+  //   - The live `deployService` is NEVER invoked — only `deployServiceDryRun`.
+  // Everything else (ordering, building the report) is a pure transform over
+  // what `deployServiceDryRun` returns, so we stub it deterministically.
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function makeDryRunReport(overrides: Partial<{ serviceDeploymentId: string; serverName: string; imageTag: string }> = {}) {
+    return {
+      dryRun: true as const,
+      serviceId: 'svc-1',
+      serviceDeploymentId: overrides.serviceDeploymentId ?? 'sd-1',
+      serverName: overrides.serverName ?? 'srv-a',
+      imageTag: overrides.imageTag ?? 'v1.0',
+      imageDigest: 'sha256:abc123',
+      composeContent: 'services: {}',
+      env: {},
+      containerAction: 'cycle' as const,
+      warnings: [],
+    };
+  }
+
+  it('does not transition plan status or write step rows', async () => {
+    mockPrisma.deploymentPlan.findUniqueOrThrow.mockResolvedValue({
+      id: 'plan-1',
+      name: 'Deploy v2.0',
+      steps: [
+        {
+          id: 'step-1',
+          order: 0,
+          action: 'deploy',
+          serviceDeployment: {
+            id: 'sd-1',
+            server: { name: 'srv-a' },
+            service: { name: 'web' },
+          },
+        },
+      ],
+    } as any);
+    mockDeployServiceDryRun.mockResolvedValue(makeDryRunReport({ serviceDeploymentId: 'sd-1' }));
+
+    await executePlanDryRun('plan-1');
+
+    // CRITICAL: no mutation to the plan or its steps.
+    expect(mockPrisma.deploymentPlan.update).not.toHaveBeenCalled();
+    expect(mockPrisma.deploymentPlanStep.update).not.toHaveBeenCalled();
+    expect(mockPrisma.deploymentPlanStep.updateMany).not.toHaveBeenCalled();
+    // CRITICAL: no live deploy attempted.
+    expect(mockDeployService).not.toHaveBeenCalled();
+    // No deployment lifecycle events emitted (dry-run is side-effect-free).
+    expect(eventBus.emitEvent).not.toHaveBeenCalled();
+  });
+
+  it('returns one step per deploy action in plan order with serviceName attached', async () => {
+    mockPrisma.deploymentPlan.findUniqueOrThrow.mockResolvedValue({
+      id: 'plan-1',
+      name: 'Multi-service rollout',
+      steps: [
+        {
+          id: 'step-1',
+          order: 0,
+          action: 'deploy',
+          serviceDeployment: {
+            id: 'sd-a',
+            server: { name: 'srv-a' },
+            service: { name: 'web' },
+          },
+        },
+        {
+          id: 'step-2',
+          order: 1,
+          action: 'deploy',
+          serviceDeployment: {
+            id: 'sd-b',
+            server: { name: 'srv-b' },
+            service: { name: 'worker' },
+          },
+        },
+      ],
+    } as any);
+
+    mockDeployServiceDryRun.mockImplementation(async (sdId: string) =>
+      makeDryRunReport({ serviceDeploymentId: sdId })
+    );
+
+    const report = await executePlanDryRun('plan-1');
+
+    expect(report.dryRun).toBe(true);
+    expect(report.planId).toBe('plan-1');
+    expect(report.planName).toBe('Multi-service rollout');
+    expect(report.steps).toHaveLength(2);
+    // Order matches the plan's step order (asc). serviceName is denormalized
+    // onto each step so the caller doesn't need a separate join.
+    expect(report.steps[0]).toMatchObject({
+      stepOrder: 0,
+      serviceName: 'web',
+      serviceDeploymentId: 'sd-a',
+    });
+    expect(report.steps[1]).toMatchObject({
+      stepOrder: 1,
+      serviceName: 'worker',
+      serviceDeploymentId: 'sd-b',
+    });
+    // The per-deployment dry-run was called once per deploy step, and the
+    // step.targetTag is passed through so each preview reflects the planned
+    // tag (not the current Service tag).
+    expect(mockDeployServiceDryRun).toHaveBeenCalledTimes(2);
+    expect(mockDeployServiceDryRun).toHaveBeenNthCalledWith(1, 'sd-a', { imageTag: undefined });
+    expect(mockDeployServiceDryRun).toHaveBeenNthCalledWith(2, 'sd-b', { imageTag: undefined });
+  });
+
+  it('passes step.targetTag through to deployServiceDryRun so the preview matches what executePlan would deploy', async () => {
+    // The live `executePlan` path passes `{ imageTag: step.targetTag }` into
+    // `deployService`. The dry-run must mirror that — without this, the
+    // preview would render the current Service.imageTag, NOT the tag the
+    // real run would deploy.
+    mockPrisma.deploymentPlan.findUniqueOrThrow.mockResolvedValue({
+      id: 'plan-1',
+      name: 'Deploy v2.0',
+      steps: [
+        {
+          id: 'step-1',
+          order: 0,
+          action: 'deploy',
+          targetTag: 'v2.0',
+          serviceDeployment: {
+            id: 'sd-1',
+            server: { name: 'srv-a' },
+            service: { name: 'web' },
+          },
+        },
+      ],
+    } as any);
+    mockDeployServiceDryRun.mockResolvedValue(makeDryRunReport({ serviceDeploymentId: 'sd-1', imageTag: 'v2.0' }));
+
+    const report = await executePlanDryRun('plan-1');
+
+    expect(mockDeployServiceDryRun).toHaveBeenCalledWith('sd-1', { imageTag: 'v2.0' });
+    expect(report.steps[0].imageTag).toBe('v2.0');
+  });
+
+  it('skips non-deploy steps (e.g. health_check) — only deploy actions get a dry-run report', async () => {
+    mockPrisma.deploymentPlan.findUniqueOrThrow.mockResolvedValue({
+      id: 'plan-1',
+      name: 'Deploy with health check',
+      steps: [
+        {
+          id: 'step-1',
+          order: 0,
+          action: 'deploy',
+          serviceDeployment: {
+            id: 'sd-a',
+            server: { name: 'srv-a' },
+            service: { name: 'web' },
+          },
+        },
+        {
+          id: 'step-2',
+          order: 1,
+          action: 'health_check',
+          serviceDeployment: {
+            id: 'sd-a',
+            server: { name: 'srv-a' },
+            service: { name: 'web' },
+          },
+        },
+      ],
+    } as any);
+    mockDeployServiceDryRun.mockResolvedValue(makeDryRunReport({ serviceDeploymentId: 'sd-a' }));
+
+    const report = await executePlanDryRun('plan-1');
+
+    expect(report.steps).toHaveLength(1);
+    expect(report.steps[0].stepOrder).toBe(0);
+    expect(mockDeployServiceDryRun).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips deploy steps that have no attached ServiceDeployment', async () => {
+    // Defensive: a deploy step row missing its serviceDeployment relation
+    // would otherwise crash when we read `step.serviceDeployment.id`.
+    mockPrisma.deploymentPlan.findUniqueOrThrow.mockResolvedValue({
+      id: 'plan-1',
+      name: 'Plan with orphan step',
+      steps: [
+        {
+          id: 'step-1',
+          order: 0,
+          action: 'deploy',
+          serviceDeployment: null,
+        },
+      ],
+    } as any);
+
+    const report = await executePlanDryRun('plan-1');
+
+    expect(report.steps).toEqual([]);
+    expect(mockDeployServiceDryRun).not.toHaveBeenCalled();
   });
 });

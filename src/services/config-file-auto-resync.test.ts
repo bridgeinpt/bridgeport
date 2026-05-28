@@ -21,6 +21,7 @@ const { mockPrisma, mockSSHClientInstance } = vi.hoisted(() => ({
     },
     serviceFile: {
       update: vi.fn(),
+      findMany: vi.fn(),
     },
   },
   mockSSHClientInstance: {
@@ -50,6 +51,7 @@ vi.mock('../routes/environments.js', () => ({
 
 vi.mock('./secrets.js', () => ({
   resolveSecretPlaceholders: vi.fn(),
+  getSecretsForEnv: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock('./audit.js', () => ({
@@ -59,10 +61,11 @@ vi.mock('./audit.js', () => ({
 import {
   triggerAutoResyncForKey,
   syncConfigFileToAttachedServices,
+  syncConfigFileToAttachedServicesDryRun,
   deriveSyncStatus,
 } from './config-file-auto-resync.js';
 import { createClientForServer } from '../lib/ssh.js';
-import { resolveSecretPlaceholders } from './secrets.js';
+import { resolveSecretPlaceholders, getSecretsForEnv } from './secrets.js';
 import { logAudit } from './audit.js';
 
 /** Build a ConfigFile row with one attached service (and one server). */
@@ -473,6 +476,254 @@ describe('syncConfigFileToAttachedServices', () => {
     expect(result!.targetsSucceeded).toBe(0);
     expect(result!.targetsFailed).toBe(1);
     expect(result!.success).toBe(false);
+  });
+});
+
+describe('syncConfigFileToAttachedServicesDryRun (issue #128)', () => {
+  // The dry-run path MUST NOT mutate. Specifically:
+  //  - No `writeFile` SFTP transfers and no `cat > … << HEREDOC` heredoc exec
+  //    that would write the rendered content to the host.
+  //  - No `serviceFile.update({ lastSyncedAt })` rows.
+  // The only allowed SSH activity is the read-only `cat <hostPath>` capture
+  // used to compute the diff.
+  beforeEach(() => {
+    // Default: the listReferencingServiceNames helper returns the service
+    // name. Individual tests can override.
+    vi.mocked(mockPrisma.serviceFile.findMany).mockResolvedValue([
+      { service: { name: 'web' } } as any,
+    ]);
+  });
+
+  it('returns null when the ConfigFile is not found', async () => {
+    mockPrisma.configFile.findUnique.mockResolvedValue(null);
+
+    const result = await syncConfigFileToAttachedServicesDryRun('missing');
+
+    expect(result).toBeNull();
+    // No SSH attempted when the row doesn't exist.
+    expect(createClientForServer).not.toHaveBeenCalled();
+  });
+
+  it('returns an empty results array when the ConfigFile has zero attached services', async () => {
+    mockPrisma.configFile.findUnique.mockResolvedValue(
+      buildConfigFileFixture({ attached: false })
+    );
+
+    const result = await syncConfigFileToAttachedServicesDryRun('cf-1');
+
+    expect(result).toEqual({ dryRun: true, results: [] });
+    expect(createClientForServer).not.toHaveBeenCalled();
+  });
+
+  it('does not write the file or update lastSyncedAt on the happy path', async () => {
+    mockPrisma.configFile.findUnique.mockResolvedValue(buildConfigFileFixture());
+    // `cat <hostPath>` returns the current host content.
+    mockSSHClientInstance.exec.mockResolvedValue({
+      code: 0,
+      stdout: 'upstream { server old.example.com; }\n',
+      stderr: '',
+    });
+
+    const result = await syncConfigFileToAttachedServicesDryRun('cf-1');
+
+    expect(result).not.toBeNull();
+    expect(result!.dryRun).toBe(true);
+    expect(result!.results).toHaveLength(1);
+
+    // CRITICAL: no `writeFile` SFTP transfer.
+    expect(mockSSHClientInstance.writeFile).not.toHaveBeenCalled();
+    // CRITICAL: no `lastSyncedAt` mutation.
+    expect(mockPrisma.serviceFile.update).not.toHaveBeenCalled();
+
+    // The only allowed SSH call is the read-only `cat <hostPath>` capture for
+    // the diff — there must be no `cat > …` heredoc that would overwrite the
+    // host file.
+    const execCalls = mockSSHClientInstance.exec.mock.calls.map((c) => c[0] as string);
+    expect(execCalls.some((cmd) => cmd.includes('cat >'))).toBe(false);
+    expect(execCalls.some((cmd) => cmd.startsWith('mkdir -p'))).toBe(false);
+    expect(execCalls.every((cmd) => cmd.startsWith('cat '))).toBe(true);
+  });
+
+  it('surfaces a non-empty diff and exists=true when the host file differs', async () => {
+    mockPrisma.configFile.findUnique.mockResolvedValue(buildConfigFileFixture());
+    mockSSHClientInstance.exec.mockResolvedValue({
+      code: 0,
+      stdout: 'upstream { server old.example.com; }\n',
+      stderr: '',
+    });
+    // Rendered content differs from the host content above.
+    vi.mocked(resolveSecretPlaceholders).mockResolvedValue({
+      content: 'upstream { server new.example.com; }',
+      missing: [],
+      templateErrors: [],
+    });
+
+    const result = await syncConfigFileToAttachedServicesDryRun('cf-1');
+
+    expect(result!.results).toHaveLength(1);
+    const target = result!.results[0];
+    expect(target.exists).toBe(true);
+    expect(target.diff).toContain('-upstream { server old.example.com; }');
+    expect(target.diff).toContain('+upstream { server new.example.com; }');
+    expect(target.warnings).toEqual([]);
+  });
+
+  it('reports exists=false and an empty before-side diff when the host file is missing', async () => {
+    mockPrisma.configFile.findUnique.mockResolvedValue(buildConfigFileFixture());
+    // `cat` returns non-zero when the file does not exist.
+    mockSSHClientInstance.exec.mockResolvedValue({
+      code: 1,
+      stdout: '',
+      stderr: 'cat: no such file',
+    });
+    vi.mocked(resolveSecretPlaceholders).mockResolvedValue({
+      content: 'rendered content',
+      missing: [],
+      templateErrors: [],
+    });
+
+    const result = await syncConfigFileToAttachedServicesDryRun('cf-1');
+
+    const target = result!.results[0];
+    expect(target.exists).toBe(false);
+    // Whole rendered content shows up as `+`-prefixed additions.
+    expect(target.diff).toContain('+rendered content');
+    expect(mockPrisma.serviceFile.update).not.toHaveBeenCalled();
+  });
+
+  it('redacts secret values from the rendered content in the diff', async () => {
+    // Sanity: even if the rendered content contains a secret value, the
+    // dry-run response must not leak it. The dry-run path pulls secret values
+    // via getSecretsForEnv and runs them through redactSecretValues.
+    vi.mocked(getSecretsForEnv).mockResolvedValue({ API_TOKEN: 'super-s3cr3t' });
+    mockPrisma.configFile.findUnique.mockResolvedValue(buildConfigFileFixture());
+    mockSSHClientInstance.exec.mockResolvedValue({
+      code: 1, // file does not exist on host → diff is purely additions.
+      stdout: '',
+      stderr: '',
+    });
+    vi.mocked(resolveSecretPlaceholders).mockResolvedValue({
+      content: 'token=super-s3cr3t',
+      missing: [],
+      templateErrors: [],
+    });
+
+    const result = await syncConfigFileToAttachedServicesDryRun('cf-1');
+    const target = result!.results[0];
+
+    // The verbatim secret must not appear in the diff body.
+    expect(target.diff).not.toContain('super-s3cr3t');
+    expect(target.diff).toContain('***');
+  });
+
+  it('redacts secret values from the host-side (before) content in the diff', async () => {
+    // After a prior live sync, the host file contains the resolved secret
+    // values verbatim. The dry-run reads them back via `cat`, and they must
+    // be redacted before they reach the `-` lines of the diff — otherwise the
+    // dry-run becomes a back-channel reveal that bypasses the
+    // `allowSecretReveal` / `neverReveal` controls on /api/secrets/:id/value.
+    vi.mocked(getSecretsForEnv).mockResolvedValue({ API_TOKEN: 'super-s3cr3t' });
+    mockPrisma.configFile.findUnique.mockResolvedValue(buildConfigFileFixture());
+    mockSSHClientInstance.exec.mockResolvedValue({
+      code: 0,
+      stdout: 'token=super-s3cr3t\nother=line\n',
+      stderr: '',
+    });
+    vi.mocked(resolveSecretPlaceholders).mockResolvedValue({
+      content: 'token=super-s3cr3t\nrenamed=line\n',
+      missing: [],
+      templateErrors: [],
+    });
+
+    const result = await syncConfigFileToAttachedServicesDryRun('cf-1');
+    const target = result!.results[0];
+
+    expect(target.exists).toBe(true);
+    // Critical: the verbatim secret must not appear ANYWHERE in the diff,
+    // including the `-` (removed) lines that came from the live host file.
+    expect(target.diff).not.toContain('super-s3cr3t');
+    expect(target.diff).toContain('***');
+  });
+
+  it('marks targets with missing secrets as would-fail (error set, diff omitted) so callers do not render a green preview', async () => {
+    // The live `syncConfigFileToAttachedServices` path treats missing secrets
+    // as a hard failure (`success: false, error: 'Missing secrets: ...'`).
+    // The dry-run must mirror that — surfacing the warning AND a structured
+    // `error` field, and skipping the diff entirely (there is no meaningful
+    // before/after when the rendered content would never be written).
+    mockPrisma.configFile.findUnique.mockResolvedValue(buildConfigFileFixture());
+    vi.mocked(resolveSecretPlaceholders).mockResolvedValue({
+      content: 'upstream { server ${SECRET_A}; }',
+      missing: ['SECRET_A'],
+      templateErrors: [],
+    });
+
+    const result = await syncConfigFileToAttachedServicesDryRun('cf-1');
+
+    const target = result!.results[0];
+    expect(target.warnings.some((w) => /SECRET_A/.test(w))).toBe(true);
+    // CRITICAL: would-fail surfaces as a structured error, not just a warning.
+    expect(target.error).toMatch(/SECRET_A/);
+    // Diff is omitted because the live path would refuse to write — there's
+    // nothing meaningful to compare against the host file.
+    expect(target.diff).toBe('');
+    expect(target.exists).toBe(false);
+    // We never run `cat` on the host when the artifact would not be written.
+    expect(mockSSHClientInstance.exec).not.toHaveBeenCalled();
+    // No mutation under any circumstances.
+    expect(mockPrisma.serviceFile.update).not.toHaveBeenCalled();
+  });
+
+  it('marks targets with template errors as would-fail (error set, diff omitted)', async () => {
+    mockPrisma.configFile.findUnique.mockResolvedValue(buildConfigFileFixture());
+    vi.mocked(resolveSecretPlaceholders).mockResolvedValue({
+      content: 'upstream { ... }',
+      missing: [],
+      templateErrors: ['unknown filter "upper"'],
+    });
+
+    const result = await syncConfigFileToAttachedServicesDryRun('cf-1');
+
+    const target = result!.results[0];
+    expect(target.error).toMatch(/Template errors/);
+    expect(target.error).toMatch(/unknown filter/);
+    expect(target.diff).toBe('');
+    // The live path throws — no host-file read attempted here either.
+    expect(mockSSHClientInstance.exec).not.toHaveBeenCalled();
+  });
+
+  it('records a warning (not a result mutation) when SSH client creation fails', async () => {
+    mockPrisma.configFile.findUnique.mockResolvedValue(buildConfigFileFixture());
+    vi.mocked(createClientForServer).mockResolvedValue({
+      client: null,
+      error: 'SSH key not configured for this environment',
+    });
+
+    const result = await syncConfigFileToAttachedServicesDryRun('cf-1');
+
+    const target = result!.results[0];
+    expect(target.warnings).toContain('SSH key not configured for this environment');
+    expect(target.exists).toBe(false);
+    expect(mockSSHClientInstance.connect).not.toHaveBeenCalled();
+    expect(mockPrisma.serviceFile.update).not.toHaveBeenCalled();
+  });
+
+  it('reports binary config files with a diff-omitted warning and no file write', async () => {
+    mockPrisma.configFile.findUnique.mockResolvedValue(
+      buildConfigFileFixture({ isBinary: true })
+    );
+    mockSSHClientInstance.exec.mockResolvedValue({ code: 0, stdout: '', stderr: '' });
+
+    const result = await syncConfigFileToAttachedServicesDryRun('cf-1');
+
+    const target = result!.results[0];
+    expect(target.diff).toBe('');
+    expect(target.warnings).toContain('Binary file — diff omitted');
+    // resolveSecretPlaceholders is bypassed for binary files (no substitution).
+    expect(resolveSecretPlaceholders).not.toHaveBeenCalled();
+    // No SFTP write of the binary blob — that's the whole point of dry-run.
+    expect(mockSSHClientInstance.writeFile).not.toHaveBeenCalled();
+    expect(mockPrisma.serviceFile.update).not.toHaveBeenCalled();
   });
 });
 

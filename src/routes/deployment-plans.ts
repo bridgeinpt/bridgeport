@@ -4,6 +4,7 @@ import { prisma } from '../lib/db.js';
 import {
   buildDeploymentPlan,
   executePlan,
+  executePlanDryRun,
   cancelPlan,
   rollbackPlan,
   getDeploymentPlan,
@@ -12,6 +13,7 @@ import {
 import { logAudit, actorFrom } from '../services/audit.js';
 import { PLAN_STATUS, STEP_STATUS } from '../lib/constants.js';
 import { validateBody, findOrNotFound, getErrorMessage } from '../lib/helpers.js';
+import { isDryRun } from '../lib/dry-run.js';
 
 const createPlanSchema = z.object({
   serviceIds: z.array(z.string()).min(1),
@@ -107,8 +109,45 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
       const plan = await findOrNotFound(prisma.deploymentPlan.findUnique({ where: { id } }), 'Deployment plan', reply);
       if (!plan) return;
 
+      // Gate BOTH dry-run and real execute on PENDING status. Previewing a
+      // RUNNING/COMPLETED/FAILED plan returns a stale snapshot that no longer
+      // matches anything the system would actually do — operators reading
+      // the report would get a misleading picture.
       if (plan.status !== PLAN_STATUS.PENDING) {
         return reply.code(400).send({ error: `Cannot execute plan with status: ${plan.status}` });
+      }
+
+      // Dry-run: walk the plan's deploy steps synchronously, return the
+      // per-step preview report. Plan status stays PENDING — the real execute
+      // is still a valid follow-up. Step rows are not touched.
+      if (isDryRun(request)) {
+        try {
+          const report = await executePlanDryRun(id);
+          await logAudit({
+            action: 'deploy',
+            resourceType: 'deployment_plan',
+            resourceId: id,
+            resourceName: plan.name,
+            details: { action: 'execute', dryRun: true, steps: report.steps.length },
+            ...actorFrom(request),
+            environmentId: plan.environmentId,
+          });
+          return report;
+        } catch (error) {
+          const message = getErrorMessage(error, 'Plan dry-run failed');
+          await logAudit({
+            action: 'deploy',
+            resourceType: 'deployment_plan',
+            resourceId: id,
+            resourceName: plan.name,
+            details: { action: 'execute', dryRun: true },
+            success: false,
+            error: message,
+            ...actorFrom(request),
+            environmentId: plan.environmentId,
+          });
+          return reply.code(500).send({ error: message });
+        }
       }
 
       await logAudit({
