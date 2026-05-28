@@ -269,8 +269,8 @@ export async function getEnvironmentMetricsSummary(
   //
   // New shape: parallel queries for server/service rows + two raw SQL window
   // queries that read the latest ServerMetrics / ServiceMetrics per id in a
-  // single index scan. better-sqlite3 ships SQLite 3.46+ which supports
-  // ROW_NUMBER() OVER (PARTITION BY ... ORDER BY ...). The
+  // single index scan. Our SQLite (libsql 0.5+) supports ROW_NUMBER() OVER
+  // (PARTITION BY ... ORDER BY ...). The
   // `@@index([serverId, collectedAt(sort: Desc)])` index on each metrics
   // table makes this almost free.
   const includeServices = options.includeServices ?? true;

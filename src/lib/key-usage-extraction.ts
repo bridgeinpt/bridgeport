@@ -21,7 +21,7 @@ type Db = PrismaClient | Prisma.TransactionClient;
 /**
  * Detect a Prisma unique-constraint violation (P2002) without depending on
  * `Prisma.PrismaClientKnownRequestError` (which would require importing the
- * runtime class — kept loose to play nicely with the better-sqlite3 adapter).
+ * runtime class — kept loose to play nicely with Prisma driver adapters).
  */
 function isUniqueConstraintError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
@@ -156,8 +156,8 @@ export async function syncSecretUsageForConfigFile(
   if (toCreate.length > 0) {
     // Race protection: two concurrent writes to the same configFile can both
     // pass the diff check and collide on the @@unique(env, key, file) index.
-    // Prisma 7 + better-sqlite3 doesn't expose `skipDuplicates` on createMany,
-    // so on P2002 we re-read existing rows and retry with the filtered set.
+    // Prisma 7 + SQLite doesn't expose `skipDuplicates` on createMany, so on
+    // P2002 we re-read existing rows and retry with the filtered set.
     try {
       await db.secretUsage.createMany({
         data: toCreate.map((secretKey) => ({ environmentId, secretKey, configFileId })),

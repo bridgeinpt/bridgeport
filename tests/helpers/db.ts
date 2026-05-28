@@ -25,7 +25,7 @@
  *   });
  */
 import { PrismaClient } from '@prisma/client';
-import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
+import { PrismaLibSql } from '@prisma/adapter-libsql';
 import { execSync } from 'child_process';
 import { existsSync, rmSync } from 'fs';
 import { resolve } from 'path';
@@ -74,7 +74,7 @@ export async function setupTestDb(): Promise<PrismaClient> {
 
   // Create or reuse PrismaClient connected to the test database
   if (!testPrisma) {
-    const adapter = new PrismaBetterSqlite3({ url: dbUrl });
+    const adapter = new PrismaLibSql({ url: dbUrl });
     testPrisma = new PrismaClient({
       adapter,
       log: [], // Quiet in tests

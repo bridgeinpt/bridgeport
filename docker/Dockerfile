@@ -69,14 +69,11 @@ RUN npx prisma generate
 FROM node:26-alpine AS deps-prod
 WORKDIR /app
 
-# python3/make/g++ are needed only if better-sqlite3's prebuilt binary is unavailable
-# for this platform; npm rebuild will fall back to compiling from source.
-RUN apk add --no-cache python3 make g++
-
+# libsql ships prebuilt binaries for linux-musl (amd64 + arm64) via the
+# @libsql/linux-{x64,arm64}-musl optional packages — no native compilation
+# toolchain is needed at install time.
 COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev --ignore-scripts && \
-    npm rebuild better-sqlite3 && \
-    apk del python3 make g++
+RUN npm ci --omit=dev --ignore-scripts
 
 # Copy all prisma-related packages from prisma-build (for both client and CLI)
 COPY --from=prisma-build /app/node_modules/.prisma ./node_modules/.prisma

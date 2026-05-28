@@ -1,7 +1,11 @@
 import { PrismaClient, Prisma } from '@prisma/client';
-import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
+import { PrismaLibSql } from '@prisma/adapter-libsql';
 
-const adapter = new PrismaBetterSqlite3({
+// libsql is an async SQLite driver — unlike better-sqlite3 (synchronous) it
+// yields to the event loop while queries run, so concurrent HTTP requests
+// don't serialize behind whichever query is currently executing. WAL mode
+// (set below in initializeDatabase) then gives us real concurrent reads.
+const adapter = new PrismaLibSql({
   url: process.env.DATABASE_URL ?? 'file:./bridgeport.db',
 });
 
