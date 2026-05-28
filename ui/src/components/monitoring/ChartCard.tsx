@@ -2,6 +2,8 @@ import { memo } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
+import ChartCardSkeleton from './ChartCardSkeleton';
+import RefreshingDot from './RefreshingDot';
 
 const COLORS = ['#60a5fa', '#34d399', '#fbbf24', '#f472b6', '#a78bfa', '#f87171'];
 
@@ -12,13 +14,29 @@ export interface ChartCardProps {
   formatTime: (time: string) => string;
   unit?: string;
   domain?: [number | 'auto', number | 'auto'];
+  // Issue #171 — per-card loading states. `loading` renders the inline
+  // skeleton (used during the card's first fetch). `refreshing` shows a
+  // small spinner in the corner while a delta-refresh is in flight so the
+  // existing chart stays visible.
+  loading?: boolean;
+  refreshing?: boolean;
 }
 
-const ChartCard = memo(function ChartCard({ title, data, names, formatTime, unit, domain }: ChartCardProps) {
+const ChartCard = memo(function ChartCard({ title, data, names, formatTime, unit, domain, loading, refreshing }: ChartCardProps) {
+  // While the card is doing its initial load, render the matching skeleton
+  // in place so the rest of the page chrome can paint without waiting on
+  // any one card's data.
+  if (loading) {
+    return <ChartCardSkeleton title={title} />;
+  }
+
   if (data.length === 0) {
     return (
-      <div className="card">
-        <h3 className="text-sm font-medium text-white mb-4">{title}</h3>
+      <div className="card relative">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-medium text-white">{title}</h3>
+          {refreshing && <RefreshingDot />}
+        </div>
         <div className="h-56 flex items-center justify-center text-slate-500">
           No data available
         </div>
@@ -27,8 +45,16 @@ const ChartCard = memo(function ChartCard({ title, data, names, formatTime, unit
   }
 
   return (
-    <div className="card">
-      <h3 className="text-sm font-medium text-white mb-4">{title}</h3>
+    <div className="card relative">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-medium text-white">{title}</h3>
+        {refreshing && (
+          <span
+            className="inline-block w-3 h-3 border-2 border-slate-600 border-t-brand-400 rounded-full animate-spin"
+            aria-label="Refreshing"
+          />
+        )}
+      </div>
       <ResponsiveContainer width="100%" height={220}>
         <LineChart data={data} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
           <XAxis

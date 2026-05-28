@@ -303,6 +303,99 @@ describe('monitoring routes', () => {
       expect(body.series.cpu[sparseIdx]![t2Idx]).toBeNull();
       expect(body.series.cpu[sparseIdx]![t2Idx]).not.toBe(0);
     });
+
+    // Issue #171 — delta refresh + LTTB downsampling additions.
+    it('returns mode=full and an ISO until on a normal (no-since) request', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'mon-mode-full' });
+      const s = await createTestServer(app.prisma, { environmentId: env.id, name: 'sm' });
+      await app.prisma.serverMetrics.create({
+        data: { serverId: s.id, collectedAt: new Date(), cpuPercent: 1, source: 'agent' },
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/environments/${env.id}/metrics/history?hours=6&metric=cpu`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { mode: string; until: string };
+      expect(body.mode).toBe('full');
+      // until should be a parseable ISO timestamp.
+      expect(Number.isNaN(new Date(body.until).getTime())).toBe(false);
+    });
+
+    it('?since= returns mode=delta and only points strictly after the cutoff', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'mon-since' });
+      const s = await createTestServer(app.prisma, { environmentId: env.id, name: 'srv-since' });
+      // Three points spaced one minute apart. The middle one is our cutoff
+      // — a delta request with `since=t2` must drop t1 + t2 but keep t3.
+      const t1 = new Date(Date.now() - 180_000);
+      const t2 = new Date(Date.now() - 120_000);
+      const t3 = new Date(Date.now() - 60_000);
+      await app.prisma.serverMetrics.createMany({
+        data: [
+          { serverId: s.id, collectedAt: t1, cpuPercent: 1, source: 'agent' },
+          { serverId: s.id, collectedAt: t2, cpuPercent: 2, source: 'agent' },
+          { serverId: s.id, collectedAt: t3, cpuPercent: 3, source: 'agent' },
+        ],
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/environments/${env.id}/metrics/history?hours=6&metric=cpu&since=${encodeURIComponent(t2.toISOString())}`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as {
+        servers: Array<{ id: string }>;
+        timestamps: string[];
+        series: { cpu: Array<Array<number | null>> };
+        mode: string;
+        until: string;
+      };
+      expect(body.mode).toBe('delta');
+      // Strict `>` — t2 must NOT appear in the delta. t3 should be the only
+      // remaining point for this server.
+      expect(body.timestamps).toContain(t3.toISOString());
+      expect(body.timestamps).not.toContain(t2.toISOString());
+      expect(body.timestamps).not.toContain(t1.toISOString());
+      const sIdx = body.servers.findIndex((srv) => srv.id === s.id);
+      expect(body.series.cpu[sIdx]).toEqual([3]);
+    });
+
+    it('?maxPoints caps the full-window response to that point count', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'mon-maxpoints' });
+      const s = await createTestServer(app.prisma, { environmentId: env.id, name: 'srv-cap' });
+      // Insert 60 distinct timestamps; ask for maxPoints=20. The route
+      // should LTTB-downsample to exactly 20 (n > maxPoints).
+      const now = Date.now();
+      const data = Array.from({ length: 60 }, (_, i) => ({
+        serverId: s.id,
+        collectedAt: new Date(now - (60 - i) * 60_000),
+        cpuPercent: i + 1,
+        source: 'agent' as const,
+      }));
+      await app.prisma.serverMetrics.createMany({ data });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/environments/${env.id}/metrics/history?hours=6&metric=cpu&maxPoints=20`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as {
+        servers: Array<{ id: string }>;
+        timestamps: string[];
+        series: { cpu: Array<Array<number | null>> };
+        mode: string;
+      };
+      expect(body.mode).toBe('full');
+      expect(body.timestamps.length).toBe(20);
+      // Every per-server row must align to the downsampled timestamps.
+      for (const row of body.series.cpu) {
+        expect(row.length).toBe(body.timestamps.length);
+      }
+    });
   });
 
   describe('GET /api/environments/:envId/services/metrics/history', () => {
@@ -410,6 +503,95 @@ describe('monitoring routes', () => {
       // The old per-service `data` array must no longer be present — if it
       // sneaks back in it means we regressed to the nested shape.
       expect(entry!).not.toHaveProperty('data');
+    });
+
+    // Issue #171 — delta refresh + LTTB downsampling additions for the
+    // services/metrics/history endpoint.
+    it('?since= returns mode=delta and only service points strictly after the cutoff', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'svc-since-env' });
+      const server = await createTestServer(app.prisma, { environmentId: env.id, name: 'svc-host-since' });
+      const image = await createTestContainerImage(app.prisma, { environmentId: env.id });
+      const svc = await createTestService(app.prisma, {
+        environmentId: env.id,
+        serverId: server.id,
+        containerImageId: image.id,
+        name: 'svc-since',
+      });
+      const dep = await app.prisma.serviceDeployment.findFirstOrThrow({ where: { serviceId: svc.id } });
+      await app.prisma.serviceDeployment.update({ where: { id: dep.id }, data: { discoveryStatus: 'found' } });
+
+      const t1 = new Date(Date.now() - 180_000);
+      const t2 = new Date(Date.now() - 120_000);
+      const t3 = new Date(Date.now() - 60_000);
+      await app.prisma.serviceMetrics.createMany({
+        data: [
+          { serviceDeploymentId: dep.id, collectedAt: t1, cpuPercent: 1.1 },
+          { serviceDeploymentId: dep.id, collectedAt: t2, cpuPercent: 2.2 },
+          { serviceDeploymentId: dep.id, collectedAt: t3, cpuPercent: 3.3 },
+        ],
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/environments/${env.id}/services/metrics/history?hours=6&since=${encodeURIComponent(t2.toISOString())}`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as {
+        services: Array<{ id: string }>;
+        timestamps: string[];
+        series: { cpu: Array<Array<number | null>> };
+        mode: string;
+        until: string;
+      };
+      expect(body.mode).toBe('delta');
+      // Strict `>` semantics — t2 must not show up.
+      expect(body.timestamps).toContain(t3.toISOString());
+      expect(body.timestamps).not.toContain(t2.toISOString());
+      const sIdx = body.services.findIndex((s) => s.id === svc.id);
+      // Service-metrics route preserves 1 decimal — assert via approximate match.
+      expect(body.series.cpu[sIdx]!.filter((v) => v != null)).toEqual([3.3]);
+    });
+
+    it('?maxPoints caps the services full-window response to that point count', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'svc-maxpoints-env' });
+      const server = await createTestServer(app.prisma, { environmentId: env.id, name: 'svc-host-cap' });
+      const image = await createTestContainerImage(app.prisma, { environmentId: env.id });
+      const svc = await createTestService(app.prisma, {
+        environmentId: env.id,
+        serverId: server.id,
+        containerImageId: image.id,
+        name: 'svc-cap',
+      });
+      const dep = await app.prisma.serviceDeployment.findFirstOrThrow({ where: { serviceId: svc.id } });
+      await app.prisma.serviceDeployment.update({ where: { id: dep.id }, data: { discoveryStatus: 'found' } });
+
+      const now = Date.now();
+      const data = Array.from({ length: 60 }, (_, i) => ({
+        serviceDeploymentId: dep.id,
+        collectedAt: new Date(now - (60 - i) * 60_000),
+        cpuPercent: i + 1,
+      }));
+      await app.prisma.serviceMetrics.createMany({ data });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/environments/${env.id}/services/metrics/history?hours=6&maxPoints=20`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as {
+        services: Array<{ id: string }>;
+        timestamps: string[];
+        series: { cpu: Array<Array<number | null>> };
+        mode: string;
+      };
+      expect(body.mode).toBe('full');
+      expect(body.timestamps.length).toBe(20);
+      // Every service row aligns to the downsampled timestamps.
+      for (const row of body.series.cpu) {
+        expect(row.length).toBe(body.timestamps.length);
+      }
     });
   });
 });

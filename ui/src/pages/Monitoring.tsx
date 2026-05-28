@@ -1,4 +1,4 @@
-import { useEffect, useState, memo } from 'react';
+import { memo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppStore } from '../lib/store';
 import {
@@ -11,6 +11,7 @@ import {
 } from '../lib/api';
 import { ServerIcon, CubeIcon, DatabaseIcon } from '../components/Icons';
 import { formatDistanceToNow } from 'date-fns';
+import { useMetricResource } from '../hooks/useMetricResource';
 
 interface FlatService {
   id: string;
@@ -23,42 +24,63 @@ interface FlatService {
 
 export default function Monitoring() {
   const { selectedEnvironment, autoRefreshEnabled, setAutoRefreshEnabled } = useAppStore();
-  const [stats, setStats] = useState<MonitoringOverviewStats | null>(null);
-  const [servers, setServers] = useState<MetricsSummaryServer[]>([]);
-  const [databases, setDatabases] = useState<DatabaseMonitoringSummaryItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
 
-  const fetchData = async (isRefresh = false) => {
-    if (!selectedEnvironment?.id) return;
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
+  // Issue #171 — three independent resources so the page chrome paints
+  // immediately. Each section (HealthCards, Servers table, Services
+  // table, Databases table) renders its own loading state.
+  const envId = selectedEnvironment?.id;
 
-    try {
-      const [overviewRes, metricsRes, dbRes] = await Promise.all([
-        getMonitoringOverview(selectedEnvironment.id),
-        getEnvironmentMetricsSummary(selectedEnvironment.id),
-        getDatabaseMonitoringSummary(selectedEnvironment.id),
-      ]);
-      setStats(overviewRes.stats);
-      setServers(metricsRes.servers);
-      setDatabases(dbRes.databases);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+  const overviewResource = useMetricResource<{ stats: MonitoringOverviewStats; until?: string }>(
+    useCallback(async () => {
+      if (!envId) return { stats: { servers: { total: 0, healthy: 0, unhealthy: 0 }, services: { total: 0, healthy: 0, unhealthy: 0 }, databases: { total: 0, monitored: 0, connected: 0, error: 0 }, alerts: 0 } };
+      return getMonitoringOverview(envId);
+    }, [envId]),
+    {
+      autoRefreshMs: autoRefreshEnabled ? 30000 : 0,
+      depKey: envId ?? '',
+      enabled: !!envId,
     }
-  };
+  );
 
-  useEffect(() => {
-    fetchData();
-  }, [selectedEnvironment?.id]);
+  // The overview page renders per-server services[] data (`flatServices`)
+  // so we keep includeServices=true (the default).
+  const summaryResource = useMetricResource<{ servers: MetricsSummaryServer[]; until?: string }>(
+    useCallback(async () => {
+      if (!envId) return { servers: [] };
+      return getEnvironmentMetricsSummary(envId);
+    }, [envId]),
+    {
+      autoRefreshMs: autoRefreshEnabled ? 30000 : 0,
+      depKey: envId ?? '',
+      enabled: !!envId,
+    }
+  );
 
-  // Auto-refresh every 30 seconds if enabled
-  useEffect(() => {
-    if (!autoRefreshEnabled) return;
-    const interval = setInterval(() => fetchData(true), 30000);
-    return () => clearInterval(interval);
-  }, [selectedEnvironment?.id, autoRefreshEnabled]);
+  const databasesResource = useMetricResource<{ databases: DatabaseMonitoringSummaryItem[]; until?: string }>(
+    useCallback(async () => {
+      if (!envId) return { databases: [] };
+      return getDatabaseMonitoringSummary(envId);
+    }, [envId]),
+    {
+      autoRefreshMs: autoRefreshEnabled ? 30000 : 0,
+      depKey: envId ?? '',
+      enabled: !!envId,
+    }
+  );
+
+  const stats = overviewResource.data?.stats ?? null;
+  const servers = summaryResource.data?.servers ?? [];
+  const databases = databasesResource.data?.databases ?? [];
+  const refreshing =
+    overviewResource.refreshing ||
+    summaryResource.refreshing ||
+    databasesResource.refreshing;
+
+  const reloadAll = useCallback(() => {
+    overviewResource.reload();
+    summaryResource.reload();
+    databasesResource.reload();
+  }, [overviewResource, summaryResource, databasesResource]);
 
   // Flatten services from servers
   const flatServices: FlatService[] = servers.flatMap((s) =>
@@ -94,20 +116,10 @@ export default function Monitoring() {
       return a.name.localeCompare(b.name);
     });
 
-  if (loading) {
-    return (
-      <div className="p-8">
-        <div className="animate-pulse">
-          <div className="h-8 w-48 bg-slate-700 rounded mb-8"></div>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="h-28 bg-slate-800 rounded-xl"></div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // Page-level render gate dropped (issue #171). Health cards below paint
+  // immediately; the section-level lists show skeletons until their own
+  // fetches return.
+  const overviewLoading = overviewResource.loading;
 
   return (
     <div className="p-6">
@@ -123,7 +135,7 @@ export default function Monitoring() {
             Auto: 30s
           </label>
           <button
-            onClick={() => fetchData(true)}
+            onClick={reloadAll}
             disabled={refreshing}
             className="btn btn-secondary"
           >
@@ -133,7 +145,13 @@ export default function Monitoring() {
       </div>
 
       {/* Health Sections */}
-      {stats && (
+      {overviewLoading ? (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="panel h-28 animate-pulse" />
+          ))}
+        </div>
+      ) : stats && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <HealthCard
             title="Servers Health"

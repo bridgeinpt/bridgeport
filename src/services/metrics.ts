@@ -250,7 +250,18 @@ interface ServiceLatestRow {
   collectedAt: Date;
 }
 
-export async function getEnvironmentMetricsSummary(environmentId: string) {
+export interface EnvironmentMetricsSummaryOptions {
+  // When false, skips the per-server services[] block (and the dependent
+  // ServiceDeployment / ServiceMetrics queries). Callers that only render
+  // server-level data (e.g. the Monitoring > Servers page) opt out to drop
+  // the cost of two queries + the in-memory join.
+  includeServices?: boolean;
+}
+
+export async function getEnvironmentMetricsSummary(
+  environmentId: string,
+  options: EnvironmentMetricsSummaryOptions = {}
+) {
   // Sentry flagged this transaction at p99=8s in production (count=76 / 14d).
   // Root cause: server.findMany with nested `include: { metrics take 1,
   // services: { include: { metrics take 1 } } }` made Prisma emit a
@@ -262,7 +273,14 @@ export async function getEnvironmentMetricsSummary(environmentId: string) {
   // ROW_NUMBER() OVER (PARTITION BY ... ORDER BY ...). The
   // `@@index([serverId, collectedAt(sort: Desc)])` index on each metrics
   // table makes this almost free.
-  const [servers, deployments] = await Promise.all([
+  const includeServices = options.includeServices ?? true;
+
+  // Service deployments query is split into two: a thin findMany for
+  // (id, serverId, containerName, serviceId) and a separate Service lookup
+  // by `id IN`. Prisma's nested `service: { select: ... }` emits a
+  // correlated EXISTS subquery per row; doing the join in JS lets us pay
+  // one indexed PK lookup batch instead.
+  const [servers, deploymentsThin] = await Promise.all([
     prisma.server.findMany({
       where: { environmentId },
       select: {
@@ -273,24 +291,26 @@ export async function getEnvironmentMetricsSummary(environmentId: string) {
         metricsMode: true,
       },
     }),
-    // Service.server moved to ServiceDeployment in 2.0. Each row here is one
-    // (service, server) pair carrying the runtime containerName that
-    // ServiceMetrics is keyed against.
-    prisma.serviceDeployment.findMany({
-      where: { server: { environmentId } },
-      select: {
-        id: true,
-        serverId: true,
-        containerName: true,
-        service: { select: { id: true, name: true } },
-      },
-    }),
+    includeServices
+      ? prisma.serviceDeployment.findMany({
+          where: { server: { environmentId } },
+          select: {
+            id: true,
+            serverId: true,
+            containerName: true,
+            serviceId: true,
+          },
+        })
+      : Promise.resolve([] as Array<{ id: string; serverId: string; containerName: string; serviceId: string }>),
   ]);
 
   const serverIds = servers.map((s) => s.id);
-  const deploymentIds = deployments.map((d) => d.id);
+  const deploymentIds = includeServices ? deploymentsThin.map((d) => d.id) : [];
+  const serviceIds = includeServices
+    ? Array.from(new Set(deploymentsThin.map((d) => d.serviceId)))
+    : [];
 
-  const [serverLatest, serviceLatest] = await Promise.all([
+  const [serverLatest, serviceLatest, serviceRows] = await Promise.all([
     serverIds.length === 0
       ? Promise.resolve([] as ServerLatestRow[])
       : prisma.$queryRaw<ServerLatestRow[]>`
@@ -306,7 +326,7 @@ export async function getEnvironmentMetricsSummary(environmentId: string) {
             WHERE "serverId" IN (${Prisma.join(serverIds)})
           ) WHERE rn = 1
         `,
-    deploymentIds.length === 0
+    !includeServices || deploymentIds.length === 0
       ? Promise.resolve([] as ServiceLatestRow[])
       : prisma.$queryRaw<ServiceLatestRow[]>`
           SELECT id, "serviceDeploymentId", "cpuPercent", "memoryUsedMb", "memoryLimitMb",
@@ -317,16 +337,25 @@ export async function getEnvironmentMetricsSummary(environmentId: string) {
             WHERE "serviceDeploymentId" IN (${Prisma.join(deploymentIds)})
           ) WHERE rn = 1
         `,
+    !includeServices || serviceIds.length === 0
+      ? Promise.resolve([] as Array<{ id: string; name: string }>)
+      : prisma.service.findMany({
+          where: { id: { in: serviceIds } },
+          select: { id: true, name: true },
+        }),
   ]);
 
   const serverMetricById = new Map(serverLatest.map((m) => [m.serverId, m]));
   const serviceMetricByDeployment = new Map(serviceLatest.map((m) => [m.serviceDeploymentId, m]));
+  const serviceById = new Map(serviceRows.map((s) => [s.id, s]));
 
-  const deploymentsByServer = new Map<string, typeof deployments>();
-  for (const d of deployments) {
-    const arr = deploymentsByServer.get(d.serverId) ?? [];
-    arr.push(d);
-    deploymentsByServer.set(d.serverId, arr);
+  const deploymentsByServer = new Map<string, typeof deploymentsThin>();
+  if (includeServices) {
+    for (const d of deploymentsThin) {
+      const arr = deploymentsByServer.get(d.serverId) ?? [];
+      arr.push(d);
+      deploymentsByServer.set(d.serverId, arr);
+    }
   }
 
   return servers.map((server) => ({
@@ -336,13 +365,20 @@ export async function getEnvironmentMetricsSummary(environmentId: string) {
     tags: server.tags,
     metricsMode: server.metricsMode,
     latestMetrics: serverMetricById.get(server.id) ?? null,
-    services: (deploymentsByServer.get(server.id) ?? []).map((d) => ({
-      id: d.service.id,
-      deploymentId: d.id,
-      name: d.service.name,
-      containerName: d.containerName,
-      latestMetrics: serviceMetricByDeployment.get(d.id) ?? null,
-    })),
+    services: includeServices
+      ? (deploymentsByServer.get(server.id) ?? []).map((d) => {
+          const svc = serviceById.get(d.serviceId);
+          return {
+            id: d.serviceId,
+            deploymentId: d.id,
+            // Fall back to '' if a deployment references a service that
+            // disappeared between the two queries — same shape as before.
+            name: svc?.name ?? '',
+            containerName: d.containerName,
+            latestMetrics: serviceMetricByDeployment.get(d.id) ?? null,
+          };
+        })
+      : [],
   }));
 }
 

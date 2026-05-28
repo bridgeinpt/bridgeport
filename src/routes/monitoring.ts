@@ -10,6 +10,7 @@ import { getAgentEvents } from '../services/agent-events.js';
 import { logHealthCheck } from '../services/health-checks.js';
 import { SERVER_STATUS, HEALTH_STATUS, CONTAINER_STATUS, HEALTH_CHECK_STATUS, DISCOVERY_STATUS, type ServerStatus } from '../lib/constants.js';
 import { validateBody, findOrNotFound, getErrorMessage } from '../lib/helpers.js';
+import { downsampleColumnar } from '../lib/metrics-downsample.js';
 
 const healthLogQuerySchema = z.object({
   type: z.enum(['server', 'service', 'container']).optional(),
@@ -24,6 +25,14 @@ const healthLogQuerySchema = z.object({
 const metricsHistoryQuerySchema = z.object({
   hours: z.coerce.number().min(1).max(168).default(24),
   metric: z.enum(['cpu', 'memory', 'disk', 'load']).optional(),
+  // Delta refresh — when set, return only points strictly after this ISO
+  // timestamp. Clients pass the previous response's `until` here on each
+  // auto-refresh tick so the wire payload stays small.
+  since: z.string().datetime().optional(),
+  // Downsample cap for the full-window response. LTTB is applied to the
+  // assembled timestamp+rows shape when `since` is absent. Capped to avoid
+  // unbounded chart point counts; min 10 keeps the algorithm meaningful.
+  maxPoints: z.coerce.number().min(10).max(2000).default(120),
 });
 
 // Shared error-response schemas for the columnar /metrics/history endpoints.
@@ -346,6 +355,13 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
                   tcpTotal: { type: 'array', items: { type: 'array', items: { type: ['number', 'null'] } } },
                 },
               },
+              // Issue #171 — delta-refresh additions. `mode` tells the client
+              // whether this payload is the full downsampled window or just
+              // the points after the previously-known `until`. `until` is
+              // the server-now ISO the client should pass back as `since` on
+              // the next tick.
+              mode: { type: 'string', enum: ['full', 'delta'] },
+              until: { type: 'string' },
             },
           },
           400: ERROR_RESPONSE_SCHEMA,
@@ -361,9 +377,20 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         return reply.code(400).send({ error: 'Invalid query', details: query.error.issues });
       }
 
-      const { hours, metric } = query.data;
-      const since = new Date();
-      since.setHours(since.getHours() - hours);
+      const { hours, metric, since: sinceIso, maxPoints } = query.data;
+      // For delta requests, the lower bound is the client's last-known
+      // timestamp (exclusive). Otherwise fall back to the rolling window.
+      const since = sinceIso
+        ? new Date(sinceIso)
+        : (() => {
+            const d = new Date();
+            d.setHours(d.getHours() - hours);
+            return d;
+          })();
+      // Capture server-now BEFORE the DB read so the client's next `since`
+      // can never skip rows that were committed mid-query.
+      const until = new Date().toISOString();
+      const isDelta = !!sinceIso;
 
       // Parallelize env existence check + servers load (no dependency).
       const [env, servers] = await Promise.all([
@@ -404,20 +431,35 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         tcpTotal: number | null;
         collectedAt: Date;
       }
+      // Delta requests use strict `>` so a client passing the previous
+      // response's `until` doesn't replay the boundary point. Full-window
+      // requests use `>=` to be inclusive of the rolling-window start.
       const rows: ServerMetricRow[] =
         serverIds.length === 0
           ? []
-          : await prisma.$queryRaw<ServerMetricRow[]>`
-              SELECT "serverId", "cpuPercent", "memoryUsedMb", "memoryTotalMb",
-                     "swapUsedMb", "swapTotalMb", "diskUsedGb", "diskTotalGb",
-                     "loadAvg1", "loadAvg5", "loadAvg15", "openFds", "maxFds",
-                     "tcpEstablished", "tcpListen", "tcpTimeWait", "tcpCloseWait",
-                     "tcpTotal", "collectedAt"
-              FROM "ServerMetrics"
-              WHERE "serverId" IN (${Prisma.join(serverIds)})
-                AND "collectedAt" >= ${since}
-              ORDER BY "collectedAt" ASC
-            `;
+          : isDelta
+            ? await prisma.$queryRaw<ServerMetricRow[]>`
+                SELECT "serverId", "cpuPercent", "memoryUsedMb", "memoryTotalMb",
+                       "swapUsedMb", "swapTotalMb", "diskUsedGb", "diskTotalGb",
+                       "loadAvg1", "loadAvg5", "loadAvg15", "openFds", "maxFds",
+                       "tcpEstablished", "tcpListen", "tcpTimeWait", "tcpCloseWait",
+                       "tcpTotal", "collectedAt"
+                FROM "ServerMetrics"
+                WHERE "serverId" IN (${Prisma.join(serverIds)})
+                  AND "collectedAt" > ${since}
+                ORDER BY "collectedAt" ASC
+              `
+            : await prisma.$queryRaw<ServerMetricRow[]>`
+                SELECT "serverId", "cpuPercent", "memoryUsedMb", "memoryTotalMb",
+                       "swapUsedMb", "swapTotalMb", "diskUsedGb", "diskTotalGb",
+                       "loadAvg1", "loadAvg5", "loadAvg15", "openFds", "maxFds",
+                       "tcpEstablished", "tcpListen", "tcpTimeWait", "tcpCloseWait",
+                       "tcpTotal", "collectedAt"
+                FROM "ServerMetrics"
+                WHERE "serverId" IN (${Prisma.join(serverIds)})
+                  AND "collectedAt" >= ${since}
+                ORDER BY "collectedAt" ASC
+              `;
 
       // Collect the union of timestamps across all servers so every series row
       // aligns to the same `timestamps[]` index. `$queryRaw` can hand back
@@ -533,7 +575,40 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         return { id: server.id, name: server.name, tags: server.tags };
       });
 
-      return { servers: serverMeta, timestamps, series };
+      // Downsample the full-window response to `maxPoints` shared timestamps
+      // using LTTB. Delta payloads are returned untouched — they're already
+      // small (just the new points since `since`) and downsampling them
+      // would distort the rolling-window stitch on the client.
+      let outTimestamps = timestamps;
+      let outSeries = series;
+      if (!isDelta && timestamps.length > maxPoints) {
+        // Flatten per-metric rows into a single matrix, downsample once on
+        // the shared timestamp axis, then re-slice back into per-metric
+        // arrays so every series stays aligned to the picked timestamps.
+        const flatRows: Array<Array<number | null>> = [];
+        const rowSpans: Array<{ key: SeriesKey; count: number }> = [];
+        for (const key of keysToEmit) {
+          const arr = series[key]!;
+          rowSpans.push({ key, count: arr.length });
+          for (const r of arr) flatRows.push(r);
+        }
+        const ds = downsampleColumnar(timestamps, flatRows, maxPoints);
+        outTimestamps = ds.timestamps;
+        outSeries = {};
+        let cursor = 0;
+        for (const span of rowSpans) {
+          outSeries[span.key] = ds.rows.slice(cursor, cursor + span.count);
+          cursor += span.count;
+        }
+      }
+
+      return {
+        servers: serverMeta,
+        timestamps: outTimestamps,
+        series: outSeries,
+        mode: isDelta ? 'delta' : 'full',
+        until,
+      };
     }
   );
 
@@ -574,6 +649,9 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
                   restartCount: { type: 'array', items: { type: 'array', items: { type: ['number', 'null'] } } },
                 },
               },
+              // Issue #171 — delta-refresh additions, see /metrics/history.
+              mode: { type: 'string', enum: ['full', 'delta'] },
+              until: { type: 'string' },
             },
           },
           400: ERROR_RESPONSE_SCHEMA,
@@ -589,9 +667,16 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         return reply.code(400).send({ error: 'Invalid query', details: query.error.issues });
       }
 
-      const { hours } = query.data;
-      const since = new Date();
-      since.setHours(since.getHours() - hours);
+      const { hours, since: sinceIso, maxPoints } = query.data;
+      const since = sinceIso
+        ? new Date(sinceIso)
+        : (() => {
+            const d = new Date();
+            d.setHours(d.getHours() - hours);
+            return d;
+          })();
+      const until = new Date().toISOString();
+      const isDelta = !!sinceIso;
 
       // Parallelize the env existence check with the server load. Deployment
       // load happens after because filtering deployments by
@@ -659,14 +744,23 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
       const rows: MetricRow[] =
         deploymentIds.length === 0
           ? []
-          : await prisma.$queryRaw<MetricRow[]>`
-              SELECT "serviceDeploymentId", "cpuPercent", "memoryUsedMb", "memoryLimitMb",
-                     "networkRxMb", "networkTxMb", "restartCount", "collectedAt"
-              FROM "ServiceMetrics"
-              WHERE "serviceDeploymentId" IN (${Prisma.join(deploymentIds)})
-                AND "collectedAt" >= ${since}
-              ORDER BY "collectedAt" ASC
-            `;
+          : isDelta
+            ? await prisma.$queryRaw<MetricRow[]>`
+                SELECT "serviceDeploymentId", "cpuPercent", "memoryUsedMb", "memoryLimitMb",
+                       "networkRxMb", "networkTxMb", "restartCount", "collectedAt"
+                FROM "ServiceMetrics"
+                WHERE "serviceDeploymentId" IN (${Prisma.join(deploymentIds)})
+                  AND "collectedAt" > ${since}
+                ORDER BY "collectedAt" ASC
+              `
+            : await prisma.$queryRaw<MetricRow[]>`
+                SELECT "serviceDeploymentId", "cpuPercent", "memoryUsedMb", "memoryLimitMb",
+                       "networkRxMb", "networkTxMb", "restartCount", "collectedAt"
+                FROM "ServiceMetrics"
+                WHERE "serviceDeploymentId" IN (${Prisma.join(deploymentIds)})
+                  AND "collectedAt" >= ${since}
+                ORDER BY "collectedAt" ASC
+              `;
 
       // Union of all timestamps so every service row is the same length.
       // `$queryRaw` can hand back `collectedAt` as either Date or string;
@@ -739,10 +833,54 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         };
       });
 
+      // Apply LTTB downsampling to full-window responses, same shape as
+      // /metrics/history. Delta payloads are returned as-is.
+      let outTimestamps = timestamps;
+      let outSeries: {
+        cpu: Array<Array<number | null>>;
+        memory: Array<Array<number | null>>;
+        memoryLimit: Array<Array<number | null>>;
+        networkRx: Array<Array<number | null>>;
+        networkTx: Array<Array<number | null>>;
+        restartCount: Array<Array<number | null>>;
+      } = { cpu, memory, memoryLimit, networkRx, networkTx, restartCount };
+
+      if (!isDelta && timestamps.length > maxPoints) {
+        // Same flatten/downsample/re-slice pattern as the server-metrics
+        // route — every series stays aligned to the same picked timestamps.
+        const keys = ['cpu', 'memory', 'memoryLimit', 'networkRx', 'networkTx', 'restartCount'] as const;
+        const sourceMap = { cpu, memory, memoryLimit, networkRx, networkTx, restartCount };
+        const flatRows: Array<Array<number | null>> = [];
+        const counts: number[] = [];
+        for (const key of keys) {
+          const arr = sourceMap[key];
+          counts.push(arr.length);
+          for (const r of arr) flatRows.push(r);
+        }
+        const ds = downsampleColumnar(timestamps, flatRows, maxPoints);
+        outTimestamps = ds.timestamps;
+        const sliced: Record<string, Array<Array<number | null>>> = {};
+        let cursor = 0;
+        keys.forEach((key, i) => {
+          sliced[key] = ds.rows.slice(cursor, cursor + counts[i]);
+          cursor += counts[i];
+        });
+        outSeries = {
+          cpu: sliced.cpu,
+          memory: sliced.memory,
+          memoryLimit: sliced.memoryLimit,
+          networkRx: sliced.networkRx,
+          networkTx: sliced.networkTx,
+          restartCount: sliced.restartCount,
+        };
+      }
+
       return {
         services: serviceMeta,
-        timestamps,
-        series: { cpu, memory, memoryLimit, networkRx, networkTx, restartCount },
+        timestamps: outTimestamps,
+        series: outSeries,
+        mode: isDelta ? 'delta' : 'full',
+        until,
       };
     }
   );

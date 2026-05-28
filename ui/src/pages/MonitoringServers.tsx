@@ -14,6 +14,18 @@ import ChartCard from '../components/monitoring/ChartCard';
 import MetricGauge from '../components/monitoring/MetricGauge';
 import TimeRangeSelector from '../components/monitoring/TimeRangeSelector';
 import AutoRefreshToggle from '../components/monitoring/AutoRefreshToggle';
+import { useMetricResource } from '../hooks/useMetricResource';
+import { mergeColumnarHistory } from '../lib/metricsMerge';
+
+// Stable empty-history fallback so the `historyResource.data ?? EMPTY_HISTORY`
+// below produces the same object identity across renders — prevents downstream
+// memos (cpuChart, memoryChart, ...) from invalidating every render while the
+// initial fetch is in flight.
+const EMPTY_HISTORY: MetricsHistoryResponse = Object.freeze({
+  servers: [],
+  timestamps: [],
+  series: {},
+}) as MetricsHistoryResponse;
 
 export default function MonitoringServers() {
   const {
@@ -26,49 +38,112 @@ export default function MonitoringServers() {
     setMonitoringServerFilter,
   } = useAppStore();
 
-  const [servers, setServers] = useState<MetricsSummaryServer[]>([]);
-  const [history, setHistory] = useState<MetricsHistoryResponse>({
-    servers: [],
-    timestamps: [],
-    series: {},
-  });
+  // Issue #171 — three independent resources per page so the chrome paints
+  // immediately. `history` carries the chart data (delta-refreshable),
+  // `summary` is the per-server table data, and `schedulerConfig` is the
+  // module settings used to toggle chart visibility.
+  const envId = selectedEnvironment?.id;
+  const depKey = useMemo(
+    () => `${envId ?? ''}|${monitoringTimeRange}`,
+    [envId, monitoringTimeRange]
+  );
+
+  const historyResource = useMetricResource<MetricsHistoryResponse>(
+    useCallback(
+      async (since) => {
+        if (!envId) return { servers: [], timestamps: [], series: {} };
+        return getMetricsHistory(envId, monitoringTimeRange, {
+          since,
+          maxPoints: 120,
+        });
+      },
+      [envId, monitoringTimeRange]
+    ),
+    {
+      autoRefreshMs: autoRefreshEnabled ? 30000 : 0,
+      depKey,
+      enabled: !!envId,
+      // Merge delta points onto the existing full window using the columnar
+      // merge helper; cap the visible window at a generous 1000 points so
+      // long-running auto-refresh sessions don't grow unbounded.
+      //
+      // The columnar helper works on a generic `entities` field; we adapt
+      // the response's `servers` field to `entities` going in and rename it
+      // back going out so subsequent ticks (which feed the merged shape
+      // back in as `prev`) keep finding `prev.servers`. Without this
+      // explicit rename the second delta tick would crash with
+      // `history.servers is undefined`.
+      merge: (prev, next) => {
+        if (next.mode !== 'delta') return next;
+        const merged = mergeColumnarHistory(
+          {
+            entities: prev.servers,
+            timestamps: prev.timestamps,
+            series: prev.series,
+            until: prev.until,
+          },
+          {
+            entities: next.servers ?? [],
+            timestamps: next.timestamps,
+            series: next.series,
+            until: next.until,
+          },
+          { windowSize: 1000 }
+        );
+        return {
+          servers: merged.entities,
+          timestamps: merged.timestamps,
+          series: merged.series,
+          mode: merged.mode,
+          until: merged.until,
+        } as MetricsHistoryResponse;
+      },
+    }
+  );
+
+  const summaryResource = useMetricResource<{ servers: MetricsSummaryServer[]; until?: string }>(
+    useCallback(async () => {
+      if (!envId) return { servers: [] };
+      // /monitoring/servers doesn't render any per-server services[] data,
+      // so we opt out of the ServiceDeployment + ServiceMetrics queries.
+      const res = await getEnvironmentMetricsSummary(envId, { includeServices: false });
+      return res;
+    }, [envId]),
+    {
+      autoRefreshMs: autoRefreshEnabled ? 30000 : 0,
+      depKey: envId ?? '',
+      enabled: !!envId,
+    }
+  );
+
   const [schedulerConfig, setSchedulerConfig] = useState<Record<string, unknown> | null>(null);
   const [disabledMetricsExpanded, setDisabledMetricsExpanded] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
 
-  const fetchData = async (isRefresh = false) => {
-    if (!selectedEnvironment?.id) return;
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
-
-    try {
-      const [summaryRes, historyRes, configRes] = await Promise.all([
-        getEnvironmentMetricsSummary(selectedEnvironment.id),
-        getMetricsHistory(selectedEnvironment.id, monitoringTimeRange),
-        getModuleSettings(selectedEnvironment.id, 'monitoring'),
-      ]);
-      setServers(summaryRes.servers);
-      setHistory(historyRes);
-      setSchedulerConfig(configRes.settings);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
+  // schedulerConfig changes rarely; load it once per envId. Auto-refresh
+  // is skipped because the user reloads the page after toggling settings.
   useEffect(() => {
-    fetchData();
-  }, [selectedEnvironment?.id, monitoringTimeRange]);
+    if (!envId) return;
+    let cancelled = false;
+    (async () => {
+      const res = await getModuleSettings(envId, 'monitoring');
+      if (!cancelled) setSchedulerConfig(res.settings);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [envId]);
 
-  // Auto-refresh every 30 seconds if enabled
-  useEffect(() => {
-    if (!autoRefreshEnabled) return;
-    const interval = setInterval(() => {
-      fetchData(true);
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [selectedEnvironment?.id, monitoringTimeRange, autoRefreshEnabled]);
+  const history: MetricsHistoryResponse = historyResource.data ?? EMPTY_HISTORY;
+  const servers: MetricsSummaryServer[] = summaryResource.data?.servers ?? [];
+  const historyLoading = historyResource.loading;
+  const historyRefreshing = historyResource.refreshing;
+  const refreshing = historyRefreshing || summaryResource.refreshing;
+
+  // Combined "refresh all" used by the AutoRefreshToggle button.
+  const reloadAll = useCallback(() => {
+    historyResource.reload();
+    summaryResource.reload();
+  }, [historyResource, summaryResource]);
 
   // Filter by server ID
   const filterSet = useMemo(() => new Set(monitoringServerFilter), [monitoringServerFilter]);
@@ -156,21 +231,8 @@ export default function MonitoringServers() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="p-8">
-        <div className="animate-pulse">
-          <div className="h-8 w-48 bg-slate-700 rounded mb-8"></div>
-          <div className="grid grid-cols-2 gap-6">
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="h-64 bg-slate-800 rounded-xl"></div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
+  // Page-level render gate dropped (issue #171). Each chart/table renders
+  // its own loading state below so the page chrome paints immediately.
   const serversWithMetrics = filteredServers.filter((s) => s.latestMetrics);
 
   return (
@@ -179,7 +241,7 @@ export default function MonitoringServers() {
         <AutoRefreshToggle
           enabled={autoRefreshEnabled}
           onChange={setAutoRefreshEnabled}
-          onRefresh={() => fetchData(true)}
+          onRefresh={reloadAll}
           refreshing={refreshing}
         />
       </div>
@@ -221,26 +283,27 @@ export default function MonitoringServers() {
         )}
       </div>
 
-      {/* Server Charts */}
-      {hasAnyHistory ? (
+      {/* Server Charts — each card renders its own loading skeleton so the
+          page chrome above paints immediately (issue #171). */}
+      {historyLoading || hasAnyHistory ? (
         <div className="grid grid-cols-2 gap-6 mb-8">
           {(schedulerConfig?.collectCpu ?? true) && (
-            <ChartCard title="CPU Usage" data={cpuChart.data} names={cpuChart.names} formatTime={formatTime} unit="%" domain={[0, 100]} />
+            <ChartCard title="CPU Usage" data={cpuChart.data} names={cpuChart.names} formatTime={formatTime} unit="%" domain={[0, 100]} loading={historyLoading} refreshing={historyRefreshing} />
           )}
           {(schedulerConfig?.collectMemory ?? true) && (
-            <ChartCard title="Memory Usage" data={memoryChart.data} names={memoryChart.names} formatTime={formatTime} unit="%" domain={[0, 100]} />
+            <ChartCard title="Memory Usage" data={memoryChart.data} names={memoryChart.names} formatTime={formatTime} unit="%" domain={[0, 100]} loading={historyLoading} refreshing={historyRefreshing} />
           )}
           {(schedulerConfig?.collectSwap ?? true) && (
-            <ChartCard title="Swap Usage" data={swapChart.data} names={swapChart.names} formatTime={formatTime} unit="%" domain={[0, 100]} />
+            <ChartCard title="Swap Usage" data={swapChart.data} names={swapChart.names} formatTime={formatTime} unit="%" domain={[0, 100]} loading={historyLoading} refreshing={historyRefreshing} />
           )}
           {(schedulerConfig?.collectDisk ?? true) && (
-            <ChartCard title="Disk Usage" data={diskChart.data} names={diskChart.names} formatTime={formatTime} unit="%" domain={[0, 100]} />
+            <ChartCard title="Disk Usage" data={diskChart.data} names={diskChart.names} formatTime={formatTime} unit="%" domain={[0, 100]} loading={historyLoading} refreshing={historyRefreshing} />
           )}
           {(schedulerConfig?.collectLoad ?? true) && (
-            <ChartCard title="Load Average" data={loadChart.data} names={loadChart.names} formatTime={formatTime} domain={[0, 'auto']} />
+            <ChartCard title="Load Average" data={loadChart.data} names={loadChart.names} formatTime={formatTime} domain={[0, 'auto']} loading={historyLoading} refreshing={historyRefreshing} />
           )}
           {(schedulerConfig?.collectTcp ?? true) && (
-            <ChartCard title="TCP Connections" data={tcpChart.data} names={tcpChart.names} formatTime={formatTime} domain={[0, 'auto']} />
+            <ChartCard title="TCP Connections" data={tcpChart.data} names={tcpChart.names} formatTime={formatTime} domain={[0, 'auto']} loading={historyLoading} refreshing={historyRefreshing} />
           )}
         </div>
       ) : (

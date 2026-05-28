@@ -87,6 +87,39 @@ The UI auto-refreshes every 30 seconds.
 | Collection method | Pull (SSH) | Push (HTTP) | Pull (SQL/SSH/Redis) |
 | Default interval | 5 min | ~15 sec | 60 sec |
 
+## API: History Endpoints
+
+The three columnar history endpoints share a common set of query parameters
+introduced for the per-card refresh model:
+
+| Endpoint | What it returns |
+|---|---|
+| `GET /api/environments/:envId/metrics/history` | Per-server CPU/memory/disk/load/etc. |
+| `GET /api/environments/:envId/services/metrics/history` | Per-deployment CPU/memory/network |
+| `GET /api/environments/:envId/databases/metrics/history` | Per-database, grouped by type, plugin-driven series |
+
+All three accept:
+
+- `hours` (1-168, default 24) — rolling window for the initial fetch.
+- `maxPoints` (10-2000, default 120) — caps the number of points per series in
+  the full-window response via LTTB (Largest-Triangle-Three-Buckets) downsampling.
+  Picks shared timestamp slots so every series row stays aligned.
+- `since` (ISO timestamp) — when set, returns only points strictly newer than
+  this. The response has `mode: 'delta'` and is *not* downsampled (deltas are
+  already small). Use the previous response's `until` here on each refresh tick.
+
+Every response now includes:
+
+- `mode: 'full' | 'delta'` — tells the client whether to replace or merge.
+- `until: <ISO>` — server-now captured before the DB read. Pass this back as
+  `since` on the next tick to avoid skipping rows committed mid-query.
+
+The `/api/environments/:envId/metrics/summary` endpoint accepts an additional
+`includeServices=false` query parameter that skips the per-server services[]
+block (and the dependent ServiceDeployment + ServiceMetrics queries). Pages
+that only render server-level data (e.g. the Servers monitoring page) opt out
+to drop two queries plus an in-memory join.
+
 ## Next Steps
 
 - [Server Monitoring](monitoring-servers.md) -- CPU, memory, disk, load, swap, TCP connections, file descriptors

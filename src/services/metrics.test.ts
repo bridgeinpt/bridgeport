@@ -12,6 +12,12 @@ vi.mock('../lib/db.js', () => ({
       findMany: vi.fn(),
       deleteMany: vi.fn(),
     },
+    // getEnvironmentMetricsSummary touches these too; default to empty so
+    // unrelated tests don't accidentally hit them.
+    server: { findMany: vi.fn().mockResolvedValue([]) },
+    serviceDeployment: { findMany: vi.fn().mockResolvedValue([]) },
+    service: { findMany: vi.fn().mockResolvedValue([]) },
+    $queryRaw: vi.fn().mockResolvedValue([]),
   },
 }));
 
@@ -23,6 +29,7 @@ import {
   getServerMetrics,
   getServiceMetrics,
   cleanupOldMetrics,
+  getEnvironmentMetricsSummary,
 } from './metrics.js';
 
 const mockPrisma = vi.mocked(prisma);
@@ -171,6 +178,86 @@ describe('metrics', () => {
       expect(result).toBe(8);
       expect(mockPrisma.serverMetrics.deleteMany).toHaveBeenCalled();
       expect(mockPrisma.serviceMetrics.deleteMany).toHaveBeenCalled();
+    });
+  });
+
+  describe('getEnvironmentMetricsSummary', () => {
+    // Issue #171 — Monitoring > Servers page opts out of the services[] block
+    // to skip two queries + the in-memory join.
+    it('includeServices=false skips deployment + service queries and emits services:[]', async () => {
+      mockPrisma.server.findMany.mockResolvedValue([
+        { id: 'srv-1', name: 'web-1', hostname: 'web1.local', tags: null, metricsMode: 'agent' },
+      ] as any);
+      // $queryRaw is called for serverLatest; return the row keyed by serverId.
+      (mockPrisma.$queryRaw as any).mockResolvedValueOnce([
+        { id: 'm-1', serverId: 'srv-1', cpuPercent: 12.5, collectedAt: new Date() },
+      ]);
+
+      const result = await getEnvironmentMetricsSummary('env-1', { includeServices: false });
+
+      expect(result).toHaveLength(1);
+      expect(result[0]!.id).toBe('srv-1');
+      // Latest metrics are still hydrated for the server.
+      expect(result[0]!.latestMetrics).toMatchObject({ serverId: 'srv-1', cpuPercent: 12.5 });
+      // Services block must be empty when opted out.
+      expect(result[0]!.services).toEqual([]);
+
+      // Crucially, the slimmed call must NOT have queried deployments / services.
+      expect(mockPrisma.serviceDeployment.findMany).not.toHaveBeenCalled();
+      expect(mockPrisma.service.findMany).not.toHaveBeenCalled();
+    });
+
+    it('defaults to includeServices=true and populates services[] when deployments exist', async () => {
+      mockPrisma.server.findMany.mockResolvedValue([
+        { id: 'srv-1', name: 'web-1', hostname: 'web1.local', tags: null, metricsMode: 'agent' },
+      ] as any);
+      mockPrisma.serviceDeployment.findMany.mockResolvedValue([
+        { id: 'dep-1', serverId: 'srv-1', containerName: 'web-1-c', serviceId: 'svc-1' },
+      ] as any);
+      mockPrisma.service.findMany.mockResolvedValue([{ id: 'svc-1', name: 'web' }] as any);
+      // First $queryRaw → serverLatest, second → serviceLatest.
+      (mockPrisma.$queryRaw as any)
+        .mockResolvedValueOnce([
+          { id: 'm-1', serverId: 'srv-1', cpuPercent: 33, collectedAt: new Date() },
+        ])
+        .mockResolvedValueOnce([
+          { id: 'sm-1', serviceDeploymentId: 'dep-1', cpuPercent: 5, collectedAt: new Date() },
+        ]);
+
+      const result = await getEnvironmentMetricsSummary('env-1');
+
+      expect(result).toHaveLength(1);
+      expect(result[0]!.services).toHaveLength(1);
+      expect(result[0]!.services[0]).toMatchObject({
+        id: 'svc-1',
+        deploymentId: 'dep-1',
+        name: 'web',
+        containerName: 'web-1-c',
+      });
+      // Latest service metrics hydrated via the deployment id.
+      expect(result[0]!.services[0]!.latestMetrics).toMatchObject({
+        serviceDeploymentId: 'dep-1',
+        cpuPercent: 5,
+      });
+    });
+
+    it('falls back to empty name when a deployment references a missing service', async () => {
+      // Race-condition safety net: a deployment can briefly reference a
+      // service that the service.findMany batch did not return.
+      mockPrisma.server.findMany.mockResolvedValue([
+        { id: 'srv-1', name: 'web-1', hostname: 'h', tags: null, metricsMode: 'agent' },
+      ] as any);
+      mockPrisma.serviceDeployment.findMany.mockResolvedValue([
+        { id: 'dep-1', serverId: 'srv-1', containerName: 'c', serviceId: 'svc-missing' },
+      ] as any);
+      mockPrisma.service.findMany.mockResolvedValue([] as any); // missing
+      (mockPrisma.$queryRaw as any)
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([]);
+
+      const result = await getEnvironmentMetricsSummary('env-1');
+      expect(result[0]!.services[0]!.name).toBe('');
+      expect(result[0]!.services[0]!.id).toBe('svc-missing');
     });
   });
 });
