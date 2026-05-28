@@ -221,22 +221,32 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
     async (request) => {
       const { envId } = request.params as { envId: string };
 
-      // Get all services with their dependencies in this environment.
-      // Since runtime status moved to ServiceDeployment, derive a rolled-up
-      // "service-level" status (worst-case across deployments) for nodes.
+      // Single narrow findMany for the whole graph. Previously this route
+      // ran two `findMany` calls — one with `include: { dependents }` for
+      // node counts, then a second fatter one (with full Service rows in
+      // dependsOn/dependent + server.hostname) just to feed
+      // `resolveDependencyOrder`. The order routine only needs
+      // `{id, name, dependencies: {dependsOnId}[]}` (see ServiceOrderInput
+      // in orchestration.ts), so one query carries both jobs. The
+      // `dependentCount` for each node is derived from a single pass over
+      // the dependencies of all services — no `dependents` include needed.
       const services = await prisma.service.findMany({
         where: { environmentId: envId },
-        include: {
+        select: {
+          id: true,
+          name: true,
+          containerImage: { select: { id: true, name: true } },
           serviceDeployments: {
-            select: { id: true, status: true, healthStatus: true, server: { select: { id: true, name: true } } },
+            select: {
+              id: true,
+              status: true,
+              healthStatus: true,
+              server: { select: { id: true, name: true } },
+            },
           },
           dependencies: {
-            include: { dependsOn: { select: { id: true, name: true } } },
+            select: { id: true, type: true, dependsOnId: true },
           },
-          dependents: {
-            include: { dependent: { select: { id: true, name: true } } },
-          },
-          containerImage: { select: { id: true, name: true } },
         },
       });
 
@@ -253,6 +263,14 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
         return 'unknown';
       };
 
+      // dependentCount[targetId] = how many other services point TO targetId.
+      const dependentCount = new Map<string, number>();
+      for (const service of services) {
+        for (const dep of service.dependencies) {
+          dependentCount.set(dep.dependsOnId, (dependentCount.get(dep.dependsOnId) ?? 0) + 1);
+        }
+      }
+
       const nodes = services.map((service) => ({
         id: service.id,
         name: service.name,
@@ -261,7 +279,7 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
         status: rollupStatus(service.serviceDeployments),
         healthStatus: rollupHealth(service.serviceDeployments),
         dependencyCount: service.dependencies.length,
-        dependentCount: service.dependents.length,
+        dependentCount: dependentCount.get(service.id) ?? 0,
       }));
 
       const edges = services.flatMap((service) =>
@@ -273,19 +291,10 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
         }))
       );
 
-      // Also compute the deployment order
+      // Compute deployment order from the same dataset.
       let deploymentOrder: string[][] = [];
       try {
-        const servicesWithDeps = await prisma.service.findMany({
-          where: { environmentId: envId },
-          include: {
-            serviceDeployments: { include: { server: { select: { name: true, hostname: true } } } },
-            dependencies: { include: { dependsOn: true } },
-            dependents: { include: { dependent: true } },
-          },
-        });
-
-        const levels = resolveDependencyOrder(servicesWithDeps);
+        const levels = resolveDependencyOrder(services);
         deploymentOrder = levels.map((level) => level.map((s) => s.id));
       } catch (error) {
         // If there's a cycle, we can't compute the order

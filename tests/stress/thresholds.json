@@ -128,8 +128,8 @@
     },
     "dependency-graph": {
       "path": "/api/environments/{envId}/dependency-graph",
-      "maxP99Ms": 100,
-      "minRps": 400
+      "maxP99Ms": 40,
+      "minRps": 1200
     },
     "users-list": {
       "path": "/api/users",
