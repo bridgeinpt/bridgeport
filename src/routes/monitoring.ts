@@ -614,24 +614,31 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
 
       // Metrics are per-deployment in 2.0. Each row pairs the runtime with
       // its template name so the chart legend can show "<service> @ <server>".
-      const deployments = envServerIds.length === 0
+      // $queryRaw to skip Prisma's hydration + JOIN materialisation cost at
+      // ~90 deployments per env — that hydration was the dominant cost in
+      // this route's p99 tail under concurrency.
+      interface DeploymentRow {
+        id: string;
+        serverId: string;
+        serviceId: string;
+        serviceName: string;
+      }
+      const deploymentRows: DeploymentRow[] = envServerIds.length === 0
         ? []
-        : (await prisma.serviceDeployment.findMany({
-            where: {
-              serverId: { in: envServerIds },
-              discoveryStatus: DISCOVERY_STATUS.FOUND,
-            },
-            select: {
-              id: true,
-              serverId: true,
-              service: { select: { id: true, name: true } },
-            },
-          })).map((d) => ({
-            id: d.id,
-            serviceId: d.service.id,
-            serviceName: d.service.name,
-            server: { id: d.serverId, name: serverNameById.get(d.serverId) ?? '' },
-          }));
+        : await prisma.$queryRaw<DeploymentRow[]>`
+            SELECT sd."id", sd."serverId",
+                   s."id" AS "serviceId", s."name" AS "serviceName"
+            FROM "ServiceDeployment" sd
+            JOIN "Service" s ON s."id" = sd."serviceId"
+            WHERE sd."serverId" IN (${Prisma.join(envServerIds)})
+              AND sd."discoveryStatus" = ${DISCOVERY_STATUS.FOUND}
+          `;
+      const deployments = deploymentRows.map((d) => ({
+        id: d.id,
+        serviceId: d.serviceId,
+        serviceName: d.serviceName,
+        server: { id: d.serverId, name: serverNameById.get(d.serverId) ?? '' },
+      }));
 
       // Fetch all metrics in one query, then bucket by deployment.
       // Sentry BRIDGEPORT-BE-5 was an N+1 here when this loop ran per-row.
@@ -662,20 +669,31 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
             `;
 
       // Union of all timestamps so every service row is the same length.
+      // `$queryRaw` can hand back `collectedAt` as either Date or string;
+      // resolve to ISO once per row and reuse the value when bucketing.
+      const isoOf = (v: Date | string): string =>
+        v instanceof Date ? v.toISOString() : new Date(v).toISOString();
       const timestampSet = new Set<string>();
-      for (const row of rows) {
-        const iso = row.collectedAt instanceof Date
-          ? row.collectedAt.toISOString()
-          : new Date(row.collectedAt).toISOString();
+      const isoByRow = new Array<string>(rows.length);
+      for (let i = 0; i < rows.length; i++) {
+        const iso = isoOf(rows[i].collectedAt);
+        isoByRow[i] = iso;
         timestampSet.add(iso);
       }
       const timestamps = Array.from(timestampSet).sort();
       const tsIndex = new Map<string, number>();
       timestamps.forEach((t, i) => tsIndex.set(t, i));
 
-      const byDeployment = new Map<string, MetricRow[]>();
+      // Bucket by deployment with the resolved timestamp index already in
+      // hand, so the per-deployment hot loop doesn't repeat the iso/lookup.
+      interface BucketRow { tIndex: number; row: MetricRow }
+      const byDeployment = new Map<string, BucketRow[]>();
       for (const id of deploymentIds) byDeployment.set(id, []);
-      for (const row of rows) byDeployment.get(row.serviceDeploymentId)?.push(row);
+      for (let i = 0; i < rows.length; i++) {
+        const ti = tsIndex.get(isoByRow[i]);
+        if (ti === undefined) continue;
+        byDeployment.get(rows[i].serviceDeploymentId)?.push({ tIndex: ti, row: rows[i] });
+      }
 
       const T = timestamps.length;
       const cpu: Array<Array<number | null>> = [];
@@ -686,7 +704,7 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
       const restartCount: Array<Array<number | null>> = [];
 
       const serviceMeta = deployments.map((d) => {
-        const metrics = byDeployment.get(d.id) ?? [];
+        const buckets = byDeployment.get(d.id) ?? [];
         const cpuRow = new Array<number | null>(T).fill(null);
         const memRow = new Array<number | null>(T).fill(null);
         const memLimitRow = new Array<number | null>(T).fill(null);
@@ -694,12 +712,9 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
         const txRow = new Array<number | null>(T).fill(null);
         const restartRow = new Array<number | null>(T).fill(null);
 
-        for (const m of metrics) {
-          const iso = m.collectedAt instanceof Date
-            ? m.collectedAt.toISOString()
-            : new Date(m.collectedAt).toISOString();
-          const ti = tsIndex.get(iso);
-          if (ti === undefined) continue;
+        for (const b of buckets) {
+          const m = b.row;
+          const ti = b.tIndex;
           cpuRow[ti] = m.cpuPercent;
           memRow[ti] = m.memoryUsedMb;
           memLimitRow[ti] = m.memoryLimitMb;
