@@ -440,4 +440,277 @@ describe('database routes', () => {
       expect(slot.rows[dbIdx]![t1Idx]).toEqual(snapshot1);
     });
   });
+
+  // ==================== GET /api/environments/:envId/databases/backup-summary ====================
+  //
+  // Batched endpoint backing the Dashboard's "Database Backups" card — replaces
+  // the per-database N+1 fan-out (listDatabaseBackups + getBackupSchedule).
+  // Each row carries the *last completed* backup (in-progress/failed are
+  // ignored) plus the schedule's enabled/nextRunAt, and a supportsBackup flag
+  // derived from the linked DatabaseType's backupCommand.
+  describe('GET /api/environments/:envId/databases/backup-summary', () => {
+    it('returns { databases: [] } for an environment with no databases', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'bs-empty' });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/environments/${env.id}/databases/backup-summary`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ databases: [] });
+    });
+
+    it('returns per-database lastBackup and schedule for a mixed-state env', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'bs-mixed' });
+
+      // Type with backupCommand → supportsBackup: true for any DB linked to it.
+      const supportedType = await app.prisma.databaseType.upsert({
+        where: { name: 'pg-bs' },
+        update: { backupCommand: 'pg_dump' },
+        create: {
+          name: 'pg-bs',
+          displayName: 'PostgreSQL (bs)',
+          source: 'user',
+          connectionFields: '[]',
+          backupCommand: 'pg_dump',
+        },
+      });
+
+      // DB A: has a completed backup AND a schedule.
+      const dbA = await createTestDatabase(app.prisma, { environmentId: env.id, name: 'bs-a' });
+      await app.prisma.database.update({
+        where: { id: dbA.id },
+        data: { databaseTypeId: supportedType.id },
+      });
+      await app.prisma.databaseBackup.create({
+        data: {
+          databaseId: dbA.id,
+          filename: 'a-backup.sql',
+          size: BigInt(1024),
+          type: 'manual',
+          status: 'completed',
+          storageType: 'local',
+          storagePath: '/var/backups/a-backup.sql',
+          completedAt: new Date('2024-06-01T10:00:00Z'),
+        },
+      });
+      const scheduleNext = new Date('2024-06-02T02:00:00Z');
+      await app.prisma.backupSchedule.create({
+        data: {
+          databaseId: dbA.id,
+          cronExpression: '0 2 * * *',
+          enabled: true,
+          nextRunAt: scheduleNext,
+        },
+      });
+
+      // DB B: schedule only, no completed backups.
+      const dbB = await createTestDatabase(app.prisma, { environmentId: env.id, name: 'bs-b' });
+      await app.prisma.database.update({
+        where: { id: dbB.id },
+        data: { databaseTypeId: supportedType.id },
+      });
+      await app.prisma.backupSchedule.create({
+        data: {
+          databaseId: dbB.id,
+          cronExpression: '0 3 * * *',
+          enabled: false,
+          nextRunAt: null,
+        },
+      });
+
+      // DB C: neither schedule nor backup.
+      const dbC = await createTestDatabase(app.prisma, { environmentId: env.id, name: 'bs-c' });
+      await app.prisma.database.update({
+        where: { id: dbC.id },
+        data: { databaseTypeId: supportedType.id },
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/environments/${env.id}/databases/backup-summary`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as {
+        databases: Array<{
+          databaseId: string;
+          name: string;
+          supportsBackup: boolean;
+          lastBackup: { id: string; completedAt: string | null; status: string } | null;
+          schedule: { enabled: boolean; nextRunAt: string | null } | null;
+        }>;
+      };
+
+      // Ordered by name asc — "bs-a", "bs-b", "bs-c".
+      expect(body.databases.map((d) => d.name)).toEqual(['bs-a', 'bs-b', 'bs-c']);
+
+      const rowA = body.databases.find((d) => d.databaseId === dbA.id)!;
+      expect(rowA.supportsBackup).toBe(true);
+      expect(rowA.lastBackup).not.toBeNull();
+      expect(rowA.lastBackup!.status).toBe('completed');
+      expect(rowA.lastBackup!.completedAt).toBe('2024-06-01T10:00:00.000Z');
+      expect(rowA.schedule).toEqual({
+        enabled: true,
+        nextRunAt: scheduleNext.toISOString(),
+      });
+
+      const rowB = body.databases.find((d) => d.databaseId === dbB.id)!;
+      expect(rowB.supportsBackup).toBe(true);
+      expect(rowB.lastBackup).toBeNull();
+      expect(rowB.schedule).toEqual({ enabled: false, nextRunAt: null });
+
+      const rowC = body.databases.find((d) => d.databaseId === dbC.id)!;
+      expect(rowC.supportsBackup).toBe(true);
+      expect(rowC.lastBackup).toBeNull();
+      expect(rowC.schedule).toBeNull();
+    });
+
+    it('reports supportsBackup=false when the database type has no backupCommand', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'bs-unsupported' });
+
+      const noBackupType = await app.prisma.databaseType.upsert({
+        where: { name: 'redis-bs' },
+        update: { backupCommand: null },
+        create: {
+          name: 'redis-bs',
+          displayName: 'Redis (bs)',
+          source: 'user',
+          connectionFields: '[]',
+          backupCommand: null,
+        },
+      });
+
+      const db = await createTestDatabase(app.prisma, {
+        environmentId: env.id,
+        name: 'cache',
+        type: 'redis',
+      });
+      await app.prisma.database.update({
+        where: { id: db.id },
+        data: { databaseTypeId: noBackupType.id },
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/environments/${env.id}/databases/backup-summary`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { databases: Array<{ databaseId: string; supportsBackup: boolean }> };
+      expect(body.databases).toHaveLength(1);
+      expect(body.databases[0]).toMatchObject({
+        databaseId: db.id,
+        supportsBackup: false,
+      });
+    });
+
+    it('ignores in_progress and failed backups when picking lastBackup', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'bs-status-filter' });
+      const supportedType = await app.prisma.databaseType.upsert({
+        where: { name: 'pg-bs-status' },
+        update: { backupCommand: 'pg_dump' },
+        create: {
+          name: 'pg-bs-status',
+          displayName: 'PostgreSQL (status filter)',
+          source: 'user',
+          connectionFields: '[]',
+          backupCommand: 'pg_dump',
+        },
+      });
+      const db = await createTestDatabase(app.prisma, { environmentId: env.id, name: 'bs-status' });
+      await app.prisma.database.update({
+        where: { id: db.id },
+        data: { databaseTypeId: supportedType.id },
+      });
+
+      // Older completed backup — this should be the one returned.
+      const completed = await app.prisma.databaseBackup.create({
+        data: {
+          databaseId: db.id,
+          filename: 'old-completed.sql',
+          size: BigInt(512),
+          type: 'manual',
+          status: 'completed',
+          storageType: 'local',
+          storagePath: '/var/backups/old-completed.sql',
+          createdAt: new Date('2024-05-01T00:00:00Z'),
+          completedAt: new Date('2024-05-01T00:05:00Z'),
+        },
+      });
+
+      // Newer in_progress backup — must NOT win, even though it's more recent.
+      await app.prisma.databaseBackup.create({
+        data: {
+          databaseId: db.id,
+          filename: 'in-progress.sql',
+          size: BigInt(0),
+          type: 'manual',
+          status: 'in_progress',
+          storageType: 'local',
+          storagePath: '/var/backups/in-progress.sql',
+          createdAt: new Date('2024-06-01T00:00:00Z'),
+        },
+      });
+
+      // Newer failed backup — must NOT win either.
+      await app.prisma.databaseBackup.create({
+        data: {
+          databaseId: db.id,
+          filename: 'failed.sql',
+          size: BigInt(0),
+          type: 'manual',
+          status: 'failed',
+          storageType: 'local',
+          storagePath: '/var/backups/failed.sql',
+          createdAt: new Date('2024-06-15T00:00:00Z'),
+        },
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/environments/${env.id}/databases/backup-summary`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as {
+        databases: Array<{ databaseId: string; lastBackup: { id: string; status: string } | null }>;
+      };
+      const row = body.databases.find((d) => d.databaseId === db.id)!;
+      expect(row.lastBackup).not.toBeNull();
+      expect(row.lastBackup!.id).toBe(completed.id);
+      expect(row.lastBackup!.status).toBe('completed');
+    });
+
+    it('does not leak databases from other environments', async () => {
+      const envA = await createTestEnvironment(app.prisma, { name: 'bs-iso-a' });
+      const envB = await createTestEnvironment(app.prisma, { name: 'bs-iso-b' });
+      await createTestDatabase(app.prisma, { environmentId: envA.id, name: 'iso-a-db' });
+      await createTestDatabase(app.prisma, { environmentId: envB.id, name: 'iso-b-db' });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/environments/${envA.id}/databases/backup-summary`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { databases: Array<{ name: string }> };
+      expect(body.databases.map((d) => d.name)).toEqual(['iso-a-db']);
+    });
+
+    it('requires authentication', async () => {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/environments/${envId}/databases/backup-summary`,
+      });
+
+      expect(res.statusCode).toBe(401);
+    });
+  });
 });

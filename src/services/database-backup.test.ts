@@ -72,6 +72,7 @@ import {
   setBackupSchedule,
   getNextRunTime,
   checkDueBackups,
+  listEnvironmentBackupSummary,
 } from './database-backup.js';
 
 const mockPrisma = vi.mocked(prisma);
@@ -208,6 +209,107 @@ describe('database-backup', () => {
           where: { enabled: true },
         })
       );
+    });
+  });
+
+  // Unit-level coverage of the batched summary function backing the dashboard's
+  // "Database Backups" card. Route-level integration tests live in
+  // src/routes/databases.test.ts — these tests pin the Prisma query shape
+  // (status filter, ordering, take=1, schedule select) and the mapping into
+  // DatabaseBackupSummaryItem.
+  describe('listEnvironmentBackupSummary', () => {
+    it('queries with status=completed filter, desc order, take=1, and the right selects', async () => {
+      mockPrisma.database.findMany.mockResolvedValue([] as any);
+
+      await listEnvironmentBackupSummary('env-1');
+
+      expect(mockPrisma.database.findMany).toHaveBeenCalledTimes(1);
+      const args = mockPrisma.database.findMany.mock.calls[0]![0]!;
+      expect(args).toMatchObject({
+        where: { environmentId: 'env-1' },
+        orderBy: { name: 'asc' },
+        include: expect.objectContaining({
+          databaseType: { select: { backupCommand: true } },
+          schedule: { select: { enabled: true, nextRunAt: true } },
+          backups: {
+            where: { status: 'completed' },
+            orderBy: { completedAt: 'desc' },
+            take: 1,
+            select: {
+              id: true,
+              completedAt: true,
+              createdAt: true,
+              status: true,
+            },
+          },
+        }),
+      });
+    });
+
+    it('maps each row into DatabaseBackupSummaryItem with supportsBackup derived from backupCommand', async () => {
+      const completedAt = new Date('2024-06-01T10:00:00Z');
+      const createdAt = new Date('2024-06-01T09:55:00Z');
+      const nextRunAt = new Date('2024-06-02T02:00:00Z');
+
+      mockPrisma.database.findMany.mockResolvedValue([
+        {
+          id: 'db-supported',
+          name: 'pg',
+          databaseType: { backupCommand: 'pg_dump' },
+          schedule: { enabled: true, nextRunAt },
+          backups: [
+            { id: 'bk-1', completedAt, createdAt, status: 'completed' },
+          ],
+        },
+        {
+          id: 'db-unsupported',
+          name: 'cache',
+          databaseType: { backupCommand: null },
+          schedule: null,
+          backups: [],
+        },
+        {
+          id: 'db-no-type',
+          name: 'orphan',
+          databaseType: null,
+          schedule: null,
+          backups: [],
+        },
+      ] as any);
+
+      const result = await listEnvironmentBackupSummary('env-1');
+
+      expect(result).toEqual([
+        {
+          databaseId: 'db-supported',
+          name: 'pg',
+          supportsBackup: true,
+          lastBackup: { id: 'bk-1', completedAt, createdAt, status: 'completed' },
+          schedule: { enabled: true, nextRunAt },
+        },
+        {
+          databaseId: 'db-unsupported',
+          name: 'cache',
+          supportsBackup: false,
+          lastBackup: null,
+          schedule: null,
+        },
+        {
+          databaseId: 'db-no-type',
+          name: 'orphan',
+          supportsBackup: false,
+          lastBackup: null,
+          schedule: null,
+        },
+      ]);
+    });
+
+    it('returns an empty array when no databases are in the environment', async () => {
+      mockPrisma.database.findMany.mockResolvedValue([] as any);
+
+      const result = await listEnvironmentBackupSummary('env-empty');
+
+      expect(result).toEqual([]);
     });
   });
 });
