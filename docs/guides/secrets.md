@@ -325,7 +325,14 @@ Set `existingSecretId` to reuse an existing secret or var instead of creating a 
 
 ## Reveal Controls
 
-BRIDGEPORT has two independent layers of reveal control to protect sensitive values.
+BRIDGEPORT has three independent layers of reveal control to protect sensitive values. All three must permit a reveal for `GET /api/secrets/:id/value` to return the plaintext.
+
+### Role Requirement (Admin-Only)
+
+Revealing a secret value requires the **admin** role. Operators and viewers receive `403 Forbidden` (`code: FORBIDDEN_ROLE`) from `GET /api/secrets/:id/value`, and the reveal control is hidden for them in the UI.
+
+- Operators can still **create, update, and use** secrets in config-file syncs — they just never see the current plaintext.
+- This is enforced server-side, so it also applies to API tokens: a non-admin token cannot reveal values regardless of its environment scope.
 
 ### Environment-Level Control
 

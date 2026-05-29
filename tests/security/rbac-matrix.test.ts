@@ -107,6 +107,10 @@ const adminRoutes: RouteSpec[] = [
 
   // API tokens (admin-only management)
   { method: 'GET', url: '/api/admin/tokens', minRole: 'admin', description: 'list API tokens' },
+
+  // Revealing a secret value is admin-only (requireAdmin runs before the lookup,
+  // so the placeholder id yields 404 for admin — the matrix only checks "not 403").
+  { method: 'GET', url: '/api/secrets/__PLACEHOLDER__/value', minRole: 'admin', description: 'reveal secret value' },
 ];
 
 // Operator-only routes (admin + operator allowed, viewer denied)

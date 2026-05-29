@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useAppStore } from '../lib/store.js';
+import { useAppStore, useAuthStore, isAdmin } from '../lib/store.js';
 import {
   listSecrets,
   createSecret,
@@ -29,6 +29,7 @@ type ActiveTab = 'secrets' | 'vars';
 
 export default function Secrets() {
   const { selectedEnvironment } = useAppStore();
+  const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState<ActiveTab>('secrets');
   const [secrets, setSecrets] = useState<Secret[]>([]);
   const [vars, setVars] = useState<Var[]>([]);
@@ -166,7 +167,9 @@ export default function Secrets() {
     setDeleteConfirm(null);
   };
 
-  const canReveal = (secret: Secret) => allowSecretReveal && !secret.neverReveal;
+  // Revealing a value is admin-only (the API enforces this too — see
+  // GET /api/secrets/:id/value). The env toggle and write-only flag gate it further.
+  const canReveal = (secret: Secret) => isAdmin(user) && allowSecretReveal && !secret.neverReveal;
   const toggleUsage = (id: string) => setExpandedUsage((prev) => ({ ...prev, [id]: !prev[id] }));
 
   // Pagination for active tab

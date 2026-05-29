@@ -70,7 +70,7 @@ BRIDGEPORT has three roles arranged in a strict hierarchy: **admin** > **operato
 | Action | Admin | Operator | Viewer |
 |--------|:-----:|:--------:|:------:|
 | View servers, services, databases | Yes | Yes | Yes |
-| View secrets (if `allowSecretReveal` enabled) | Yes | Yes | Yes |
+| Reveal secret values (if `allowSecretReveal` enabled) | Yes | No | No |
 | View audit logs | Yes | Yes | Yes |
 | Deploy services | Yes | Yes | No |
 | Manage secrets (create, update, delete) | Yes | Yes | No |
