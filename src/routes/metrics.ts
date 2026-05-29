@@ -16,6 +16,12 @@ import { logAgentEvent } from '../services/agent-events.js';
 import crypto from 'crypto';
 import { SERVER_STATUS, HEALTH_STATUS, CONTAINER_STATUS, METRICS_MODE, AGENT_STATUS, DISCOVERY_STATUS } from '../lib/constants.js';
 import { findOrNotFound, validateBody } from '../lib/helpers.js';
+import { createResponseCache } from '../lib/response-cache.js';
+
+// Short-TTL, single-flight cache for the env metrics summary — polled by every
+// open monitoring dashboard, recomputed from the same window each time. See
+// lib/response-cache.ts.
+const summaryCache = createResponseCache<unknown[]>();
 
 const metricsQuerySchema = z.object({
   from: z.string().datetime().optional(),
@@ -215,7 +221,10 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
       const env = await findOrNotFound(prisma.environment.findUnique({ where: { id: envId } }), 'Environment', reply);
       if (!env) return;
 
-      const summary = await getEnvironmentMetricsSummary(envId, { includeServices: includeServicesFlag });
+      const summary = await summaryCache.getOrCompute(
+        `${envId}:${includeServicesFlag}`,
+        () => getEnvironmentMetricsSummary(envId, { includeServices: includeServicesFlag })
+      );
       return { servers: summary };
     }
   );
