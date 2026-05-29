@@ -16,7 +16,7 @@ A **service** in BRIDGEPORT is an **environment-scoped template** that describes
    - [Service Actions](#service-actions)
    - [Health Check Configuration](#health-check-configuration)
    - [TCP & Certificate Checks](#tcp--certificate-checks)
-   - [Type Tags (Grouping & Filtering)](#type-tags-grouping--filtering)
+   - [Service Types (Grouping & Filtering)](#service-types-grouping--filtering)
    - [Linking to Container Images](#linking-to-container-images)
    - [Service Dependencies](#service-dependencies)
    - [Config File Attachment & Sync](#config-file-attachment--sync)
@@ -142,7 +142,7 @@ This endpoint is preserved for the CLI and pre-2.0 UI flows. It creates the env-
 
 **Optional fields:**
 - `imageTag` -- defaults to `latest`.
-- `typeTag` -- free-form operator-defined type label (e.g., `"django"`, `"postgres"`, `"redis"`). Used to group services on the list page via filter chips. Distinct from the plugin-provided `serviceTypeId` relation. Max 64 chars; trimmed; empty string is stored as `null`.
+- `serviceTypeId` -- links the service to a plugin-provided **Service Type** (managed under `/admin/service-types`). Drives the grouping/filter chips on the Services list page.
 - `composeTemplate` -- template Compose file (the rendered file is uploaded per-deployment to each server's compose path).
 - `deployStrategy` -- `sequential` (default) or `parallel`; controls how multi-server deploys roll out.
 - `baseEnv` -- JSON object of env vars applied to every deployment. Per-deployment env overrides take precedence.
@@ -428,42 +428,42 @@ Content-Type: application/json
 
 The agent runs these checks periodically and stores results in `agentTcpCheckResults` and `agentCertCheckResults` on the service record.
 
-### Type Tags (Grouping & Filtering)
+### Service Types (Grouping & Filtering)
 
-Each service has an optional free-form `typeTag` string (e.g., `"django"`, `"postgres"`, `"redis"`). This is **separate** from the plugin-provided `serviceTypeId` relation -- type tags are operator-defined labels for grouping services on the Services list page.
+Each service can be linked to a **Service Type** via `serviceTypeId`. Service Types are plugin-provided (and admin-editable under `/admin/service-types`); they carry a display name and an optional set of predefined commands. The Services list page groups and filters by the linked Service Type.
 
-**Set / change a type tag:**
+**Set / change a service's type:**
 ```http
 PATCH /api/services/:id
 Authorization: Bearer <token>
 Content-Type: application/json
 
 {
-  "typeTag": "django"
+  "serviceTypeId": "<service-type-id>"
 }
 ```
 
-Pass `null` (or `""`) to clear the tag. Values are trimmed and capped at 64 characters; comparisons are case-sensitive, so `"django"` and `"Django"` are distinct tags.
+Pass `null` to clear it (the service becomes "untyped").
 
-**List distinct type tags in an environment (for chips / autocomplete):**
+**List the service types in use in an environment (for the filter chips):**
 ```http
-GET /api/environments/:envId/services/type-tags
+GET /api/environments/:envId/services/type-counts
 Authorization: Bearer <token>
 ```
 
 **Response:**
 ```json
 {
-  "tags": [
-    { "tag": "django", "count": 4 },
-    { "tag": "postgres", "count": 2 }
+  "types": [
+    { "id": "ckxq...", "displayName": "Django", "count": 4 },
+    { "id": "ckyr...", "displayName": "Postgres", "count": 2 }
   ]
 }
 ```
 
-Empty / null tags are excluded -- the Services list page surfaces untyped services via a separate "No type" filter chip.
+Services with no `serviceTypeId` are excluded -- the Services list page surfaces untyped services via a separate "No type" filter chip.
 
-**UI:** the Services list page shows filter chips at the top (one per distinct tag, plus "No type" when applicable). The selected chip persists in the URL via `?type=<tag>` (`?type=__none__` for the "No type" chip). The ServiceDetail config modal exposes a "Type" input with autocomplete from existing values in the current environment.
+**UI:** the Services list page shows filter chips at the top (one per Service Type in use, plus "No type" when applicable). The selected chip persists in the URL via `?type=<serviceTypeId>` (`?type=__none__` for the "No type" chip). The ServiceDetail config modal exposes a "Service Type" dropdown.
 
 ### Linking to Container Images
 
@@ -631,7 +631,6 @@ Authorization: Bearer <token>
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `imageTag` | string | `'latest'` | Tag deployed across all deployments of this template |
-| `typeTag` | string \| null | `null` | Free-form operator-defined type label (e.g., `"django"`, `"postgres"`). Drives the filter chips on the Services list. Distinct from the plugin-provided `serviceTypeId`. |
 | `composeTemplate` | string | `null` | Custom compose template (null = auto-generated) |
 | `baseEnv` | JSON string | `null` | Env vars applied to every deployment (overrides win per-deployment) |
 | `deployStrategy` | enum | `'sequential'` | `sequential` or `parallel` -- how multi-server deploys roll out |
@@ -639,7 +638,7 @@ Authorization: Bearer <token>
 | `healthWaitMs` | int | `30000` | Wait after deploy before checking health |
 | `healthRetries` | int | `3` | Number of health check attempts |
 | `healthIntervalMs` | int | `5000` | Interval between health check retries |
-| `serviceTypeId` | string | `null` | Service type for predefined commands |
+| `serviceTypeId` | string | `null` | Plugin-provided Service Type (predefined commands). Also drives the grouping/filter chips on the Services list. |
 | `tcpChecks` | JSON string | `null` | TCP port checks (agent-required) |
 | `certChecks` | JSON string | `null` | TLS certificate checks (agent-required) |
 

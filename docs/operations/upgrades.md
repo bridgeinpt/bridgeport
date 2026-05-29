@@ -141,7 +141,7 @@ The v1.3 → v1.4 upgrade introduces several schema changes. All are applied aut
 - **SecretUsage / VarUsage join tables.** Secrets and Vars list endpoints stop doing GLOB scans over config-file content; the migration backfills usage rows by pattern-matching once.
 - **Compound indexes** added to `HealthCheckLog`, `AuditLog`, and `Database` for the most common query shapes.
 - **Notification fan-out queue.** `sendSystemNotification` writes to an in-process queue and returns immediately; delivery happens off the request thread.
-- **New features.** ConfigFile fragments (env-scoped reusable text blocks), atomic multi-resource sync batches, dry-run preview for deploys / plans / config-file syncs, server bootstrap (Docker + agent + sysctl + swap), free-form Service type tagging, OpenAPI spec at `/openapi.json` with a `code/message/field/hint` error envelope.
+- **New features.** ConfigFile fragments (env-scoped reusable text blocks), atomic multi-resource sync batches, dry-run preview for deploys / plans / config-file syncs, server bootstrap (Docker + agent + sysctl + swap), Service Type grouping/filtering on the Services list, OpenAPI spec at `/openapi.json` with a `code/message/field/hint` error envelope.
 
 > [!TIP]
 > Always back up your database before upgrading, especially for major version jumps. A simple file copy is sufficient:

@@ -23,9 +23,7 @@ import {
   getServiceDependencies,
   getContainerImage,
   listServiceTypes,
-  listServiceTypeTags,
   getModuleSettings,
-  type ServiceTypeTagCount,
   type ServiceWithServer,
   type Deployment,
   type ServiceFile,
@@ -114,12 +112,8 @@ export default function ServiceDetail() {
   const [editComposePath, setEditComposePath] = useState<string>('');
   const [editContainerName, setEditContainerName] = useState<string>('');
   const [editHealthCheckUrl, setEditHealthCheckUrl] = useState<string>('');
-  const [editTypeTag, setEditTypeTag] = useState<string>('');
   const [editTcpChecks, setEditTcpChecks] = useState<TCPCheckConfig[]>([]);
   const [editCertChecks, setEditCertChecks] = useState<CertCheckConfig[]>([]);
-
-  // Distinct type-tag suggestions for autocomplete (issue #112)
-  const [typeTagSuggestions, setTypeTagSuggestions] = useState<ServiceTypeTagCount[]>([]);
 
   // Attached files state
   const [attachedFiles, setAttachedFiles] = useState<ServiceFile[]>([]);
@@ -220,10 +214,6 @@ export default function ServiceDetail() {
       getModuleSettings(selectedEnvironment.id, 'monitoring')
         .then(({ settings }) => setSchedulerConfig(settings))
         .catch(() => setSchedulerConfig(null));
-      // Load distinct free-form type tags for the autocomplete (issue #112)
-      listServiceTypeTags(selectedEnvironment.id)
-        .then(({ tags }) => setTypeTagSuggestions(tags))
-        .catch(() => setTypeTagSuggestions([]));
     }
     // Load service types (global, not per-environment)
     listServiceTypes().then(({ serviceTypes }) =>
@@ -518,7 +508,6 @@ export default function ServiceDetail() {
     setEditContainerName(service.containerName || '');
     setEditHealthCheckUrl(service.healthCheckUrl || '');
     setEditServiceTypeId(service.serviceTypeId || '');
-    setEditTypeTag(service.typeTag || '');
     setEditTcpChecks(parseTCPChecks(service.tcpChecks));
     setEditCertChecks(parseCertChecks(service.certChecks));
     setShowConfig(true);
@@ -528,15 +517,11 @@ export default function ServiceDetail() {
     if (!id || !selectedEnvironment?.id) return;
     setSaving(true);
     try {
-      // Normalize the free-form type tag: trim whitespace, empty → null
-      // (matches the backend zod transform).
-      const trimmedTypeTag = editTypeTag.trim();
       const { service: updated } = await updateService(id, {
         composePath: editComposePath || null,
         containerName: editContainerName || undefined,
         healthCheckUrl: editHealthCheckUrl || null,
         serviceTypeId: editServiceTypeId || null,
-        typeTag: trimmedTypeTag === '' ? null : trimmedTypeTag,
         tcpChecks: editTcpChecks.length > 0 ? JSON.stringify(editTcpChecks) : null,
         certChecks: editCertChecks.length > 0 ? JSON.stringify(editCertChecks) : null,
       });
@@ -549,11 +534,6 @@ export default function ServiceDetail() {
       });
       setShowConfig(false);
       toast.success('Configuration saved');
-      // Refresh autocomplete suggestions: a new tag may have just been minted
-      // or the only user of a removed tag may have just dropped it.
-      listServiceTypeTags(selectedEnvironment.id)
-        .then(({ tags }) => setTypeTagSuggestions(tags))
-        .catch(() => {});
     } finally {
       setSaving(false);
     }
@@ -1994,30 +1974,6 @@ export default function ServiceDetail() {
                     ))}
                   </select>
                 </div>
-              </div>
-              {/* Free-form Type tag with env-scoped autocomplete (issue #112) */}
-              <div>
-                <label htmlFor="service-type-tag" className="block text-sm text-slate-400 mb-1">
-                  Type
-                </label>
-                <input
-                  id="service-type-tag"
-                  type="text"
-                  value={editTypeTag}
-                  onChange={(e) => setEditTypeTag(e.target.value)}
-                  list="service-type-tag-suggestions"
-                  placeholder="e.g., django, postgres, redis"
-                  maxLength={64}
-                  className="input text-sm"
-                />
-                <datalist id="service-type-tag-suggestions">
-                  {typeTagSuggestions.map((s) => (
-                    <option key={s.tag} value={s.tag} />
-                  ))}
-                </datalist>
-                <p className="text-xs text-slate-500 mt-1">
-                  Free-form label used to group services on the list page. Leave blank for &ldquo;no type&rdquo;.
-                </p>
               </div>
               <div>
                 <label className="block text-sm text-slate-400 mb-1">
