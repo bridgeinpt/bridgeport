@@ -1,0 +1,10 @@
+{
+  "$schema": "../schemas/service-type.schema.json",
+  "name": "postgres",
+  "displayName": "PostgreSQL",
+  "commands": [
+    { "name": "psql", "displayName": "psql Shell", "command": "psql -U \"${POSTGRES_USER:-postgres}\" \"${POSTGRES_DB:-postgres}\"", "description": "Interactive psql session (uses POSTGRES_USER/POSTGRES_DB if set)", "sortOrder": 0 },
+    { "name": "list-dbs", "displayName": "List Databases", "command": "psql -U \"${POSTGRES_USER:-postgres}\" -l", "description": "List all databases on the server", "sortOrder": 1 },
+    { "name": "version", "displayName": "Version", "command": "postgres --version", "description": "Print the PostgreSQL server version", "sortOrder": 2 }
+  ]
+}

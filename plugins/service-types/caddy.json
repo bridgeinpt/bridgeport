@@ -1,0 +1,12 @@
+{
+  "$schema": "../schemas/service-type.schema.json",
+  "name": "caddy",
+  "displayName": "Caddy",
+  "commands": [
+    { "name": "version", "displayName": "Version", "command": "caddy version", "description": "Print the Caddy version", "sortOrder": 0 },
+    { "name": "validate", "displayName": "Validate Config", "command": "caddy validate --config /etc/caddy/Caddyfile", "description": "Validate the Caddyfile without applying it", "sortOrder": 1 },
+    { "name": "reload", "displayName": "Reload Config", "command": "caddy reload --config /etc/caddy/Caddyfile", "description": "Gracefully reload the running config (zero downtime)", "sortOrder": 2 },
+    { "name": "fmt", "displayName": "Format Caddyfile", "command": "caddy fmt --overwrite /etc/caddy/Caddyfile", "description": "Format the Caddyfile in place", "sortOrder": 3 },
+    { "name": "list-modules", "displayName": "List Modules", "command": "caddy list-modules", "description": "List the modules compiled into this Caddy binary", "sortOrder": 4 }
+  ]
+}
