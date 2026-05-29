@@ -453,5 +453,22 @@ describe('registries', () => {
       expect(result!.username).toBe('user');
       expect(result!.password).toBeDefined();
     });
+
+    it('throws a sanitized error (no secret material) when decryption fails', async () => {
+      mockPrisma.registryConnection.findUnique.mockResolvedValue({
+        ...baseRegistryRecord,
+        encryptedPassword: 'enc-pass',
+        passwordNonce: 'pass-nonce',
+      });
+      vi.mocked(decrypt).mockImplementation(() => {
+        throw new Error('GCM auth failed: pass-nonce / enc-pass leaked');
+      });
+
+      const error = await getRegistryCredentials('reg-1').catch((e) => e as Error);
+      expect(error).toBeInstanceOf(Error);
+      expect(error.message).toBe('Failed to decrypt credentials for registry connection reg-1');
+      // The raw error (which carries the nonce/ciphertext) must not surface.
+      expect(error.message).not.toMatch(/nonce|enc-pass/);
+    });
   });
 });

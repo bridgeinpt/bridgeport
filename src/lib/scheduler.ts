@@ -359,7 +359,16 @@ async function runUpdateChecks(): Promise<void> {
 
     // Check updates for each registry
     for (const [registryId, registryImages] of byRegistry) {
-      const creds = await getRegistryCredentials(registryId);
+      let creds: RegistryCredentials | null;
+      try {
+        creds = await getRegistryCredentials(registryId);
+      } catch {
+        // Don't log the caught error: getRegistryCredentials decrypts secrets,
+        // and static analysis (rightly) treats anything it throws as tainted by
+        // that secret material. The failure mode is unambiguous on its own.
+        console.error(`[Scheduler] Could not load credentials for registry ${registryId}; skipping`);
+        continue;
+      }
       if (!creds) {
         console.warn(`[Scheduler] Could not get credentials for registry ${registryId}`);
         continue;
