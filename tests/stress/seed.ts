@@ -98,7 +98,17 @@ export interface Refs {
   configFileId: string;
   userId: string;
   userEmail: string;
+  // Dedicated agent-mode server for the write-path (POST /api/metrics/ingest)
+  // scenario: a fixed token the runner sends as the agent bearer, plus the
+  // deployment container names the ingest body reports metrics for.
+  agentToken: string;
+  agentContainerNames: string; // comma-joined
 }
+
+// Fixed agent token + container-name prefix for the ingest stress server, so
+// the runner can build a valid ingest payload without threading generated IDs.
+export const STRESS_AGENT_TOKEN = 'stress-agent-ingest-token';
+const STRESS_AGENT_DEPLOYMENTS = 6;
 
 const SECRET_KEYS = [
   'DATABASE_URL',
@@ -618,6 +628,44 @@ export async function seedStressData(
     await prisma.serviceConnection.createMany({ data: connData });
   }
 
+  // -- Dedicated agent-mode server for the write-path (ingest) scenario.
+  // The factory doesn't set agentToken, so create the server directly with a
+  // fixed token + a handful of FOUND deployments whose container names the
+  // ingest payload reports against. This exercises the per-service metrics +
+  // health/tcp/cert update fan-out the real agent push drives.
+  const agentServer = await prisma.server.create({
+    data: {
+      name: 'stress-agent-ingest',
+      hostname: '192.168.250.250',
+      tags: JSON.stringify(['stress', 'agent-ingest']),
+      dockerMode: 'ssh',
+      metricsMode: 'agent',
+      status: 'healthy',
+      agentToken: STRESS_AGENT_TOKEN,
+      agentStatus: 'active',
+      lastAgentPushAt: new Date(now),
+      environmentId: env.id,
+    },
+  });
+  const agentContainerNames: string[] = [];
+  for (let i = 0; i < STRESS_AGENT_DEPLOYMENTS; i++) {
+    const containerName = `stress-ingest-${i}`;
+    agentContainerNames.push(containerName);
+    const service = await createTestService(prisma, {
+      environmentId: env.id,
+      serverId: agentServer.id,
+      containerName,
+      healthCheckUrl: 'http://localhost:8080/health',
+      containerImageId: imageIds[i % imageIds.length]!,
+    });
+    // Mark the deployment FOUND so agent-config and history paths treat it as
+    // a live container (the factory leaves discoveryStatus at its default).
+    await prisma.serviceDeployment.updateMany({
+      where: { serviceId: service.id, serverId: agentServer.id },
+      data: { discoveryStatus: 'found' },
+    });
+  }
+
   return {
     envId: env.id,
     serverId: serverIds[0]!,
@@ -627,5 +675,7 @@ export async function seedStressData(
     configFileId: configFileIds[0]!,
     userId: user.id,
     userEmail: user.email,
+    agentToken: STRESS_AGENT_TOKEN,
+    agentContainerNames: agentContainerNames.join(','),
   };
 }

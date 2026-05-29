@@ -165,6 +165,13 @@
       "path": "/api/environments/{envId}/server-clusters",
       "maxP99Ms": 150,
       "minRps": 200
+    },
+    "metrics-ingest": {
+      "path": "/api/metrics/ingest",
+      "method": "POST",
+      "authRef": "agentToken",
+      "maxP99Ms": 350,
+      "minRps": 100
     }
   },
   "load": {

@@ -42,6 +42,8 @@ interface AutocannonOpts {
   connections: number;
   duration: number;
   pipelining?: number;
+  method?: string;
+  body?: string;
   headers?: Record<string, string>;
   title?: string;
 }
@@ -60,6 +62,73 @@ interface ScenarioConfig {
   path: string;
   maxP99Ms: number;
   minRps: number;
+  // POST scenarios (currently only the agent ingest write path). `method`
+  // defaults to GET. `authRef` names the Refs key holding the bearer token to
+  // send instead of the default user token (e.g. the per-server agent token).
+  method?: string;
+  authRef?: string;
+}
+
+/**
+ * Build the agent ingest payload (POST /api/metrics/ingest) from seeded refs.
+ * Reports server metrics plus per-deployment metrics, health checks, and TCP
+ * checks for each seeded container name — exercising the full write fan-out a
+ * real agent push drives (server metric + server update + N service metrics +
+ * the per-deployment status/health/tcp updates).
+ */
+function buildIngestBody(refs: Record<string, string>): string {
+  const containers = String(refs.agentContainerNames ?? '')
+    .split(',')
+    .filter(Boolean);
+  const checkedAt = new Date().toISOString();
+  return JSON.stringify({
+    cpuPercent: 42.5,
+    memoryUsedMb: 2048,
+    memoryTotalMb: 8192,
+    swapUsedMb: 0,
+    swapTotalMb: 2048,
+    diskUsedGb: 35,
+    diskTotalGb: 100,
+    loadAvg1: 0.7,
+    loadAvg5: 0.6,
+    loadAvg15: 0.5,
+    uptime: 123456,
+    openFds: 320,
+    maxFds: 1024,
+    tcpEstablished: 60,
+    tcpListen: 22,
+    tcpTimeWait: 12,
+    tcpCloseWait: 1,
+    tcpTotal: 95,
+    serverHealthy: true,
+    agentVersion: 'stress-1.0.0',
+    services: containers.map((c) => ({
+      containerName: c,
+      cpuPercent: 12,
+      memoryUsedMb: 200,
+      memoryLimitMb: 512,
+      networkRxMb: 5,
+      networkTxMb: 3,
+      restartCount: 0,
+      state: 'running',
+      health: 'healthy',
+    })),
+    serviceHealthChecks: containers.map((c) => ({
+      containerName: c,
+      healthCheckUrl: 'http://localhost:8080/health',
+      success: true,
+      statusCode: 200,
+      durationMs: 8,
+      checkedAt,
+    })),
+    tcpCheckResults: containers.map((c) => ({
+      containerName: c,
+      host: 'localhost',
+      port: 5432,
+      success: true,
+      durationMs: 3,
+    })),
+  });
 }
 
 interface ThresholdsFile {
@@ -123,12 +192,25 @@ async function runScenario(
   load: ThresholdsFile['load']
 ): Promise<ScenarioReport> {
   const path = substitutePath(scenario.path, refs);
+  const method = scenario.method ?? 'GET';
+  // Per-scenario auth override (e.g. the agent token for the ingest write
+  // path); falls back to the shared user token.
+  const auth = scenario.authRef ? `Bearer ${refs[scenario.authRef]}` : authHeader;
+  const isWrite = method !== 'GET' && method !== 'HEAD';
+  const headers: Record<string, string> = { authorization: auth };
+  let body: string | undefined;
+  if (isWrite) {
+    headers['content-type'] = 'application/json';
+    body = buildIngestBody(refs);
+  }
   const result = await autocannon({
     url: `${baseUrl}${path}`,
     connections: load.connections,
     duration: load.durationSec,
     pipelining: load.pipelining ?? 1,
-    headers: { authorization: authHeader },
+    method,
+    body,
+    headers,
     title: name,
   });
 

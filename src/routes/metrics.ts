@@ -1,14 +1,15 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/db.js';
 import {
   collectServerMetricsSSH,
   saveServerMetrics,
-  saveServiceMetrics,
   getServerMetrics,
   getServiceMetrics,
   getEnvironmentMetricsSummary,
 } from '../services/metrics.js';
+import { createThrottle } from '../lib/last-active-throttle.js';
 import { logAudit, actorFrom } from '../services/audit.js';
 import { getSchedulerConfig } from '../services/health-checks.js';
 import { deployAgent } from '../services/agent-deploy.js';
@@ -16,6 +17,26 @@ import { logAgentEvent } from '../services/agent-events.js';
 import crypto from 'crypto';
 import { SERVER_STATUS, HEALTH_STATUS, CONTAINER_STATUS, METRICS_MODE, AGENT_STATUS, DISCOVERY_STATUS } from '../lib/constants.js';
 import { findOrNotFound, validateBody } from '../lib/helpers.js';
+
+// Throttle the per-push server-row heartbeat write (lastAgentPushAt /
+// lastCheckedAt). The Server row is read on every ingest, every agent-config
+// poll, and every dashboard load, so rewriting it on every single push is pure
+// churn on a hot row. A 30s window is far below the agent-stale threshold
+// (agentStaleThresholdMs = 180s), so a throttled heartbeat can never make an
+// agent look stale. Material changes (status transitions, health flips, version
+// bumps) bypass the throttle and always persist immediately.
+const agentHeartbeatThrottle = createThrottle({ windowMs: 30_000 });
+
+/** Group agent check results (TCP/cert) by their container name. */
+function groupByContainer<T extends { containerName: string }>(items: T[]): Map<string, T[]> {
+  const byContainer = new Map<string, T[]>();
+  for (const item of items) {
+    const existing = byContainer.get(item.containerName);
+    if (existing) existing.push(item);
+    else byContainer.set(item.containerName, [item]);
+  }
+  return byContainer;
+}
 
 const metricsQuerySchema = z.object({
   from: z.string().datetime().optional(),
@@ -280,40 +301,20 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
     const body = validateBody(serverMetricsIngestSchema, request, reply);
     if (!body) return;
 
-    // Save server metrics (exclude non-metrics fields)
+    // A single agent push fans out into many writes: the server metric row, a
+    // server heartbeat update, container/process snapshots, and — per
+    // deployment — a service metric row plus status/health/tcp/cert updates.
+    // Done as individual statements, that's ~N separate transactions, each
+    // grabbing SQLite's single writer lock; under many agents pushing at once
+    // the lock handoffs dominate. We instead assemble everything in memory and
+    // commit it in ONE transaction (one lock acquisition), batch the service
+    // metric inserts with createMany, and merge the per-deployment updates so
+    // each deployment row is written at most once.
     const { services: serviceMetrics, serverHealthy, agentVersion, serviceHealthChecks, tcpCheckResults, certCheckResults, containers, topProcesses, ...serverMetricsData } = body;
-    await saveServerMetrics(server.id, serverMetricsData, 'agent');
 
-    // Save container snapshot for discovery (upsert)
-    if (containers && containers.length > 0) {
-      await prisma.agentContainerSnapshot.upsert({
-        where: { serverId: server.id },
-        create: {
-          serverId: server.id,
-          data: JSON.stringify(containers),
-        },
-        update: {
-          data: JSON.stringify(containers),
-        },
-      });
-    }
-
-    // Save process snapshot (upsert)
-    if (topProcesses) {
-      await prisma.agentProcessSnapshot.upsert({
-        where: { serverId: server.id },
-        create: {
-          serverId: server.id,
-          data: JSON.stringify(topProcesses),
-        },
-        update: {
-          data: JSON.stringify(topProcesses),
-        },
-      });
-    }
-
-    // Update server status: agent push means server is healthy and agent is active
     const now = new Date();
+
+    // -- Server-row update (heartbeat + material fields). --
     const serverUpdateData: {
       status?: string;
       lastCheckedAt: Date;
@@ -327,11 +328,156 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
       lastAgentPushAt: now,
     };
 
-    // Track status change time if status is changing
-    if (server.agentStatus !== AGENT_STATUS.ACTIVE) {
+    const agentBecameActive = server.agentStatus !== AGENT_STATUS.ACTIVE;
+    if (agentBecameActive) {
       serverUpdateData.agentStatusChangedAt = now;
+    }
 
-      // Log status_change event when agent becomes active
+    let healthChanged = false;
+    if (serverHealthy !== undefined) {
+      const newStatus = serverHealthy ? SERVER_STATUS.HEALTHY : SERVER_STATUS.UNHEALTHY;
+      serverUpdateData.status = newStatus;
+      healthChanged = server.status !== newStatus;
+    }
+
+    const versionChanged = !!agentVersion && agentVersion !== server.agentVersion;
+    if (agentVersion) {
+      serverUpdateData.agentVersion = agentVersion;
+    }
+
+    // Persist the server row when something material changed; otherwise this is
+    // a pure heartbeat and the throttle decides whether to write it this push.
+    const materialServerChange = agentBecameActive || healthChanged || versionChanged;
+    const writeServerRow =
+      materialServerChange || agentHeartbeatThrottle.shouldWrite(server.id, now.getTime());
+
+    // -- Per-deployment fan-out, accumulated by deployment id. --
+    // O(1) container-name lookups instead of a .find() scan per item.
+    const deploymentByContainer = new Map(
+      server.serviceDeployments.map((sd) => [sd.containerName, sd])
+    );
+    const serviceMetricRows: Prisma.ServiceMetricsCreateManyInput[] = [];
+    const deploymentUpdates = new Map<string, Record<string, unknown>>();
+    const mergeDeploymentUpdate = (id: string, data: Record<string, unknown>): void => {
+      deploymentUpdates.set(id, { ...(deploymentUpdates.get(id) ?? {}), ...data });
+    };
+
+    if (serviceMetrics && serviceMetrics.length > 0) {
+      for (const sm of serviceMetrics) {
+        const sd = deploymentByContainer.get(sm.containerName);
+        if (!sd) continue;
+        const { containerName, state, health, ...metricsData } = sm;
+        serviceMetricRows.push({ serviceDeploymentId: sd.id, ...metricsData });
+
+        if (state !== undefined || health !== undefined) {
+          const isRunning = state === CONTAINER_STATUS.RUNNING;
+
+          let healthStatus: string = HEALTH_STATUS.UNKNOWN;
+          if (!isRunning) {
+            healthStatus = HEALTH_STATUS.UNKNOWN;
+          } else if (health === HEALTH_STATUS.HEALTHY) {
+            healthStatus = HEALTH_STATUS.HEALTHY;
+          } else if (health === HEALTH_STATUS.UNHEALTHY) {
+            healthStatus = HEALTH_STATUS.UNHEALTHY;
+          } else if (health === HEALTH_STATUS.NONE || health === '') {
+            healthStatus = HEALTH_STATUS.NONE;
+          }
+
+          let status: string = CONTAINER_STATUS.RUNNING;
+          if (!isRunning) {
+            status = CONTAINER_STATUS.STOPPED;
+          } else if (healthStatus === HEALTH_STATUS.UNHEALTHY) {
+            status = SERVER_STATUS.UNHEALTHY;
+          } else if (healthStatus === HEALTH_STATUS.HEALTHY) {
+            status = SERVER_STATUS.HEALTHY;
+          }
+
+          mergeDeploymentUpdate(sd.id, {
+            status,
+            containerStatus: state || CONTAINER_STATUS.STOPPED,
+            healthStatus,
+            lastCheckedAt: now,
+          });
+        }
+      }
+    }
+
+    // Agent-performed service health checks (per-deployment).
+    if (serviceHealthChecks && serviceHealthChecks.length > 0) {
+      for (const hc of serviceHealthChecks) {
+        const sd = deploymentByContainer.get(hc.containerName);
+        if (!sd) continue;
+        mergeDeploymentUpdate(sd.id, {
+          agentHealthSuccess: hc.success,
+          agentHealthStatusCode: hc.statusCode ?? null,
+          agentHealthDurationMs: hc.durationMs ?? null,
+          agentHealthCheckedAt: hc.checkedAt ? new Date(hc.checkedAt) : now,
+        });
+      }
+    }
+
+    // Agent TCP port checks (per-deployment), grouped by container.
+    if (tcpCheckResults && tcpCheckResults.length > 0) {
+      for (const [containerName, results] of groupByContainer(tcpCheckResults)) {
+        const sd = deploymentByContainer.get(containerName);
+        if (!sd) continue;
+        mergeDeploymentUpdate(sd.id, {
+          agentTcpCheckResults: JSON.stringify(results),
+          agentTcpCheckedAt: now,
+        });
+      }
+    }
+
+    // Agent TLS cert checks (per-deployment), grouped by container.
+    if (certCheckResults && certCheckResults.length > 0) {
+      for (const [containerName, results] of groupByContainer(certCheckResults)) {
+        const sd = deploymentByContainer.get(containerName);
+        if (!sd) continue;
+        mergeDeploymentUpdate(sd.id, {
+          agentCertCheckResults: JSON.stringify(results),
+          agentCertCheckedAt: now,
+        });
+      }
+    }
+
+    // -- Commit everything in one transaction (one writer-lock acquisition). --
+    await prisma.$transaction(async (tx) => {
+      await tx.serverMetrics.create({
+        data: { serverId: server.id, source: 'agent', ...serverMetricsData },
+      });
+
+      if (containers && containers.length > 0) {
+        await tx.agentContainerSnapshot.upsert({
+          where: { serverId: server.id },
+          create: { serverId: server.id, data: JSON.stringify(containers) },
+          update: { data: JSON.stringify(containers) },
+        });
+      }
+
+      if (topProcesses) {
+        await tx.agentProcessSnapshot.upsert({
+          where: { serverId: server.id },
+          create: { serverId: server.id, data: JSON.stringify(topProcesses) },
+          update: { data: JSON.stringify(topProcesses) },
+        });
+      }
+
+      if (writeServerRow) {
+        await tx.server.update({ where: { id: server.id }, data: serverUpdateData });
+      }
+
+      if (serviceMetricRows.length > 0) {
+        await tx.serviceMetrics.createMany({ data: serviceMetricRows });
+      }
+
+      for (const [id, data] of deploymentUpdates) {
+        await tx.serviceDeployment.update({ where: { id }, data });
+      }
+    });
+
+    // Status-change event is rare (only on activation/recovery) and not part of
+    // the steady-state write load, so log it outside the hot transaction.
+    if (agentBecameActive) {
       await logAgentEvent({
         serverId: server.id,
         eventType: 'status_change',
@@ -341,132 +487,6 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
           : 'Agent recovered and is now active',
         details: { previousStatus: server.agentStatus, version: agentVersion },
       });
-    }
-
-    // Set server health status if provided
-    if (serverHealthy !== undefined) {
-      serverUpdateData.status = serverHealthy ? SERVER_STATUS.HEALTHY : SERVER_STATUS.UNHEALTHY;
-    }
-
-    // Store agent version if provided
-    if (agentVersion) {
-      serverUpdateData.agentVersion = agentVersion;
-    }
-
-    await prisma.server.update({
-      where: { id: server.id },
-      data: serverUpdateData,
-    });
-
-    // Save service metrics and health if provided. Per-server runtime state now lives on ServiceDeployment.
-    if (serviceMetrics && serviceMetrics.length > 0) {
-      for (const sm of serviceMetrics) {
-        const sd = server.serviceDeployments.find((s) => s.containerName === sm.containerName);
-        if (sd) {
-          const { containerName, state, health, ...metricsData } = sm;
-
-          // Save metrics linked to the ServiceDeployment row.
-          await saveServiceMetrics(sd.id, metricsData);
-
-          if (state !== undefined || health !== undefined) {
-            const isRunning = state === CONTAINER_STATUS.RUNNING;
-
-            let healthStatus: string = HEALTH_STATUS.UNKNOWN;
-            if (!isRunning) {
-              healthStatus = HEALTH_STATUS.UNKNOWN;
-            } else if (health === HEALTH_STATUS.HEALTHY) {
-              healthStatus = HEALTH_STATUS.HEALTHY;
-            } else if (health === HEALTH_STATUS.UNHEALTHY) {
-              healthStatus = HEALTH_STATUS.UNHEALTHY;
-            } else if (health === HEALTH_STATUS.NONE || health === '') {
-              healthStatus = HEALTH_STATUS.NONE;
-            }
-
-            let status: string = CONTAINER_STATUS.RUNNING;
-            if (!isRunning) {
-              status = CONTAINER_STATUS.STOPPED;
-            } else if (healthStatus === HEALTH_STATUS.UNHEALTHY) {
-              status = SERVER_STATUS.UNHEALTHY;
-            } else if (healthStatus === HEALTH_STATUS.HEALTHY) {
-              status = SERVER_STATUS.HEALTHY;
-            }
-
-            await prisma.serviceDeployment.update({
-              where: { id: sd.id },
-              data: {
-                status,
-                containerStatus: state || CONTAINER_STATUS.STOPPED,
-                healthStatus,
-                lastCheckedAt: new Date(),
-              },
-            });
-          }
-        }
-      }
-    }
-
-    // Process agent-performed service health checks (now per-deployment)
-    if (serviceHealthChecks && serviceHealthChecks.length > 0) {
-      for (const hc of serviceHealthChecks) {
-        const sd = server.serviceDeployments.find((s) => s.containerName === hc.containerName);
-        if (sd) {
-          await prisma.serviceDeployment.update({
-            where: { id: sd.id },
-            data: {
-              agentHealthSuccess: hc.success,
-              agentHealthStatusCode: hc.statusCode ?? null,
-              agentHealthDurationMs: hc.durationMs ?? null,
-              agentHealthCheckedAt: hc.checkedAt ? new Date(hc.checkedAt) : now,
-            },
-          });
-        }
-      }
-    }
-
-    // Agent TCP port checks (per-deployment)
-    if (tcpCheckResults && tcpCheckResults.length > 0) {
-      const resultsByContainer = new Map<string, typeof tcpCheckResults>();
-      for (const result of tcpCheckResults) {
-        const existing = resultsByContainer.get(result.containerName) || [];
-        existing.push(result);
-        resultsByContainer.set(result.containerName, existing);
-      }
-
-      for (const [containerName, results] of resultsByContainer) {
-        const sd = server.serviceDeployments.find((s) => s.containerName === containerName);
-        if (sd) {
-          await prisma.serviceDeployment.update({
-            where: { id: sd.id },
-            data: {
-              agentTcpCheckResults: JSON.stringify(results),
-              agentTcpCheckedAt: now,
-            },
-          });
-        }
-      }
-    }
-
-    // Agent TLS cert checks (per-deployment)
-    if (certCheckResults && certCheckResults.length > 0) {
-      const resultsByContainer = new Map<string, typeof certCheckResults>();
-      for (const result of certCheckResults) {
-        const existing = resultsByContainer.get(result.containerName) || [];
-        existing.push(result);
-        resultsByContainer.set(result.containerName, existing);
-      }
-
-      for (const [containerName, results] of resultsByContainer) {
-        const sd = server.serviceDeployments.find((s) => s.containerName === containerName);
-        if (sd) {
-          await prisma.serviceDeployment.update({
-            where: { id: sd.id },
-            data: {
-              agentCertCheckResults: JSON.stringify(results),
-              agentCertCheckedAt: now,
-            },
-          });
-        }
-      }
     }
 
     return { success: true };
