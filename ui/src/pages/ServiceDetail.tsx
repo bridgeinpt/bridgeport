@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   getService,
@@ -101,6 +101,16 @@ export default function ServiceDetail() {
   // No-more-older indicator (server returned an empty page for the `before` cursor)
   const [noMoreOlderLogs, setNoMoreOlderLogs] = useState(false);
   const logsContainerRef = useRef<HTMLPreElement>(null);
+  // How to reposition the logs view after the next `logs` DOM commit. Set right
+  // before a setLogs() call and consumed by the layout effect below.
+  //  - 'bottom': pin to the newest entry (initial load / refresh)
+  //  - { prevHeight, prevTop }: preserve the user's view after prepending older
+  //    entries by offsetting scrollTop by the added height
+  // A ref + useLayoutEffect is used instead of requestAnimationFrame because the
+  // root runs in React concurrent mode: setLogs() from an async handler is
+  // committed on a scheduler macrotask that can run *after* a rAF callback, so a
+  // rAF read of scrollHeight sees stale content and the scroll misfires.
+  const pendingLogScrollRef = useRef<'bottom' | { prevHeight: number; prevTop: number } | null>(null);
   const [showConfig, setShowConfig] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -410,6 +420,26 @@ export default function ServiceDetail() {
     return null;
   };
 
+  // Reposition the logs view after each `logs` change, once the new content is
+  // committed to the DOM. Runs before paint so the user never sees a flash at
+  // the wrong scroll position. See pendingLogScrollRef for why this isn't rAF.
+  useLayoutEffect(() => {
+    const intent = pendingLogScrollRef.current;
+    if (!intent) return;
+    pendingLogScrollRef.current = null;
+    const container = logsContainerRef.current;
+    if (!container) return;
+    if (intent === 'bottom') {
+      // Pin to the newest entry (logs render oldest->newest, like `docker logs`).
+      container.scrollTop = container.scrollHeight;
+    } else {
+      // Older entries were prepended: keep the previously-visible lines in place
+      // by offsetting scrollTop by the height that was added at the top.
+      const delta = container.scrollHeight - intent.prevHeight;
+      container.scrollTop = intent.prevTop + delta;
+    }
+  }, [logs]);
+
   const loadLogs = async () => {
     if (!id) return;
     setLogsLoading(true);
@@ -419,17 +449,11 @@ export default function ServiceDetail() {
     try {
       // tail omitted -> server uses admin-configured defaultLogLines
       const { logs } = await getServiceLogs(id);
+      // Pin the view to the most recent entries once this content commits.
+      // Without this the modal opens scrolled to the top, hiding newer logs.
+      pendingLogScrollRef.current = 'bottom';
       setLogs(logs);
       setOldestLogTimestamp(extractOldestTimestamp(logs));
-      // Logs render oldest->newest, so pin the view to the bottom on open to
-      // land on the most recent entries (matching `docker logs` / terminals).
-      // Without this the modal opens scrolled to the top, hiding newer logs.
-      requestAnimationFrame(() => {
-        const container = logsContainerRef.current;
-        if (container) {
-          container.scrollTop = container.scrollHeight;
-        }
-      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to load logs';
       if (message.includes('No such container')) {
@@ -490,19 +514,15 @@ export default function ServiceDetail() {
         setOldestLogTimestamp(newOldest);
         return;
       }
-      // Preserve scroll position when prepending older content
+      // Preserve scroll position when prepending older content. The layout
+      // effect restores the user's view once the new content is committed.
       const container = logsContainerRef.current;
-      const previousHeight = container?.scrollHeight ?? 0;
-      const previousTop = container?.scrollTop ?? 0;
+      pendingLogScrollRef.current = {
+        prevHeight: container?.scrollHeight ?? 0,
+        prevTop: container?.scrollTop ?? 0,
+      };
       setLogs((prev) => `${dedupedTrimmed}\n${prev}`);
       setOldestLogTimestamp(newOldest);
-      // After DOM updates, restore the user's view by adjusting for added height
-      requestAnimationFrame(() => {
-        if (container) {
-          const delta = container.scrollHeight - previousHeight;
-          container.scrollTop = previousTop + delta;
-        }
-      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to load older logs';
       toast.error(message);
@@ -2203,7 +2223,13 @@ export default function ServiceDetail() {
                 Logs - {service.containerName}
               </h3>
               <button
-                onClick={() => setShowLogs(false)}
+                onClick={() => {
+                  setShowLogs(false);
+                  // Clear so a reopen always transitions '' -> content, which
+                  // guarantees the [logs] layout effect re-fires and re-pins to
+                  // the newest entry even if the logs are byte-identical.
+                  setLogs('');
+                }}
                 className="text-slate-400 hover:text-white"
               >
                 ✕
