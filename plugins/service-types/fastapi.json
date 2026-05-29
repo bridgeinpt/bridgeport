@@ -1,0 +1,11 @@
+{
+  "$schema": "../schemas/service-type.schema.json",
+  "name": "fastapi",
+  "displayName": "FastAPI",
+  "commands": [
+    { "name": "shell", "displayName": "Python Shell", "command": "python", "description": "Interactive Python REPL", "sortOrder": 0 },
+    { "name": "pip-list", "displayName": "List Packages", "command": "pip list", "description": "List installed Python packages", "sortOrder": 1 },
+    { "name": "migrate", "displayName": "Run Migrations", "command": "alembic upgrade head", "description": "Apply Alembic migrations to the latest revision", "sortOrder": 2 },
+    { "name": "makemigration", "displayName": "Make Migration", "command": "alembic revision --autogenerate -m \"auto\"", "description": "Autogenerate a new Alembic migration", "sortOrder": 3 }
+  ]
+}

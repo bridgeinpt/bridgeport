@@ -1,0 +1,10 @@
+{
+  "$schema": "../schemas/service-type.schema.json",
+  "name": "nginx",
+  "displayName": "Nginx",
+  "commands": [
+    { "name": "test-config", "displayName": "Test Config", "command": "nginx -t", "description": "Test the configuration for syntax errors", "sortOrder": 0 },
+    { "name": "reload", "displayName": "Reload Config", "command": "nginx -s reload", "description": "Reload configuration without dropping connections", "sortOrder": 1 },
+    { "name": "version", "displayName": "Version", "command": "nginx -V", "description": "Print version and build configuration", "sortOrder": 2 }
+  ]
+}

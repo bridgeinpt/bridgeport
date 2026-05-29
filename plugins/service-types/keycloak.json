@@ -1,0 +1,9 @@
+{
+  "$schema": "../schemas/service-type.schema.json",
+  "name": "keycloak",
+  "displayName": "Keycloak",
+  "commands": [
+    { "name": "version", "displayName": "Version", "command": "/opt/keycloak/bin/kc.sh --version", "description": "Print the Keycloak version", "sortOrder": 0 },
+    { "name": "show-config", "displayName": "Show Config", "command": "/opt/keycloak/bin/kc.sh show-config", "description": "Show the effective server configuration", "sortOrder": 1 }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "$schema": "../schemas/service-type.schema.json",
+  "name": "redis",
+  "displayName": "Redis",
+  "commands": [
+    { "name": "cli", "displayName": "Redis CLI", "command": "redis-cli", "description": "Interactive redis-cli session", "sortOrder": 0 },
+    { "name": "ping", "displayName": "Ping", "command": "redis-cli ping", "description": "Check that the server responds (PONG)", "sortOrder": 1 },
+    { "name": "info", "displayName": "Server Info", "command": "redis-cli info", "description": "Print server stats and configuration", "sortOrder": 2 },
+    { "name": "dbsize", "displayName": "Key Count", "command": "redis-cli dbsize", "description": "Number of keys in the current database", "sortOrder": 3 }
+  ]
+}

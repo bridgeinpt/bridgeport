@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo, lazy, Suspense } from 'react';
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAppStore, useAuthStore, isAdmin } from '../lib/store.js';
-import { listServices, listServiceTypeTags, deployService, checkServiceHealth, deleteService, getDependencyGraph, type ServiceWithServerName, type ExposedPort, type DependencyGraphNode, type DependencyGraphEdge, type ServiceTypeTagCount } from '../lib/api.js';
+import { listServices, listServiceTypeCounts, deployService, checkServiceHealth, deleteService, getDependencyGraph, type ServiceWithServerName, type ExposedPort, type DependencyGraphNode, type DependencyGraphEdge, type ServiceTypeCount } from '../lib/api.js';
 import { usePaginatedFetch } from '../hooks/usePaginatedFetch.js';
 import { formatDistanceToNow } from 'date-fns';
 import { getContainerStatusColor, getHealthStatusColor } from '../lib/status.js';
@@ -40,7 +40,8 @@ function formatPorts(ports: ExposedPort[], maxDisplay = 2): string {
 
 type TabType = 'list' | 'dependencies';
 
-// URL sentinel for the "no type" filter chip (services where typeTag is null/empty)
+// URL sentinel for the "no type" filter chip (services with no serviceTypeId).
+// ServiceType ids are cuids, so this literal can never collide with a real id.
 const NO_TYPE_FILTER = '__none__';
 
 export default function Services() {
@@ -90,11 +91,11 @@ export default function Services() {
   const [graphEdges, setGraphEdges] = useState<DependencyGraphEdge[]>([]);
   const [deploymentOrder, setDeploymentOrder] = useState<string[][]>([]);
 
-  // Distinct free-form type tags for filter chips (issue #112)
-  const [typeTagCounts, setTypeTagCounts] = useState<ServiceTypeTagCount[]>([]);
+  // Service types in use across the environment, for the filter chips.
+  const [serviceTypeCounts, setServiceTypeCounts] = useState<ServiceTypeCount[]>([]);
 
   // Active filter (URL-persisted). null = "All"; NO_TYPE_FILTER = services with no type;
-  // any other string = exact-match typeTag (case-sensitive — matches backend grouping).
+  // any other string = a serviceTypeId to exact-match.
   // URL params: type filter is shareable + survives reload. `servicesShowUpdatesOnly`
   // above is a per-user preference, kept in Zustand — intentionally different mechanisms.
   const activeTypeFilter = searchParams.get('type');
@@ -129,9 +130,9 @@ export default function Services() {
           setDependencyNodes(nodeMap);
         });
 
-      listServiceTypeTags(selectedEnvironment.id)
-        .then(({ tags }) => setTypeTagCounts(tags))
-        .catch(() => setTypeTagCounts([]));
+      listServiceTypeCounts(selectedEnvironment.id)
+        .then(({ types }) => setServiceTypeCounts(types))
+        .catch(() => setServiceTypeCounts([]));
     }
   }, [selectedEnvironment?.id]);
 
@@ -156,21 +157,21 @@ export default function Services() {
     [services]
   );
 
-  // Count of services without a type — drives whether to surface the "No type" chip.
+  // Count of services without a service type — drives whether to surface the "No type" chip.
   const noTypeCount = useMemo(
-    () => services.filter((s) => !s.typeTag).length,
+    () => services.filter((s) => !s.serviceTypeId).length,
     [services]
   );
 
   // Filtered services based on "show updates only" toggle + active type filter (memoized).
-  // Type filter matches case-sensitively (matches the backend's groupBy behavior).
+  // The active filter holds a serviceTypeId (or the NO_TYPE_FILTER sentinel).
   const filteredServices = useMemo(() => {
     const base = servicesShowUpdatesOnly ? servicesWithUpdates : services;
     if (activeTypeFilter === null) return base;
     if (activeTypeFilter === NO_TYPE_FILTER) {
-      return base.filter((s) => !s.typeTag);
+      return base.filter((s) => !s.serviceTypeId);
     }
-    return base.filter((s) => s.typeTag === activeTypeFilter);
+    return base.filter((s) => s.serviceTypeId === activeTypeFilter);
   }, [servicesShowUpdatesOnly, servicesWithUpdates, services, activeTypeFilter]);
 
   const handleBulkDeployAll = async () => {
@@ -367,8 +368,8 @@ export default function Services() {
         </Suspense>
       ) : (
       <div className="space-y-4">
-        {/* Type-tag filter chips (issue #112). Hidden when no service in the env has a typeTag and there are no untyped services to differentiate either. */}
-        {(typeTagCounts.length > 0 || noTypeCount > 0) && (
+        {/* Service-type filter chips. Hidden when no service in the env has a type and there are no untyped services to differentiate either. */}
+        {(serviceTypeCounts.length > 0 || noTypeCount > 0) && (
           <div
             role="group"
             aria-label="Filter services by type"
@@ -386,13 +387,13 @@ export default function Services() {
             >
               All ({services.length})
             </button>
-            {typeTagCounts.map((t) => {
-              const active = activeTypeFilter === t.tag;
+            {serviceTypeCounts.map((t) => {
+              const active = activeTypeFilter === t.id;
               return (
                 <button
-                  key={t.tag}
+                  key={t.id}
                   type="button"
-                  onClick={() => setActiveTypeFilter(t.tag)}
+                  onClick={() => setActiveTypeFilter(t.id)}
                   aria-pressed={active}
                   className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
                     active
@@ -400,7 +401,7 @@ export default function Services() {
                       : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-600'
                   }`}
                 >
-                  {t.tag} ({t.count})
+                  {t.displayName} ({t.count})
                 </button>
               );
             })}
@@ -456,11 +457,6 @@ export default function Services() {
                           </span>
                           {hasUpdate && (
                             <span className="badge bg-green-500/20 text-green-400 text-xs">Update available</span>
-                          )}
-                          {service.typeTag && (
-                            <span className="badge bg-slate-700 text-slate-300 text-xs" title="Service type">
-                              {service.typeTag}
-                            </span>
                           )}
                           {hasContainerImage && (
                             <span
