@@ -16,10 +16,15 @@
  *  3. Nulls are excluded from the triangle calculation; if a bucket has no
  *     numeric samples for a given row, that row emits `null` at that slot
  *     (matching the "no sample" semantics of the columnar shape).
- *  4. Picking the timestamp index once per bucket, then projecting every row
- *     against that shared index, keeps timestamps aligned across all
- *     entities — required by the frontend, which assumes
- *     `series[key][rowIdx][tIdx]` corresponds to `timestamps[tIdx]`.
+ *  4. Picking the timestamp index once per bucket keeps timestamps aligned
+ *     across all entities — required by the frontend, which assumes
+ *     `series[key][rowIdx][tIdx]` corresponds to `timestamps[tIdx]`. Each row
+ *     emits its value at the shared anchor index; if that index is null for a
+ *     row (because that entity wasn't sampled at the anchor instant — common
+ *     when entities live on different hosts with independently-scheduled
+ *     agents) the row falls back to its own most recent non-null sample inside
+ *     the bucket, so staggered-timestamp series stay populated instead of
+ *     collapsing to the single series that wins the anchor selection.
  *
  * If `timestamps.length <= maxPoints` (or `maxPoints < 3`, since LTTB needs
  * at least three slots to form a triangle), the input is returned as-is.
@@ -168,16 +173,43 @@ export function downsampleColumnar(
   for (let i = 0; i < interior; i++) finalIdx[i + 1] = selectedIndices[i];
   finalIdx[maxPoints - 1] = n - 1;
 
-  // Project timestamps + each row onto the selected indices. A null at the
-  // chosen index stays null (the row's data shape is preserved point-wise).
+  // Project timestamps onto the selected anchor indices.
   const newTimestamps = finalIdx.map((i) => timestamps[i]);
+
+  // Project each row. The two preserved endpoints take the exact sample. For
+  // interior slots we take the row's value at the bucket's shared anchor index
+  // when present; when it's null we fall back to the row's most recent non-null
+  // sample *within the same bucket*.
+  //
+  // The fallback is load-bearing for multi-entity charts: services (and
+  // servers) on different hosts are sampled by independent agents at staggered
+  // times, so the shared `timestamps[]` is a UNION where each row is non-null
+  // only at its own slots. Projecting every row onto a single shared anchor
+  // index (the old behaviour) then nulls out every row except the one sampled
+  // at that exact instant — and since the highest-variance series wins the
+  // anchor selection in most buckets, only that one series survives, leaving
+  // the chart showing a single object. Picking each row's own in-bucket sample
+  // keeps every series populated while still sharing the bucket's x-position.
   const newRows: Array<Array<number | null>> = new Array(rows.length);
   for (let r = 0; r < rows.length; r++) {
     const row = rows[r];
     const out: Array<number | null> = new Array(maxPoints);
-    for (let i = 0; i < maxPoints; i++) {
-      const v = row[finalIdx[i]];
-      out[i] = v ?? null;
+    out[0] = row[0] ?? null;
+    out[maxPoints - 1] = row[n - 1] ?? null;
+    for (let b = 0; b < interior; b++) {
+      const anchor = selectedIndices[b];
+      let v = row[anchor];
+      if (v == null) {
+        const [bStart, bEnd] = boundaries[b];
+        for (let j = bEnd - 1; j >= bStart; j--) {
+          const cand = row[j];
+          if (cand != null) {
+            v = cand;
+            break;
+          }
+        }
+      }
+      out[b + 1] = v ?? null;
     }
     newRows[r] = out;
   }
