@@ -30,6 +30,7 @@ import {
   getErrorMessage,
   handleUniqueConstraint,
   parsePaginationQuery,
+  coerceNumeric,
 } from '../lib/helpers.js';
 import { downsampleColumnar } from '../lib/metrics-downsample.js';
 
@@ -727,10 +728,13 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
                 const slot = series[key] as { rows: unknown[][] };
                 slot.rows[dbIdx]![ti] = value;
               } else if (scalarKeys.has(key)) {
-                // Direct scalar fill. For declared-scalar keys whose actual
-                // value is non-numeric (array, object), store null.
+                // Direct scalar fill. node-postgres returns int8/numeric columns
+                // as strings, so coerce before the numeric check — otherwise
+                // every Postgres scalar series is all-null and the chart is
+                // empty. Non-numeric values (arrays, objects, text) → null.
                 const arr = series[key] as Array<Array<number | null>>;
-                arr[dbIdx]![ti] = typeof value === 'number' ? value : null;
+                const num = coerceNumeric(value);
+                arr[dbIdx]![ti] = typeof num === 'number' ? num : null;
               } else if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
                 // Compound row-flatten case — fields end up in `${key}.${field}`
                 // entries that were registered as scalarKeys during discovery.
@@ -738,7 +742,8 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
                   const compound = `${key}.${field}`;
                   const arr = series[compound] as Array<Array<number | null>> | undefined;
                   if (arr) {
-                    arr[dbIdx]![ti] = typeof fieldValue === 'number' ? fieldValue : null;
+                    const num = coerceNumeric(fieldValue);
+                    arr[dbIdx]![ti] = typeof num === 'number' ? num : null;
                   }
                 }
               }

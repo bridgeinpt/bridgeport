@@ -94,6 +94,29 @@ export function safeJsonParse<T>(json: string | null | undefined, defaultValue: 
 }
 
 /**
+ * Coerce a value to a JS number when it represents one, otherwise return it
+ * unchanged. Database drivers — notably node-postgres for `int8`/`bigint` and
+ * `numeric` columns — return numeric values as STRINGS to avoid precision loss
+ * (e.g. `pg_database_size()` → "27917335"). Downstream consumers that expect
+ * `typeof value === 'number'` (history chart series, byte/percent formatting)
+ * silently drop those strings, so we normalise here:
+ *   - `bigint` → `Number` (matches prior behaviour)
+ *   - a string that is a finite number → that number
+ *   - everything else (non-numeric text like "public.foo", null, objects,
+ *     arrays, empty/whitespace strings, "Infinity"/"NaN") → returned as-is
+ */
+export function coerceNumeric(value: unknown): unknown {
+  if (typeof value === 'bigint') return Number(value);
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed === '') return value;
+    const num = Number(trimmed);
+    if (Number.isFinite(num)) return num;
+  }
+  return value;
+}
+
+/**
  * Extract a human-readable error message from an unknown error value.
  */
 export function getErrorMessage(error: unknown, defaultMessage: string = 'Unknown error'): string {

@@ -33,6 +33,12 @@ export interface UseMetricResourceOptions<T> {
   // When false, the hook short-circuits and does nothing. Use this to gate
   // on selectedEnvironment etc. without conditionally calling the hook.
   enabled?: boolean;
+  // Bounded retry for the INITIAL load only. A cold-started backend (container
+  // just restarted) can briefly 5xx / time out the first metrics fetch; without
+  // a retry the page latches a misleading "no data" empty state until the user
+  // manually refreshes. Refresh-tick failures are left to the next auto-refresh
+  // tick and are never retried here. Set `retries: 0` to opt out.
+  initialRetry?: { retries?: number; baseMs?: number; maxMs?: number };
 }
 
 export interface UseMetricResourceResult<T> {
@@ -47,7 +53,10 @@ export function useMetricResource<T extends { until?: string }>(
   fetcher: (since?: string) => Promise<T>,
   opts: UseMetricResourceOptions<T> = {}
 ): UseMetricResourceResult<T> {
-  const { autoRefreshMs = 30000, depKey, merge, enabled = true } = opts;
+  const { autoRefreshMs = 30000, depKey, merge, enabled = true, initialRetry } = opts;
+  const maxInitialRetries = initialRetry?.retries ?? 4;
+  const initialRetryBaseMs = initialRetry?.baseMs ?? 800;
+  const initialRetryMaxMs = initialRetry?.maxMs ?? 8000;
 
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState<boolean>(enabled);
@@ -65,6 +74,17 @@ export function useMetricResource<T extends { until?: string }>(
   // changed before the request settled) doesn't overwrite fresher state.
   const requestTokenRef = useRef(0);
 
+  // Pending initial-load retry timer + how many retries we've consumed for the
+  // current depKey window. Reset on success, depKey change, and reload().
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryCountRef = useRef(0);
+  const clearRetryTimer = useCallback(() => {
+    if (retryTimerRef.current != null) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+  }, []);
+
   // Keep a fresh fetcher reference. `doFetch` reads it on each call so
   // callers can pass an inline arrow function without forcing the effect
   // to re-run on every render.
@@ -75,12 +95,16 @@ export function useMetricResource<T extends { until?: string }>(
     async (isRefresh: boolean) => {
       if (!enabled) return;
       const token = ++requestTokenRef.current;
+      // A fresh fetch supersedes any retry we had queued.
+      clearRetryTimer();
       if (isRefresh) setRefreshing(true);
       else setLoading(true);
+      let scheduledRetry = false;
       try {
         const since = isRefresh ? lastUntilRef.current : undefined;
         const result = await fetcherRef.current(since);
         if (token !== requestTokenRef.current) return;
+        retryCountRef.current = 0;
         setError(null);
         if (isRefresh && merge && dataRef.current != null) {
           const next = merge(dataRef.current, result);
@@ -105,19 +129,38 @@ export function useMetricResource<T extends { until?: string }>(
         }
       } catch (err) {
         if (token !== requestTokenRef.current) return;
+        // Transient first-load failure (cold-started backend): retry with
+        // exponential backoff instead of latching the empty state. Keep
+        // `loading` true across retries so the page shows skeletons, not the
+        // "no data" card. Refresh-tick failures fall through to the next tick.
+        if (!isRefresh && retryCountRef.current < maxInitialRetries) {
+          const delay = Math.min(
+            initialRetryBaseMs * 2 ** retryCountRef.current,
+            initialRetryMaxMs
+          );
+          retryCountRef.current += 1;
+          retryTimerRef.current = setTimeout(() => {
+            void doFetch(false);
+          }, delay);
+          scheduledRetry = true;
+          return;
+        }
         setError(err instanceof Error ? err : new Error(String(err)));
       } finally {
-        if (token === requestTokenRef.current) {
+        if (token === requestTokenRef.current && !scheduledRetry) {
           if (isRefresh) setRefreshing(false);
           else setLoading(false);
         }
       }
     },
-    [enabled, merge]
+    [enabled, merge, clearRetryTimer, maxInitialRetries, initialRetryBaseMs, initialRetryMaxMs]
   );
 
   // Initial load + reset on depKey change.
   useEffect(() => {
+    // A new window invalidates any queued retry and resets the retry budget.
+    clearRetryTimer();
+    retryCountRef.current = 0;
     if (!enabled) {
       setLoading(false);
       setData(null);
@@ -130,6 +173,9 @@ export function useMetricResource<T extends { until?: string }>(
     lastUntilRef.current = undefined;
     setData(null);
     void doFetch(false);
+    // Cancel a pending retry if the component unmounts or depKey/enabled change
+    // before it fires.
+    return clearRetryTimer;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [depKey, enabled]);
 
@@ -144,10 +190,12 @@ export function useMetricResource<T extends { until?: string }>(
   }, [autoRefreshMs, depKey, enabled]);
 
   const reload = useCallback(() => {
+    clearRetryTimer();
+    retryCountRef.current = 0;
     dataRef.current = null;
     lastUntilRef.current = undefined;
     void doFetch(false);
-  }, [doFetch]);
+  }, [doFetch, clearRetryTimer]);
 
   return { data, loading, refreshing, error, reload };
 }

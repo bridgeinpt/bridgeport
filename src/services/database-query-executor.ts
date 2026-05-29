@@ -2,6 +2,7 @@ import pg from 'pg';
 import mysql from 'mysql2/promise';
 import Redis from 'ioredis';
 import { SSHClient, LocalClient, isLocalhost, shellEscape, type CommandClient } from '../lib/ssh.js';
+import { coerceNumeric } from '../lib/helpers.js';
 import { decrypt } from '../lib/crypto.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 
@@ -41,6 +42,7 @@ export interface SSHConnectionInfo {
 export interface RedisConnectionInfo {
   host: string;
   port: number;
+  username?: string;
   password?: string;
   useSsl?: boolean;
 }
@@ -228,6 +230,11 @@ async function executeRedisQueries(
   const client = new Redis({
     host: conn.host,
     port: conn.port,
+    // Managed Redis/Valkey with restricted ACLs authenticates a named user, so
+    // the username must be sent alongside the password — omitting it makes AUTH
+    // fail and ioredis closes the socket ("Connection is closed."). Mirrors the
+    // credential handling in pingDatabase().
+    username: conn.username || undefined,
     password: conn.password || undefined,
     tls: conn.useSsl ? { rejectUnauthorized: false } : undefined,
     connectTimeout: 10000,
@@ -480,8 +487,7 @@ function parseQueryResult(
     if (rows.length === 0) return null;
     const firstRow = rows[0];
     const firstKey = Object.keys(firstRow)[0];
-    const value = firstRow[firstKey];
-    return typeof value === 'bigint' ? Number(value) : value;
+    return coerceNumeric(firstRow[firstKey]);
   }
 
   if (query.resultType === 'row') {
@@ -490,15 +496,13 @@ function parseQueryResult(
     if (query.resultMapping) {
       const mapped: Record<string, unknown> = {};
       for (const [resultKey, columnKey] of Object.entries(query.resultMapping)) {
-        const value = row[columnKey];
-        mapped[resultKey] = typeof value === 'bigint' ? Number(value) : value;
+        mapped[resultKey] = coerceNumeric(row[columnKey]);
       }
       return mapped;
     }
-    // Convert bigints
     const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(row)) {
-      result[key] = typeof value === 'bigint' ? Number(value) : value;
+      result[key] = coerceNumeric(value);
     }
     return result;
   }
@@ -508,14 +512,13 @@ function parseQueryResult(
       if (query.resultMapping) {
         const mapped: Record<string, unknown> = {};
         for (const [resultKey, columnKey] of Object.entries(query.resultMapping)) {
-          const value = row[columnKey];
-          mapped[resultKey] = typeof value === 'bigint' ? Number(value) : value;
+          mapped[resultKey] = coerceNumeric(row[columnKey]);
         }
         return mapped;
       }
       const result: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(row)) {
-        result[key] = typeof value === 'bigint' ? Number(value) : value;
+        result[key] = coerceNumeric(value);
       }
       return result;
     });
