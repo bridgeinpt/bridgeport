@@ -71,9 +71,13 @@ export function usePaginatedFetch<T>({
   // Fetch with loading indicator — used by the effect for pagination/dep changes
   useEffect(() => {
     if (!enabled) {
+      // Precondition not met yet (e.g. the environment hasn't been selected
+      // during cold start). This is a *pending* state, not a *loaded-empty* one:
+      // keep `loading` true so callers show a skeleton instead of flashing a
+      // misleading "no results" empty state until the precondition resolves.
       setItems([]);
       setTotal(0);
-      setLoading(false);
+      setLoading(true);
       return;
     }
 
