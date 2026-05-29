@@ -931,10 +931,24 @@ export class DockerSSH {
     return stdout + stderr; // Docker logs go to both
   }
 
-  async composeUp(composePath: string, serviceName?: string, forceRecreate: boolean = true): Promise<void> {
+  /**
+   * `noDeps` adds `--no-deps` so the named service's `up` does not cascade into
+   * (re)creating its `depends_on` services. Callers pass this when the compose
+   * file is shared by multiple BRIDGEPORT deployments — each sibling owns and
+   * deploys its own service, so cascading would gratuitously recreate (and
+   * race on) a sibling's container. It is left off for a standalone compose
+   * file so a service's own un-tracked dependencies still come up.
+   */
+  async composeUp(
+    composePath: string,
+    serviceName?: string,
+    forceRecreate: boolean = true,
+    noDeps: boolean = false
+  ): Promise<void> {
     const { cmd: compose, majorVersion } = await this.getComposeInfo();
     const escapedPath = shellEscape(composePath);
     const escapedService = serviceName ? shellEscape(serviceName) : undefined;
+    const noDepsFlag = escapedService && noDeps ? '--no-deps' : '';
 
     if (forceRecreate && majorVersion === 1) {
       // docker-compose v1.x has a bug with --force-recreate on newer Docker versions
@@ -945,7 +959,7 @@ export class DockerSSH {
       await this.client.exec(this.pathPrefix + rmCmd);
 
       const upCmd = escapedService
-        ? `${compose} -f ${escapedPath} up -d ${escapedService}`
+        ? `${compose} -f ${escapedPath} up -d ${noDepsFlag} ${escapedService}`
         : `${compose} -f ${escapedPath} up -d`;
       const { code, stderr } = await this.client.exec(this.pathPrefix + upCmd);
       if (code !== 0) {
@@ -955,7 +969,7 @@ export class DockerSSH {
       // docker compose v2.x: use --force-recreate normally
       const forceFlag = forceRecreate ? '--force-recreate' : '';
       const cmd = escapedService
-        ? `${compose} -f ${escapedPath} up -d ${forceFlag} ${escapedService}`
+        ? `${compose} -f ${escapedPath} up -d ${forceFlag} ${noDepsFlag} ${escapedService}`
         : `${compose} -f ${escapedPath} up -d ${forceFlag}`;
 
       const { code, stderr } = await this.client.exec(this.pathPrefix + cmd);

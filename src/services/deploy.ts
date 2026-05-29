@@ -13,6 +13,7 @@ import { pruneServerImages } from './servers.js';
 import { sendSystemNotification, NOTIFICATION_TYPES } from './notifications.js';
 import { recordTagDeployment } from './image-management.js';
 import { safeJsonParse, getErrorMessage } from '../lib/helpers.js';
+import { runExclusive } from '../lib/keyed-lock.js';
 import { getSystemSettings } from './system-settings.js';
 import { eventBus } from '../lib/event-bus.js';
 import { DEPLOYMENT_STATUS, CONTAINER_STATUS, HISTORY_STATUS, DISCOVERY_STATUS } from '../lib/constants.js';
@@ -184,7 +185,13 @@ export async function deployService(
       // Upload compose file (preserve existing path if set, otherwise use generated name)
       const composePath = deployment.composePath || `${deployDir}/${artifacts.compose.name}`;
       log(`Writing compose file to ${composePath}`);
-      await sshClient.exec(`cat > ${shellEscape(composePath)} << 'COMPOSEEOF'\n${artifacts.compose.content}\nCOMPOSEEOF`);
+      // Write to a per-deployment temp file then atomically rename into place.
+      // Multiple BRIDGEPORT services can share one compose file; two concurrent
+      // deploys doing a plain `cat >` to the same path could interleave into a
+      // half-written, unparseable file. `mv` on the same directory is atomic.
+      const composeTmp = `${composePath}.tmp.${deploymentRow.id}`;
+      await sshClient.exec(`cat > ${shellEscape(composeTmp)} << 'COMPOSEEOF'\n${artifacts.compose.content}\nCOMPOSEEOF`);
+      await sshClient.exec(`mv -f ${shellEscape(composeTmp)} ${shellEscape(composePath)}`);
 
       // Upload config files to their configured target paths
       for (const cf of artifacts.configFiles) {
@@ -252,9 +259,27 @@ export async function deployService(
 
     // Deploy using compose or direct container
     if (deployment.composePath && dockerSSH) {
-      log(`Running docker compose up for ${deployment.composePath}`);
-      await dockerSSH.composePull(deployment.composePath, deployment.containerName);
-      await dockerSSH.composeUp(deployment.composePath, deployment.containerName);
+      const composePath = deployment.composePath;
+      const ssh = dockerSSH;
+      log(`Running docker compose up for ${composePath}`);
+      // When this compose file backs more than one BRIDGEPORT deployment on this
+      // server, each sibling owns its own service, so suppress dependency
+      // cascade (--no-deps) to avoid recreating (and racing on) a sibling's
+      // container. A standalone compose file keeps default behavior so a
+      // service's own un-tracked dependencies still come up.
+      const deploymentsOnComposeFile = await prisma.serviceDeployment.count({
+        where: { serverId: deployment.serverId, composePath },
+      });
+      const sharedCompose = deploymentsOnComposeFile > 1;
+      // Serialize compose ops per (server, compose file): multiple BRIDGEPORT
+      // services can share one docker-compose.yml, and concurrent
+      // `compose up --force-recreate` runs race on recreating shared/dependency
+      // containers ("removal of container ... is already in progress"). One
+      // deploy touches a given file at a time.
+      await runExclusive(`${deployment.serverId}::${composePath}`, async () => {
+        await ssh.composePull(composePath, deployment.containerName);
+        await ssh.composeUp(composePath, deployment.containerName, true, sharedCompose);
+      });
       log('Compose up completed');
     } else {
       log(`Restarting container: ${deployment.containerName}`);
