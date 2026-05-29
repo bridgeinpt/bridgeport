@@ -121,25 +121,44 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   const hideTooltip = () => setTooltip(null);
 
   useEffect(() => {
-    listEnvironments().then(({ environments }) => {
-      setEnvironments(environments);
+    let cancelled = false;
 
-      if (selectedEnvironment) {
-        // Validate persisted environment still exists
-        const stillExists = environments.some((env) => env.id === selectedEnvironment.id);
-        if (!stillExists) {
-          // Environment was deleted, clear and select first available
-          if (environments.length > 0) {
+    // Retry on cold start: if this first call fails (backend still booting,
+    // transient 5xx), the environment would never get selected and every
+    // environment-scoped list page would sit on a skeleton forever.
+    const loadEnvironments = (attempt = 0) => {
+      listEnvironments()
+        .then(({ environments }) => {
+          if (cancelled) return;
+          setEnvironments(environments);
+
+          if (selectedEnvironment) {
+            // Validate persisted environment still exists
+            const stillExists = environments.some((env) => env.id === selectedEnvironment.id);
+            if (!stillExists) {
+              // Environment was deleted, clear and select first available
+              if (environments.length > 0) {
+                setSelectedEnvironment(environments[0]);
+              } else {
+                clearSelectedEnvironment();
+              }
+            }
+          } else if (environments.length > 0) {
+            // No environment selected, select first one
             setSelectedEnvironment(environments[0]);
-          } else {
-            clearSelectedEnvironment();
           }
-        }
-      } else if (environments.length > 0) {
-        // No environment selected, select first one
-        setSelectedEnvironment(environments[0]);
-      }
-    });
+        })
+        .catch(() => {
+          if (cancelled || attempt >= 5) return;
+          // Backoff: 0.5s, 1s, 2s, 4s, 8s
+          setTimeout(() => loadEnvironments(attempt + 1), 500 * 2 ** attempt);
+        });
+    };
+
+    loadEnvironments();
+    return () => {
+      cancelled = true;
+    };
   }, []); // Only run on mount
 
   return (
