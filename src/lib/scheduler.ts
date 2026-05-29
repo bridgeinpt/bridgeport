@@ -7,7 +7,7 @@ import { RegistryFactory, type RegistryCredentials } from './registry.js';
 import { getRegistryCredentials } from '../services/registries.js';
 import { deployService } from '../services/deploy.js';
 import { extractRepoName, stripRegistryPrefix, getDefaultTag, parseTagFilter, getBestTag } from './image-utils.js';
-import { safeJsonParse } from './helpers.js';
+import { safeJsonParse, getErrorMessage } from './helpers.js';
 import { syncDigestsFromRegistry, cleanupOldImageDigests, getImageDigest } from '../services/image-management.js';
 import {
   collectServerMetricsSSH,
@@ -359,7 +359,13 @@ async function runUpdateChecks(): Promise<void> {
 
     // Check updates for each registry
     for (const [registryId, registryImages] of byRegistry) {
-      const creds = await getRegistryCredentials(registryId);
+      let creds: RegistryCredentials | null;
+      try {
+        creds = await getRegistryCredentials(registryId);
+      } catch (error) {
+        console.error(`[Scheduler] Could not load credentials for registry ${registryId}:`, getErrorMessage(error));
+        continue;
+      }
       if (!creds) {
         console.warn(`[Scheduler] Could not get credentials for registry ${registryId}`);
         continue;

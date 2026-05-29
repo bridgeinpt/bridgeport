@@ -279,16 +279,23 @@ export async function getRegistryCredentials(id: string): Promise<RegistryCreden
     repositoryPrefix: conn.repositoryPrefix,
   };
 
-  if (conn.encryptedToken && conn.tokenNonce) {
-    creds.token = decrypt(conn.encryptedToken, conn.tokenNonce);
-  }
+  // Decrypt secrets defensively: a decryption failure must never let the raw
+  // error (which is tainted by the encrypted material / nonce) propagate to a
+  // logger. Re-throw a sanitized, secret-free error instead.
+  try {
+    if (conn.encryptedToken && conn.tokenNonce) {
+      creds.token = decrypt(conn.encryptedToken, conn.tokenNonce);
+    }
 
-  if (conn.username) {
-    creds.username = conn.username;
-  }
+    if (conn.username) {
+      creds.username = conn.username;
+    }
 
-  if (conn.encryptedPassword && conn.passwordNonce) {
-    creds.password = decrypt(conn.encryptedPassword, conn.passwordNonce);
+    if (conn.encryptedPassword && conn.passwordNonce) {
+      creds.password = decrypt(conn.encryptedPassword, conn.passwordNonce);
+    }
+  } catch {
+    throw new Error(`Failed to decrypt credentials for registry connection ${id}`);
   }
 
   return creds;
