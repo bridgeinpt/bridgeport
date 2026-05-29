@@ -7,12 +7,18 @@ import { generateTestToken } from '../../tests/helpers/auth.js';
 describe('secret routes', () => {
   let app: TestApp;
   let adminToken: string;
+  let operatorToken: string;
+  let viewerToken: string;
   let envId: string;
 
   beforeAll(async () => {
     app = await buildTestApp();
     const admin = await createTestUser(app.prisma, { email: 'admin@secrets.test', role: 'admin' });
     adminToken = await generateTestToken({ id: admin.id, email: admin.email });
+    const operator = await createTestUser(app.prisma, { email: 'operator@secrets.test', role: 'operator' });
+    operatorToken = await generateTestToken({ id: operator.id, email: operator.email });
+    const viewer = await createTestUser(app.prisma, { email: 'viewer@secrets.test', role: 'viewer' });
+    viewerToken = await generateTestToken({ id: viewer.id, email: viewer.email });
     const env = await createTestEnvironment(app.prisma, { name: 'secrets-env' });
     envId = env.id;
   });
@@ -172,6 +178,54 @@ describe('secret routes', () => {
       });
 
       expect(audit).not.toBeNull();
+    });
+
+    // Revealing a secret value is admin-only. Reveal is a GET, so the global
+    // read-method role exemption (authenticate.ts) does NOT gate it — the
+    // endpoint must carry an explicit requireAdmin guard. These assert it does.
+    describe('admin-only authorization', () => {
+      let revealableId: string;
+
+      beforeAll(async () => {
+        const createRes = await app.inject({
+          method: 'POST',
+          url: `/api/environments/${envId}/secrets`,
+          headers: { authorization: `Bearer ${adminToken}` },
+          payload: { key: 'ADMIN_ONLY_REVEAL', value: 'top-secret' },
+        });
+        revealableId = createRes.json().secret.id;
+      });
+
+      it('allows an admin to reveal', async () => {
+        const res = await app.inject({
+          method: 'GET',
+          url: `/api/secrets/${revealableId}/value`,
+          headers: { authorization: `Bearer ${adminToken}` },
+        });
+        expect(res.statusCode).toBe(200);
+        expect(res.json().value).toBe('top-secret');
+      });
+
+      it('forbids an operator from revealing (403)', async () => {
+        const res = await app.inject({
+          method: 'GET',
+          url: `/api/secrets/${revealableId}/value`,
+          headers: { authorization: `Bearer ${operatorToken}` },
+        });
+        expect(res.statusCode).toBe(403);
+        // Guard runs before the handler — no plaintext leaks in the body.
+        expect(res.body).not.toContain('top-secret');
+      });
+
+      it('forbids a viewer from revealing (403)', async () => {
+        const res = await app.inject({
+          method: 'GET',
+          url: `/api/secrets/${revealableId}/value`,
+          headers: { authorization: `Bearer ${viewerToken}` },
+        });
+        expect(res.statusCode).toBe(403);
+        expect(res.body).not.toContain('top-secret');
+      });
     });
   });
 

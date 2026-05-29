@@ -10,7 +10,7 @@ import {
 } from '../services/secrets.js';
 import { logAudit, actorFrom } from '../services/audit.js';
 import { validateBody, validateUpdateBody, findOrNotFound, handleUniqueConstraint } from '../lib/helpers.js';
-import { requireOperator } from '../plugins/authorize.js';
+import { requireOperator, requireAdmin } from '../plugins/authorize.js';
 import { triggerAutoResyncForKey } from '../services/config-file-auto-resync.js';
 
 const createSecretSchema = z.object({
@@ -152,10 +152,15 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
-  // Get secret value (requires explicit action)
+  // Get secret value (decrypts and returns plaintext). Admin-only: revealing a
+  // secret value is the most sensitive read in the system, so it requires the
+  // admin role on top of the per-environment `allowSecretReveal` toggle and the
+  // per-secret `neverReveal` flag below. (Reveal is a GET, so the global
+  // read-method role exemption would otherwise let any authenticated principal
+  // through — see src/plugins/authenticate.ts `enforceRoleForMethod`.)
   fastify.get(
     '/api/secrets/:id/value',
-    { preHandler: [fastify.authenticate] },
+    { preHandler: [fastify.authenticate, requireAdmin] },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 

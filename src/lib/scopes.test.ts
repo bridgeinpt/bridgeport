@@ -18,6 +18,8 @@ describe('computeScopes', () => {
 
     expect(scopes).toContain('admin:*');
     expect(scopes).toContain('tokens:manage');
+    // Decrypting secret values is admin-only.
+    expect(scopes).toContain('secrets:reveal');
 
     // Read on every resource.
     for (const r of ['services', 'secrets', 'servers', 'environments']) {
@@ -31,6 +33,8 @@ describe('computeScopes', () => {
 
     expect(scopes).not.toContain('admin:*');
     expect(scopes).not.toContain('tokens:manage');
+    // Reveal is admin-only — operators can manage secrets but not decrypt values.
+    expect(scopes).not.toContain('secrets:reveal');
 
     for (const r of ['services', 'secrets', 'servers', 'environments']) {
       expect(scopes).toContain(`${r}:read`);
@@ -38,11 +42,12 @@ describe('computeScopes', () => {
     }
   });
 
-  it('viewer role gets ONLY read scopes — no writes, no admin', () => {
+  it('viewer role gets ONLY read scopes — no writes, no admin, no reveal', () => {
     const scopes = computeScopes(makeUser({ role: 'viewer' }));
 
     expect(scopes).not.toContain('admin:*');
     expect(scopes).not.toContain('tokens:manage');
+    expect(scopes).not.toContain('secrets:reveal');
 
     // All reads present.
     for (const r of ['services', 'secrets', 'servers', 'environments']) {

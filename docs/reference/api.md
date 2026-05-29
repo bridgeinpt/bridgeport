@@ -110,7 +110,7 @@ curl https://deploy.example.com/api/auth/me \
   "scopes": [
     "services:read", "secrets:read", "servers:read", "environments:read",
     "services:write", "secrets:write", "servers:write", "environments:write",
-    "tokens:manage", "admin:*"
+    "secrets:reveal", "tokens:manage", "admin:*"
   ]
 }
 ```
@@ -118,7 +118,7 @@ curl https://deploy.example.com/api/auth/me \
 - `user` (existing) — full principal record.
 - `role` — `admin` / `operator` / `viewer` (effective role for API tokens).
 - `environments` — environment IDs the caller may act on. For env-scoped API tokens this is the token's allowlist; for full-access JWTs/tokens it's every environment in the system.
-- `scopes` — derived, human-friendly scope strings (`<resource>:<action>`). Use these to gate UI affordances; the source of truth for enforcement is still the role + token scope.
+- `scopes` — derived, human-friendly scope strings (`<resource>:<action>`). Use these to gate UI affordances; the source of truth for enforcement is still the role + token scope. Note `secrets:read` (all roles) covers listing secret keys/metadata, while `secrets:reveal` (admin only) covers decrypting values via `GET /api/secrets/:id/value`.
 
 **First-user registration**
 
