@@ -155,6 +155,34 @@ describe('downsampleColumnar', () => {
       expect(result.rows[0]![result.rows[0]!.length - 1]).toBe(t.length - 1);
     });
 
+    it('keeps every series populated when rows have disjoint (staggered) sample times', () => {
+      // Regression for the "only one object renders" bug: services/servers on
+      // different hosts are sampled by independent agents, so the shared axis
+      // is a UNION where each row is non-null only at its OWN slots. Here four
+      // rows interleave their samples (row r at indices where i % 4 === r) and
+      // row 0 carries a large-variance spike while the rest are near-flat — so
+      // row 0's timestamps dominate the per-bucket anchor selection. The old
+      // shared-index projection nulled out rows 1–3 entirely; every series must
+      // now survive downsampling.
+      const N = 4;
+      const total = N * 200; // 800 union timestamps -> well above maxPoints
+      const t = timestamps(total);
+      const rows = Array.from({ length: N }, (_, r) =>
+        t.map((_, i) => {
+          if (i % N !== r) return null as number | null;
+          return r === 0 ? Math.sin(i / 3) * 1000 : 5 + r; // spiky vs flat
+        })
+      );
+
+      const result = downsampleColumnar(t, rows, 120);
+
+      expect(result.timestamps.length).toBe(120);
+      for (let r = 0; r < N; r++) {
+        const nonNull = result.rows[r]!.filter((v) => v != null).length;
+        expect(nonNull).toBeGreaterThan(20);
+      }
+    });
+
     it('rows of different sparsity stay aligned to the same timestamps', () => {
       const t = timestamps(200);
       // Dense row, occasional null row, mostly-null row.
