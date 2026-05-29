@@ -57,6 +57,8 @@ plugins/
 │   ├── nodejs.json
 │   ├── caddy.json
 │   ├── nginx.json
+│   ├── celery.json
+│   ├── keycloak.json
 │   ├── redis.json
 │   ├── postgres.json
 │   ├── generic.json
@@ -495,6 +497,8 @@ BRIDGEPORT ships with these plugins:
 | `nodejs` | Node.js | repl, npm-install, npm-build, npm-test |
 | `caddy` | Caddy | version, validate, reload, fmt, list-modules |
 | `nginx` | Nginx | test-config, reload, version |
+| `celery` | Celery | status, inspect-active, inspect-scheduled, inspect-stats |
+| `keycloak` | Keycloak | version, show-config |
 | `redis` | Redis | cli, ping, info, dbsize |
 | `postgres` | PostgreSQL | psql, list-dbs, version |
 | `generic` | Generic | sh, bash |

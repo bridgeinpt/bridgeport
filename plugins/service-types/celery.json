@@ -1,0 +1,11 @@
+{
+  "$schema": "../schemas/service-type.schema.json",
+  "name": "celery",
+  "displayName": "Celery",
+  "commands": [
+    { "name": "status", "displayName": "Worker Status", "command": "celery -A \"${CELERY_APP:-app}\" status", "description": "List active workers and ping them", "sortOrder": 0 },
+    { "name": "inspect-active", "displayName": "Active Tasks", "command": "celery -A \"${CELERY_APP:-app}\" inspect active", "description": "Tasks currently being executed", "sortOrder": 1 },
+    { "name": "inspect-scheduled", "displayName": "Scheduled Tasks", "command": "celery -A \"${CELERY_APP:-app}\" inspect scheduled", "description": "Tasks scheduled for later (ETA/countdown)", "sortOrder": 2 },
+    { "name": "inspect-stats", "displayName": "Worker Stats", "command": "celery -A \"${CELERY_APP:-app}\" inspect stats", "description": "Per-worker pool and resource statistics", "sortOrder": 3 }
+  ]
+}
