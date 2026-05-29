@@ -9,10 +9,16 @@
  * Scope strings follow `<resource>:<action>`:
  *   services:read | services:write
  *   secrets:read  | secrets:write
+ *   secrets:reveal    (decrypt secret values — admin only)
  *   servers:read  | servers:write
  *   environments:read | environments:write
  *   tokens:manage
  *   admin:*           (wildcard granted to admins)
+ *
+ * NOTE: `secrets:read` (granted to every role) covers listing secret keys and
+ * metadata. Revealing the decrypted *value* is a separate, stronger capability
+ * advertised as `secrets:reveal` and granted to admins only — matching the
+ * `requireAdmin` guard on `GET /api/secrets/:id/value`.
  *
  * NOTE: This is intentionally a *view* of permissions, not the source of
  * truth. The real enforcement still lives in the authenticate/authorize
@@ -39,6 +45,9 @@ function scopesForRole(role: UserRole): string[] {
 
   // Admin-only.
   if (role === 'admin') {
+    // Revealing decrypted secret values is admin-only (enforced by requireAdmin
+    // on GET /api/secrets/:id/value). `secrets:read` above only covers listing.
+    out.push('secrets:reveal');
     out.push('tokens:manage');
     out.push('admin:*');
   }
