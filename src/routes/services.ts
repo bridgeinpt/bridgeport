@@ -25,26 +25,10 @@ import { isDryRun } from '../lib/dry-run.js';
 
 // --- schemas ---
 
-// Free-form operator-defined type label (issue #112). String-trim, normalize empty → null.
-// Distinct from `serviceTypeId` which references the plugin-provided ServiceType model.
-// `__none__` is reserved: the Services UI uses it as a URL sentinel for the "No type"
-// filter chip (see ui/src/pages/Services.tsx `NO_TYPE_FILTER`). Persisting a literal
-// '__none__' would collide with that sentinel and silently break the filter, so reject
-// it here at the API boundary.
-const typeTagSchema = z
-  .string()
-  .trim()
-  .max(64)
-  .transform((v) => (v === '' ? null : v))
-  .refine((v) => v !== '__none__', { message: 'typeTag value "__none__" is reserved' })
-  .nullable()
-  .optional();
-
 const createServiceSchema = z.object({
   name: z.string().min(1),
   containerImageId: z.string().min(1),
   imageTag: z.string().default('latest'),
-  typeTag: typeTagSchema,
   composeTemplate: z.string().nullable().optional(),
   healthCheckUrl: z.string().nullable().optional(),
   baseEnv: z.record(z.string(), z.string()).optional(),
@@ -55,7 +39,6 @@ const updateServiceSchema = z.object({
   name: z.string().min(1).optional(),
   containerImageId: z.string().min(1).optional(),
   imageTag: z.string().optional(),
-  typeTag: typeTagSchema,
   composeTemplate: z.string().nullable().optional(),
   healthCheckUrl: z.string().nullable().optional(),
   baseEnv: z.record(z.string(), z.string()).nullable().optional(),
@@ -178,29 +161,45 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
     }
   );
 
-  // Distinct free-form type tags for an environment (issue #112).
-  // Used to populate the Services list filter chips and the ServiceDetail
-  // type-tag autocomplete. Case-sensitive grouping (operators converge via
-  // the datalist UX); empty/null typeTags are excluded from the list — the
-  // UI surfaces a separate "No type" chip computed client-side.
+  // Service types in use across an environment, with per-type service counts.
+  // Populates the Services list filter chips. Services with no serviceTypeId are
+  // excluded here — the UI surfaces a separate "No type" chip computed client-side.
   fastify.get(
-    '/api/environments/:envId/services/type-tags',
+    '/api/environments/:envId/services/type-counts',
     { preHandler: [fastify.authenticate] },
     async (request) => {
       const { envId } = request.params as { envId: string };
 
       const grouped = await prisma.service.groupBy({
-        by: ['typeTag'],
-        where: { environmentId: envId, typeTag: { not: null } },
+        by: ['serviceTypeId'],
+        where: { environmentId: envId, serviceTypeId: { not: null } },
         _count: { _all: true },
       });
 
-      const tags = grouped
-        .filter((row): row is typeof row & { typeTag: string } => row.typeTag !== null)
-        .map((row) => ({ tag: row.typeTag, count: row._count._all }))
-        .sort((a, b) => a.tag.localeCompare(b.tag));
+      const ids = grouped
+        .map((row) => row.serviceTypeId)
+        .filter((id): id is string => id !== null);
 
-      return { tags };
+      const serviceTypes = ids.length
+        ? await prisma.serviceType.findMany({
+            where: { id: { in: ids } },
+            select: { id: true, displayName: true },
+          })
+        : [];
+      const displayNameById = new Map(serviceTypes.map((t) => [t.id, t.displayName]));
+
+      const types = grouped
+        .filter((row): row is typeof row & { serviceTypeId: string } => row.serviceTypeId !== null)
+        .map((row) => ({
+          id: row.serviceTypeId,
+          // Fall back to the id if the ServiceType was deleted out from under a
+          // lingering FK (SetNull should prevent this, but stay defensive).
+          displayName: displayNameById.get(row.serviceTypeId) ?? row.serviceTypeId,
+          count: row._count._all,
+        }))
+        .sort((a, b) => a.displayName.localeCompare(b.displayName));
+
+      return { types };
     }
   );
 
@@ -295,7 +294,6 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
             name: body.name,
             containerImageId: body.containerImageId,
             imageTag: body.imageTag,
-            typeTag: body.typeTag ?? null,
             composeTemplate: body.composeTemplate ?? null,
             healthCheckUrl: body.healthCheckUrl ?? null,
             baseEnv: body.baseEnv ? JSON.stringify(body.baseEnv) : null,
@@ -309,9 +307,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
           resourceType: 'service',
           resourceId: service.id,
           resourceName: service.name,
-          // Wrap field-level state in `changes` so it mirrors PATCH's audit shape.
-          // A forensic query of `details.changes.typeTag` finds both CREATE and PATCH events.
-          details: { containerImageId: service.containerImageId, changes: { typeTag: service.typeTag } },
+          details: { containerImageId: service.containerImageId },
           ...actorFrom(request),
           environmentId: envId,
         });
@@ -378,7 +374,6 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
               name: body.name,
               containerImageId: body.containerImageId,
               imageTag: body.imageTag,
-              typeTag: body.typeTag ?? null,
               composeTemplate: body.composeTemplate ?? null,
               healthCheckUrl: body.healthCheckUrl ?? null,
               baseEnv: body.baseEnv ? JSON.stringify(body.baseEnv) : null,

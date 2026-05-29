@@ -299,7 +299,6 @@ model Service {
   id              String   @id @default(cuid())
   name            String // e.g., traefik, app-api
   imageTag        String   @default("latest") // Shared across all deployments (single source of truth in 2.0)
-  typeTag         String? // Free-form operator-defined type label (e.g., "django", "postgres"); distinct from the plugin-provided ServiceType relation
   composeTemplate String? // Docker compose template with placeholders
   healthCheckUrl  String? // Optional URL to check for health (e.g., http://localhost:8000/health)
   baseEnv         String? // JSON object: base env vars applied to every deployment
