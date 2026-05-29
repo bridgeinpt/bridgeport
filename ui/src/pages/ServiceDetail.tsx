@@ -421,6 +421,15 @@ export default function ServiceDetail() {
       const { logs } = await getServiceLogs(id);
       setLogs(logs);
       setOldestLogTimestamp(extractOldestTimestamp(logs));
+      // Logs render oldest->newest, so pin the view to the bottom on open to
+      // land on the most recent entries (matching `docker logs` / terminals).
+      // Without this the modal opens scrolled to the top, hiding newer logs.
+      requestAnimationFrame(() => {
+        const container = logsContainerRef.current;
+        if (container) {
+          container.scrollTop = container.scrollHeight;
+        }
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to load logs';
       if (message.includes('No such container')) {
