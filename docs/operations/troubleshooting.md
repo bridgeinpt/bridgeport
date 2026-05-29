@@ -88,12 +88,12 @@ In the UI: **Admin → Service Accounts → New**, give it the `viewer` role, th
 mint a token. A `viewer` token is read-only — every mutating call is rejected.
 
 > [!NOTE]
-> Resource scopes are derived from the role and **cannot be narrowed
-> per-resource today** — a `viewer` token therefore *can* read decrypted secret
-> values (`secrets:read`). The narrowing that **is** available is
+> A `viewer` token can't mutate anything, and **revealing secret values is
+> admin-only** — so a viewer/operator token cannot read decrypted secrets. (The
+> `secrets:read` string in `/api/auth/me` is advisory role-derived metadata; the
+> reveal endpoint enforces admin regardless.) The narrowing you **can** apply is
 > **per-environment**: when minting the token, scope it to the specific
-> environment(s) you're debugging rather than "all environments". Until
-> per-resource scopes exist, just avoid the secret-value endpoints.
+> environment(s) you're debugging rather than "all environments".
 
 **2. Put the URL + token in your `.env`** (see `.env.example`):
 
