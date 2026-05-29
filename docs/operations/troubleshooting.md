@@ -7,6 +7,7 @@ A practical guide to diagnosing and fixing common BRIDGEPORT issues, with a quic
 ## Table of Contents
 
 - [General Debugging](#general-debugging)
+  - [Querying a Live Instance (Read-Only API Access)](#querying-a-live-instance-read-only-api-access)
 - [Quick Troubleshooting Table](#quick-troubleshooting-table)
 - [Container Won't Start](#container-wont-start)
 - [Authentication Issues](#authentication-issues)
@@ -72,6 +73,62 @@ If this endpoint does not respond, BRIDGEPORT is not running or not reachable.
 | `[Scheduler] Health check failed for server X` | SSH or URL health check failed for a server |
 | `[Scheduler] Auto-deploying container image` | Auto-update triggered a deployment |
 | `Crypto not initialized` | `MASTER_KEY` is missing or invalid |
+
+### Querying a Live Instance (Read-Only API Access)
+
+When you (or a coding agent like Claude Code) are debugging an issue, it's often
+faster to read the *actual* state of a running instance than to reason from the
+code alone — "which services exist? what tag is deployed? is this server marked
+unhealthy?". BRIDGEPORT's API answers all of these, and a **read-only service
+account token** lets you query it safely without touching anything.
+
+**1. Create a read-only token**
+
+In the UI: **Admin → Service Accounts → New**, give it the `viewer` role, then
+mint a token. A `viewer` token is read-only — every mutating call is rejected.
+
+> [!NOTE]
+> Resource scopes are derived from the role and **cannot be narrowed
+> per-resource today** — a `viewer` token therefore *can* read decrypted secret
+> values (`secrets:read`). The narrowing that **is** available is
+> **per-environment**: when minting the token, scope it to the specific
+> environment(s) you're debugging rather than "all environments". Until
+> per-resource scopes exist, just avoid the secret-value endpoints.
+
+**2. Put the URL + token in your `.env`** (see `.env.example`):
+
+```bash
+BRIDGEPORT_URL="https://deploy.example.com"
+BRIDGEPORT_TOKEN="bport_pat_..."
+```
+
+These two variables are **not** read by the BRIDGEPORT server — they're purely
+for local tooling. `.env` is gitignored, so the token never gets committed.
+Treat it like any secret and revoke it from the Service Accounts page when done.
+
+**3. Query the API** (everything authenticates with `Authorization: Bearer`):
+
+```bash
+# Load the vars (from the repo root)
+set -a; . ./.env; set +a
+
+# Who am I / what can this token do?
+curl -s -H "Authorization: Bearer $BRIDGEPORT_TOKEN" "$BRIDGEPORT_URL/api/auth/me" | jq '{role, scopes}'
+
+# List environments, then services in one of them
+curl -s -H "Authorization: Bearer $BRIDGEPORT_TOKEN" "$BRIDGEPORT_URL/api/environments" | jq '.environments[] | {id, name}'
+curl -s -H "Authorization: Bearer $BRIDGEPORT_TOKEN" "$BRIDGEPORT_URL/api/environments/<envId>/services" | jq '.services[] | {name, imageTag, healthStatus, serviceTypeId}'
+```
+
+The full surface is documented in the [API Reference](../reference/api.md) and the
+live OpenAPI spec at `GET /openapi.json` (Swagger UI at `/api/docs`). A `viewer`
+token is rejected (`403`, `code: FORBIDDEN_ROLE`) on any mutating call, so it's
+safe to hand to automated tooling.
+
+> [!WARNING]
+> A token is a bearer credential — anyone holding it has its scopes. Never paste
+> it into a file that gets committed, a chat log, or a shared terminal recording.
+> Prefer short-lived tokens and rotate them after a debugging session.
 
 ---
 
