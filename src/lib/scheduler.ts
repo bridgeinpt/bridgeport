@@ -7,7 +7,7 @@ import { RegistryFactory, type RegistryCredentials } from './registry.js';
 import { getRegistryCredentials } from '../services/registries.js';
 import { deployService } from '../services/deploy.js';
 import { extractRepoName, stripRegistryPrefix, getDefaultTag, parseTagFilter, getBestTag } from './image-utils.js';
-import { safeJsonParse, getErrorMessage } from './helpers.js';
+import { safeJsonParse } from './helpers.js';
 import { syncDigestsFromRegistry, cleanupOldImageDigests, getImageDigest } from '../services/image-management.js';
 import {
   collectServerMetricsSSH,
@@ -362,8 +362,11 @@ async function runUpdateChecks(): Promise<void> {
       let creds: RegistryCredentials | null;
       try {
         creds = await getRegistryCredentials(registryId);
-      } catch (error) {
-        console.error(`[Scheduler] Could not load credentials for registry ${registryId}:`, getErrorMessage(error));
+      } catch {
+        // Don't log the caught error: getRegistryCredentials decrypts secrets,
+        // and static analysis (rightly) treats anything it throws as tainted by
+        // that secret material. The failure mode is unambiguous on its own.
+        console.error(`[Scheduler] Could not load credentials for registry ${registryId}; skipping`);
         continue;
       }
       if (!creds) {
