@@ -87,12 +87,41 @@ describe('useMetricResource', () => {
 
   it('captures fetch errors into the error slot without throwing', async () => {
     const fetcher = vi.fn().mockRejectedValue(new Error('boom'));
-    const { result } = renderHook(() => useMetricResource(fetcher, { autoRefreshMs: 0 }));
+    // Opt out of initial-load retries so the error settles immediately.
+    const { result } = renderHook(() =>
+      useMetricResource(fetcher, { autoRefreshMs: 0, initialRetry: { retries: 0 } })
+    );
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.error).toBeInstanceOf(Error);
     expect(result.current.error?.message).toBe('boom');
     expect(result.current.data).toBeNull();
+  });
+
+  it('retries a failed initial load and self-heals without a manual reload', async () => {
+    // Cold-start signature: the first fetch rejects (backend still warming up),
+    // the retry succeeds. The hook must stay in loading (not surface the error
+    // or a "no data" state) and then populate data on its own.
+    const fetcher = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('cold start 503'))
+      .mockResolvedValue({ until: 'T1', payload: 'recovered' });
+
+    const { result } = renderHook(() =>
+      // Tiny backoff so the retry fires well within waitFor's window — real
+      // timers, no fake-timer brittleness.
+      useMetricResource(fetcher, { autoRefreshMs: 0, initialRetry: { retries: 3, baseMs: 5 } })
+    );
+
+    await waitFor(() => expect(result.current.data).not.toBeNull());
+    expect(result.current.data).toEqual({ until: 'T1', payload: 'recovered' });
+    expect(result.current.error).toBeNull();
+    expect(result.current.loading).toBe(false);
+    // First call failed, second (retry) succeeded.
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    // Both the failed initial load and its retry are full-window (since=undefined).
+    expect(fetcher.mock.calls[0]![0]).toBeUndefined();
+    expect(fetcher.mock.calls[1]![0]).toBeUndefined();
   });
 
   it('enabled=false short-circuits — no fetch, no loading state', async () => {

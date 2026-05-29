@@ -80,6 +80,7 @@ export async function collectDatabaseMetrics(databaseId: string): Promise<void> 
       redisConn = {
         host: database.host || 'localhost',
         port: database.port || 6379,
+        username: credentials?.username,
         password: credentials?.password,
         useSsl: database.useSsl,
       };

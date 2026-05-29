@@ -381,6 +381,56 @@ describe('database routes', () => {
       expect(connections[idxB]![t1Idx]).toBe(22);
     });
 
+    it('coerces numeric-string scalars (node-postgres int8/numeric) into the chart series', async () => {
+      // node-postgres returns int8/bigint/numeric columns as STRINGS to avoid
+      // precision loss (e.g. pg_database_size() → "27917335"). The columnar
+      // projection used to do `typeof value === 'number' ? value : null`, which
+      // nulled every Postgres scalar and left the charts empty. They must come
+      // back as numbers now.
+      const env = await createTestEnvironment(app.prisma, { name: 'db-metrics-strnum' });
+      const db = await seedMonitoredDatabase({
+        envId: env.id,
+        typeName: 'pg-strnum',
+        typeDisplayName: 'PostgreSQL (strnum)',
+        dbName: 'strnum-db',
+        queries: [
+          { name: 'dbSize', displayName: 'Database Size', resultType: 'scalar', unit: 'bytes' },
+          { name: 'deadTupleRatio', displayName: 'Dead Tuple Ratio', resultType: 'scalar', unit: '%' },
+        ],
+      });
+
+      const t0 = new Date(Date.now() - 60_000);
+      const t1 = new Date(Date.now() - 30_000);
+      await app.prisma.databaseMetrics.createMany({
+        data: [
+          // Values stored exactly as the pg driver hands them over: strings.
+          { databaseId: db.id, collectedAt: t0, metricsJson: JSON.stringify({ dbSize: '27917335', deadTupleRatio: '3.09' }) },
+          { databaseId: db.id, collectedAt: t1, metricsJson: JSON.stringify({ dbSize: '27918000', deadTupleRatio: '0' }) },
+        ],
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/environments/${env.id}/databases/metrics/history?hours=6`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as {
+        types: Array<{ type: string; timestamps: string[]; series: Record<string, Array<Array<number | null>>> }>;
+      };
+      const group = body.types.find((g) => g.type === 'pg-strnum')!;
+      const t0Idx = group.timestamps.indexOf(t0.toISOString());
+      const t1Idx = group.timestamps.indexOf(t1.toISOString());
+
+      // Strings became numbers — and stay numbers (not "27917335" the string).
+      expect(group.series.dbSize[0]![t0Idx]).toBe(27917335);
+      expect(group.series.dbSize[0]![t1Idx]).toBe(27918000);
+      // "0" must coerce to 0, not be treated as falsy/null.
+      expect(group.series.deadTupleRatio[0]![t0Idx]).toBe(3.09);
+      expect(group.series.deadTupleRatio[0]![t1Idx]).toBe(0);
+    });
+
     it('preserves row-result query as { rows: unknown[][] } with snapshot per (db, time)', async () => {
       const env = await createTestEnvironment(app.prisma, { name: 'db-metrics-rows' });
       const db = await seedMonitoredDatabase({

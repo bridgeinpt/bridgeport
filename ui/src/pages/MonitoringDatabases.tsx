@@ -34,6 +34,13 @@ function formatBytes(bytes: number): string {
 
 function formatTableValue(value: unknown, unit?: string): string {
   if (value === null || value === undefined) return '-';
+  // node-postgres returns int8/numeric columns (e.g. table sizes) as strings.
+  // Coerce numeric-looking strings so byte/percent formatting and thousands
+  // separators apply; leave genuine text (table names, etc.) untouched.
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed !== '' && Number.isFinite(Number(trimmed))) value = Number(trimmed);
+  }
   if (typeof value === 'number') {
     if (unit === 'bytes' || unit === 'B') return formatBytes(value);
     if (unit === '%') return `${value.toFixed(1)}%`;
@@ -222,8 +229,21 @@ export default function MonitoringDatabases() {
       if (filterSet.size > 0 && !filterSet.has(db.id)) return;
       const series = rowsMatrix[i];
       if (!series) return;
-      const lastIdx = series.length - 1;
-      const val = lastIdx >= 0 ? series[lastIdx] : null;
+      // `timestamps` is a UNION across every db in the group. A db that collects
+      // on a slightly different cadence than its peers has `null` at the other
+      // dbs' timestamps — including, frequently, the global last index (which
+      // belongs to whichever db collected most recently). Scan back to THIS
+      // db's most recent actual snapshot instead of reading the last index, or
+      // all but the latest-collected db drop out of the table. Stop at the
+      // first non-null: if that snapshot is an empty array the query currently
+      // returns no rows, so the db is still correctly omitted.
+      let val: unknown = null;
+      for (let k = series.length - 1; k >= 0; k--) {
+        if (series[k] != null) {
+          val = series[k];
+          break;
+        }
+      }
       if (Array.isArray(val) && val.length > 0) {
         results.push({ dbName: db.name, rows: val as Array<Record<string, unknown>> });
       }
