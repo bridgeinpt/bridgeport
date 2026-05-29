@@ -253,6 +253,7 @@ Use these instead of reimplementing:
 - ContainerImage is required for every Service - central entity for image management
 - Service is a template (image, env, health, compose, container-image link); per-server runtime lives on ServiceDeployment (containerName, status, discovery, ports). UI/API back-compat: a `service.server`-style accessor still resolves to the first deployment's server, but new code should read from `serviceDeployments[]`
 - ConfigFragment is env-scoped, reusable text shared across config files; when an in-use fragment is deleted/edited the dependent files are auto-resynced
+- **Debugging against a live instance:** if `BRIDGEPORT_URL` and `BRIDGEPORT_TOKEN` are set in `.env` (a read-only service-account token), you can query a running instance for real data — `curl -H "Authorization: Bearer $BRIDGEPORT_TOKEN" "$BRIDGEPORT_URL/api/environments"`. Read-only only: never run mutating calls without explicit per-action approval, and avoid `secrets:read` endpoints. See [`docs/operations/troubleshooting.md`](docs/operations/troubleshooting.md#querying-a-live-instance-read-only-api-access).
 - **Docs stay in sync with code.** When you change `src/routes/**`, `src/services/**`, `prisma/schema.prisma`, `ui/src/pages/**`, or settings, update the matching file under `docs/guides/` or `docs/reference/` in the same PR. A Stop hook (`scripts/check-docs-drift.sh`) prints a reminder when code paths change without any `docs/` update.
 
 ## UI/UX Guidelines
