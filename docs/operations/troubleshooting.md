@@ -85,9 +85,15 @@ account token** lets you query it safely without touching anything.
 **1. Create a read-only token**
 
 In the UI: **Admin → Service Accounts → New**, give it the `viewer` role, then
-mint a token. Grant the fewest scopes you need — for most debugging that's
-`services:read`, `servers:read`, and `environments:read`. **Omit `secrets:read`**
-unless you specifically need it: that scope returns *decrypted* secret values.
+mint a token. A `viewer` token is read-only — every mutating call is rejected.
+
+> [!NOTE]
+> Resource scopes are derived from the role and **cannot be narrowed
+> per-resource today** — a `viewer` token therefore *can* read decrypted secret
+> values (`secrets:read`). The narrowing that **is** available is
+> **per-environment**: when minting the token, scope it to the specific
+> environment(s) you're debugging rather than "all environments". Until
+> per-resource scopes exist, just avoid the secret-value endpoints.
 
 **2. Put the URL + token in your `.env`** (see `.env.example`):
 
