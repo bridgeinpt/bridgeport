@@ -180,6 +180,18 @@ Files in `src/lib/` provide infrastructure concerns:
 - **ssh.ts** -- SSH connection pooling and command execution
 - **scheduler.ts** -- Timer-based background job scheduler
 - **registry.ts** -- Factory for registry API clients (Docker Hub, DigitalOcean, generic)
+- **response-cache.ts** -- Short-TTL, single-flight cache for read-heavy GET endpoints
+
+#### Metrics endpoint caching (`response-cache.ts`)
+
+The monitoring dashboards poll the metrics endpoints (`GET .../metrics/history`, `GET .../metrics/summary`) on a ~30s timer, and every open dashboard hits the same path. The underlying query is sub-millisecond and index-served; the cost that surfaces as the p99 tail under concurrency is the *synchronous* per-request work (columnar transform + JSON serialization of a large payload) serializing on the single Node event loop, paid independently by every concurrent identical request.
+
+`createResponseCache()` addresses this two ways:
+
+- **Single-flight** -- while one request is computing a key, concurrent requests for the same key await the in-flight promise instead of starting their own compute. This collapses a burst of N identical requests into one compute and is the dominant win under load.
+- **TTL reuse** -- a freshly-computed value is served from memory for `ttlMs` (default 5s). With a multi-minute sample interval this is well within what a 30s-refreshing chart already tolerates, and the delta-refresh path keeps steady-state freshness regardless.
+
+Only the **full-window** metrics reads are cached, keyed by `(envId, params)`. Delta requests (per-client `since`) bypass the cache. Under `NODE_ENV=test` the TTL is `0` so reads are always fresh — single-flight still applies. State is per-process; in a multi-process deployment each process coalesces its own load.
 
 ### Plugin Registration
 
