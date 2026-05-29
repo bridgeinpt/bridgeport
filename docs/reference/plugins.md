@@ -52,7 +52,15 @@ plugins/
 │   └── database-type.schema.json    # JSON Schema for validation
 ├── service-types/
 │   ├── django.json
+│   ├── fastapi.json
+│   ├── flask.json
 │   ├── nodejs.json
+│   ├── caddy.json
+│   ├── nginx.json
+│   ├── celery.json
+│   ├── keycloak.json
+│   ├── redis.json
+│   ├── postgres.json
 │   ├── generic.json
 │   └── your-custom-type.json        # Add your own here
 └── database-types/
@@ -484,7 +492,15 @@ BRIDGEPORT ships with these plugins:
 | Name | Display Name | Commands |
 |------|-------------|----------|
 | `django` | Django | shell, dbshell, migrate, makemigrations, collectstatic, createsuperuser |
+| `fastapi` | FastAPI | shell, pip-list, migrate, makemigration |
+| `flask` | Flask | shell, routes, db-upgrade, repl |
 | `nodejs` | Node.js | repl, npm-install, npm-build, npm-test |
+| `caddy` | Caddy | version, validate, reload, fmt, list-modules |
+| `nginx` | Nginx | test-config, reload, version |
+| `celery` | Celery | status, inspect-active, inspect-scheduled, inspect-stats |
+| `keycloak` | Keycloak | version, show-config |
+| `redis` | Redis | cli, ping, info, dbsize |
+| `postgres` | PostgreSQL | psql, list-dbs, version |
 | `generic` | Generic | sh, bash |
 
 **Database Types:**

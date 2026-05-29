@@ -1,0 +1,11 @@
+{
+  "$schema": "../schemas/service-type.schema.json",
+  "name": "flask",
+  "displayName": "Flask",
+  "commands": [
+    { "name": "shell", "displayName": "Flask Shell", "command": "flask shell", "description": "Interactive shell with the app context loaded", "sortOrder": 0 },
+    { "name": "routes", "displayName": "List Routes", "command": "flask routes", "description": "Show the URL map for the app", "sortOrder": 1 },
+    { "name": "db-upgrade", "displayName": "Run Migrations", "command": "flask db upgrade", "description": "Apply Flask-Migrate migrations to the latest revision", "sortOrder": 2 },
+    { "name": "repl", "displayName": "Python Shell", "command": "python", "description": "Plain Python REPL", "sortOrder": 3 }
+  ]
+}
