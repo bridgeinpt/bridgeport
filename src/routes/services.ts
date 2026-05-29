@@ -11,6 +11,7 @@ import {
   getLatestImageTags,
 } from '../services/deploy.js';
 import { DockerSSH, createClientForServer, shellEscape } from '../lib/ssh.js';
+import { runExclusive } from '../lib/keyed-lock.js';
 import { getEnvironmentSshKey } from './environments.js';
 import { logAudit, actorFrom } from '../services/audit.js';
 import { userIdForFk } from '../services/auth.js';
@@ -987,8 +988,19 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         // are re-read. We deliberately do NOT regenerate compose artifacts
         // here: restart means "down + up with the current on-disk compose".
         if (deployment.composePath) {
-          await docker.composeDown(deployment.composePath, deployment.containerName);
-          await docker.composeUp(deployment.composePath, deployment.containerName, true);
+          const composePath = deployment.composePath;
+          // Same compose file can back multiple deployments — suppress dependency
+          // cascade when shared (see deploy.ts), and serialize down+up per
+          // (server, compose file) so a manual restart can't race a concurrent
+          // deploy on the same file ("removal of container ... already in progress").
+          const deploymentsOnComposeFile = await prisma.serviceDeployment.count({
+            where: { serverId: deployment.serverId, composePath },
+          });
+          const sharedCompose = deploymentsOnComposeFile > 1;
+          await runExclusive(`${deployment.serverId}::${composePath}`, async () => {
+            await docker.composeDown(composePath, deployment.containerName);
+            await docker.composeUp(composePath, deployment.containerName, true, sharedCompose);
+          });
         } else {
           await docker.restartContainer(deployment.containerName);
         }

@@ -347,25 +347,46 @@ describe('ssh', () => {
   });
 
   describe('DockerSSH.composeUp', () => {
-    // exec is called once for version detection, then once for the up command.
-    function makeMockClient(composeVersion: string) {
+    // v2: the `docker compose version --short` plugin probe succeeds, so
+    // getComposeInfo picks the v2 (`--force-recreate`) branch. exec calls are
+    // [version, up].
+    function makeV2Client(version: string) {
       return {
         connect: vi.fn(),
         disconnect: vi.fn(),
         execStream: vi.fn(),
         exec: vi
           .fn()
-          .mockResolvedValueOnce({ stdout: composeVersion, stderr: '', code: 0 }) // version probe
+          .mockResolvedValueOnce({ stdout: version, stderr: '', code: 0 }) // plugin probe
           .mockResolvedValue({ stdout: '', stderr: '', code: 0 }),
         writeFile: vi.fn().mockResolvedValue(undefined),
       } as never;
     }
 
-    it('targets a single service with --no-deps so deps are not cascade-recreated (v2)', async () => {
-      const client = makeMockClient('2.24.0');
+    // v1: the plugin probe FAILS and the standalone `docker-compose version
+    // --short` probe succeeds, so getComposeInfo picks the v1 (rm + up)
+    // workaround branch. exec calls are [plugin probe (fail), standalone probe,
+    // rm, up]. Mocking the version directly would NOT reach v1 — getComposeInfo
+    // forces majorVersion>=2 whenever the plugin probe answers.
+    function makeV1Client(version: string) {
+      return {
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+        execStream: vi.fn(),
+        exec: vi
+          .fn()
+          .mockResolvedValueOnce({ stdout: '', stderr: 'not found', code: 1 }) // plugin probe fails
+          .mockResolvedValueOnce({ stdout: version, stderr: '', code: 0 }) // standalone probe
+          .mockResolvedValue({ stdout: '', stderr: '', code: 0 }),
+        writeFile: vi.fn().mockResolvedValue(undefined),
+      } as never;
+    }
+
+    it('adds --no-deps for a single service only when noDeps is set (v2)', async () => {
+      const client = makeV2Client('2.24.0');
       const docker = new DockerSSH(client);
 
-      await docker.composeUp('/opt/app/docker-compose.yml', 'frontend');
+      await docker.composeUp('/opt/app/docker-compose.yml', 'frontend', true, true);
 
       const upCmd = client.exec.mock.calls[1][0] as string;
       expect(upCmd).toContain('up -d');
@@ -374,27 +395,54 @@ describe('ssh', () => {
       expect(upCmd).toMatch(/'frontend'$/);
     });
 
-    it('does not add --no-deps when no service is targeted (v2 whole-file up)', async () => {
-      const client = makeMockClient('2.24.0');
+    it('omits --no-deps for a single service when noDeps is false (v2 default)', async () => {
+      const client = makeV2Client('2.24.0');
       const docker = new DockerSSH(client);
 
-      await docker.composeUp('/opt/app/docker-compose.yml');
+      // Default noDeps=false: a standalone compose file must still start deps.
+      await docker.composeUp('/opt/app/docker-compose.yml', 'frontend');
+
+      const upCmd = client.exec.mock.calls[1][0] as string;
+      expect(upCmd).toContain('--force-recreate');
+      expect(upCmd).not.toContain('--no-deps');
+      expect(upCmd).toMatch(/'frontend'$/);
+    });
+
+    it('does not add --no-deps when no service is targeted (v2 whole-file up)', async () => {
+      const client = makeV2Client('2.24.0');
+      const docker = new DockerSSH(client);
+
+      await docker.composeUp('/opt/app/docker-compose.yml', undefined, true, true);
 
       const upCmd = client.exec.mock.calls[1][0] as string;
       expect(upCmd).not.toContain('--no-deps');
     });
 
-    it('adds --no-deps on the v1 rm+up workaround path when a service is targeted', async () => {
-      // v1 force-recreate path: exec calls are [version, rm, up].
-      const client = makeMockClient('1.29.2');
+    it('adds --no-deps on the v1 rm+up workaround path when noDeps is set', async () => {
+      const client = makeV1Client('1.29.2');
+      const docker = new DockerSSH(client);
+
+      await docker.composeUp('/opt/app/docker-compose.yml', 'frontend', true, true);
+
+      const cmds = client.exec.mock.calls.map((c: unknown[]) => c[0] as string);
+      // Confirm we genuinely hit the v1 branch: it issues `rm -f -s` before up.
+      expect(cmds.some((c) => c.includes('rm -f -s'))).toBe(true);
+      const upCmd = cmds.find((c) => c.includes('up -d'))!;
+      expect(upCmd).toContain('docker-compose');
+      expect(upCmd).toContain('--no-deps');
+      expect(upCmd).toMatch(/'frontend'$/);
+    });
+
+    it('omits --no-deps on the v1 path when noDeps is false', async () => {
+      const client = makeV1Client('1.29.2');
       const docker = new DockerSSH(client);
 
       await docker.composeUp('/opt/app/docker-compose.yml', 'frontend');
 
       const cmds = client.exec.mock.calls.map((c: unknown[]) => c[0] as string);
+      expect(cmds.some((c) => c.includes('rm -f -s'))).toBe(true);
       const upCmd = cmds.find((c) => c.includes('up -d'))!;
-      expect(upCmd).toContain('--no-deps');
-      expect(upCmd).toMatch(/'frontend'$/);
+      expect(upCmd).not.toContain('--no-deps');
     });
   });
 });

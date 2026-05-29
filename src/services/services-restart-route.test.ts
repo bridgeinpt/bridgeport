@@ -35,6 +35,7 @@ const {
     // ServiceDeployment, so the route under test reads from this delegate.
     serviceDeployment: {
       findUnique: vi.fn(),
+      count: vi.fn(),
     },
     server: {
       findUnique: vi.fn(),
@@ -147,6 +148,8 @@ describe('POST /api/services/:id/deployments/:depId/restart — compose vs conta
     mockDocker.restartContainer.mockResolvedValue(undefined);
     mockDocker.composeDown.mockResolvedValue(undefined);
     mockDocker.composeUp.mockResolvedValue(undefined);
+    // Default: compose file backs a single deployment (not shared).
+    mockPrisma.serviceDeployment.count.mockResolvedValue(1);
 
     app = await buildAppWithRestart();
   });
@@ -202,11 +205,33 @@ describe('POST /api/services/:id/deployments/:depId/restart — compose vs conta
     expect(mockDocker.composeUp).toHaveBeenCalledWith(
       '/srv/web/docker-compose.yml',
       'web-container',
-      true // forceRecreate must be true
+      true, // forceRecreate must be true
+      false // noDeps: this compose file backs a single deployment (count=1)
     );
 
     // Critically: plain docker restart must NOT have run on the compose path.
     expect(mockDocker.restartContainer).not.toHaveBeenCalled();
+  });
+
+  it('passes noDeps=true to composeUp when the compose file backs multiple deployments', async () => {
+    mockPrisma.serviceDeployment.findUnique.mockResolvedValue(
+      deploymentFixture({ composePath: '/srv/web/docker-compose.yml' })
+    );
+    // Two deployments share this compose file → suppress dependency cascade.
+    mockPrisma.serviceDeployment.count.mockResolvedValue(2);
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/services/svc-1/deployments/dep-1/restart',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockDocker.composeUp).toHaveBeenCalledWith(
+      '/srv/web/docker-compose.yml',
+      'web-container',
+      true,
+      true // noDeps: shared compose file
+    );
   });
 
   it('runs restartContainer when composePath is null, and does NOT touch compose helpers', async () => {
