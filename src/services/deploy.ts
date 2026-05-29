@@ -13,6 +13,7 @@ import { pruneServerImages } from './servers.js';
 import { sendSystemNotification, NOTIFICATION_TYPES } from './notifications.js';
 import { recordTagDeployment } from './image-management.js';
 import { safeJsonParse, getErrorMessage } from '../lib/helpers.js';
+import { runExclusive } from '../lib/keyed-lock.js';
 import { getSystemSettings } from './system-settings.js';
 import { eventBus } from '../lib/event-bus.js';
 import { DEPLOYMENT_STATUS, CONTAINER_STATUS, HISTORY_STATUS, DISCOVERY_STATUS } from '../lib/constants.js';
@@ -252,9 +253,18 @@ export async function deployService(
 
     // Deploy using compose or direct container
     if (deployment.composePath && dockerSSH) {
-      log(`Running docker compose up for ${deployment.composePath}`);
-      await dockerSSH.composePull(deployment.composePath, deployment.containerName);
-      await dockerSSH.composeUp(deployment.composePath, deployment.containerName);
+      const composePath = deployment.composePath;
+      const ssh = dockerSSH;
+      log(`Running docker compose up for ${composePath}`);
+      // Serialize compose ops per (server, compose file): multiple BRIDGEPORT
+      // services can share one docker-compose.yml, and concurrent
+      // `compose up --force-recreate` runs race on recreating shared/dependency
+      // containers ("removal of container ... is already in progress"). One
+      // deploy touches a given file at a time.
+      await runExclusive(`${deployment.serverId}::${composePath}`, async () => {
+        await ssh.composePull(composePath, deployment.containerName);
+        await ssh.composeUp(composePath, deployment.containerName);
+      });
       log('Compose up completed');
     } else {
       log(`Restarting container: ${deployment.containerName}`);

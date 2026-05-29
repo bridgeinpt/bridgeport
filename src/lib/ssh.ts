@@ -944,8 +944,12 @@ export class DockerSSH {
         : `${compose} -f ${escapedPath} down`;
       await this.client.exec(this.pathPrefix + rmCmd);
 
+      // --no-deps when targeting a single service: each service in a shared
+      // compose file is deployed by its own BRIDGEPORT service, so we must not
+      // cascade-recreate dependencies (e.g. a frontend `up` recreating its
+      // `depends_on` api) — that collides with the api's own concurrent deploy.
       const upCmd = escapedService
-        ? `${compose} -f ${escapedPath} up -d ${escapedService}`
+        ? `${compose} -f ${escapedPath} up -d --no-deps ${escapedService}`
         : `${compose} -f ${escapedPath} up -d`;
       const { code, stderr } = await this.client.exec(this.pathPrefix + upCmd);
       if (code !== 0) {
@@ -954,8 +958,9 @@ export class DockerSSH {
     } else {
       // docker compose v2.x: use --force-recreate normally
       const forceFlag = forceRecreate ? '--force-recreate' : '';
+      // --no-deps when targeting a single service — see the v1 branch above.
       const cmd = escapedService
-        ? `${compose} -f ${escapedPath} up -d ${forceFlag} ${escapedService}`
+        ? `${compose} -f ${escapedPath} up -d ${forceFlag} --no-deps ${escapedService}`
         : `${compose} -f ${escapedPath} up -d ${forceFlag}`;
 
       const { code, stderr } = await this.client.exec(this.pathPrefix + cmd);

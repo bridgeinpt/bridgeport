@@ -345,4 +345,56 @@ describe('ssh', () => {
       );
     });
   });
+
+  describe('DockerSSH.composeUp', () => {
+    // exec is called once for version detection, then once for the up command.
+    function makeMockClient(composeVersion: string) {
+      return {
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+        execStream: vi.fn(),
+        exec: vi
+          .fn()
+          .mockResolvedValueOnce({ stdout: composeVersion, stderr: '', code: 0 }) // version probe
+          .mockResolvedValue({ stdout: '', stderr: '', code: 0 }),
+        writeFile: vi.fn().mockResolvedValue(undefined),
+      } as never;
+    }
+
+    it('targets a single service with --no-deps so deps are not cascade-recreated (v2)', async () => {
+      const client = makeMockClient('2.24.0');
+      const docker = new DockerSSH(client);
+
+      await docker.composeUp('/opt/app/docker-compose.yml', 'frontend');
+
+      const upCmd = client.exec.mock.calls[1][0] as string;
+      expect(upCmd).toContain('up -d');
+      expect(upCmd).toContain('--force-recreate');
+      expect(upCmd).toContain('--no-deps');
+      expect(upCmd).toMatch(/'frontend'$/);
+    });
+
+    it('does not add --no-deps when no service is targeted (v2 whole-file up)', async () => {
+      const client = makeMockClient('2.24.0');
+      const docker = new DockerSSH(client);
+
+      await docker.composeUp('/opt/app/docker-compose.yml');
+
+      const upCmd = client.exec.mock.calls[1][0] as string;
+      expect(upCmd).not.toContain('--no-deps');
+    });
+
+    it('adds --no-deps on the v1 rm+up workaround path when a service is targeted', async () => {
+      // v1 force-recreate path: exec calls are [version, rm, up].
+      const client = makeMockClient('1.29.2');
+      const docker = new DockerSSH(client);
+
+      await docker.composeUp('/opt/app/docker-compose.yml', 'frontend');
+
+      const cmds = client.exec.mock.calls.map((c: unknown[]) => c[0] as string);
+      const upCmd = cmds.find((c) => c.includes('up -d'))!;
+      expect(upCmd).toContain('--no-deps');
+      expect(upCmd).toMatch(/'frontend'$/);
+    });
+  });
 });
