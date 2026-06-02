@@ -127,7 +127,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Download all shard reports
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: stress-report-*
           path: shards
@@ -210,7 +210,7 @@ jobs:
 
       - name: Post sticky PR comment (only when thresholds breached)
         if: hashFiles('stress-report.json') != '' && github.event_name == 'pull_request'
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
