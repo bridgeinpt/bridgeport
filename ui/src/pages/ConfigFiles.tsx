@@ -11,6 +11,7 @@ import {
   getConfigFileHistory,
   restoreConfigFile,
   uploadAssetFile,
+  replaceAssetFile,
   syncConfigFileToAll,
   listConfigFragments,
   previewConfigFile,
@@ -94,6 +95,11 @@ export default function ConfigFiles() {
   const [editDescription, setEditDescription] = useState('');
   const [editAutoResync, setEditAutoResync] = useState(true);
   const [editLanguage, setEditLanguage] = useState<string>('plaintext');
+  // Replacement file picked in the binary branch of the edit modal. Binary
+  // content can't be edited inline, so "save" uploads this via the
+  // replace-asset endpoint instead of PATCHing content.
+  const [editReplaceFile, setEditReplaceFile] = useState<File | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
   const [viewingFile, setViewingFile] = useState<(ConfigFile & { services: ConfigFileServiceAttachment[] }) | null>(null);
   const [historyFile, setHistoryFile] = useState<ConfigFile | null>(null);
   const [history, setHistory] = useState<FileHistoryEntry[]>([]);
@@ -173,6 +179,10 @@ export default function ConfigFiles() {
       reload();
       setShowCreate(false);
       resetCreateForm();
+    } catch (err) {
+      // Surface API errors (e.g. 409 duplicate name) — previously swallowed,
+      // leaving the modal open with no feedback.
+      toast.error(err instanceof Error ? err.message : 'Failed to create config file');
     } finally {
       setCreating(false);
     }
@@ -180,25 +190,42 @@ export default function ConfigFiles() {
 
   const handleEdit = async () => {
     if (!editingFile) return;
-    await updateConfigFile(editingFile.id, {
-      content: editContent,
-      description: editDescription || undefined,
-      autoResync: editAutoResync,
-      // Language is only meaningful for text files. For binary files the
-      // language select is hidden, so don't re-assert a (possibly stale)
-      // language on every unrelated edit — let the server keep what it has.
-      ...(editingFile.isBinary ? {} : { language: editLanguage }),
-      // Always send the fragmentIds list on edit (full-replace semantics).
-      // Binary files skip the selector so we leave fragments alone.
-      ...(editingFile.isBinary ? {} : { fragmentIds: editFragmentIds }),
-    });
-    setEditingFile(null);
-    setEditContent('');
-    setEditDescription('');
-    setEditFragmentIds([]);
-    setPreviewContent(null);
-    setPreviewError(null);
-    reload();
+    setSavingEdit(true);
+    try {
+      // Replace the binary payload FIRST so a failed upload aborts the save
+      // before any metadata is touched.
+      if (editingFile.isBinary && editReplaceFile) {
+        await replaceAssetFile(editingFile.id, editReplaceFile);
+      }
+      await updateConfigFile(editingFile.id, {
+        // NEVER send content for binary files: the API strips binary content
+        // to '' in responses, so editContent is always empty here — PATCHing
+        // it back would wipe the stored payload. Replacement goes through
+        // replaceAssetFile above instead.
+        ...(editingFile.isBinary ? {} : { content: editContent }),
+        description: editDescription || undefined,
+        autoResync: editAutoResync,
+        // Language is only meaningful for text files. For binary files the
+        // language select is hidden, so don't re-assert a (possibly stale)
+        // language on every unrelated edit — let the server keep what it has.
+        ...(editingFile.isBinary ? {} : { language: editLanguage }),
+        // Always send the fragmentIds list on edit (full-replace semantics).
+        // Binary files skip the selector so we leave fragments alone.
+        ...(editingFile.isBinary ? {} : { fragmentIds: editFragmentIds }),
+      });
+      setEditingFile(null);
+      setEditContent('');
+      setEditDescription('');
+      setEditFragmentIds([]);
+      setEditReplaceFile(null);
+      setPreviewContent(null);
+      setPreviewError(null);
+      reload();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save config file');
+    } finally {
+      setSavingEdit(false);
+    }
   };
 
   const handleDelete = async () => {
@@ -268,6 +295,7 @@ export default function ConfigFiles() {
     setEditDescription(file.description || '');
     setEditAutoResync(file.autoResync ?? true);
     setEditLanguage(file.language || 'plaintext');
+    setEditReplaceFile(null);
     setPreviewContent(null);
     setPreviewError(null);
     const ids = (included ?? [])
@@ -350,6 +378,10 @@ export default function ConfigFiles() {
       setUploadName('');
       setUploadFilename('');
       setUploadDescription('');
+    } catch (err) {
+      // Surface API errors (e.g. 409 duplicate name) — previously swallowed,
+      // leaving the modal open with no feedback.
+      toast.error(err instanceof Error ? err.message : 'Upload failed');
     } finally {
       setUploading(false);
     }
@@ -631,6 +663,7 @@ export default function ConfigFiles() {
           setEditingFile(null);
           setEditContent('');
           setEditDescription('');
+          setEditReplaceFile(null);
         }}
         title={`Edit: ${editingFile?.name || ''}`}
         size="3xl"
@@ -670,7 +703,7 @@ export default function ConfigFiles() {
               )}
             </div>
             {editingFile?.isBinary ? (
-              <div className="p-4 bg-slate-800/50 rounded-lg border border-slate-700">
+              <div className="p-4 bg-slate-800/50 rounded-lg border border-slate-700 space-y-3">
                 <div className="flex items-center gap-3 text-slate-400">
                   <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -681,9 +714,24 @@ export default function ConfigFiles() {
                       {formatFileSize(editingFile.fileSize)} • {editingFile.mimeType || 'Unknown type'}
                     </p>
                     <p className="text-xs text-slate-500 mt-1">
-                      Binary files cannot be edited. Re-upload to replace.
+                      Binary files cannot be edited inline. Choose a replacement file below — it
+                      replaces the content on save (history is kept for rollback).
                     </p>
                   </div>
+                </div>
+                <div>
+                  <label className="block text-sm text-slate-400 mb-1">Replace file</label>
+                  <input
+                    type="file"
+                    onChange={(e) => setEditReplaceFile(e.target.files?.[0] || null)}
+                    className="input"
+                  />
+                  {editReplaceFile && (
+                    <p className="text-xs text-slate-500 mt-1">
+                      Will replace with: {editReplaceFile.name} (
+                      {formatFileSize(editReplaceFile.size)})
+                    </p>
+                  )}
                 </div>
               </div>
             ) : (
@@ -754,13 +802,14 @@ export default function ConfigFiles() {
                 setEditingFile(null);
                 setEditContent('');
                 setEditDescription('');
+                setEditReplaceFile(null);
               }}
               className="btn btn-ghost"
             >
               Cancel
             </button>
-            <button onClick={handleEdit} className="btn btn-primary">
-              Save Changes
+            <button onClick={handleEdit} disabled={savingEdit} className="btn btn-primary">
+              {savingEdit ? 'Saving...' : 'Save Changes'}
             </button>
           </div>
         </div>

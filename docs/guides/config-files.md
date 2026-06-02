@@ -120,6 +120,29 @@ file: <binary file data>
 > [!NOTE]
 > Binary file content is not returned in API responses to keep payloads small. The file metadata (name, filename, size, MIME type) is always available.
 
+### Replacing a Binary File
+
+Binary files cannot be edited in the text editor. To replace the content of an existing binary file in place (keeping its service attachments, sync assignments, and history):
+
+1. Click **Edit** on the binary file.
+2. Choose a replacement file under **Replace file**.
+3. Click **Save Changes**. The previous content is kept in history for rollback.
+
+**API (multipart upload):**
+
+```http
+POST /api/config-files/:id/replace-asset
+Authorization: Bearer <token>
+Content-Type: multipart/form-data
+
+file: <binary file data>
+```
+
+The file's `mimeType` and `fileSize` are updated from the uploaded file. Requires the operator role.
+
+> [!WARNING]
+> `PATCH /api/config-files/:id` rejects an empty `content` value for binary files — since binary content is stripped from API responses, round-tripping a fetched file through PATCH would otherwise wipe the stored payload. Use the replace endpoint above to change binary content.
+
 ---
 
 ## Attaching Files to Services
