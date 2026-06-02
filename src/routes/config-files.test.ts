@@ -933,4 +933,175 @@ describe('config-files routes', () => {
       expect(res.statusCode).toBe(400);
     });
   });
+
+  // ==================== binary content wipe guard ====================
+
+  describe('PATCH /api/config-files/:id (binary content wipe guard)', () => {
+    it('rejects empty content on a binary file with 400 and leaves content intact', async () => {
+      const original = Buffer.from('original-binary-payload').toString('base64');
+      const cf = await app.prisma.configFile.create({
+        data: {
+          environmentId: envId,
+          name: 'binary-wipe-guard',
+          filename: 'guard.bin',
+          content: original,
+          isBinary: true,
+          mimeType: 'application/octet-stream',
+          fileSize: 23,
+        },
+      });
+
+      // Simulates the old UI bug: binary content is stripped to '' in API
+      // responses, and the edit modal round-tripped that '' into a PATCH.
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/config-files/${cf.id}`,
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { content: '', description: 'new description' },
+      });
+      expect(res.statusCode).toBe(400);
+
+      const after = await app.prisma.configFile.findUnique({ where: { id: cf.id } });
+      expect(after?.content).toBe(original);
+    });
+
+    it('allows metadata-only PATCH on a binary file without touching content', async () => {
+      const original = Buffer.from('metadata-only-payload').toString('base64');
+      const cf = await app.prisma.configFile.create({
+        data: {
+          environmentId: envId,
+          name: 'binary-metadata-only',
+          filename: 'meta.bin',
+          content: original,
+          isBinary: true,
+          mimeType: 'application/octet-stream',
+          fileSize: 21,
+        },
+      });
+
+      const res = await app.inject({
+        method: 'PATCH',
+        url: `/api/config-files/${cf.id}`,
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { description: 'updated description' },
+      });
+      expect(res.statusCode).toBe(200);
+      // Binary content is stripped from the response...
+      expect(res.json().configFile.content).toBe('');
+
+      // ...but stays intact in the database.
+      const after = await app.prisma.configFile.findUnique({ where: { id: cf.id } });
+      expect(after?.content).toBe(original);
+      expect(after?.description).toBe('updated description');
+    });
+  });
+
+  // ==================== replace binary asset ====================
+
+  describe('POST /api/config-files/:id/replace-asset', () => {
+    it('replaces content, mimeType and fileSize, and writes a history entry', async () => {
+      const original = Buffer.from('old-binary-content').toString('base64');
+      const cf = await app.prisma.configFile.create({
+        data: {
+          environmentId: envId,
+          name: 'binary-replace-target',
+          filename: 'cert.pem',
+          content: original,
+          isBinary: true,
+          mimeType: 'application/x-pem-file',
+          fileSize: 18,
+        },
+      });
+
+      const replacement = 'new-binary-content-longer';
+      const form = new FormData();
+      form.append('file', new Blob([replacement], { type: 'application/x-x509-ca-cert' }), 'cert.pem');
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/config-files/${cf.id}/replace-asset`,
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: form,
+      });
+      expect(res.statusCode).toBe(200);
+      // Binary content stays stripped from the response
+      expect(res.json().configFile.content).toBe('');
+      expect(res.json().configFile.fileSize).toBe(replacement.length);
+
+      const after = await app.prisma.configFile.findUnique({ where: { id: cf.id } });
+      expect(after?.content).toBe(Buffer.from(replacement).toString('base64'));
+      expect(after?.mimeType).toBe('application/x-x509-ca-cert');
+      expect(after?.fileSize).toBe(replacement.length);
+
+      // Old payload is preserved in history for rollback
+      const history = await app.prisma.fileHistory.findMany({
+        where: { configFileId: cf.id },
+      });
+      expect(history.map((h) => h.content)).toContain(original);
+    });
+
+    it('rejects text files with 400', async () => {
+      const cf = await app.prisma.configFile.create({
+        data: {
+          environmentId: envId,
+          name: 'text-replace-reject',
+          filename: 'app.env',
+          content: 'KEY=value',
+        },
+      });
+
+      const form = new FormData();
+      form.append('file', new Blob(['NEW=value']), 'app.env');
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/config-files/${cf.id}/replace-asset`,
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: form,
+      });
+      expect(res.statusCode).toBe(400);
+
+      const after = await app.prisma.configFile.findUnique({ where: { id: cf.id } });
+      expect(after?.content).toBe('KEY=value');
+    });
+
+    it('returns 404 for an unknown config file', async () => {
+      const form = new FormData();
+      form.append('file', new Blob(['data']), 'x.bin');
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/config-files/does-not-exist/replace-asset',
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: form,
+      });
+      expect(res.statusCode).toBe(404);
+    });
+
+    it('requires operator role', async () => {
+      const cf = await app.prisma.configFile.create({
+        data: {
+          environmentId: envId,
+          name: 'binary-replace-rbac',
+          filename: 'rbac.bin',
+          content: Buffer.from('rbac').toString('base64'),
+          isBinary: true,
+        },
+      });
+
+      const form = new FormData();
+      form.append('file', new Blob(['evil']), 'rbac.bin');
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/config-files/${cf.id}/replace-asset`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+        payload: form,
+      });
+      expect(res.statusCode).toBe(403);
+
+      const after = await app.prisma.configFile.findUnique({ where: { id: cf.id } });
+      expect(after?.content).toBe(Buffer.from('rbac').toString('base64'));
+    });
+  });
 });

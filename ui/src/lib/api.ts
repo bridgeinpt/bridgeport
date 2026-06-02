@@ -1522,6 +1522,12 @@ export const uploadAssetFile = (
   );
 };
 
+export const replaceAssetFile = (id: string, file: File) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  return api.upload<{ configFile: ConfigFile }>(`/config-files/${id}/replace-asset`, formData);
+};
+
 // Registry Connections
 export interface RegistryConnection {
   id: string;

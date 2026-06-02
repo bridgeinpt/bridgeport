@@ -392,6 +392,19 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         });
       }
 
+      // Binary content is stripped to '' in API responses, so a client that
+      // round-trips a fetched binary ConfigFile through PATCH would silently
+      // wipe the stored base64 payload (and the next sync would write an
+      // empty file to every attached server). Reject the wipe explicitly —
+      // content replacement for binary files goes through the multipart
+      // replace endpoint below.
+      if (effectiveIsBinary && body.content === '') {
+        return reply.code(400).send({
+          error:
+            'Binary file content cannot be cleared. Use the asset replace upload to change it.',
+        });
+      }
+
       // Validate fragmentIds against the ConfigFile's environment (not any
       // environmentId from the PATCH body, which is read-only and would be
       // rejected upstream by validateUpdateBody anyway).
@@ -1815,6 +1828,80 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         if (handleUniqueConstraint(error, 'Config file with this name already exists', reply)) return;
         throw error;
       }
+    }
+  );
+
+  // Replace the content of an existing binary asset file (multipart).
+  // Binary files cannot be edited in the text editor, and the create-upload
+  // route above rejects duplicate names — this is the in-place "re-upload to
+  // replace" path. Keeps the ConfigFile row (and therefore its ServiceFile
+  // attachments, sync assignments, and history) intact.
+  fastify.post(
+    '/api/config-files/:id/replace-asset',
+    { preHandler: [fastify.authenticate, requireOperator] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      const existing = await findOrNotFound(
+        prisma.configFile.findUnique({ where: { id } }),
+        'Config file',
+        reply
+      );
+      if (!existing) return;
+
+      if (!existing.isBinary) {
+        return reply.code(400).send({
+          error: 'Only binary asset files can be replaced via upload. Edit text files directly.',
+        });
+      }
+
+      const data = await request.file();
+      if (!data) {
+        return reply.code(400).send({ error: 'No file uploaded' });
+      }
+
+      // Read file and convert to base64 (same storage format as upload)
+      const chunks: Buffer[] = [];
+      for await (const chunk of data.file) {
+        chunks.push(chunk);
+      }
+      const fileBuffer = Buffer.concat(chunks);
+      const content = fileBuffer.toString('base64');
+      const fileSize = fileBuffer.length;
+      const mimeType = data.mimetype || 'application/octet-stream';
+
+      // History write + content update in one transaction so a failed update
+      // can't leave a stray history row (mirrors the PATCH content path).
+      const configFile = await prisma.$transaction(async (tx) => {
+        await tx.fileHistory.create({
+          data: {
+            content: existing.content,
+            configFileId: id,
+            editedById: userIdForFk(request.authUser!),
+          },
+        });
+        const cf = await tx.configFile.update({
+          where: { id },
+          data: { content, mimeType, fileSize },
+        });
+        // Binary assets produce no usage; the helper still no-ops cleanly so
+        // we call it for consistency with the other write paths.
+        await syncUsageForConfigFile(tx, cf);
+        return cf;
+      });
+
+      await logAudit({
+        action: 'update',
+        resourceType: 'config_file',
+        resourceId: configFile.id,
+        resourceName: configFile.name,
+        details: { isBinary: true, mimeType, fileSize, replaced: true },
+        ...actorFrom(request),
+        environmentId: existing.environmentId,
+      });
+
+      // Strip binary content from response — no need to echo back the base64 payload
+      return { configFile: { ...configFile, content: '' } };
     }
   );
 }
