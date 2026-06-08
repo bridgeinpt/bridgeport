@@ -211,15 +211,29 @@ Example setup:
 
 If no routing matches, the notification goes to the **default channel** (if one is set and enabled).
 
-### Per-Environment Default Channel
+### Per-Environment Channel Override
 
-You can override the global default channel for a single environment without touching type-routing rules:
+Each environment can set its own Slack channel without touching the global type-routing rules:
 
 1. Go to **Settings > Notifications** in the environment.
 2. Pick a channel (or **Inherit default** to clear the override).
 3. Click **Send Test Message** to verify the chosen channel is reachable.
 
-When set, the override only replaces the global default fallback — explicit `SlackTypeRouting` matches still win.
+The override does two things, depending on how the notification type is routed globally:
+
+- **Fan-out demultiplexer** — when a type is routed to **more than one** channel, the override collapses that fan-out and sends **only** to this environment's channel. This is how you split shared alerts per environment: route, say, `system.backup_failed` to both `#alerts` and `#alerts-staging` globally, then set the staging environment's override to `#alerts-staging` so staging's copy lands there alone (and you can mute that one channel without losing production alerts).
+- **Default fallback** — when a type matches **no** routing rule, the override stands in for the global default channel.
+
+A type routed to exactly **one** channel is left untouched — it reaches that channel from every environment regardless of any override (e.g. `Updates → #ntf-bridgeport`). If the override points at a disabled or deleted channel, it is ignored (a fan-out keeps all its channels; an unrouted type falls through to the global default).
+
+#### Resolution order
+
+For each notification, BRIDGEPORT resolves the target channels as follows:
+
+1. Collect the channels whose `SlackTypeRouting` rule matches the type (and passes the environment filter, if any).
+2. **Exactly one match** → send there. The override is not consulted.
+3. **More than one match** → if the environment has a usable override, send **only** to the override channel; otherwise send to all matched channels.
+4. **No match** → send to the environment override if set, else the global **default** channel.
 
 ### Slack Message Format
 

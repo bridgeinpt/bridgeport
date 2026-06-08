@@ -452,8 +452,9 @@ describe('slack-notifications', () => {
     });
 
     describe('env-channel override (NotificationSettings.slackChannelId)', () => {
-      it('IGNORES env override when an explicit SlackTypeRouting matches', async () => {
-        // Explicit routing wins — env override must NOT be consulted.
+      it('IGNORES env override when a SINGLE explicit SlackTypeRouting matches', async () => {
+        // A single explicit routing is env-agnostic — env override must NOT be
+        // consulted (e.g. "Updates" -> #ntf-bridgeport from every environment).
         mockPrisma.slackTypeRouting.findMany.mockResolvedValue([
           {
             channel: {
@@ -482,6 +483,195 @@ describe('slack-notifications', () => {
         expect(mockPrisma.notificationSettings.findUnique).not.toHaveBeenCalled();
         // And the global default should not be looked up either.
         expect(mockPrisma.slackChannel.findFirst).not.toHaveBeenCalled();
+      });
+
+      it('demultiplexes a multi-channel fan-out to the env override channel only', async () => {
+        // The type is routed to two channels; the originating env has an
+        // override → send ONLY to that env's channel, isolating its alerts.
+        mockPrisma.slackTypeRouting.findMany.mockResolvedValue([
+          {
+            channel: {
+              id: 'ch-prod',
+              name: 'prod-alerts',
+              webhookUrl: 'enc-url',
+              webhookUrlNonce: 'nonce',
+              enabled: true,
+            },
+            environmentIds: null,
+          },
+          {
+            channel: {
+              id: 'ch-staging',
+              name: 'staging-alerts',
+              webhookUrl: 'enc-url',
+              webhookUrlNonce: 'nonce',
+              enabled: true,
+            },
+            environmentIds: null,
+          },
+        ] as any);
+        mockPrisma.notificationSettings.findUnique.mockResolvedValue({
+          id: 'ns-1',
+          environmentId: 'env-staging',
+          slackChannelId: 'ch-staging',
+          slackChannel: {
+            id: 'ch-staging',
+            name: 'staging-alerts',
+            webhookUrl: 'enc-url',
+            webhookUrlNonce: 'nonce',
+            isDefault: false,
+            enabled: true,
+          },
+        } as any);
+        mockFetch.mockResolvedValue({ ok: true });
+
+        const results = await dispatchSlackNotification(
+          mockNotificationType as any,
+          'Title',
+          'Body',
+          {},
+          'env-staging'
+        );
+
+        expect(results).toHaveLength(1);
+        expect(results[0].channelName).toBe('staging-alerts');
+        // Global default must NOT be consulted — an override was applied.
+        expect(mockPrisma.slackChannel.findFirst).not.toHaveBeenCalled();
+      });
+
+      it('keeps the full fan-out when a multi-channel type has NO env override', async () => {
+        // Same fan-out, but this env has no override → both channels fire.
+        mockPrisma.slackTypeRouting.findMany.mockResolvedValue([
+          {
+            channel: {
+              id: 'ch-prod',
+              name: 'prod-alerts',
+              webhookUrl: 'enc-url',
+              webhookUrlNonce: 'nonce',
+              enabled: true,
+            },
+            environmentIds: null,
+          },
+          {
+            channel: {
+              id: 'ch-staging',
+              name: 'staging-alerts',
+              webhookUrl: 'enc-url',
+              webhookUrlNonce: 'nonce',
+              enabled: true,
+            },
+            environmentIds: null,
+          },
+        ] as any);
+        mockPrisma.notificationSettings.findUnique.mockResolvedValue(null);
+        mockFetch.mockResolvedValue({ ok: true });
+
+        const results = await dispatchSlackNotification(
+          mockNotificationType as any,
+          'Title',
+          'Body',
+          {},
+          'env-prod'
+        );
+
+        expect(results).toHaveLength(2);
+        expect(results.map((r) => r.channelName).sort()).toEqual([
+          'prod-alerts',
+          'staging-alerts',
+        ]);
+      });
+
+      it('keeps the full fan-out when a multi-channel type has a DISABLED override', async () => {
+        // A dangling override (disabled channel) must not collapse the fan-out.
+        mockPrisma.slackTypeRouting.findMany.mockResolvedValue([
+          {
+            channel: {
+              id: 'ch-prod',
+              name: 'prod-alerts',
+              webhookUrl: 'enc-url',
+              webhookUrlNonce: 'nonce',
+              enabled: true,
+            },
+            environmentIds: null,
+          },
+          {
+            channel: {
+              id: 'ch-staging',
+              name: 'staging-alerts',
+              webhookUrl: 'enc-url',
+              webhookUrlNonce: 'nonce',
+              enabled: true,
+            },
+            environmentIds: null,
+          },
+        ] as any);
+        mockPrisma.notificationSettings.findUnique.mockResolvedValue({
+          id: 'ns-1',
+          environmentId: 'env-staging',
+          slackChannelId: 'ch-override',
+          slackChannel: {
+            id: 'ch-override',
+            name: 'disabled-override',
+            webhookUrl: 'enc-url',
+            webhookUrlNonce: 'nonce',
+            isDefault: false,
+            enabled: false,
+          },
+        } as any);
+        mockFetch.mockResolvedValue({ ok: true });
+
+        const results = await dispatchSlackNotification(
+          mockNotificationType as any,
+          'Title',
+          'Body',
+          {},
+          'env-staging'
+        );
+
+        expect(results).toHaveLength(2);
+        expect(results.map((r) => r.channelName).sort()).toEqual([
+          'prod-alerts',
+          'staging-alerts',
+        ]);
+      });
+
+      it('keeps the full fan-out for a system-wide event (no environmentId)', async () => {
+        // No environment → nothing to demultiplex by; all matched channels fire.
+        mockPrisma.slackTypeRouting.findMany.mockResolvedValue([
+          {
+            channel: {
+              id: 'ch-prod',
+              name: 'prod-alerts',
+              webhookUrl: 'enc-url',
+              webhookUrlNonce: 'nonce',
+              enabled: true,
+            },
+            environmentIds: null,
+          },
+          {
+            channel: {
+              id: 'ch-staging',
+              name: 'staging-alerts',
+              webhookUrl: 'enc-url',
+              webhookUrlNonce: 'nonce',
+              enabled: true,
+            },
+            environmentIds: null,
+          },
+        ] as any);
+        mockFetch.mockResolvedValue({ ok: true });
+
+        const results = await dispatchSlackNotification(
+          mockNotificationType as any,
+          'Title',
+          'Body',
+          {},
+          null
+        );
+
+        expect(results).toHaveLength(2);
+        // Env-scoped lookup must be skipped when there's no environment.
+        expect(mockPrisma.notificationSettings.findUnique).not.toHaveBeenCalled();
       });
 
       it('routes to the env override channel when no routing matches and override is enabled', async () => {

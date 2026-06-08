@@ -628,9 +628,11 @@ function NotificationsSection({
         ) : (
           <>
             <p className="text-sm text-slate-400 mb-4">
-              Pick a Slack channel for notifications from this environment that don't match an
-              explicit routing rule. Leave on <em>Inherit default</em> to use the global default
-              channel.
+              Pick this environment's Slack channel. When a notification type is routed to{' '}
+              <strong>more than one</strong> channel, this environment's copy goes here only — so you
+              can split shared alerts per environment (and mute one). It's also the fallback for types
+              that match no routing rule. Types routed to a single channel are unaffected. Leave on{' '}
+              <em>Inherit default</em> to use the global default channel.
             </p>
 
             <div className="space-y-3">
