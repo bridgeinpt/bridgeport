@@ -199,6 +199,7 @@ flowchart TD
 | [Feature Guides](docs/guides/) | Server, service, database, monitoring, and more |
 | [CLI Reference](docs/reference/cli.md) | Full command-line interface documentation |
 | [API Reference](docs/reference/api.md) | REST API authentication and endpoints |
+| [API Stability Policy](docs/api-stability.md) | Compatibility contract, semver, and deprecation window for the HTTP API |
 | [Operations](docs/operations/) | Upgrades, security hardening, backups, troubleshooting |
 | [Contributing](CONTRIBUTING.md) | Development setup, code style, and PR process |
 

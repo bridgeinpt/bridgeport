@@ -274,6 +274,7 @@ For detailed patterns and examples, see the Testing section in [CLAUDE.md](CLAUD
 - [ ] New routes added to RBAC security tests (`tests/security/rbac-matrix.test.ts`)
 - [ ] Migration files committed (if schema changed)
 - [ ] Documentation updated (if behavior changed)
+- [ ] HTTP API changes follow the [API Stability Policy](docs/api-stability.md) (semver, deprecation window, OpenAPI `deprecated: true`) and are noted in the release's `## API changes`
 
 ## Common Pitfalls
 

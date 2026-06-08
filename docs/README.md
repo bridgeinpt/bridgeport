@@ -80,6 +80,7 @@ Detailed technical reference for APIs, CLI, agent, plugins, and settings.
 | Doc | Description |
 |-----|-------------|
 | [API Reference](reference/api.md) | REST API authentication, endpoints, and error handling |
+| [API Stability Policy](api-stability.md) | Compatibility contract, semver rules, deprecation window, and current deprecations |
 | [CLI Reference](reference/cli.md) | Full command reference with examples and expected output |
 | [Agent Reference](reference/agent.md) | Monitoring agent installation, configuration, and troubleshooting |
 | [Real-Time Events (SSE)](reference/events.md) | Server-Sent Events endpoint, event types, and client integration |

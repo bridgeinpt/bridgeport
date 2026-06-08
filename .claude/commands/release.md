@@ -113,6 +113,24 @@ Skip this section if you don't use these features.
 
 ---
 
+## API changes
+
+Required in every release (see [API Stability Policy](../../docs/api-stability.md)). Say "None" when there are no HTTP API-surface changes. Split into Added / Deprecated / Removed; omit empty subsections.
+
+### Added
+
+- New `GET /api/...` endpoint / new optional field on `<endpoint>` (#PR)
+
+### Deprecated
+
+- `<field>` on `<endpoint>` — use `<replacement>` instead. Removal target: <next major>. Also flag `deprecated: true` in the OpenAPI spec and add a row to the "Current deprecations" table in `docs/api-stability.md`. (#PR)
+
+### Removed
+
+- `<surface>` (deprecated in <version>) is gone — migrate to `<replacement>`. (#PR)
+
+---
+
 ## Improvements
 
 <Group related improvements under H3 subheadings when there are several from the same area (e.g. "Config scan" with three sub-items). Use a flat bullet list only when items are independent.>
@@ -178,8 +196,8 @@ Show the draft. Ask if they want changes. Apply edits. Re-show. Stop when they s
 
 Compute `LAST_VERSION=${LAST_TAG#v}` and propose a default bump:
 
-- **major** — anything in `## Action required before upgrading`
-- **minor** — anything in `## Features` or `## Database migrations`
+- **major** — anything in `## Action required before upgrading`, or a `## API changes → Removed` entry (breaking wire-format changes ship major-only; see `docs/api-stability.md`)
+- **minor** — anything in `## Features` or `## Database migrations`, or `## API changes → Added` / `Deprecated` entries
 - **patch** — only `## Fixes`, `## Security`, `## Documentation`, `## Under the hood`
 
 Use AskUserQuestion to confirm (patch / minor / major / prerelease). For prerelease, ask for the suffix (e.g. `rc.1`, `beta.2`) and append to the next minor: `1.2.0-rc.1`.
