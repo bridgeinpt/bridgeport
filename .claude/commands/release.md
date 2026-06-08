@@ -223,18 +223,36 @@ Proceed?
 
 ## Step 8 — Tag and push
 
-Write the final notes to a temp file and use it with `-F` so the message is preserved exactly:
+Write the final notes to a temp file and use it with `-F` so the message is preserved exactly.
+
+**CRITICAL: pass `--cleanup=verbatim`.** Without it, `git tag` strips every line that starts with `#` as a comment — which silently deletes all `##`/`###` markdown headers from the notes (this bit v2.0.0 and v2.1.0). `release.yml` reads the tag message verbatim to create the GitHub Release, so missing headers ship to users. `--cleanup=verbatim` keeps the message exactly as written.
 
 ```bash
 cat > /tmp/bridgeport-release-notes.md <<'EOF'
 <final notes>
 EOF
 
-git tag -a "v${VERSION}" -F /tmp/bridgeport-release-notes.md
+git tag -a "v${VERSION}" --cleanup=verbatim -F /tmp/bridgeport-release-notes.md
 git push origin "v${VERSION}"
 ```
 
-## Step 9 — Report
+Sanity-check the headers survived before pushing — `git show "v${VERSION}" --no-patch` should still show the `##` lines. If you forgot the flag and already pushed, don't delete/re-push the tag: fix forward with `gh release edit "v${VERSION}" --notes-file <file>` once `release.yml` has created the Release.
+
+## Step 9 — Close the matching milestone
+
+If a milestone exists whose title exactly matches `${VERSION}` (the version without the `v` prefix — milestones are named `2.2.0`, not `v2.2.0`), its work just shipped, so close it. Skip silently when there's no match (most releases won't have one).
+
+```bash
+MILESTONE_NUMBER=$(gh api repos/:owner/:repo/milestones --jq ".[] | select(.title == \"${VERSION}\") | .number")
+if [ -n "$MILESTONE_NUMBER" ]; then
+  gh api "repos/:owner/:repo/milestones/${MILESTONE_NUMBER}" -X PATCH -f state=closed >/dev/null \
+    && echo "Closed milestone ${VERSION}"
+fi
+```
+
+Note any still-open issues on the milestone in the final report — closing the milestone doesn't close them, and they likely slipped the release.
+
+## Step 10 — Report
 
 Tell the user where to watch the workflow and where the release will appear:
 
