@@ -1,4 +1,4 @@
-package api
+package client
 
 type LoginRequest struct {
 	Email    string `json:"email"`

@@ -3,9 +3,9 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/bridgeinpt/bridgeport-cli/internal/api"
-	"github.com/bridgeinpt/bridgeport-cli/internal/docker"
-	"github.com/bridgeinpt/bridgeport-cli/internal/output"
+	bpclient "github.com/bridgeinpt/bridgeport/client"
+	"github.com/bridgeinpt/bridgeport/cli/internal/docker"
+	"github.com/bridgeinpt/bridgeport/cli/internal/output"
 	"github.com/spf13/cobra"
 )
 
@@ -91,7 +91,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	})
 }
 
-func listCommands(service *api.Service) error {
+func listCommands(service *bpclient.Service) error {
 	if service.ServiceType == nil || len(service.ServiceType.Commands) == 0 {
 		fmt.Printf("No predefined commands available for %s\n", service.Name)
 		if service.ServiceType == nil {

@@ -6,9 +6,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/bridgeinpt/bridgeport-cli/internal/api"
-	"github.com/bridgeinpt/bridgeport-cli/internal/config"
-	"github.com/bridgeinpt/bridgeport-cli/internal/output"
+	bpclient "github.com/bridgeinpt/bridgeport/client"
+	"github.com/bridgeinpt/bridgeport/cli/internal/config"
+	"github.com/bridgeinpt/bridgeport/cli/internal/output"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -77,7 +77,7 @@ func runLogin(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create a temporary client for login
-	client := api.NewClient(url, "")
+	client := bpclient.NewClient(url, "")
 
 	fmt.Printf("Logging in to %s...\n", url)
 

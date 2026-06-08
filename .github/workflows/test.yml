@@ -70,6 +70,7 @@ jobs:
           go-version: '1.25'
       - run: cd bridgeport-agent && go test ./... -short -count=1
       - run: cd cli && go test ./... -short -count=1
+      - run: cd client && go test ./... -short -count=1
 
   # ── Tier 2: Integration Tests (every PR) ──────────────
   integration-backend:
@@ -153,6 +154,7 @@ jobs:
           JWT_SECRET: ${{ env.TEST_JWT_SECRET }}
       - run: cd bridgeport-agent && go test ./... -count=1
       - run: cd cli && go test ./... -count=1
+      - run: cd client && go test ./... -count=1
 
   # ── Build Verification ──────────────────────────────────
   build:

@@ -1,4 +1,4 @@
-package api
+package client
 
 type AuditLog struct {
 	ID           string  `json:"id"`
