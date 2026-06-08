@@ -163,6 +163,10 @@ model OperationsSettings {
   defaultMetricsMode String  @default("disabled") // "disabled" | "ssh" | "agent"
   autoPruneImages    Boolean @default(false) // auto-prune after deploy and weekly
   pruneImagesMode    String  @default("dangling") // "dangling" | "all"
+  // Opt-in: when a deployment has no composePath yet, let BRIDGEPORT auto-set it
+  // to the generated compose file on first deploy. Default OFF so operator-set
+  // paths and hand-maintained compose files are never touched. (issue #200)
+  autoManageCompose  Boolean @default(false)
 }
 
 model DataSettings {

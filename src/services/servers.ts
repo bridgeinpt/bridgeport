@@ -5,6 +5,7 @@ import { getEnvironmentSshKey } from '../routes/environments.js';
 import { parseRegistryFromImage } from '../lib/image-utils.js';
 import { checkServiceUpdate } from '../lib/scheduler.js';
 import { findOrCreateContainerImage } from './image-management.js';
+import { logAudit } from './audit.js';
 import { getErrorMessage } from '../lib/helpers.js';
 import { SERVER_STATUS, HEALTH_STATUS, CONTAINER_STATUS, DISCOVERY_STATUS } from '../lib/constants.js';
 import {
@@ -637,6 +638,14 @@ export async function importFromTerraform(
 ): Promise<Server[]> {
   const servers: Server[] = [];
 
+  // Whether BRIDGEPORT may auto-set a deployment's composePath when it is null.
+  // Default OFF. A non-null composePath is NEVER overwritten regardless. (issue #200)
+  const opSettings = await prisma.operationsSettings.findUnique({
+    where: { environmentId },
+    select: { autoManageCompose: true },
+  });
+  const autoManageCompose = opSettings?.autoManageCompose ?? false;
+
   for (const serverData of tfOutput.servers) {
     let server: Server;
 
@@ -732,23 +741,62 @@ export async function importFromTerraform(
           where: { serviceId_serverId: { serviceId: service.id, serverId: server.id } },
         });
 
+        // Decide whether this import may set composePath. We NEVER overwrite a
+        // non-null value (operator intent / hand-maintained file). For a null
+        // value we only set it when the per-environment opt-in is enabled and
+        // the import actually carries a path. (issue #200)
+        // Treat an empty or whitespace-only path as "no path" so a blank
+        // terraform output can't persist as an invalid composePath. The trim is
+        // only for the null-decision; the original (untrimmed) value is kept
+        // when non-blank.
+        const incomingComposePath = serviceData.compose_path?.trim()
+          ? serviceData.compose_path
+          : null;
+
         if (existingDeployment) {
+          const maySetComposePath =
+            existingDeployment.composePath === null &&
+            autoManageCompose &&
+            incomingComposePath !== null;
           await prisma.serviceDeployment.update({
             where: { id: existingDeployment.id },
             data: {
               containerName: serviceData.container_name,
-              composePath: serviceData.compose_path,
+              // Omit composePath entirely unless we're allowed to set it, so a
+              // re-import never clobbers an existing path.
+              ...(maySetComposePath ? { composePath: incomingComposePath } : {}),
             },
           });
+          if (maySetComposePath) {
+            await logAudit({
+              action: 'service_deployment_compose_path_set',
+              resourceType: 'service_deployment',
+              resourceId: existingDeployment.id,
+              resourceName: serviceData.container_name,
+              environmentId,
+              details: { source: 'terraform-import', composePath: incomingComposePath },
+            });
+          }
         } else {
-          await prisma.serviceDeployment.create({
+          const setComposePath = autoManageCompose && incomingComposePath !== null;
+          const created = await prisma.serviceDeployment.create({
             data: {
               serviceId: service.id,
               serverId: server.id,
               containerName: serviceData.container_name,
-              composePath: serviceData.compose_path,
+              composePath: setComposePath ? incomingComposePath : null,
             },
           });
+          if (setComposePath) {
+            await logAudit({
+              action: 'service_deployment_compose_path_set',
+              resourceType: 'service_deployment',
+              resourceId: created.id,
+              resourceName: serviceData.container_name,
+              environmentId,
+              details: { source: 'terraform-import', composePath: incomingComposePath },
+            });
+          }
         }
       }
     }

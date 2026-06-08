@@ -145,11 +145,15 @@ Defaults for new servers and environment-wide operational behavior.
 | `defaultMetricsMode` | `string` | `"disabled"` | `disabled`, `ssh`, `agent` | Default metrics collection mode for new servers |
 | `autoPruneImages` | `boolean` | `false` | -- | Run `docker image prune` automatically after every deploy to the affected server, and weekly on all healthy servers in this environment |
 | `pruneImagesMode` | `string` | `"dangling"` | `dangling`, `all` | Which images are pruned. `dangling` removes only untagged layers (safe default). `all` removes any image not used by a running container, including rollback targets -- use with care. |
+| `autoManageCompose` | `boolean` | `false` | -- | When a deployment has no compose file path yet, let BRIDGEPORT set it to the generated compose file on first deploy. A compose path that is already set (by an operator, the API, or a previous import) is **never** overwritten regardless of this setting. |
 
 > [!NOTE]
 > The server-type defaults (`defaultDockerMode`, `defaultMetricsMode`) apply when creating new servers. Existing servers are not affected when you change these settings.
 >
 > The prune settings apply immediately -- the next deploy and the next weekly scheduler tick will honor the new values.
+
+> [!IMPORTANT]
+> **Compose path management (`autoManageCompose`).** BRIDGEPORT never rewrites a deployment's `composePath` once it is set. With this setting **off** (the default), a deployment whose `composePath` is still `null` is deployed by restarting its container directly rather than via a generated compose file — point it at a compose file manually (or enable this setting) to deploy through `docker compose`. With it **on**, the first deploy of a path-less deployment writes a generated compose file and records its path. Every automatic `composePath` change is written to the audit log with `details.source` (`generator` or `terraform-import`). Generated and template-authored compose files are validated before deploy: the compose document must define a service keyed exactly on the deployment's `containerName`, otherwise the deploy is refused with an actionable error instead of failing mid-rollout. Shared compose files that back multiple deployments are validated against the file already on disk and are never rewritten.
 
 ---
 

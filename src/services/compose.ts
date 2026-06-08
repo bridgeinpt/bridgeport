@@ -2,7 +2,7 @@ import { prisma } from '../lib/db.js';
 import { createHash } from 'crypto';
 import YAML from 'yaml';
 import { resolveSecretPlaceholders, getSecretsForEnv } from './secrets.js';
-import { safeJsonParse } from '../lib/helpers.js';
+import { safeJsonParse, getErrorMessage } from '../lib/helpers.js';
 import { redactEnvSecrets, redactSecretValues } from '../lib/dry-run.js';
 import { composeFragmentedContent } from '../lib/config-fragments.js';
 
@@ -116,6 +116,54 @@ export function serializeExposedPorts(exposedPortsJson: string | null | undefine
   }
 
   return result;
+}
+
+/**
+ * Validate that a compose file actually defines a service keyed on the
+ * deployment's `containerName`. The deploy path runs `docker compose pull/up
+ * <containerName>`, so the compose document MUST contain a top-level service
+ * with that exact key — otherwise compose aborts with "No such service:
+ * <containerName>" BEFORE recreating anything, leaving the stale container in
+ * place (the stale-config trap in issue #200).
+ *
+ * Works for both generator-authored and template-authored compose: it parses
+ * the actual YAML rather than assuming the generator's structure, and tolerates
+ * shared compose files that define multiple services (it only requires that the
+ * deployment's OWN service key is present among them).
+ *
+ * Returns an error message string when invalid, or `null` when valid.
+ */
+export function validateGeneratedCompose(
+  composeContent: string,
+  containerName: string
+): string | null {
+  let parsed: unknown;
+  try {
+    parsed = YAML.parse(composeContent);
+  } catch (err) {
+    return `Generated compose for "${containerName}" is not valid YAML: ${getErrorMessage(err)}`;
+  }
+
+  if (parsed === null || typeof parsed !== 'object') {
+    return `Generated compose for "${containerName}" did not parse to a compose document`;
+  }
+
+  const services = (parsed as { services?: unknown }).services;
+  if (services === null || typeof services !== 'object') {
+    return `Generated compose for "${containerName}" has no "services:" section`;
+  }
+
+  const serviceKeys = Object.keys(services as Record<string, unknown>);
+  if (!serviceKeys.includes(containerName)) {
+    return (
+      `Compose service key mismatch: deploy targets "${containerName}" but the ` +
+      `compose file defines service(s) [${serviceKeys.join(', ') || 'none'}]. ` +
+      `The compose file must contain a service keyed exactly on "${containerName}". ` +
+      `If you maintain this compose file by hand, rename the service to "${containerName}".`
+    );
+  }
+
+  return null;
 }
 
 /**
@@ -253,10 +301,13 @@ export async function generateDeploymentArtifacts(
       composeContent = composeContent.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), () => value);
     }
   } else {
-    // Generate default compose structure
+    // Generate default compose structure.
+    // Key the compose service on `containerName` (not `service.name`): the deploy
+    // path targets the service by `containerName` in `docker compose pull/up`, so
+    // the generated key MUST match or deploy aborts with "No such service". (issue #200)
     const composeConfig: ComposeConfig = {
       services: {
-        [service.name]: {
+        [deployment.containerName]: {
           image: `${imageName}:${service.imageTag}`,
           container_name: deployment.containerName,
           restart: 'unless-stopped',
@@ -264,7 +315,7 @@ export async function generateDeploymentArtifacts(
       },
     };
 
-    const svc = composeConfig.services[service.name];
+    const svc = composeConfig.services[deployment.containerName];
 
     // Inject merged env vars (base + per-deployment overrides) into the compose service.
     if (Object.keys(mergedEnv).length > 0) {
@@ -525,16 +576,17 @@ export async function previewDryRunArtifacts(
       composeContent = composeContent.replace(new RegExp(`\\$\\{${key}\\}`, 'g'), () => value);
     }
   } else {
+    // Key the service on `containerName` to match the real deploy path. (issue #200)
     const composeConfig: ComposeConfig = {
       services: {
-        [service.name]: {
+        [deployment.containerName]: {
           image: `${imageName}:${imageTag}`,
           container_name: deployment.containerName,
           restart: 'unless-stopped',
         },
       },
     };
-    const svc = composeConfig.services[service.name];
+    const svc = composeConfig.services[deployment.containerName];
     if (Object.keys(mergedEnv).length > 0) {
       // Use redacted env in the compose YAML so secret values don't leak in
       // the response. The compose YAML's `environment:` block stays a faithful
