@@ -6,7 +6,7 @@ import (
 	"os"
 	"strings"
 
-	bpclient "github.com/bridgeinpt/bridgeport/client"
+	"github.com/bridgeinpt/bridgeport/client"
 	"github.com/bridgeinpt/bridgeport/cli/internal/config"
 	"github.com/bridgeinpt/bridgeport/cli/internal/output"
 	"github.com/spf13/cobra"
@@ -77,11 +77,11 @@ func runLogin(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create a temporary client for login
-	client := bpclient.NewClient(url, "")
+	c := client.NewClient(url, "")
 
 	fmt.Printf("Logging in to %s...\n", url)
 
-	resp, err := client.Login(email, password)
+	resp, err := c.Login(email, password)
 	if err != nil {
 		return fmt.Errorf("login failed: %w", err)
 	}

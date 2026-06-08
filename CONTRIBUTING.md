@@ -284,13 +284,16 @@ module within this repo. Because it is part of the HTTP API's contract surface,
 treat it like the API itself:
 
 - **Tag with the `client/` prefix.** Following Go's multi-module convention, the
-  client module is released as `client/vX.Y.Z` (not a bare `vX.Y.Z`, which is
-  reserved for the repo's main module). External consumers `go get` a tagged
-  version.
+  client module is released as `client/vX.Y.Z` (not a bare `vX.Y.Z` — those are
+  the product/Docker release tags driven by `release.yml`). External consumers
+  `go get` a tagged version.
 - **Bump it in the same PR as wire-shape changes.** Any change that alters the
   request/response shapes the client depends on (new/renamed fields, removed
   endpoints, changed types) MUST update the client and be released alongside the
-  API change, so the published SDK never lags the contract it describes.
+  API change, so the published SDK never lags the contract it describes. Creating
+  the `client/vX.Y.Z` tag is a manual `git tag client/vX.Y.Z && git push origin
+  client/vX.Y.Z` step today; the product release flow does not create it
+  automatically.
 - **The CLI stays in lockstep locally.** `cli/go.mod` consumes the client via a
   `replace github.com/bridgeinpt/bridgeport/client => ../client` directive, so the
   CLI always builds against the in-repo client without needing a tagged release.
