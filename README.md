@@ -1,13 +1,44 @@
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
-[![Docker](https://img.shields.io/badge/Docker-ghcr.io%2Fbridgeinpt%2Fbridgeport-blue)](https://ghcr.io/bridgeinpt/bridgeport)
+<p align="center">
+  <img src="ui/public/logo.png" alt="BRIDGEPORT" width="440" />
+</p>
 
-# BRIDGEPORT
+<p align="center">
+  <b>Dock. Run. Ship. Repeat.</b><br />
+  A lightweight, self-hosted deployment management tool for Docker-based infrastructure.
+</p>
 
-**Dock. Run. Ship. Repeat.**
+<!-- functional + CI status badges -->
+<p align="center">
+  <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/License-Apache--2.0-blue.svg" /></a>
+  <a href="https://ghcr.io/bridgeinpt/bridgeport"><img alt="Docker image" src="https://img.shields.io/badge/ghcr.io-bridgeinpt%2Fbridgeport-2496ED?logo=docker&logoColor=white" /></a>
+  <a href="https://github.com/bridgeinpt/bridgeport/actions/workflows/test.yml"><img alt="Tests" src="https://github.com/bridgeinpt/bridgeport/actions/workflows/test.yml/badge.svg" /></a>
+  <a href="https://github.com/bridgeinpt/bridgeport/actions/workflows/build.yml"><img alt="Build" src="https://github.com/bridgeinpt/bridgeport/actions/workflows/build.yml/badge.svg" /></a>
+</p>
 
-A lightweight, self-hosted deployment management tool for Docker-based infrastructure. Manage servers, deploy containers, monitor health, and orchestrate multi-service rollouts -- all from one place, no Kubernetes required.
+<!-- tech stack, brand red #CC0000 -->
+<p align="center">
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-6-CC0000?logo=typescript&logoColor=white" />
+  <img alt="Node.js" src="https://img.shields.io/badge/Node.js-CC0000?logo=node.js&logoColor=white" />
+  <img alt="Fastify" src="https://img.shields.io/badge/Fastify-5-CC0000?logo=fastify&logoColor=white" />
+  <img alt="React" src="https://img.shields.io/badge/React-18-CC0000?logo=react&logoColor=white" />
+  <img alt="Prisma" src="https://img.shields.io/badge/Prisma-7-CC0000?logo=prisma&logoColor=white" />
+  <img alt="SQLite" src="https://img.shields.io/badge/SQLite-CC0000?logo=sqlite&logoColor=white" />
+  <img alt="Go" src="https://img.shields.io/badge/Go-1.25-CC0000?logo=go&logoColor=white" />
+  <img alt="Docker" src="https://img.shields.io/badge/Docker-CC0000?logo=docker&logoColor=white" />
+</p>
 
-Created by the Engineering Team at [BRIDGE IN](https://bridgein.pt).
+<p align="center">
+  <a href="#quick-start"><b>Quick Start</b></a> &nbsp;·&nbsp;
+  <a href="docs/getting-started.md">Docs</a> &nbsp;·&nbsp;
+  <a href="#key-features">Features</a> &nbsp;·&nbsp;
+  <a href="docs/reference/cli.md">CLI</a>
+</p>
+
+<p align="center">
+  <sub>Created by the Engineering Team at <a href="https://bridgein.pt">BRIDGE IN</a>.</sub>
+</p>
+
+---
 
 ## The Problem
 
