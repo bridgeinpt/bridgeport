@@ -1,6 +1,6 @@
 # BRIDGEPORT
 
-A lightweight, self-hosted deployment management tool for Docker-based infrastructure.
+A lightweight, self-hosted tool to deploy, orchestrate, and monitor Docker services across all your servers — production-grade ops without Kubernetes.
 
 ---
 
@@ -252,7 +252,13 @@ Use these instead of reimplementing:
 - Admin pages use a separate layout (`AdminLayout` + `AdminSidebar`) at `/admin/*` routes
 - ContainerImage is required for every Service - central entity for image management
 - Service is a template (image, env, health, compose, container-image link); per-server runtime lives on ServiceDeployment (containerName, status, discovery, ports). UI/API back-compat: a `service.server`-style accessor still resolves to the first deployment's server, but new code should read from `serviceDeployments[]`
-- ConfigFragment is env-scoped, reusable text shared across config files; when an in-use fragment is deleted/edited the dependent files are auto-resynced
+- ConfigFragment is env-scoped, reusable text shared across config files; when an in-use fragment is deleted/edited the dependent files are auto-resynced. Config files support `{{range servers tag="..."}}` templating to iterate over tagged servers
+- `SyncBatch`/`SyncBatchOperation` back atomic multi-resource syncs: all-or-nothing transactional rollouts with rollback and dry-run preview (`src/services/sync-batch.ts`)
+- `ServiceAccount` is a machine identity for API access (survives user turnover); API token scope is set via `allEnvironments` or the `ApiTokenEnvironment` join table, with a per-token `role` cap
+- `ServiceType`/`ServiceTypeCommand` and `DatabaseType`/`DatabaseTypeCommand` are plugin-defined types with predefined commands (shell, migrate, etc.), seeded from `plugins/` on startup
+- `ExternalEntity` (CDNs, clients, third-party deps) and `ServerCluster` (logical server groupings) are topology nodes beyond services/databases, rendered on the dashboard diagram
+- `SecretUsage`/`VarUsage` join tables track which config files reference which secrets/vars, so list endpoints avoid regex-scanning config content
+- Denormalized `lastHealthCheck*` fields on `Server`/`ServiceDeployment` are a read cache for fast list rendering; `HealthCheckLog` remains the source of truth
 - **Debugging against a live instance:** if `BRIDGEPORT_URL` and `BRIDGEPORT_TOKEN` are set in `.env` (a read-only service-account token), you can query a running instance for real data — `curl -H "Authorization: Bearer $BRIDGEPORT_TOKEN" "$BRIDGEPORT_URL/api/environments"`. Read-only only: never run mutating calls without explicit per-action approval. (Secret-value reveal is admin-only, so a viewer/operator token can't read decrypted secrets anyway.) See [`docs/operations/troubleshooting.md`](docs/operations/troubleshooting.md#querying-a-live-instance-read-only-api-access).
 - **Docs stay in sync with code.** When you change `src/routes/**`, `src/services/**`, `prisma/schema.prisma`, `ui/src/pages/**`, or settings, update the matching file under `docs/guides/` or `docs/reference/` in the same PR. A Stop hook (`scripts/check-docs-drift.sh`) prints a reminder when code paths change without any `docs/` update.
 

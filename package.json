@@ -1,7 +1,7 @@
 {
   "name": "bridgeport",
   "version": "1.0.0",
-  "description": "BRIDGEPORT - Dock. Run. Ship. Repeat. A lightweight, self-hosted deployment management tool for Docker-based infrastructure.",
+  "description": "BRIDGEPORT - Dock. Run. Ship. Repeat. A lightweight, self-hosted tool to deploy, orchestrate, and monitor Docker services across all your servers - production-grade ops without Kubernetes.",
   "repository": {
     "type": "git",
     "url": "https://github.com/bridgeinpt/bridgeport.git"

@@ -208,4 +208,5 @@ Always use the `EmptyState` component with an icon:
 
 - **Card layout**: `Services.tsx`, `Servers.tsx`, `Databases.tsx`, `Registries.tsx`, `Secrets.tsx`
 - **Table layout**: Health check logs, audit logs (dense tabular data)
-- **Grid layout**: `ConfigFiles.tsx` (special case for compact items)
+- **Grid layout**: `ConfigFiles.tsx`, `Fragments.tsx` (special case for compact items)
+- **Detail / orchestration views**: `DeploymentPlans.tsx`, `DeploymentPlanDetail.tsx` (multi-step plan progress with health gates)

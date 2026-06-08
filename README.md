@@ -4,7 +4,7 @@
 
 <p align="center">
   <b>Dock. Run. Ship. Repeat.</b><br />
-  A lightweight, self-hosted deployment management tool for Docker-based infrastructure.
+  A lightweight, self-hosted tool to deploy, orchestrate, and monitor Docker services across all your servers — production-grade ops without Kubernetes.
 </p>
 
 <!-- functional + CI status badges -->
@@ -46,21 +46,24 @@ Managing Docker containers across multiple servers means SSH-ing into each machi
 
 ## The Solution
 
-BRIDGEPORT gives you a single web UI to manage all your Docker infrastructure. Connect your servers via SSH (or Docker socket for the local host), and you get one-click deploys with auto-rollback, real-time health monitoring, encrypted secrets, database backups, and multi-channel notifications. It's designed for teams that want production-grade tooling without the complexity of Kubernetes.
+BRIDGEPORT gives you a single web UI to manage all your Docker infrastructure. Connect your servers via SSH (or Docker socket for the local host), and you get one-click deploys to one server or a whole fleet, dependency-ordered orchestration with automatic rollback, config-as-code (managed files, reusable fragments, and templating), real-time health monitoring, encrypted secrets, database backups, and multi-channel notifications. It's designed for teams that want production-grade tooling without the complexity of Kubernetes.
 
 ## Key Features
 
 | | Feature | Description |
 |---|---|---|
 | **Servers** | Multi-Server Management | Connect via SSH or Docker socket. Discover containers automatically |
-| **Deploy** | One-Click Deployments | Deploy new image tags with auto-rollback on failure |
+| **Provision** | Server Bootstrap | One-click setup of Docker, Compose, the agent, sysctl tuning, and swap on a fresh server |
+| **Deploy** | Deploy & Orchestrate | One-click deploys to one server or a whole fleet, with dependency-ordered deployment plans, health gates, and automatic rollback |
+| **Config** | Config-as-Code | Managed text & binary config files with edit history, reusable fragments, server-tag templating, and atomic batched syncs with dry-run preview |
 | **Monitor** | Real-Time Monitoring | Server, service, and database metrics via SSH polling or Go agent |
 | **Health** | Health Checks | Container, URL, TCP, and TLS certificate checks with bounce protection |
 | **Secrets** | Encrypted Secrets | AES-256-GCM encryption at rest with per-environment isolation |
 | **Backup** | Database Backups | Scheduled PostgreSQL, MySQL, and SQLite backups to S3-compatible storage |
 | **Notify** | Notifications | In-app, email (SMTP), Slack, and outgoing webhooks |
 | **Registry** | Registry Integration | Docker Hub, GHCR, and private registries with auto-update |
-| **Topology** | Service Topology | Interactive diagram of your service architecture |
+| **Topology** | Service Topology | Interactive diagram of services, databases, external entities (CDNs, clients), and server clusters |
+| **API** | REST API & Service Accounts | Environment-scoped API tokens and machine service accounts for CI/CD automation |
 | **CLI** | CLI Tool | SSH, logs, exec, deploy, and manage from the terminal |
 | **Plugins** | Plugin System | JSON-defined service types and database types with monitoring queries |
 | **RBAC** | Access Control | Three roles: admin, operator, viewer |
