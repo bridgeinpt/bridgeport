@@ -37,15 +37,20 @@ bridgeport/
 │   ├── routes/                 # API route handlers (Fastify plugins)
 │   │   ├── auth.ts             # Login, token refresh, API tokens
 │   │   ├── users.ts            # User CRUD with RBAC
+│   │   ├── service-accounts.ts # Machine identities for API access
 │   │   ├── environments.ts     # Environment CRUD
 │   │   ├── servers.ts          # Server management
 │   │   ├── services.ts         # Container/service management
 │   │   ├── secrets.ts          # Secret management + env templates
 │   │   ├── config-files.ts     # Config file CRUD with history
+│   │   ├── config-fragments.ts # Reusable config fragments
+│   │   ├── sync-batch.ts       # Atomic batched config syncs (dry-run + rollback)
 │   │   ├── registries.ts       # Registry connection management
 │   │   ├── container-images.ts # Image management + deploy triggers
 │   │   ├── deployment-plans.ts # Orchestrated deployment plans
+│   │   ├── service-dependencies.ts # Service dependency ordering for plans
 │   │   ├── databases.ts        # Database backup + monitoring
+│   │   ├── spaces.ts           # S3-compatible backup storage
 │   │   ├── metrics.ts          # Metrics endpoints + agent ingest
 │   │   ├── monitoring.ts       # Health logs, overview, SSH testing
 │   │   ├── topology.ts         # Service topology + diagram layouts
@@ -59,6 +64,10 @@ bridgeport/
 │   ├── services/               # Business logic layer
 │   │   ├── deploy.ts           # Service deployment execution
 │   │   ├── orchestration.ts    # Deployment plan builder + executor
+│   │   ├── sync-batch.ts       # Atomic batched syncs (transaction + rollback)
+│   │   ├── bootstrap.ts        # One-click server provisioning (Docker, agent, swap)
+│   │   ├── config-file-auto-resync.ts # Resync config files on value change
+│   │   ├── template-engine.ts  # Config/compose templating (servers, secrets, vars)
 │   │   ├── health-checks.ts    # Health check logic + scheduler config
 │   │   ├── health-verification.ts # Post-deploy health verification
 │   │   ├── metrics.ts          # SSH metrics collection
@@ -70,6 +79,7 @@ bridgeport/
 │   │   ├── database-query-executor.ts # SQL/SSH query executor
 │   │   ├── compose.ts          # Docker compose template rendering
 │   │   ├── plugin-loader.ts    # Plugin sync from JSON files
+│   │   ├── service-types.ts    # Plugin-defined service/database types + commands
 │   │   ├── environment-settings.ts # Per-module settings CRUD
 │   │   ├── system-settings.ts  # Cached singleton for system settings
 │   │   └── ...                 # Additional service modules
@@ -89,6 +99,8 @@ bridgeport/
 │   │   │   ├── Servers.tsx     # Server list
 │   │   │   ├── ServiceDetail.tsx # Service detail page
 │   │   │   │   └── service-detail/ # Sub-components
+│   │   │   ├── DeploymentPlans.tsx # Orchestrated multi-service deploys
+│   │   │   ├── Fragments.tsx   # Reusable config fragments
 │   │   │   ├── admin/          # Admin-only pages
 │   │   │   └── ...             # Other page components
 │   │   └── lib/                # Client-side utilities

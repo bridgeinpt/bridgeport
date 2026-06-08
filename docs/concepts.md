@@ -15,7 +15,7 @@ How BRIDGEPORT thinks about your infrastructure -- the mental model you need to 
 
 ## Architecture Overview
 
-BRIDGEPORT follows a **hub-and-spoke model**. A single BRIDGEPORT instance connects to your servers over SSH (or the local Docker socket), manages containers, collects metrics, and sends notifications -- all from one place.
+BRIDGEPORT follows a **hub-and-spoke model**. A single BRIDGEPORT instance connects to your servers over SSH (or the local Docker socket), manages containers, orchestrates multi-step deployments, distributes config-as-code, collects metrics, and sends notifications -- all from one place.
 
 ```mermaid
 graph TB
@@ -99,7 +99,13 @@ Related: [Secrets Guide](guides/secrets.md)
 
 ### Config File
 
-A configuration file managed by BRIDGEPORT and synced to servers. Supports both text and binary files (nginx configs, SSL certificates, `.env` files). Every edit is saved to history, so you can roll back to any previous version.
+A configuration file managed by BRIDGEPORT and synced to servers. Supports both text and binary files (nginx configs, SSL certificates, `.env` files). Every edit is saved to history, so you can roll back to any previous version. Config files can interpolate secrets and variables and iterate over tagged servers with `{{range servers tag="..."}}` templating.
+
+Related: [Config Files Guide](guides/config-files.md)
+
+### Config Fragment
+
+A named, environment-scoped block of reusable text shared across multiple config files (a common header, a shared upstream block, a license preamble). Edit the fragment once and BRIDGEPORT auto-resyncs every config file that includes it.
 
 Related: [Config Files Guide](guides/config-files.md)
 
@@ -114,6 +120,18 @@ Related: [Databases Guide](guides/databases.md)
 An orchestrated multi-service deployment. When services have dependencies (e.g., "deploy the API before the worker"), a deployment plan resolves the correct order, executes each step, verifies health checks, and automatically rolls back all services if any step fails.
 
 Related: [Deployment Plans Guide](guides/deployment-plans.md)
+
+### Service Account
+
+A machine identity for API access, independent of any human user. Service accounts hold environment-scoped API tokens (capped to a role) used by CI/CD pipelines and automation — they don't log in and survive when people leave the team.
+
+Related: [Users & Access Guide](guides/users.md)
+
+### External Entity & Server Cluster
+
+Topology building blocks beyond your own services. An **External Entity** represents a third-party dependency on the diagram (a CDN, an external client, a managed API). A **Server Cluster** groups related servers (an HA pair, a region) into a single collapsible node. Both make the dashboard topology reflect real-world architecture.
+
+Related: [Topology Guide](guides/topology.md)
 
 ---
 
@@ -159,8 +177,10 @@ erDiagram
 | **Agent** | A lightweight Go binary that runs on a server and pushes metrics, container snapshots, and process lists to BRIDGEPORT in real-time. Optional -- SSH polling works without it. | [Agent Reference](reference/agent.md) |
 | **Auto-rollback** | When a deployment plan step fails, BRIDGEPORT automatically reverts all previously deployed services to their prior tags. | [Deployment Plans](guides/deployment-plans.md) |
 | **Auto-update** | A per-image toggle that tells BRIDGEPORT to automatically deploy new tags when detected by registry checks. | [Container Images](guides/container-images.md) |
+| **Batched Sync** | An all-or-nothing transactional sync of multiple config files/resources, with a dry-run preview and automatic rollback if any operation fails. | [Config Files](guides/config-files.md) |
 | **Bounce** | A mechanism that suppresses repeated failure notifications. After N consecutive failures, alerts are "bounced" (paused) until the service recovers, preventing alert storms. | [Notifications](guides/notifications.md) |
 | **Config File** | A text or binary file managed by BRIDGEPORT, synced to servers, with full edit history. | [Config Files](guides/config-files.md) |
+| **Config Fragment** | A named, env-scoped block of reusable text shared across multiple config files; editing it auto-resyncs every file that includes it. | [Config Files](guides/config-files.md) |
 | **Container Image** | The central image entity. One image can power multiple services across servers. Tracks current tag, latest available tag, and deployment history. | [Container Images](guides/container-images.md) |
 | **Database Type** | A plugin-defined database engine (PostgreSQL, MySQL, SQLite, etc.) with backup commands and monitoring queries. | [Plugin Reference](reference/plugins.md) |
 | **Deployment Plan** | An orchestrated multi-service deployment that respects dependency ordering, runs health checks between steps, and auto-rolls back on failure. | [Deployment Plans](guides/deployment-plans.md) |
@@ -168,12 +188,15 @@ erDiagram
 | **Discovery** | The process of scanning a server for running Docker containers and importing them as services. | [Servers](guides/servers.md) |
 | **Docker Socket** | A connection mode for managing containers on the same machine. BRIDGEPORT communicates with the Docker daemon directly via `/var/run/docker.sock`. | [Installation](installation.md) |
 | **Environment** | A logical grouping of infrastructure (production, staging, etc.) with its own servers, services, secrets, SSH key, and settings. | [Environments](guides/environments.md) |
+| **External Entity** | A non-server node on the topology diagram representing a third-party dependency (CDN, external client, managed API). | [Topology](guides/topology.md) |
 | **Health Check** | A verification of a service's health status. Types include container health, HTTP URL checks, TCP connectivity, and TLS certificate expiry. | [Health Checks](guides/health-checks.md) |
 | **Notification Type** | A defined category of notification (e.g., deployment success, health failure) with templates, severity, and per-user channel preferences. | [Notifications](guides/notifications.md) |
 | **Registry** | A container registry connection that BRIDGEPORT polls for new image tags. | [Registries](guides/registries.md) |
 | **Secret** | An encrypted key-value pair, stored with AES-256-GCM encryption. Injected into services as environment variables. | [Secrets](guides/secrets.md) |
 | **Server** | A machine managed by BRIDGEPORT, connected via SSH or Docker socket. | [Servers](guides/servers.md) |
+| **Server Cluster** | A logical grouping of related servers (HA pair, region) shown as a single collapsible node on the topology diagram. | [Topology](guides/topology.md) |
 | **Service** | A template describing how to run a container (image, env, health, compose). Linked to a Container Image. Has one Service Deployment per server. | [Services](guides/services.md) |
+| **Service Account** | A machine identity for API access (CI/CD, automation) that holds env-scoped, role-capped API tokens and is independent of any human user. | [Users & Access](guides/users.md) |
 | **Service Deployment** | The per-server instance of a Service. Holds container name, runtime status, discovery state, and deploy history for one server. | [Services](guides/services.md) |
 | **Service Dependency** | A relationship between two services that controls deployment ordering: `health_before` (check health first) or `deploy_after` (deploy in sequence). | [Deployment Plans](guides/deployment-plans.md) |
 | **Service Type** | A plugin-defined service category (Django, Node.js, etc.) with predefined commands (shell, migrate, etc.). | [Plugin Reference](reference/plugins.md) |
