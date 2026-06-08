@@ -4,6 +4,23 @@ import { shellEscape, type CommandClient } from './ssh.js';
 import { CONTAINER_STATUS, DOCKER_MODE } from './constants.js';
 import { safeJsonParse } from './helpers.js';
 
+// ==================== Helpers ====================
+
+/**
+ * Parse Docker's `.Config.Env` array (`["KEY=value", ...]`) into a key→value
+ * map. The first `=` splits each entry, so values may themselves contain `=`.
+ * Malformed entries without a `=` are ignored.
+ */
+function parseEnvArray(env: string[]): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const entry of env) {
+    const eq = entry.indexOf('=');
+    if (eq === -1) continue;
+    result[entry.slice(0, eq)] = entry.slice(eq + 1);
+  }
+  return result;
+}
+
 // ==================== Types ====================
 
 export interface ContainerInfo {
@@ -27,6 +44,25 @@ export interface ContainerHealth {
   status: string;
   health?: string;
   running: boolean;
+}
+
+/**
+ * Read-only image-digest view of a running container, used by drift detection.
+ *
+ * `imageRef` is the human-readable image reference the container was created
+ * from (e.g. `nginx:1.25`). `repoDigests` are the `repo@sha256:...` entries
+ * Docker records for the resolved local image — present only when the image was
+ * pulled from a registry (locally-built images have none). `configDigest` is the
+ * image's config digest (`Image` field, the local image ID); it is stable across
+ * registries but is NOT the registry manifest digest.
+ *
+ * `found` is false when the container does not exist on the host.
+ */
+export interface ContainerImageDigests {
+  found: boolean;
+  imageRef: string;
+  repoDigests: string[];
+  configDigest: string;
 }
 
 export interface ContainerStats {
@@ -66,6 +102,15 @@ export interface DockerClient {
   getContainerInfo(containerName: string): Promise<ContainerDetails>;
   getContainerHealth(containerName: string): Promise<ContainerHealth>;
   getContainerStats(containerName: string): Promise<ContainerStats>;
+  /**
+   * Read-only: the container's effective env (`.Config.Env`) as a key→value map.
+   * Includes image-baked and Docker-injected vars (PATH, HOSTNAME, …) — callers
+   * that only care about BRIDGEPORT-managed keys must filter. Returns `null` when
+   * the container does not exist.
+   */
+  getContainerEnv(containerName: string): Promise<Record<string, string> | null>;
+  /** Read-only: image digests of the container's current image (drift). */
+  getContainerImageDigests(containerName: string): Promise<ContainerImageDigests>;
   restartContainer(containerName: string): Promise<void>;
   pullImage(image: string, auth?: RegistryAuthConfig): Promise<void>;
   getContainerLogs(
@@ -185,6 +230,48 @@ export class DockerSocketClient implements DockerClient {
     } catch (err) {
       if ((err as { statusCode?: number }).statusCode === 404) {
         return { state: CONTAINER_STATUS.NOT_FOUND, status: 'Container not found', running: false };
+      }
+      throw err;
+    }
+  }
+
+  async getContainerEnv(containerName: string): Promise<Record<string, string> | null> {
+    try {
+      const container = this.docker.getContainer(containerName);
+      const info = await container.inspect();
+      return parseEnvArray(info.Config?.Env ?? []);
+    } catch (err) {
+      if ((err as { statusCode?: number }).statusCode === 404) {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  async getContainerImageDigests(containerName: string): Promise<ContainerImageDigests> {
+    try {
+      const container = this.docker.getContainer(containerName);
+      const info = await container.inspect();
+      // Resolve the local image the container currently runs to read its
+      // RepoDigests (registry-pull provenance). info.Image is the image ID.
+      let repoDigests: string[] = [];
+      try {
+        const image = this.docker.getImage(info.Image);
+        const imageInfo = await image.inspect();
+        repoDigests = Array.isArray(imageInfo.RepoDigests) ? imageInfo.RepoDigests : [];
+      } catch {
+        // Image inspect can fail if the image was removed out from under the
+        // running container; fall back to no repo digests.
+      }
+      return {
+        found: true,
+        imageRef: info.Config?.Image || '',
+        repoDigests,
+        configDigest: info.Image || '',
+      };
+    } catch (err) {
+      if ((err as { statusCode?: number }).statusCode === 404) {
+        return { found: false, imageRef: '', repoDigests: [], configDigest: '' };
       }
       throw err;
     }
@@ -423,6 +510,52 @@ export class DockerSSHClient implements DockerClient {
       health: health && health !== '' && health !== '<no value>' ? health : undefined,
       running: running === 'true',
     };
+  }
+
+  async getContainerEnv(containerName: string): Promise<Record<string, string> | null> {
+    // shellEscape() the container name — it originates from user-supplied
+    // ServiceDeployment.containerName. Read-only inspect, never mutates state.
+    const { stdout, code } = await this.client.exec(
+      this.pathPrefix +
+        `docker inspect --format '{{json .Config.Env}}' ${shellEscape(containerName)} 2>/dev/null || echo "__not_found__"`
+    );
+    const trimmed = stdout.trim();
+    if (code !== 0 || trimmed === '__not_found__' || trimmed === '') {
+      return null;
+    }
+    const arr = safeJsonParse<string[]>(trimmed, []);
+    return parseEnvArray(Array.isArray(arr) ? arr : []);
+  }
+
+  async getContainerImageDigests(containerName: string): Promise<ContainerImageDigests> {
+    // First inspect the container for its image reference + local image ID.
+    const { stdout, code } = await this.client.exec(
+      this.pathPrefix +
+        `docker inspect --format '{{.Config.Image}}|{{.Image}}' ${shellEscape(containerName)} 2>/dev/null || echo "__not_found__"`
+    );
+    const trimmed = stdout.trim();
+    if (code !== 0 || trimmed === '__not_found__' || trimmed === '') {
+      return { found: false, imageRef: '', repoDigests: [], configDigest: '' };
+    }
+    const sep = trimmed.indexOf('|');
+    const imageRef = sep === -1 ? trimmed : trimmed.slice(0, sep);
+    const configDigest = sep === -1 ? '' : trimmed.slice(sep + 1);
+
+    // Read RepoDigests of the resolved local image (registry-pull provenance).
+    // Failure here is non-fatal — fall back to an empty list.
+    let repoDigests: string[] = [];
+    if (configDigest) {
+      const digestResult = await this.client.exec(
+        this.pathPrefix +
+          `docker inspect --format '{{json .RepoDigests}}' ${shellEscape(configDigest)} 2>/dev/null || echo "[]"`
+      );
+      if (digestResult.code === 0) {
+        const arr = safeJsonParse<string[]>(digestResult.stdout.trim() || '[]', []);
+        if (Array.isArray(arr)) repoDigests = arr;
+      }
+    }
+
+    return { found: true, imageRef, repoDigests, configDigest };
   }
 
   async getContainerStats(containerName: string): Promise<ContainerStats> {

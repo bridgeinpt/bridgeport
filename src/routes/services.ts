@@ -22,6 +22,7 @@ import { getSystemSettings } from '../services/system-settings.js';
 import { HEALTH_STATUS, CONTAINER_STATUS, DISCOVERY_STATUS, HEALTH_CHECK_STATUS } from '../lib/constants.js';
 import { validateBody, validateUpdateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery, flattenDeploymentOntoService } from '../lib/helpers.js';
 import { isDryRun } from '../lib/dry-run.js';
+import { computeServiceDrift } from '../services/drift.js';
 
 // --- schemas ---
 
@@ -263,6 +264,22 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         : service;
 
       return { service: enriched };
+    }
+  );
+
+  // Drift: diff BRIDGEPORT's stored view of a service against actual host state.
+  // Read-only (viewer-accessible) — never mutates host state. Results are keyed
+  // per-deployment since runtime lives on ServiceDeployment.
+  fastify.get(
+    '/api/services/:id/drift',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const result = await computeServiceDrift(id);
+      if (!result) {
+        return reply.code(404).send({ error: 'Service not found' });
+      }
+      return result;
     }
   );
 

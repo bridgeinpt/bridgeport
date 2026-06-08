@@ -144,6 +144,14 @@ Returns the environment row plus a `_count` block with denormalized resource cou
 
 Returns `404` if no environment matches the id.
 
+**Environment-wide drift roll-up:**
+```http
+GET /api/environments/:envId/drift
+Authorization: Bearer <token>
+```
+
+Read-only (viewer-accessible): diffs BRIDGEPORT's stored view against the actual host state for every deployment of every service in the environment, grouped under a `services[]` array. It only runs `docker inspect` and file reads -- it never mutates host state. See [Drift Detection](services.md#drift-detection) in the Services guide for the full response shape and per-field semantics.
+
 **Delete an environment:**
 ```http
 DELETE /api/environments/:id

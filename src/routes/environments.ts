@@ -6,6 +6,7 @@ import { logAudit, actorFrom } from '../services/audit.js';
 import { requireAdmin } from '../plugins/authorize.js';
 import { createDefaultSettings } from '../services/environment-settings.js';
 import { safeJsonParse, validateBody, findOrNotFound, getErrorMessage } from '../lib/helpers.js';
+import { computeEnvironmentDrift } from '../services/drift.js';
 import { S3Client, ListBucketsCommand } from '@aws-sdk/client-s3';
 
 const createEnvSchema = z.object({
@@ -71,6 +72,22 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
       }
 
       return { environment };
+    }
+  );
+
+  // Drift roll-up: diff BRIDGEPORT's stored view against actual host state for
+  // every deployment of every service in this environment. Read-only
+  // (viewer-accessible) — never mutates host state.
+  fastify.get(
+    '/api/environments/:envId/drift',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { envId } = request.params as { envId: string };
+      const result = await computeEnvironmentDrift(envId);
+      if (!result) {
+        return reply.code(404).send({ error: 'Environment not found' });
+      }
+      return result;
     }
   );
 

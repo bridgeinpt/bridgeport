@@ -25,6 +25,7 @@ import {
   SWAP_MAX_MB,
 } from '../services/bootstrap.js';
 import { createClientForServer } from '../lib/ssh.js';
+import { computeServerDrift } from '../services/drift.js';
 import { getEnvironmentSshKey } from './environments.js';
 import { prisma } from '../lib/db.js';
 import { bundledAgentVersion } from '../lib/version.js';
@@ -143,6 +144,21 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
         return { server: { ...server, services } };
       }
       return { server };
+    }
+  );
+
+  // Drift: diff BRIDGEPORT's stored view against actual host state for every
+  // deployment on this server. Read-only (viewer-accessible) — never mutates.
+  fastify.get(
+    '/api/servers/:id/drift',
+    { preHandler: [fastify.authenticate] },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const result = await computeServerDrift(id);
+      if (!result) {
+        return reply.code(404).send({ error: 'Server not found' });
+      }
+      return result;
     }
   );
 

@@ -191,6 +191,179 @@ describe('docker', () => {
       });
     });
 
+    describe('getContainerEnv (drift, read-only)', () => {
+      it('should parse .Config.Env JSON into a key->value map', async () => {
+        const envJson = JSON.stringify(['FOO=bar', 'PATH=/usr/bin', 'EMPTY=']);
+        const mockClient = createMockCommandClient(new Map([
+          ['docker inspect', { stdout: envJson + '\n', stderr: '', code: 0 }],
+        ]));
+
+        const docker = new DockerSSHClient(mockClient);
+        const env = await docker.getContainerEnv('my-container');
+
+        expect(env).toEqual({ FOO: 'bar', PATH: '/usr/bin', EMPTY: '' });
+      });
+
+      it('should split only on the first = (values may contain =)', async () => {
+        const envJson = JSON.stringify(['DATABASE_URL=postgres://u:p@h/db?x=1']);
+        const mockClient = createMockCommandClient(new Map([
+          ['docker inspect', { stdout: envJson + '\n', stderr: '', code: 0 }],
+        ]));
+
+        const docker = new DockerSSHClient(mockClient);
+        const env = await docker.getContainerEnv('my-container');
+
+        expect(env).toEqual({ DATABASE_URL: 'postgres://u:p@h/db?x=1' });
+      });
+
+      it('should return null when the container is not found', async () => {
+        const mockClient = createMockCommandClient(new Map([
+          ['docker inspect', { stdout: '__not_found__\n', stderr: '', code: 0 }],
+        ]));
+
+        const docker = new DockerSSHClient(mockClient);
+        const env = await docker.getContainerEnv('nonexistent');
+
+        expect(env).toBeNull();
+      });
+
+      it('should return null when the command exits non-zero', async () => {
+        const mockClient = createMockCommandClient(new Map([
+          ['docker inspect', { stdout: '', stderr: 'boom', code: 1 }],
+        ]));
+
+        const docker = new DockerSSHClient(mockClient);
+        const env = await docker.getContainerEnv('my-container');
+
+        expect(env).toBeNull();
+      });
+
+      it('should return an empty map for a null/empty .Config.Env', async () => {
+        const mockClient = createMockCommandClient(new Map([
+          ['docker inspect', { stdout: 'null\n', stderr: '', code: 0 }],
+        ]));
+
+        const docker = new DockerSSHClient(mockClient);
+        const env = await docker.getContainerEnv('my-container');
+
+        expect(env).toEqual({});
+      });
+
+      it('should ignore malformed entries without an =', async () => {
+        const envJson = JSON.stringify(['GOOD=1', 'JUSTAKEY', '=onlyvalue']);
+        const mockClient = createMockCommandClient(new Map([
+          ['docker inspect', { stdout: envJson + '\n', stderr: '', code: 0 }],
+        ]));
+
+        const docker = new DockerSSHClient(mockClient);
+        const env = await docker.getContainerEnv('my-container');
+
+        // 'JUSTAKEY' has no '=' and is dropped; '=onlyvalue' splits to an empty key.
+        expect(env).toEqual({ GOOD: '1', '': 'onlyvalue' });
+      });
+
+      it('should shell-escape the container name (read-only inspect)', async () => {
+        const mockClient = createMockCommandClient(new Map([
+          ['docker inspect', { stdout: '[]\n', stderr: '', code: 0 }],
+        ]));
+
+        const docker = new DockerSSHClient(mockClient);
+        await docker.getContainerEnv('evil; rm -rf /');
+
+        const cmd = (mockClient.exec as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+        expect(cmd).toContain(`'evil; rm -rf /'`);
+        expect(cmd).toContain('docker inspect');
+        // Read-only invariant: never a mutating verb.
+        expect(cmd).not.toMatch(/docker (rm|stop|kill|restart|run|up|down|pull)\b/);
+      });
+    });
+
+    describe('getContainerImageDigests (drift, read-only)', () => {
+      it('should return imageRef, configDigest, and RepoDigests', async () => {
+        const repoDigests = JSON.stringify(['nginx@sha256:aaa', 'nginx@sha256:bbb']);
+        const mockClient = createMockCommandClient(new Map([
+          // Container inspect: '{{.Config.Image}}|{{.Image}}'
+          ['{{.Config.Image}}|{{.Image}}', {
+            stdout: 'nginx:1.25|sha256:localid\n',
+            stderr: '',
+            code: 0,
+          }],
+          // Image inspect for RepoDigests: '{{json .RepoDigests}}'
+          ['json .RepoDigests', { stdout: repoDigests + '\n', stderr: '', code: 0 }],
+        ]));
+
+        const docker = new DockerSSHClient(mockClient);
+        const result = await docker.getContainerImageDigests('my-container');
+
+        expect(result.found).toBe(true);
+        expect(result.imageRef).toBe('nginx:1.25');
+        expect(result.configDigest).toBe('sha256:localid');
+        expect(result.repoDigests).toEqual(['nginx@sha256:aaa', 'nginx@sha256:bbb']);
+      });
+
+      it('should return found:false when the container is missing', async () => {
+        const mockClient = createMockCommandClient(new Map([
+          ['{{.Config.Image}}|{{.Image}}', { stdout: '__not_found__\n', stderr: '', code: 0 }],
+        ]));
+
+        const docker = new DockerSSHClient(mockClient);
+        const result = await docker.getContainerImageDigests('nonexistent');
+
+        expect(result).toEqual({ found: false, imageRef: '', repoDigests: [], configDigest: '' });
+      });
+
+      it('should fall back to empty repoDigests for a locally-built image', async () => {
+        const mockClient = createMockCommandClient(new Map([
+          ['{{.Config.Image}}|{{.Image}}', { stdout: 'myapp:dev|sha256:local\n', stderr: '', code: 0 }],
+          // Image has no RepoDigests (locally built / never pulled by digest).
+          ['json .RepoDigests', { stdout: '[]\n', stderr: '', code: 0 }],
+        ]));
+
+        const docker = new DockerSSHClient(mockClient);
+        const result = await docker.getContainerImageDigests('my-container');
+
+        expect(result.found).toBe(true);
+        expect(result.imageRef).toBe('myapp:dev');
+        expect(result.repoDigests).toEqual([]);
+      });
+
+      it('should not fail the whole call when the image-inspect step errors', async () => {
+        const mockClient = createMockCommandClient(new Map([
+          ['{{.Config.Image}}|{{.Image}}', { stdout: 'nginx:1.25|sha256:local\n', stderr: '', code: 0 }],
+          ['json .RepoDigests', { stdout: '', stderr: 'no such image', code: 1 }],
+        ]));
+
+        const docker = new DockerSSHClient(mockClient);
+        const result = await docker.getContainerImageDigests('my-container');
+
+        expect(result.found).toBe(true);
+        expect(result.repoDigests).toEqual([]);
+      });
+
+      it('should issue only read-only docker inspect commands', async () => {
+        const repoDigests = JSON.stringify(['nginx@sha256:aaa']);
+        const calls: string[] = [];
+        const mockClient = createMockCommandClient(new Map([
+          ['{{.Config.Image}}|{{.Image}}', { stdout: 'nginx:1.25|sha256:local\n', stderr: '', code: 0 }],
+          ['json .RepoDigests', { stdout: repoDigests + '\n', stderr: '', code: 0 }],
+        ]));
+        const origExec = mockClient.exec;
+        mockClient.exec = vi.fn(async (cmd: string) => {
+          calls.push(cmd);
+          return (origExec as (c: string) => Promise<SSHExecResult>)(cmd);
+        });
+
+        const docker = new DockerSSHClient(mockClient);
+        await docker.getContainerImageDigests('my-container');
+
+        expect(calls.length).toBeGreaterThan(0);
+        for (const cmd of calls) {
+          expect(cmd).toContain('docker inspect');
+          expect(cmd).not.toMatch(/docker (rm|stop|kill|restart|run|up|down|pull)\b/);
+        }
+      });
+    });
+
     describe('getContainerStats', () => {
       it('should parse CPU, memory, network, and block IO stats', async () => {
         const statsJson = JSON.stringify({

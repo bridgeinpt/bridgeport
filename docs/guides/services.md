@@ -12,6 +12,7 @@ A **service** in BRIDGEPORT is an **environment-scoped template** that describes
 3. [Step-by-Step Guide](#step-by-step-guide)
    - [Creating Services](#creating-services)
    - [Deploying Tags](#deploying-tags)
+   - [Drift Detection](#drift-detection)
    - [Deployment Logs & History](#deployment-logs--history)
    - [Service Actions](#service-actions)
    - [Health Check Configuration](#health-check-configuration)
@@ -260,6 +261,62 @@ For the service-wide `POST /api/services/:id/sync-files` endpoint, the dry-run r
   ]
 }
 ```
+
+### Drift Detection
+
+Drift endpoints diff BRIDGEPORT's **stored** view of a service against the **actual** state on the host. They are strictly **read-only** — they only run `docker inspect` and file reads (`cat`) and never pull images, write files, or touch containers. All three are **viewer-accessible**.
+
+```http
+GET /api/services/:id/drift          # one service, all its deployments
+GET /api/servers/:id/drift           # every deployment on a server
+GET /api/environments/:envId/drift   # environment-wide roll-up
+Authorization: Bearer <token>
+```
+
+A service can be deployed to multiple servers (one `ServiceDeployment` per server), and runtime state lives on the deployment — so drift is reported **per deployment**, keyed by `serverId`.
+
+**Response shape (`GET /api/services/:id/drift`):**
+
+```json
+{
+  "serviceId": "csrv...",
+  "serviceName": "api",
+  "checkedAt": "2026-06-08T12:00:00.000Z",
+  "deployments": [
+    {
+      "serviceDeploymentId": "csdp...",
+      "serverId": "csvr...",
+      "serverName": "web-1",
+      "containerName": "api",
+      "drift": {
+        "composePath":    { "expected": "/opt/api/docker-compose.yml", "actual": "/opt/api/docker-compose.yml", "match": true },
+        "composeContent": { "match": false, "reason": "Host compose file content differs from the regenerated compose." },
+        "imageDigest":    { "expected": "sha256:abc...", "actual": "sha256:def...", "match": false, "reason": "Host image digest does not match the recorded deployed digest." },
+        "exposedPorts":   { "expected": [{ "host": 80, "container": 80, "protocol": "tcp" }], "actual": [{ "host": null, "container": 80, "protocol": "tcp" }], "match": false, "reason": "Published ports differ from the stored mapping." },
+        "configFiles":    [ { "targetPath": "/etc/api/app.env", "configFileName": "app.env", "match": true } ],
+        "envVars":        { "missing": [], "unexpected": ["LOG_LEVEL"], "match": false }
+      },
+      "summary": "3 drift items detected",
+      "warnings": []
+    }
+  ],
+  "summary": "3 drift items detected"
+}
+```
+
+`GET /api/servers/:id/drift` returns the same per-deployment shape under `deployments` (one entry per deployment on the server). `GET /api/environments/:envId/drift` groups deployments under a `services[]` array (`{ serviceId, serviceName, deployments[] }`).
+
+**Per-field semantics:**
+
+- **`match`** is `true` (in sync), `false` (drift detected), or `null` (could not be reliably compared — see `reason`). The `summary` counts only `match: false` fields; `null` is never counted as drift.
+- **`composePath`** — the stored deployment compose path is the source of truth. `match: null` when no path is set (auto-managed compose off, or never deployed via compose).
+- **`composeContent`** — compared by **checksum only**; the raw content is never returned because it can embed secrets. `match: null` with a reason when the compose file is **shared and operator-maintained** (BRIDGEPORT intentionally does not rewrite those, so content drift is expected).
+- **`imageDigest`** — `expected` is the manifest digest BRIDGEPORT recorded as deployed; `actual` is read from the host image's `RepoDigests`. `match: null` (not a false mismatch) when the comparison can't be resolved — e.g. the host image is locally built / never pulled by digest, or BRIDGEPORT has no recorded deployed digest.
+- **`exposedPorts`** — compared as a set of `host:container/protocol` mappings, derived from the same logic a real deploy uses to publish ports.
+- **`configFiles`** — one entry per attached config file, compared by **checksum only** over secret-redacted content. Binary files report `match: null` with a reason.
+- **`envVars`** — only keys BRIDGEPORT manages (`baseEnv` + per-deployment `envOverrides`) are compared; image-baked and Docker-injected vars (`PATH`, `HOSTNAME`, …) are ignored. `missing` = a managed key absent on the host container; `unexpected` = a managed key whose host value differs. **Only key names are returned, never values** — so secret values never leak.
+
+**Security:** drift never returns decrypted secret values or raw secret-bearing content. Content comparisons hash secret-redacted text, and env comparisons report presence/mismatch by key name only. Hosts that are unreachable degrade each affected field to `match: null` with a `reason`/`warnings` entry rather than failing the whole request.
 
 ### Deployment Logs & History
 
