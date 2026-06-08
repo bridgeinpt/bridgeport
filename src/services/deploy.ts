@@ -209,6 +209,11 @@ export async function deployService(
       let composeToValidate = artifacts.compose.content;
       if (sharedOperatorFile) {
         const existing = await sshClient.exec(`cat ${shellEscape(composePath)}`);
+        if (existing.code !== 0) {
+          throw new Error(
+            `Failed to read shared compose file at ${composePath}: ${existing.stderr.trim() || 'file not found'}`
+          );
+        }
         composeToValidate = existing.stdout;
       }
       const composeValidationError = validateGeneratedCompose(
@@ -629,6 +634,16 @@ export async function deployServiceDryRun(
     deployment.containerName
   );
 
+  // Mirror the real deploy's pre-flight compose check (deployService): if the
+  // rendered compose's top-level service key doesn't match containerName, the
+  // live deploy refuses. Surface that as a warning here (informational — a
+  // dry-run must still return a report) so the preview isn't misleadingly
+  // green for the exact failure mode issue #200 targets.
+  const composeValidationError = validateGeneratedCompose(
+    preview.composeContent,
+    deployment.containerName
+  );
+
   return {
     dryRun: true,
     serviceId: service.id,
@@ -639,7 +654,11 @@ export async function deployServiceDryRun(
     composeContent: preview.composeContent,
     env: preview.env,
     containerAction: action,
-    warnings: [...preview.warnings, ...warnings],
+    warnings: [
+      ...preview.warnings,
+      ...warnings,
+      ...(composeValidationError ? [composeValidationError] : []),
+    ],
     // Propagate would-fail status from the artifact preview. The live deploy
     // throws on template errors and refuses missing secrets — surface that
     // structurally so the dry-run report doesn't look "green" when it isn't.

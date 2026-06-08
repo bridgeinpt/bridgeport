@@ -2,7 +2,7 @@ import { prisma } from '../lib/db.js';
 import { createHash } from 'crypto';
 import YAML from 'yaml';
 import { resolveSecretPlaceholders, getSecretsForEnv } from './secrets.js';
-import { safeJsonParse } from '../lib/helpers.js';
+import { safeJsonParse, getErrorMessage } from '../lib/helpers.js';
 import { redactEnvSecrets, redactSecretValues } from '../lib/dry-run.js';
 import { composeFragmentedContent } from '../lib/config-fragments.js';
 
@@ -141,9 +141,7 @@ export function validateGeneratedCompose(
   try {
     parsed = YAML.parse(composeContent);
   } catch (err) {
-    return `Generated compose for "${containerName}" is not valid YAML: ${
-      err instanceof Error ? err.message : String(err)
-    }`;
+    return `Generated compose for "${containerName}" is not valid YAML: ${getErrorMessage(err)}`;
   }
 
   if (parsed === null || typeof parsed !== 'object') {

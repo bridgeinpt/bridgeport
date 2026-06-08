@@ -745,7 +745,13 @@ export async function importFromTerraform(
         // non-null value (operator intent / hand-maintained file). For a null
         // value we only set it when the per-environment opt-in is enabled and
         // the import actually carries a path. (issue #200)
-        const incomingComposePath = serviceData.compose_path ?? null;
+        // Treat an empty or whitespace-only path as "no path" so a blank
+        // terraform output can't persist as an invalid composePath. The trim is
+        // only for the null-decision; the original (untrimmed) value is kept
+        // when non-blank.
+        const incomingComposePath = serviceData.compose_path?.trim()
+          ? serviceData.compose_path
+          : null;
 
         if (existingDeployment) {
           const maySetComposePath =
