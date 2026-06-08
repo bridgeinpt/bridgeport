@@ -376,6 +376,8 @@ export async function deployService(
       deployment.server.environmentId,
       {
         serviceName: service.name,
+        serviceId: service.id,
+        imageName: service.containerImage.imageName,
         imageTag,
         imageTags,
         serverName: deployment.server.name,
@@ -424,6 +426,7 @@ export async function deployService(
       {
         serviceName: service.name,
         serviceId: service.id,
+        imageName: service.containerImage.imageName,
         imageTag,
         serverName: deployment.server.name,
         error: errorMessage,
