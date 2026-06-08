@@ -1,3 +1,4 @@
+import { ReactElement } from 'react';
 import { Modal } from './Modal.js';
 import { CheckIcon, WarningIcon, SpinnerIcon } from './Icons.js';
 
@@ -54,7 +55,7 @@ export function OperationResultsModal({
   status,
   noTargetsMessage = 'Nothing to do — no targets matched this operation.',
   closeText = 'Done',
-}: OperationResultsModalProps): JSX.Element {
+}: OperationResultsModalProps): ReactElement {
   const isLoading = results === null;
   const successCount = results?.filter((r) => r.success).length ?? 0;
   const totalCount = results?.length ?? 0;

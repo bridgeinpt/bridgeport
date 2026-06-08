@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, type ReactElement } from 'react';
 import CodeMirror, { type Extension } from '@uiw/react-codemirror';
 import { dracula } from '@uiw/codemirror-theme-dracula';
 import { yaml } from '@codemirror/lang-yaml';
@@ -85,7 +85,7 @@ export function ConfigFileEditor({
   height = '20rem',
   autoFocus = false,
   className,
-}: ConfigFileEditorProps): JSX.Element {
+}: ConfigFileEditorProps): ReactElement {
   const extensions = useMemo(() => languageExtension(language), [language]);
 
   return (

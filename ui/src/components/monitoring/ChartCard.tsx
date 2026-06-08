@@ -78,7 +78,7 @@ const ChartCard = memo(function ChartCard({ title, data, names, formatTime, unit
               border: '1px solid #334155',
               borderRadius: '8px',
             }}
-            labelFormatter={formatTime}
+            labelFormatter={(label) => formatTime(String(label))}
             formatter={(value: unknown) => [`${Number(value).toFixed(1)}${unit || ''}`, '']}
           />
           <Legend wrapperStyle={{ fontSize: 12 }} />

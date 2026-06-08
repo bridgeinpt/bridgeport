@@ -1,4 +1,4 @@
-import { ReactNode, ComponentType } from 'react';
+import { ReactNode, ComponentType, ReactElement } from 'react';
 
 interface IconProps {
   className?: string;
@@ -31,7 +31,7 @@ export function EmptyState({
   description,
   action,
   children,
-}: EmptyStateProps): JSX.Element {
+}: EmptyStateProps): ReactElement {
   const buttonVariantClass = action?.variant === 'secondary'
     ? 'btn btn-secondary'
     : action?.variant === 'ghost'
