@@ -277,6 +277,45 @@ describe('drift — composeContent', () => {
     expect(result!.deployments[0].drift.composeContent.match).toBe(true);
   });
 
+  it('match:true when the host compose has extra trailing newline(s) (trimEnd tolerance)', async () => {
+    // The regenerated artifact ends in a single '\n'; the on-disk host file
+    // (written via deploy heredoc over a YAML artifact that already ends in
+    // '\n') ends in TWO. drift trimEnd()s both sides, so this is NOT drift.
+    const expectedText = 'services:\n  web: {}\n';
+    const hostText = 'services:\n  web: {}\n\n';
+    mockGenerateArtifacts.mockResolvedValue({
+      compose: { name: 'docker-compose.yml', content: expectedText, checksum: 'x' },
+      configFiles: [],
+    } as never);
+    const dep = buildDeployment({ composePath: '/opt/app/docker-compose.yml' });
+    const { client } = makeFileClient((cmd) =>
+      cmd.includes('cat') ? { stdout: hostText, stderr: '', code: 0 } : { stdout: '', stderr: '', code: 0 }
+    );
+    arrangeSingleDeployment(dep, { dockerClient: makeDockerClient(), fileClient: client });
+
+    const result = await computeServiceDrift('svc-1');
+    expect(result!.deployments[0].drift.composeContent.match).toBe(true);
+  });
+
+  it('match:false when the host compose body genuinely differs (trimEnd is not vacuous)', async () => {
+    // Sanity guard for the trailing-whitespace test above: a real body diff
+    // must still be flagged even though both sides are trimEnd'd.
+    const expectedText = 'services:\n  web: {}\n';
+    const hostText = 'services:\n  web: { image: drifted }\n';
+    mockGenerateArtifacts.mockResolvedValue({
+      compose: { name: 'docker-compose.yml', content: expectedText, checksum: 'x' },
+      configFiles: [],
+    } as never);
+    const dep = buildDeployment({ composePath: '/opt/app/docker-compose.yml' });
+    const { client } = makeFileClient((cmd) =>
+      cmd.includes('cat') ? { stdout: hostText, stderr: '', code: 0 } : { stdout: '', stderr: '', code: 0 }
+    );
+    arrangeSingleDeployment(dep, { dockerClient: makeDockerClient(), fileClient: client });
+
+    const result = await computeServiceDrift('svc-1');
+    expect(result!.deployments[0].drift.composeContent.match).toBe(false);
+  });
+
   it('match:false with a reason and NO raw secret content when content differs', async () => {
     const SECRET = 'super-secret-db-password';
     mockGetSecrets.mockResolvedValue({ DB_PASS: SECRET } as never);
@@ -461,6 +500,30 @@ describe('drift — exposedPorts', () => {
     const p = result!.deployments[0].drift.exposedPorts;
     expect(p.match).toBe(false);
     expect(p.reason).toBeTruthy();
+  });
+
+  it('stored {host:null,container:80} (EXPOSE-only) vs host {host:null,container:80} -> match:true', async () => {
+    // A container that only EXPOSEs a port is stored with host:null and the
+    // host reports host:null too. drift compares stored ports structurally
+    // (preserving host:null) instead of round-tripping through
+    // serializeExposedPorts (which would default host:null -> container and
+    // flag permanent false drift).
+    const dep = buildDeployment({
+      exposedPorts: JSON.stringify([{ host: null, container: 80 }]),
+    });
+    const docker = makeDockerClient({
+      getContainerInfo: vi.fn().mockResolvedValue({
+        state: 'running',
+        running: true,
+        image: 'nginx',
+        ports: [{ host: null, container: 80, protocol: 'tcp' }],
+      }),
+    });
+    const { client } = makeFileClient(() => ({ stdout: '', stderr: '', code: 0 }));
+    arrangeSingleDeployment(dep, { dockerClient: docker, fileClient: client });
+
+    const result = await computeServiceDrift('svc-1');
+    expect(result!.deployments[0].drift.exposedPorts.match).toBe(true);
   });
 
   it('match:true when published ports equal the stored mapping', async () => {

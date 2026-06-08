@@ -7,7 +7,7 @@ import { getEnvironmentSshKey } from '../routes/environments.js';
 import { getSecretsForEnv, resolveSecretPlaceholders } from './secrets.js';
 import { redactSecretValues } from '../lib/dry-run.js';
 import { composeFragmentedContent } from '../lib/config-fragments.js';
-import { generateDeploymentArtifacts, serializeExposedPorts } from './compose.js';
+import { generateDeploymentArtifacts, type ExposedPort } from './compose.js';
 import { safeJsonParse, getErrorMessage } from '../lib/helpers.js';
 import { CONTAINER_STATUS } from '../lib/constants.js';
 
@@ -143,51 +143,29 @@ function setsEqual(a: Set<string>, b: Set<string>): boolean {
 }
 
 /**
- * Parse a docker-compose `ports:` string entry (as produced by
- * serializeExposedPorts) back into a {host, container, protocol} mapping for
- * comparison against host-discovered ports.
+ * Expected exposed ports for a deployment, parsed STRUCTURALLY from the stored
+ * `exposedPorts` JSON into the same {host, container, protocol} shape the host
+ * side reports.
  *
- * Handles `host:container`, `host:container/proto`, `ip:host:container`, and
- * `[ipv6]:host:container` forms. Returns null for anything unparseable.
- */
-function parseComposePortString(entry: string): PortMapping | null {
-  let protocol = 'tcp';
-  let rest = entry;
-  const slash = rest.lastIndexOf('/');
-  if (slash !== -1) {
-    protocol = rest.slice(slash + 1).toLowerCase() || 'tcp';
-    rest = rest.slice(0, slash);
-  }
-
-  // Strip a leading bracketed IPv6 host-ip prefix if present.
-  if (rest.startsWith('[')) {
-    const close = rest.indexOf(']:');
-    if (close !== -1) rest = rest.slice(close + 2);
-  }
-
-  const parts = rest.split(':');
-  // Take the last two numeric segments as host:container (an IPv4 host-ip prefix
-  // contributes an earlier segment we don't compare on).
-  if (parts.length < 2) return null;
-  const containerStr = parts[parts.length - 1];
-  const hostStr = parts[parts.length - 2];
-  const container = parseInt(containerStr, 10);
-  const host = parseInt(hostStr, 10);
-  if (Number.isNaN(container)) return null;
-  return { host: Number.isNaN(host) ? null : host, container, protocol };
-}
-
-/**
- * Expected exposed ports for a deployment. The deploy path derives `ports:`
- * from the stored `exposedPorts` via serializeExposedPorts; mirror that so the
- * expected set matches what a real deploy would publish.
+ * `host: null` (container only `EXPOSE`s the port, no `-p`) is PRESERVED as
+ * null here — it must NOT be defaulted to the container port. serializeExposedPorts
+ * defaults host:null -> container as an intentional deploy-regeneration behavior
+ * (issue #117), but for drift detection we compare against what the host actually
+ * reports: a container that only EXPOSEs a port shows up as {host:null}, so
+ * defaulting here would flag permanent false drift.
  */
 function expectedPortsFor(exposedPortsJson: string | null | undefined): PortMapping[] {
-  const serialized = serializeExposedPorts(exposedPortsJson);
+  const parsed = safeJsonParse<ExposedPort[]>(exposedPortsJson, []);
+  if (!Array.isArray(parsed)) return [];
   const result: PortMapping[] = [];
-  for (const s of serialized) {
-    const parsed = parseComposePortString(s);
-    if (parsed) result.push(parsed);
+  for (const raw of parsed) {
+    if (!raw || typeof raw !== 'object') continue;
+    if (typeof raw.container !== 'number') continue;
+    result.push({
+      host: typeof raw.host === 'number' ? raw.host : null,
+      container: raw.container,
+      protocol: raw.protocol,
+    });
   }
   return result;
 }
@@ -493,6 +471,10 @@ async function computeDeploymentDrift(
           const unexpected: string[] = [];
           // Only compare keys BRIDGEPORT manages. Image-baked / Docker-injected
           // vars (PATH, HOSTNAME, …) are intentionally ignored.
+          // CAVEAT: values containing Compose/shell interpolation tokens
+          // ($VAR / ${VAR}) are interpolated by `docker compose up`, so the
+          // container's actual value can legitimately differ from the stored
+          // literal — such keys may surface here as drift.
           for (const [key, expectedValue] of Object.entries(managedEnv)) {
             if (!(key in hostEnv)) {
               missing.push(key);
@@ -545,9 +527,16 @@ async function computeDeploymentDrift(
         if (code !== 0) {
           composeContentDrift = { match: false, reason: 'Compose file not found on host.' };
         } else {
-          const hostRedacted = redactSecretValues(stdout.replace(/\n$/, ''), secretValues);
+          // trimEnd (not a single-newline strip): the deploy path writes compose
+          // via a heredoc that appends a trailing newline, and the compose
+          // artifact (YAML.stringify) already ends in one, so the on-disk file
+          // can carry MORE trailing whitespace than the regenerated artifact.
+          // Stripping ALL trailing whitespace on both sides makes the checksum
+          // comparison robust to that difference (config-file artifacts in
+          // compose.ts are likewise trimEnd'd).
+          const hostRedacted = redactSecretValues(stdout.trimEnd(), secretValues);
           const expectedRedacted = redactSecretValues(
-            expectedComposeContent.replace(/\n$/, ''),
+            expectedComposeContent.trimEnd(),
             secretValues
           );
           const match = checksum(hostRedacted) === checksum(expectedRedacted);
@@ -610,7 +599,7 @@ async function computeDeploymentDrift(
       let expectedRendered: string | null = null;
       const fromArtifact = expectedByPath.get(targetPath);
       if (fromArtifact && !fromArtifact.isBinary) {
-        expectedRendered = redactSecretValues(fromArtifact.content.replace(/\n$/, ''), secretValues);
+        expectedRendered = redactSecretValues(fromArtifact.content.trimEnd(), secretValues);
       } else {
         try {
           const composedSource = composeFragmentedContent(
@@ -634,7 +623,7 @@ async function computeDeploymentDrift(
             });
             continue;
           }
-          expectedRendered = redactSecretValues(resolved.replace(/\n$/, ''), secretValues);
+          expectedRendered = redactSecretValues(resolved.trimEnd(), secretValues);
         } catch (err) {
           configFilesDrift.push({
             targetPath,
@@ -660,7 +649,7 @@ async function computeDeploymentDrift(
           });
           continue;
         }
-        const hostRedacted = redactSecretValues(stdout.replace(/\n$/, ''), secretValues);
+        const hostRedacted = redactSecretValues(stdout.trimEnd(), secretValues);
         const match = checksum(hostRedacted) === checksum(expectedRendered ?? '');
         configFilesDrift.push({
           targetPath,

@@ -11,6 +11,7 @@ import type {
   ContainerDetails,
   ContainerHealth,
   ContainerStats,
+  ContainerImageDigests,
 } from '../../src/lib/docker.js';
 
 export interface MockDockerOptions {
@@ -22,6 +23,10 @@ export interface MockDockerOptions {
   containerHealth?: Record<string, ContainerHealth>;
   /** Container stats keyed by container name */
   containerStats?: Record<string, ContainerStats>;
+  /** Container env (`.Config.Env` as a key→value map) keyed by container name */
+  containerEnv?: Record<string, Record<string, string>>;
+  /** Container image digests (drift) keyed by container name */
+  containerImageDigests?: Record<string, ContainerImageDigests>;
   /** Container names that should fail operations */
   failOnContainers?: Set<string>;
 }
@@ -39,6 +44,8 @@ export function createMockDocker(options: MockDockerOptions = {}): DockerClient 
     getContainerInfo: ReturnType<typeof vi.fn>;
     getContainerHealth: ReturnType<typeof vi.fn>;
     getContainerStats: ReturnType<typeof vi.fn>;
+    getContainerEnv: ReturnType<typeof vi.fn>;
+    getContainerImageDigests: ReturnType<typeof vi.fn>;
     restartContainer: ReturnType<typeof vi.fn>;
     pullImage: ReturnType<typeof vi.fn>;
     getContainerLogs: ReturnType<typeof vi.fn>;
@@ -48,6 +55,8 @@ export function createMockDocker(options: MockDockerOptions = {}): DockerClient 
   const details = { ...(options.containerDetails || {}) };
   const health = { ...(options.containerHealth || {}) };
   const stats = { ...(options.containerStats || {}) };
+  const env = { ...(options.containerEnv || {}) };
+  const imageDigests = { ...(options.containerImageDigests || {}) };
   const failSet = new Set(options.failOnContainers || []);
 
   const listContainers = vi.fn(async (): Promise<ContainerInfo[]> => {
@@ -91,6 +100,31 @@ export function createMockDocker(options: MockDockerOptions = {}): DockerClient 
     };
   });
 
+  const getContainerEnv = vi.fn(
+    async (name: string): Promise<Record<string, string> | null> => {
+      if (failSet.has(name)) {
+        throw new Error(`Mock Docker: container ${name} not accessible`);
+      }
+      return env[name] || {};
+    }
+  );
+
+  const getContainerImageDigests = vi.fn(
+    async (name: string): Promise<ContainerImageDigests> => {
+      if (failSet.has(name)) {
+        throw new Error(`Mock Docker: container ${name} not accessible`);
+      }
+      return (
+        imageDigests[name] || {
+          found: false,
+          imageRef: '',
+          repoDigests: [],
+          configDigest: '',
+        }
+      );
+    }
+  );
+
   const restartContainer = vi.fn(async (name: string): Promise<void> => {
     if (failSet.has(name)) {
       throw new Error(`Mock Docker: failed to restart container ${name}`);
@@ -118,6 +152,8 @@ export function createMockDocker(options: MockDockerOptions = {}): DockerClient 
     getContainerInfo,
     getContainerHealth,
     getContainerStats,
+    getContainerEnv,
+    getContainerImageDigests,
     restartContainer,
     pullImage,
     getContainerLogs,
@@ -136,6 +172,8 @@ export function createMockDocker(options: MockDockerOptions = {}): DockerClient 
       getContainerInfo,
       getContainerHealth,
       getContainerStats,
+      getContainerEnv,
+      getContainerImageDigests,
       restartContainer,
       pullImage,
       getContainerLogs,
