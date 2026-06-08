@@ -91,7 +91,7 @@ curl -s https://deploy.example.com/openapi.json > openapi.new.json
 diff <(jq -S . openapi.pinned.json) <(jq -S . openapi.new.json)
 ```
 
-Deprecated fields and parameters are flagged with `deprecated: true` directly in the spec, so generated clients and linters surface them automatically.
+Where the spec models a deprecated field or parameter, it carries `deprecated: true` so generated clients and linters can surface it automatically. Spec coverage of deprecations is best-effort and still expanding, though — treat the [Current deprecations](#current-deprecations) table below as the authoritative, complete list rather than relying on a spec diff alone.
 
 ---
 
@@ -107,13 +107,13 @@ Concretely: anything deprecated anywhere in `2.x` keeps working for all of `2.x`
 
 ### How deprecations are signaled
 
-Every deprecation is announced in **three** places, so you can catch it whether you read specs, release notes, or this doc:
+Every deprecation is recorded in the two **authoritative** places below, and — where the spec models the affected field — surfaced in a third, machine-readable one:
 
-1. **`deprecated: true` in `/openapi.json`** — machine-readable, picked up by code generators and OpenAPI linters.
-2. **An "API changes → Deprecated" entry in the release notes** — see [Changelog discipline](#changelog-discipline) below.
-3. **The [Current deprecations](#current-deprecations) table in this document** — the human-readable, always-current list with replacements and removal targets.
+1. **The [Current deprecations](#current-deprecations) table in this document** — the complete, always-current list with replacements and removal targets. This is the canonical record.
+2. **An "API changes → Deprecated" entry in the release notes** — tells you *when* a surface was deprecated. See [Changelog discipline](#changelog-discipline) below.
+3. **`deprecated: true` in `/openapi.json`** — machine-readable and picked up by code generators and OpenAPI linters, applied **where the spec models the deprecated field** (e.g. the sync `success` alias). Coverage is best-effort and still expanding, so don't rely on a spec diff alone to catch every deprecation.
 
-If you're integrating, watch all three. The release-notes entry tells you *when* something was deprecated; this doc's table tells you *what to use instead* and *when it disappears*.
+If you're integrating, the table above is your source of truth; the release notes tell you when the clock started, and the spec annotations help your tooling flag the cases it already covers.
 
 ---
 
@@ -191,7 +191,7 @@ The sync endpoints (`POST /config-files/:id/sync-all`, `POST /services/:id/sync-
 }
 ```
 
-The richer `status` enum replaces the old top-level `success: boolean`. The boolean is kept as a deprecated alias (flagged `deprecated: true` in the spec) for back-compat. Note that `status` carries information the boolean can't: a zero-target sync now returns `200` with `status: 'no_targets'` (previously a `400`), which you should surface as a warning rather than a green success — distinct from `'ok'`.
+The richer `status` enum replaces the old top-level `success: boolean`. The boolean is kept as a deprecated alias (modeled as `deprecated: true` in the spec's shared `SyncResult` schema) for back-compat. Note that `status` carries information the boolean can't: a zero-target sync now returns `200` with `status: 'no_targets'` (previously a `400`), which you should surface as a warning rather than a green success — distinct from `'ok'`.
 
 ### Service → ServiceDeployment split
 
