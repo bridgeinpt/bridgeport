@@ -538,9 +538,16 @@ Navigate to **Configuration > Fragments** in the sidebar.
 - **Create** a fragment with a name, optional description, and content. Content
   can reference `${KEY}` placeholders — they're resolved against the same
   environment-level secrets and vars at sync time.
+- **View** (eye icon) opens a read-only modal showing the fragment's name,
+  description, content, and usage. An **Edit** button inside switches into the
+  editable modal.
 - **Edit** a fragment to update its content. If the fragment is included by any
   ConfigFile with **Auto Re-sync** enabled, an auto-resync is triggered for
   those files (same pipeline as the secret/var auto-resync).
+- **Used by** in the list is a clickable count: expand it to drill into the
+  ConfigFiles that include the fragment and the services those files are
+  attached to, with links to each. Fragments with no usage show an unobtrusive
+  `—`.
 - **Delete** is blocked when a fragment is in use. The API returns a 409 with
   an `inUseBy` array listing the ConfigFiles (and their attached services)
   that still reference the fragment.
@@ -553,6 +560,9 @@ position determines render order, and the last definition of a key wins.
 
 Click **Preview** in the edit modal to see the rendered output: fragments
 concatenated in order, headers injected, and `${KEY}` placeholders resolved.
+
+The read-only ConfigFile **view** modal also lists the included fragments (in
+position order), so you can see what a file pulls in without entering edit mode.
 
 ### API
 

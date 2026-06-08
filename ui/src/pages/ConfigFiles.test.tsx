@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../test/render';
 import { useAppStore } from '../lib/store';
+import * as api from '../lib/api';
 
 // Mock Toast
 vi.mock('../components/Toast', () => ({
@@ -97,5 +99,49 @@ describe('ConfigFiles', () => {
     await waitFor(() => {
       expect(screen.getByText('Nginx config')).toBeInTheDocument();
     });
+  });
+
+  it('view modal lists included fragments in position order', async () => {
+    const user = userEvent.setup();
+    // Detail endpoint returns fragments out of position order; the UI must sort
+    // them by position when rendering the read-only view modal.
+    vi.mocked(api.getConfigFile).mockResolvedValue({
+      configFile: {
+        id: 'cf-1',
+        name: 'nginx.conf',
+        filename: 'nginx.conf',
+        description: 'Nginx config',
+        isBinary: false,
+        mimeType: null,
+        fileSize: null,
+        autoResync: false,
+        language: 'nginx',
+        content: 'server {}',
+        createdAt: '2024-01-01T00:00:00Z',
+        updatedAt: '2024-01-15T00:00:00Z',
+        environmentId: 'env-1',
+        services: [],
+        includedFragments: [
+          { id: 'inc-2', position: 1, fragment: { id: 'f-second', name: 'second-frag', description: null } },
+          { id: 'inc-1', position: 0, fragment: { id: 'f-first', name: 'first-frag', description: 'leading block' } },
+        ],
+      },
+    } as never);
+
+    renderWithProviders(<ConfigFiles />);
+    await waitFor(() => {
+      expect(screen.getAllByText('nginx.conf').length).toBeGreaterThan(0);
+    });
+
+    await user.click(screen.getAllByTitle('View')[0]);
+
+    const heading = await screen.findByText('Included fragments:');
+    const list = heading.parentElement!.querySelector('ol') as HTMLElement;
+    const items = within(list).getAllByRole('listitem');
+    // Sorted by position: first-frag (pos 0) before second-frag (pos 1).
+    expect(items.map((li) => li.textContent)).toEqual([
+      'first-frag — leading block',
+      'second-frag',
+    ]);
   });
 });

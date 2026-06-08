@@ -1,19 +1,22 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAppStore } from '../lib/store.js';
 import {
   listConfigFragments,
+  getConfigFragment,
   createConfigFragment,
   updateConfigFragment,
   deleteConfigFragment,
   ApiRequestError,
   type ConfigFragment,
+  type ConfigFragmentUsage,
 } from '../lib/api.js';
 import { formatDistanceToNow } from 'date-fns';
 import { Modal } from '../components/Modal.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
 import { EmptyState } from '../components/EmptyState.js';
-import { PencilIcon, TrashIcon } from '../components/Icons.js';
+import { PencilIcon, TrashIcon, EyeIcon, LinkIcon } from '../components/Icons.js';
 import { useToast } from '../components/Toast.js';
 import { getErrorMessage } from '../lib/helpers.js';
 
@@ -36,6 +39,15 @@ export default function Fragments() {
   const [formDescription, setFormDescription] = useState('');
   const [formContent, setFormContent] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // Read-only view modal state
+  const [viewing, setViewing] = useState<ConfigFragment | null>(null);
+
+  // "Used by" expandable usage: lazily fetch the detail endpoint on expand and
+  // cache the result by fragment id so re-expanding the same row never refetches.
+  const [expandedUsage, setExpandedUsage] = useState<Record<string, boolean>>({});
+  const [usageById, setUsageById] = useState<Record<string, ConfigFragmentUsage[]>>({});
+  const [usageLoading, setUsageLoading] = useState<Record<string, boolean>>({});
 
   // Delete state
   const [deleteTarget, setDeleteTarget] = useState<ConfigFragment | null>(null);
@@ -80,6 +92,52 @@ export default function Fragments() {
     setFormDescription('');
     setFormContent('');
   };
+
+  const ensureUsage = (id: string) => {
+    if (usageById[id] || usageLoading[id]) return;
+    setUsageLoading((prev) => ({ ...prev, [id]: true }));
+    getConfigFragment(id)
+      .then((res) => setUsageById((prev) => ({ ...prev, [id]: res.fragment.usedBy })))
+      .catch((err) => toast.error(getErrorMessage(err, 'Failed to load usage')))
+      .finally(() => setUsageLoading((prev) => ({ ...prev, [id]: false })));
+  };
+
+  const toggleUsage = (id: string) => {
+    const willExpand = !expandedUsage[id];
+    setExpandedUsage((prev) => ({ ...prev, [id]: willExpand }));
+    if (willExpand) ensureUsage(id);
+  };
+
+  // Shared rendering of the populated "Used by" list, used by both the expanded
+  // table sub-row and the read-only view modal.
+  const renderUsageList = (usage: ConfigFragmentUsage[]) => (
+    <div className="space-y-2 text-sm">
+      {usage.map((u) => (
+        <div key={u.configFileId}>
+          <Link to="/config-files" className="text-slate-300 hover:text-white">
+            {u.configFileName}{' '}
+            <span className="text-slate-500">({u.configFileFilename})</span>
+          </Link>
+          {u.services.length > 0 && (
+            <span className="text-xs text-slate-500">
+              {' — '}
+              {u.services.map((svc, i) => (
+                <span key={svc.serviceId}>
+                  {i > 0 && ', '}
+                  <Link
+                    to={`/services/${svc.serviceId}`}
+                    className="text-primary-400 hover:text-primary-300"
+                  >
+                    {svc.serviceName}
+                  </Link>
+                </span>
+              ))}
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -185,8 +243,11 @@ export default function Fragments() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-700/50">
-              {fragments.map((fragment) => (
-                <tr key={fragment.id} className="hover:bg-slate-800/30">
+              {fragments.map((fragment) => {
+                const usageCount = fragment.usedByCount ?? 0;
+                return (
+                <Fragment key={fragment.id}>
+                <tr className="hover:bg-slate-800/30">
                   <td className="px-4 py-2.5">
                     <span className="font-mono font-medium text-white text-sm">
                       {fragment.name}
@@ -196,13 +257,33 @@ export default function Fragments() {
                     {fragment.description || <span className="text-slate-600">—</span>}
                   </td>
                   <td className="px-4 py-2.5 text-sm text-slate-400">
-                    {fragment.usedByCount ?? 0}
+                    {usageCount > 0 ? (
+                      <button
+                        onClick={() => toggleUsage(fragment.id)}
+                        className="text-sm text-primary-400 hover:text-primary-300 flex items-center gap-1"
+                      >
+                        <LinkIcon className="w-3 h-3" />
+                        {usageCount}
+                      </button>
+                    ) : (
+                      <span className="text-xs text-yellow-400/60">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-2.5 text-sm text-slate-400">
                     {formatDistanceToNow(new Date(fragment.updatedAt), { addSuffix: true })}
                   </td>
                   <td className="px-4 py-2.5">
                     <div className="flex gap-1 justify-end">
+                      <button
+                        onClick={() => {
+                          setViewing(fragment);
+                          ensureUsage(fragment.id);
+                        }}
+                        className="p-1.5 text-slate-500 hover:text-slate-200"
+                        title="View"
+                      >
+                        <EyeIcon className="w-3.5 h-3.5" />
+                      </button>
                       <button
                         onClick={() => openEdit(fragment)}
                         className="p-1.5 text-slate-500 hover:text-slate-200"
@@ -220,7 +301,23 @@ export default function Fragments() {
                     </div>
                   </td>
                 </tr>
-              ))}
+                {/* Expanded usage row: config files that include this fragment */}
+                {expandedUsage[fragment.id] && (
+                  <tr>
+                    <td colSpan={5} className="px-8 py-2 bg-slate-800/20">
+                      {usageLoading[fragment.id] ? (
+                        <p className="text-xs text-slate-500">Loading usage…</p>
+                      ) : usageById[fragment.id] && usageById[fragment.id].length > 0 ? (
+                        renderUsageList(usageById[fragment.id])
+                      ) : (
+                        <p className="text-xs text-slate-500">Not used by any config files.</p>
+                      )}
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -280,6 +377,52 @@ export default function Fragments() {
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* Read-only View Modal */}
+      <Modal
+        isOpen={!!viewing}
+        onClose={() => setViewing(null)}
+        title={viewing ? `Fragment: ${viewing.name}` : ''}
+        size="lg"
+      >
+        {viewing && (
+          <div className="space-y-4">
+            {viewing.description && (
+              <p className="text-sm text-slate-400">{viewing.description}</p>
+            )}
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">Content</label>
+              <pre className="bg-slate-950 rounded p-3 text-sm text-slate-200 font-mono whitespace-pre-wrap max-h-96 overflow-auto">
+                {viewing.content}
+              </pre>
+            </div>
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">Used by</label>
+              {usageLoading[viewing.id] && !usageById[viewing.id] ? (
+                <p className="text-xs text-slate-500">Loading usage…</p>
+              ) : usageById[viewing.id] && usageById[viewing.id].length > 0 ? (
+                renderUsageList(usageById[viewing.id])
+              ) : (
+                <p className="text-xs text-slate-500">Not used by any config files.</p>
+              )}
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => {
+                  openEdit(viewing);
+                  setViewing(null);
+                }}
+                className="btn btn-secondary"
+              >
+                Edit
+              </button>
+              <button onClick={() => setViewing(null)} className="btn btn-ghost">
+                Close
+              </button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* Delete Confirmation */}
