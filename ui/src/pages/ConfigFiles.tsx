@@ -863,6 +863,25 @@ export default function ConfigFiles() {
               </div>
             )}
 
+            {/* Included Fragments (display-only, in position order) */}
+            {viewingFile.includedFragments && viewingFile.includedFragments.length > 0 && (
+              <div className="mb-4 p-3 bg-slate-800/50 rounded-lg">
+                <p className="text-sm text-slate-400 mb-2">Included fragments:</p>
+                <ol className="space-y-1 list-decimal list-inside">
+                  {[...viewingFile.includedFragments]
+                    .sort((a, b) => a.position - b.position)
+                    .map((inc) => (
+                      <li key={inc.id} className="text-sm">
+                        <span className="font-mono text-white">{inc.fragment.name}</span>
+                        {inc.fragment.description && (
+                          <span className="text-slate-500"> — {inc.fragment.description}</span>
+                        )}
+                      </li>
+                    ))}
+                </ol>
+              </div>
+            )}
+
             {viewingFile.isBinary ? (
               <div className="flex-1 flex items-center justify-center p-8 bg-slate-950 rounded-lg">
                 <div className="text-center">
