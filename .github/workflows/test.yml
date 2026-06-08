@@ -106,7 +106,7 @@ jobs:
       - run: npm install -g npm@latest
       - run: cd ui && npm ci
       - run: cd ui && npx vitest run --coverage --reporter=github-actions
-      - uses: codecov/codecov-action@v6
+      - uses: codecov/codecov-action@v7
         with:
           files: ui/coverage/lcov.info
           flags: frontend
