@@ -1,4 +1,4 @@
-import { ReactNode } from 'react';
+import { ReactNode, ReactElement } from 'react';
 
 interface LoadingSkeletonProps {
   /** Number of skeleton rows to display */
@@ -20,7 +20,7 @@ export function LoadingSkeleton({
   rowHeight = 'h-20',
   header,
   headerWidth = 'w-32',
-}: LoadingSkeletonProps): JSX.Element {
+}: LoadingSkeletonProps): ReactElement {
   return (
     <div className="p-6">
       <div className="animate-pulse">
