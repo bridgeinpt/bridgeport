@@ -108,6 +108,37 @@ export default function Fragments() {
     if (willExpand) ensureUsage(id);
   };
 
+  // Shared rendering of the populated "Used by" list, used by both the expanded
+  // table sub-row and the read-only view modal.
+  const renderUsageList = (usage: ConfigFragmentUsage[]) => (
+    <div className="space-y-2 text-sm">
+      {usage.map((u) => (
+        <div key={u.configFileId}>
+          <Link to="/config-files" className="text-slate-300 hover:text-white">
+            {u.configFileName}{' '}
+            <span className="text-slate-500">({u.configFileFilename})</span>
+          </Link>
+          {u.services.length > 0 && (
+            <span className="text-xs text-slate-500">
+              {' — '}
+              {u.services.map((svc, i) => (
+                <span key={svc.serviceId}>
+                  {i > 0 && ', '}
+                  <Link
+                    to={`/services/${svc.serviceId}`}
+                    className="text-primary-400 hover:text-primary-300"
+                  >
+                    {svc.serviceName}
+                  </Link>
+                </span>
+              ))}
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedEnvironment?.id) return;
@@ -277,35 +308,7 @@ export default function Fragments() {
                       {usageLoading[fragment.id] ? (
                         <p className="text-xs text-slate-500">Loading usage…</p>
                       ) : usageById[fragment.id] && usageById[fragment.id].length > 0 ? (
-                        <div className="space-y-2 text-sm">
-                          {usageById[fragment.id].map((u) => (
-                            <div key={u.configFileId}>
-                              <Link
-                                to="/config-files"
-                                className="text-slate-300 hover:text-white"
-                              >
-                                {u.configFileName}{' '}
-                                <span className="text-slate-500">({u.configFileFilename})</span>
-                              </Link>
-                              {u.services.length > 0 && (
-                                <span className="text-xs text-slate-500">
-                                  {' — '}
-                                  {u.services.map((svc, i) => (
-                                    <span key={svc.serviceId}>
-                                      {i > 0 && ', '}
-                                      <Link
-                                        to={`/services/${svc.serviceId}`}
-                                        className="text-primary-400 hover:text-primary-300"
-                                      >
-                                        {svc.serviceName}
-                                      </Link>
-                                    </span>
-                                  ))}
-                                </span>
-                              )}
-                            </div>
-                          ))}
-                        </div>
+                        renderUsageList(usageById[fragment.id])
                       ) : (
                         <p className="text-xs text-slate-500">Not used by any config files.</p>
                       )}
@@ -399,32 +402,7 @@ export default function Fragments() {
               {usageLoading[viewing.id] && !usageById[viewing.id] ? (
                 <p className="text-xs text-slate-500">Loading usage…</p>
               ) : usageById[viewing.id] && usageById[viewing.id].length > 0 ? (
-                <div className="space-y-2 text-sm">
-                  {usageById[viewing.id].map((u) => (
-                    <div key={u.configFileId}>
-                      <Link to="/config-files" className="text-slate-300 hover:text-white">
-                        {u.configFileName}{' '}
-                        <span className="text-slate-500">({u.configFileFilename})</span>
-                      </Link>
-                      {u.services.length > 0 && (
-                        <span className="text-xs text-slate-500">
-                          {' — '}
-                          {u.services.map((svc, i) => (
-                            <span key={svc.serviceId}>
-                              {i > 0 && ', '}
-                              <Link
-                                to={`/services/${svc.serviceId}`}
-                                className="text-primary-400 hover:text-primary-300"
-                              >
-                                {svc.serviceName}
-                              </Link>
-                            </span>
-                          ))}
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                renderUsageList(usageById[viewing.id])
               ) : (
                 <p className="text-xs text-slate-500">Not used by any config files.</p>
               )}
