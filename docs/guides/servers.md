@@ -125,6 +125,13 @@ GET /api/servers/:id
 
 By default, this returns just the server row (fast, no joins). Pass `?include=services` to nest the server's services and their container images -- use this on the server-detail page where the nested data is needed.
 
+**Inspect drift across every deployment on a server:**
+```http
+GET /api/servers/:id/drift
+```
+
+Read-only (viewer-accessible): diffs BRIDGEPORT's stored view against the actual host state (compose path/content, image digest, exposed ports, attached config files, and managed env vars) for every deployment on this server. It only runs `docker inspect` and file reads -- it never mutates host state. See [Drift Detection](services.md#drift-detection) in the Services guide for the full response shape and per-field semantics.
+
 ### SSH Key Configuration
 
 Every environment has one SSH private key that all servers in that environment share. The key is encrypted at rest using AES-256-GCM.
