@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../lib/db.js', () => ({
   prisma: {
     service: { findUniqueOrThrow: vi.fn(), update: vi.fn() },
-    serviceDeployment: { findUniqueOrThrow: vi.fn(), update: vi.fn() },
+    serviceDeployment: { findUniqueOrThrow: vi.fn(), update: vi.fn(), count: vi.fn() },
     deployment: { create: vi.fn(), update: vi.fn(), findMany: vi.fn(), findUnique: vi.fn() },
     containerImage: { findUnique: vi.fn() },
     operationsSettings: { findUnique: vi.fn().mockResolvedValue({ autoPruneImages: false }) },
@@ -19,7 +19,14 @@ vi.mock('../lib/docker.js', () => ({
 
 vi.mock('../lib/ssh.js', () => ({
   createSSHClient: vi.fn(),
-  DockerSSH: vi.fn(),
+  // DockerSSH wraps an SSH client and runs compose commands. The composePath
+  // deploy path (issue #200 tests) calls composePull/composeUp on it, so the
+  // constructed instance must expose those. Use a real `function` so `new
+  // DockerSSH(...)` works as a constructor.
+  DockerSSH: vi.fn().mockImplementation(function (this: Record<string, unknown>) {
+    this.composePull = vi.fn().mockResolvedValue(undefined);
+    this.composeUp = vi.fn().mockResolvedValue(undefined);
+  }),
   shellEscape: vi.fn((s: string) => `'${s}'`),
 }));
 
@@ -35,13 +42,19 @@ vi.mock('../routes/environments.js', () => ({
   getEnvironmentSshKey: vi.fn().mockResolvedValue('mock-key'),
 }));
 
-vi.mock('./compose.js', () => ({
-  generateDeploymentArtifacts: vi.fn().mockResolvedValue({
-    compose: { name: 'docker-compose.yml', content: 'services:', checksum: 'abc' },
-    configFiles: [],
-  }),
-  saveDeploymentArtifacts: vi.fn().mockResolvedValue(undefined),
-}));
+vi.mock('./compose.js', async () => {
+  // Keep the REAL validateGeneratedCompose so the deploy path's compose
+  // validation (issue #200) runs against the actual implementation.
+  const actual = await vi.importActual<typeof import('./compose.js')>('./compose.js');
+  return {
+    validateGeneratedCompose: actual.validateGeneratedCompose,
+    generateDeploymentArtifacts: vi.fn().mockResolvedValue({
+      compose: { name: 'docker-compose.yml', content: 'services:', checksum: 'abc' },
+      configFiles: [],
+    }),
+    saveDeploymentArtifacts: vi.fn().mockResolvedValue(undefined),
+  };
+});
 
 vi.mock('./image-management.js', () => ({
   recordTagDeployment: vi.fn().mockResolvedValue({ id: 'hist-1', tag: 'v2.0', status: 'success' }),
@@ -88,8 +101,12 @@ import { prisma } from '../lib/db.js';
 import { createDockerClientForServer } from '../lib/docker.js';
 import { deployService, deployServiceTemplate, getDeploymentHistory, getContainerLogs } from './deploy.js';
 import { getSystemSettings } from './system-settings.js';
+import { generateDeploymentArtifacts } from './compose.js';
+import { logAudit } from './audit.js';
 
 const mockPrisma = vi.mocked(prisma);
+const mockGenerateArtifacts = vi.mocked(generateDeploymentArtifacts);
+const mockLogAudit = vi.mocked(logAudit);
 const mockCreateDocker = vi.mocked(createDockerClientForServer);
 const mockGetSystemSettings = vi.mocked(getSystemSettings);
 
@@ -212,6 +229,236 @@ describe('deployService', () => {
     );
     // Even on failure, function resolves with a result (caller inspects status).
     expect(result.deployment).toBeDefined();
+  });
+});
+
+/**
+ * issue #200 — composePath management on deploy.
+ *
+ * These tests exercise the real artifact-generation branch of deployService
+ * (generateArtifacts: true) with SSH/Docker mocked, so the composePath
+ * persistence decisions and the pre-deploy compose validation run for real.
+ */
+describe('deployService composePath management (issue #200)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Default: generator emits a valid single-service compose keyed on the
+    // deployment's containerName ('web-app' from buildDeploymentRow).
+    mockGenerateArtifacts.mockResolvedValue({
+      compose: {
+        name: 'docker-compose.web-app.yml',
+        content: 'services:\n  web-app:\n    image: registry.com/web-app:v2.0\n',
+        checksum: 'abc',
+      },
+      configFiles: [],
+    } as any);
+  });
+
+  /**
+   * Wire up an SSH-backed docker client so the `generateArtifacts && sshClient`
+   * branch runs, plus the deployment/Prisma stubs deployService needs to reach
+   * the composePath decision. `existingFileContent` is returned by `cat` when the
+   * deploy reads a shared operator-maintained file off disk.
+   */
+  function wireDeploy(opts: {
+    composePath?: string | null;
+    autoManageCompose?: boolean;
+    siblingCount?: number;
+    existingFileContent?: string;
+    containerName?: string;
+  }) {
+    const containerName = opts.containerName ?? 'web-app';
+    mockPrisma.serviceDeployment.findUniqueOrThrow.mockResolvedValue(
+      buildDeploymentRow({ composePath: opts.composePath ?? null, containerName }) as any
+    );
+    mockPrisma.deployment.create.mockResolvedValue({ id: 'dpl-1', status: 'pending' } as any);
+    // Reflect the written status so failure/success is observable in the result
+    // (a canned resolve would mask the catch block flipping status to 'failed').
+    mockPrisma.deployment.update.mockImplementation(
+      async ({ where, data }: any) => ({ id: where?.id ?? 'dpl-1', ...data }) as any
+    );
+    mockPrisma.serviceDeployment.update.mockResolvedValue({} as any);
+    mockPrisma.serviceDeployment.count.mockResolvedValue(opts.siblingCount ?? 1);
+    // operationsSettings.findUnique is read for autoManageCompose AND for auto-prune.
+    mockPrisma.operationsSettings.findUnique.mockResolvedValue({
+      autoManageCompose: opts.autoManageCompose ?? false,
+      autoPruneImages: false,
+    } as any);
+
+    const exec = vi.fn().mockImplementation(async (cmd: string) => {
+      // The shared-operator-file path reads the on-disk file via `cat`.
+      if (cmd.startsWith('cat ') && opts.existingFileContent !== undefined) {
+        return { stdout: opts.existingFileContent, stderr: '', code: 0 };
+      }
+      return { stdout: '', stderr: '', code: 0 };
+    });
+    const mockSsh = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn(),
+      exec,
+      writeFile: vi.fn().mockResolvedValue(undefined),
+      composePull: vi.fn().mockResolvedValue(undefined),
+      composeUp: vi.fn().mockResolvedValue(undefined),
+    };
+    const mockDocker = {
+      pullImage: vi.fn().mockResolvedValue(undefined),
+      restartContainer: vi.fn().mockResolvedValue(undefined),
+      listContainers: vi.fn().mockResolvedValue([{ name: containerName, state: 'running' }]),
+    };
+    mockCreateDocker.mockResolvedValue({
+      dockerClient: mockDocker,
+      sshClient: mockSsh,
+      mode: 'ssh',
+      needsConnect: true,
+    } as any);
+
+    return { exec, mockSsh, mockDocker };
+  }
+
+  function composePathUpdateCalls() {
+    return mockPrisma.serviceDeployment.update.mock.calls.filter(
+      ([arg]: any[]) => arg?.data && Object.prototype.hasOwnProperty.call(arg.data, 'composePath')
+    );
+  }
+
+  it('does NOT overwrite an operator-set composePath when autoManageCompose is OFF', async () => {
+    wireDeploy({ composePath: '/srv/app/docker-compose.yml', autoManageCompose: false });
+
+    const result = await deployService('dep-1', 'user@test.com', 'user-1', {
+      generateArtifacts: true,
+      pullImage: false,
+    });
+
+    expect(result.deployment.status).toBe('success');
+    // No serviceDeployment.update should carry a composePath field.
+    expect(composePathUpdateCalls()).toHaveLength(0);
+    expect(mockLogAudit).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'service_deployment_compose_path_set' })
+    );
+  });
+
+  it('does NOT overwrite an operator-set composePath even when autoManageCompose is ON', async () => {
+    // autoManage only ever AUTO-SETS a null path; a non-null path is sacrosanct.
+    wireDeploy({ composePath: '/srv/app/docker-compose.yml', autoManageCompose: true });
+
+    const result = await deployService('dep-1', 'user@test.com', 'user-1', {
+      generateArtifacts: true,
+      pullImage: false,
+    });
+
+    expect(result.deployment.status).toBe('success');
+    expect(composePathUpdateCalls()).toHaveLength(0);
+    expect(mockLogAudit).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'service_deployment_compose_path_set' })
+    );
+  });
+
+  it('leaves composePath null (no update, no audit) when it is null and autoManageCompose is OFF', async () => {
+    wireDeploy({ composePath: null, autoManageCompose: false });
+
+    const result = await deployService('dep-1', 'user@test.com', 'user-1', {
+      generateArtifacts: true,
+      pullImage: false,
+    });
+
+    expect(result.deployment.status).toBe('success');
+    expect(composePathUpdateCalls()).toHaveLength(0);
+    expect(mockLogAudit).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'service_deployment_compose_path_set' })
+    );
+  });
+
+  it('auto-sets composePath and audit-logs source=generator when null and autoManageCompose is ON', async () => {
+    wireDeploy({ composePath: null, autoManageCompose: true });
+
+    const result = await deployService('dep-1', 'user@test.com', 'user-1', {
+      generateArtifacts: true,
+      pullImage: false,
+    });
+
+    expect(result.deployment.status).toBe('success');
+
+    const composeUpdates = composePathUpdateCalls();
+    expect(composeUpdates).toHaveLength(1);
+    // composePath defaults to `${deployDir}/${artifacts.compose.name}` where
+    // deployDir is `/opt/${service.name}` for a path-less deployment.
+    expect(composeUpdates[0][0].where).toEqual({ id: 'dep-1' });
+    expect(composeUpdates[0][0].data.composePath).toBe('/opt/web-app/docker-compose.web-app.yml');
+
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'service_deployment_compose_path_set',
+        resourceType: 'service_deployment',
+        resourceId: 'dep-1',
+        details: expect.objectContaining({
+          source: 'generator',
+          composePath: '/opt/web-app/docker-compose.web-app.yml',
+        }),
+      })
+    );
+  });
+
+  it('refuses the deploy with a clear error when the generated compose service key != containerName', async () => {
+    // The generator (from beforeEach) emits a compose keyed on the SERVICE name
+    // 'web-app', while this deployment's containerName is 'web-app-prod' — the
+    // stale-config mismatch from issue #200. The real validator must reject it
+    // BEFORE any compose write, and the deployment is marked failed.
+    const { mockSsh } = wireDeploy({
+      composePath: null,
+      autoManageCompose: true,
+      containerName: 'web-app-prod',
+    });
+
+    const result = await deployService('dep-1', 'user@test.com', 'user-1', {
+      generateArtifacts: true,
+      pullImage: false,
+    });
+
+    // Deploy fails fast: status failed, container never restarted, compose never written.
+    expect(result.deployment.status).toBe('failed');
+    expect(mockPrisma.deployment.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'failed' }) })
+    );
+    // The temp-compose write (`cat > ...COMPOSEEOF`) must NOT have happened.
+    const wroteCompose = mockSsh.exec.mock.calls.some(([cmd]: any[]) =>
+      typeof cmd === 'string' && cmd.includes('COMPOSEEOF')
+    );
+    expect(wroteCompose).toBe(false);
+    // No composePath persisted on a refused deploy.
+    expect(composePathUpdateCalls()).toHaveLength(0);
+  });
+
+  it('does NOT rewrite a shared operator-maintained compose file; validates the on-disk copy instead', async () => {
+    // Operator-set path shared by 2 deployments. The on-disk file legitimately
+    // defines BOTH services; the generator only emits this one. We must NOT
+    // overwrite the file (that would wipe the sibling), and validation runs
+    // against the real on-disk content (which contains 'web-app').
+    const onDisk =
+      'services:\n  web-app:\n    image: registry.com/web-app:v2.0\n  api:\n    image: registry.com/api:v1\n';
+    const { mockSsh } = wireDeploy({
+      composePath: '/srv/shared/docker-compose.yml',
+      autoManageCompose: false,
+      siblingCount: 2,
+      existingFileContent: onDisk,
+    });
+
+    const result = await deployService('dep-1', 'user@test.com', 'user-1', {
+      generateArtifacts: true,
+      pullImage: false,
+    });
+
+    expect(result.deployment.status).toBe('success');
+    // It read the existing file...
+    expect(mockSsh.exec).toHaveBeenCalledWith(
+      expect.stringContaining("cat '/srv/shared/docker-compose.yml'")
+    );
+    // ...but never wrote a new compose file over it.
+    const wroteCompose = mockSsh.exec.mock.calls.some(([cmd]: any[]) =>
+      typeof cmd === 'string' && cmd.includes('COMPOSEEOF')
+    );
+    expect(wroteCompose).toBe(false);
+    // And the operator path was not touched.
+    expect(composePathUpdateCalls()).toHaveLength(0);
   });
 });
 

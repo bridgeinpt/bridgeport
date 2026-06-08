@@ -5,7 +5,8 @@ import { createDockerClientForServer, type DockerClient } from '../lib/docker.js
 import { RegistryFactory } from '../lib/registry.js';
 import { getRegistryCredentials } from './registries.js';
 import { extractRepoName, stripRegistryPrefix } from '../lib/image-utils.js';
-import { generateDeploymentArtifacts, previewDryRunArtifacts, saveDeploymentArtifacts } from './compose.js';
+import { generateDeploymentArtifacts, previewDryRunArtifacts, saveDeploymentArtifacts, validateGeneratedCompose } from './compose.js';
+import { logAudit } from './audit.js';
 import { ensureRegistryLogin, getSocketAuthConfig } from './registry-login.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 import { checkServiceUpdate } from '../lib/scheduler.js';
@@ -184,14 +185,52 @@ export async function deployService(
 
       // Upload compose file (preserve existing path if set, otherwise use generated name)
       const composePath = deployment.composePath || `${deployDir}/${artifacts.compose.name}`;
-      log(`Writing compose file to ${composePath}`);
-      // Write to a per-deployment temp file then atomically rename into place.
-      // Multiple BRIDGEPORT services can share one compose file; two concurrent
-      // deploys doing a plain `cat >` to the same path could interleave into a
-      // half-written, unparseable file. `mv` on the same directory is atomic.
-      const composeTmp = `${composePath}.tmp.${deploymentRow.id}`;
-      await sshClient.exec(`cat > ${shellEscape(composeTmp)} << 'COMPOSEEOF'\n${artifacts.compose.content}\nCOMPOSEEOF`);
-      await sshClient.exec(`mv -f ${shellEscape(composeTmp)} ${shellEscape(composePath)}`);
+
+      // Never auto-rewrite a compose file that is operator-set AND shared by more
+      // than one BRIDGEPORT deployment: the generator emits a single-service
+      // document, so writing it would wipe the sibling services from a
+      // hand-maintained file. For those, we trust the existing file on disk and
+      // only validate that it already targets this deployment's service. (issue #200)
+      const operatorSetPath = deployment.composePath !== null;
+      const siblingCount = operatorSetPath
+        ? await prisma.serviceDeployment.count({
+            where: { serverId: deployment.serverId, composePath },
+          })
+        : 0;
+      const sharedOperatorFile = operatorSetPath && siblingCount > 1;
+
+      // Validate before writing/deploying: the deploy path runs
+      // `docker compose pull/up <containerName>`, so the compose file MUST define
+      // a service keyed on this deployment's containerName. For a shared operator
+      // file we read the actual file on disk (it has multiple services); otherwise
+      // we validate the generated/template content we're about to write. Refuse
+      // loudly rather than aborting at compose-up with "No such service" while the
+      // stale container keeps running. (issue #200)
+      let composeToValidate = artifacts.compose.content;
+      if (sharedOperatorFile) {
+        const existing = await sshClient.exec(`cat ${shellEscape(composePath)}`);
+        composeToValidate = existing.stdout;
+      }
+      const composeValidationError = validateGeneratedCompose(
+        composeToValidate,
+        deployment.containerName
+      );
+      if (composeValidationError) {
+        throw new Error(composeValidationError);
+      }
+
+      if (sharedOperatorFile) {
+        log(`Compose file ${composePath} is shared and operator-maintained; not rewriting it`);
+      } else {
+        log(`Writing compose file to ${composePath}`);
+        // Write to a per-deployment temp file then atomically rename into place.
+        // Multiple BRIDGEPORT services can share one compose file; two concurrent
+        // deploys doing a plain `cat >` to the same path could interleave into a
+        // half-written, unparseable file. `mv` on the same directory is atomic.
+        const composeTmp = `${composePath}.tmp.${deploymentRow.id}`;
+        await sshClient.exec(`cat > ${shellEscape(composeTmp)} << 'COMPOSEEOF'\n${artifacts.compose.content}\nCOMPOSEEOF`);
+        await sshClient.exec(`mv -f ${shellEscape(composeTmp)} ${shellEscape(composePath)}`);
+      }
 
       // Upload config files to their configured target paths
       for (const cf of artifacts.configFiles) {
@@ -220,13 +259,37 @@ export async function deployService(
       await saveDeploymentArtifacts(deploymentRow.id, artifacts);
       log('Artifacts saved');
 
-      // Update service deployment compose path only if it wasn't already set
+      // Auto-set the deployment's composePath ONLY when it is currently null AND
+      // the per-environment opt-in is enabled (default OFF). A non-null
+      // composePath is NEVER overwritten — operator intent and hand-maintained
+      // compose files are sacrosanct. Every change is audit-logged with its
+      // source so the rewrite is traceable. (issue #200)
       if (!deployment.composePath) {
-        await prisma.serviceDeployment.update({
-          where: { id: serviceDeploymentId },
-          data: { composePath },
+        const opSettings = await prisma.operationsSettings.findUnique({
+          where: { environmentId: deployment.server.environmentId },
+          select: { autoManageCompose: true },
         });
-        deployment.composePath = composePath;
+        if (opSettings?.autoManageCompose) {
+          await prisma.serviceDeployment.update({
+            where: { id: serviceDeploymentId },
+            data: { composePath },
+          });
+          deployment.composePath = composePath;
+          await logAudit({
+            action: 'service_deployment_compose_path_set',
+            resourceType: 'service_deployment',
+            resourceId: serviceDeploymentId,
+            resourceName: deployment.containerName,
+            environmentId: deployment.server.environmentId,
+            userId: userId ?? undefined,
+            details: { source: 'generator', composePath },
+          });
+        } else {
+          log(
+            'Auto-managed compose is disabled for this environment; leaving composePath unset. ' +
+            'Enable "Auto-Manage Compose Files" in Operations settings or set a compose path manually to deploy via compose.'
+          );
+        }
       }
     }
 

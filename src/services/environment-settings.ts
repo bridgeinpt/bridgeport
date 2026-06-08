@@ -284,6 +284,15 @@ export const OPERATIONS_SETTINGS: SettingDefinition[] = [
     widget: 'select',
     options: ['dangling', 'all'],
   },
+  {
+    key: 'autoManageCompose',
+    type: 'boolean',
+    default: false,
+    label: 'Auto-Manage Compose Files',
+    description: 'When a deployment has no compose file path yet, let BRIDGEPORT set it to the generated compose file on first deploy. An operator-set path is never changed regardless of this setting.',
+    group: 'Compose Files',
+    widget: 'toggle',
+  },
 ];
 
 export const DATA_SETTINGS: SettingDefinition[] = [

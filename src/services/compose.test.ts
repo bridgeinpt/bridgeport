@@ -30,6 +30,7 @@ import {
   saveDeploymentArtifacts,
   getDeploymentArtifacts,
   serializeExposedPorts,
+  validateGeneratedCompose,
 } from './compose.js';
 import { resolveSecretPlaceholders } from './secrets.js';
 
@@ -101,9 +102,14 @@ describe('compose', () => {
       const artifacts = await generateDeploymentArtifacts('dep-1');
       const parsed = YAML.parse(artifacts.compose.content);
 
-      // The per-deployment containerName must flow into compose's container_name,
-      // not the parent template's name.
-      expect(parsed.services['web-app'].container_name).toBe('web-app-prod-server');
+      // The default generator keys the compose SERVICE on the deployment's
+      // containerName (not the parent template's name): the deploy path runs
+      // `docker compose up <containerName>`, so the key must match (issue #200).
+      expect(parsed.services['web-app-prod-server']).toBeDefined();
+      expect(parsed.services['web-app']).toBeUndefined();
+      // The per-deployment containerName must also flow into compose's
+      // container_name, not the parent template's name.
+      expect(parsed.services['web-app-prod-server'].container_name).toBe('web-app-prod-server');
       expect(artifacts.compose.name).toBe('docker-compose.web-app.yml');
     });
 
@@ -132,7 +138,8 @@ describe('compose', () => {
       const parsed = YAML.parse(artifacts.compose.content);
 
       // baseEnv: {A:1, B:2, C:3}; overrides: {B:99, D:4} -> {A:1, B:99, C:3, D:4}
-      expect(parsed.services['web-app'].environment).toEqual({
+      // Service key is the deployment's containerName (default 'web-app-prod').
+      expect(parsed.services['web-app-prod'].environment).toEqual({
         A: '1',
         B: '99',
         C: '3',
@@ -150,7 +157,7 @@ describe('compose', () => {
 
       const artifacts = await generateDeploymentArtifacts('dep-1');
       const parsed = YAML.parse(artifacts.compose.content);
-      expect(parsed.services['web-app'].environment).toEqual({ A: '1', B: '2' });
+      expect(parsed.services['web-app-prod'].environment).toEqual({ A: '1', B: '2' });
     });
 
     it('uses only envOverrides when baseEnv is null', async () => {
@@ -163,7 +170,7 @@ describe('compose', () => {
 
       const artifacts = await generateDeploymentArtifacts('dep-1');
       const parsed = YAML.parse(artifacts.compose.content);
-      expect(parsed.services['web-app'].environment).toEqual({ X: '10' });
+      expect(parsed.services['web-app-prod'].environment).toEqual({ X: '10' });
     });
 
     it('omits the environment section when both baseEnv and envOverrides are null/empty', async () => {
@@ -173,7 +180,7 @@ describe('compose', () => {
 
       const artifacts = await generateDeploymentArtifacts('dep-1');
       const parsed = YAML.parse(artifacts.compose.content);
-      expect(parsed.services['web-app'].environment).toBeUndefined();
+      expect(parsed.services['web-app-prod'].environment).toBeUndefined();
     });
 
     it('falls back to empty env when baseEnv contains invalid JSON (no throw)', async () => {
@@ -187,7 +194,7 @@ describe('compose', () => {
       const artifacts = await generateDeploymentArtifacts('dep-1');
       const parsed = YAML.parse(artifacts.compose.content);
       // baseEnv was malformed -> safeJsonParse returns {}; overrides still apply.
-      expect(parsed.services['web-app'].environment).toEqual({ K: 'v' });
+      expect(parsed.services['web-app-prod'].environment).toEqual({ K: 'v' });
     });
 
     it('falls back to empty env when envOverrides contains invalid JSON (no throw, baseEnv still applies)', async () => {
@@ -200,7 +207,7 @@ describe('compose', () => {
 
       const artifacts = await generateDeploymentArtifacts('dep-1');
       const parsed = YAML.parse(artifacts.compose.content);
-      expect(parsed.services['web-app'].environment).toEqual({ A: '1' });
+      expect(parsed.services['web-app-prod'].environment).toEqual({ A: '1' });
     });
 
     it('includes ports section from discovered exposedPorts on the deployment', async () => {
@@ -212,7 +219,7 @@ describe('compose', () => {
 
       const artifacts = await generateDeploymentArtifacts('dep-1');
       const parsed = YAML.parse(artifacts.compose.content);
-      expect(parsed.services['web-app'].ports).toEqual(['8080:80']);
+      expect(parsed.services['web-app-prod'].ports).toEqual(['8080:80']);
     });
 
     it('defaults host port to container port when host is null (issue #117)', async () => {
@@ -224,7 +231,7 @@ describe('compose', () => {
 
       const artifacts = await generateDeploymentArtifacts('dep-1');
       const parsed = YAML.parse(artifacts.compose.content);
-      expect(parsed.services['web-app'].ports).toEqual(['80:80']);
+      expect(parsed.services['web-app-prod'].ports).toEqual(['80:80']);
     });
 
     it('preserves a non-wildcard host IP', async () => {
@@ -238,7 +245,7 @@ describe('compose', () => {
 
       const artifacts = await generateDeploymentArtifacts('dep-1');
       const parsed = YAML.parse(artifacts.compose.content);
-      expect(parsed.services['web-app'].ports).toEqual(['127.0.0.1:8080:80']);
+      expect(parsed.services['web-app-prod'].ports).toEqual(['127.0.0.1:8080:80']);
     });
 
     it('fails the build when a config file has template errors', async () => {
@@ -279,7 +286,7 @@ describe('compose', () => {
 
       const artifacts = await generateDeploymentArtifacts('dep-1');
       const parsed = YAML.parse(artifacts.compose.content);
-      expect(parsed.services['web-app'].ports).toBeUndefined();
+      expect(parsed.services['web-app-prod'].ports).toBeUndefined();
     });
 
     it('omits ports section when exposedPorts is an empty array', async () => {
@@ -289,7 +296,7 @@ describe('compose', () => {
 
       const artifacts = await generateDeploymentArtifacts('dep-1');
       const parsed = YAML.parse(artifacts.compose.content);
-      expect(parsed.services['web-app'].ports).toBeUndefined();
+      expect(parsed.services['web-app-prod'].ports).toBeUndefined();
     });
 
     it('does not inject ports into custom compose templates', async () => {
@@ -519,7 +526,7 @@ describe('compose', () => {
 
       const preview = await previewDryRunArtifacts('dep-1', { imageTag: 'v2.0' });
       const parsed = YAML.parse(preview.composeContent);
-      expect(parsed.services['web-app'].image).toBe('registry.com/web-app:v2.0');
+      expect(parsed.services['web-app-prod'].image).toBe('registry.com/web-app:v2.0');
     });
 
     it('falls back to service.imageTag when no override is provided', async () => {
@@ -529,7 +536,7 @@ describe('compose', () => {
 
       const preview = await previewDryRunArtifacts('dep-1');
       const parsed = YAML.parse(preview.composeContent);
-      expect(parsed.services['web-app'].image).toBe('registry.com/web-app:v3.0');
+      expect(parsed.services['web-app-prod'].image).toBe('registry.com/web-app:v3.0');
     });
 
     it('sets wouldFail when a config file has missing secrets (live path would refuse)', async () => {
@@ -592,6 +599,114 @@ describe('compose', () => {
       const preview = await previewDryRunArtifacts('dep-1');
       expect(preview.wouldFail).toBeUndefined();
       expect(preview.failureReason).toBeUndefined();
+    });
+  });
+
+  // issue #200: the deploy path runs `docker compose pull/up <containerName>`,
+  // so the compose document MUST define a service keyed exactly on the
+  // deployment's containerName, or compose aborts with "No such service" while
+  // the stale container keeps running. validateGeneratedCompose enforces this
+  // before deploy.
+  describe('validateGeneratedCompose', () => {
+    it('returns null when a service is keyed exactly on the containerName', () => {
+      const yaml = [
+        'services:',
+        '  web-prod:',
+        '    image: registry.com/web:v1',
+        '    container_name: web-prod',
+        '',
+      ].join('\n');
+      expect(validateGeneratedCompose(yaml, 'web-prod')).toBeNull();
+    });
+
+    it('returns an actionable error when the only service key != containerName (the mismatch bug)', () => {
+      // This is the exact stale-config trap: a single-service compose keyed on
+      // the SERVICE name ("web-app") while the deploy targets the CONTAINER name
+      // ("web-app-prod"). Must be rejected with a clear, actionable message.
+      const yaml = [
+        'services:',
+        '  web-app:',
+        '    image: registry.com/web:v1',
+        '    container_name: web-app-prod',
+        '',
+      ].join('\n');
+
+      const error = validateGeneratedCompose(yaml, 'web-app-prod');
+      expect(error).not.toBeNull();
+      // Mentions the expected target, the actual keys, and how to fix it.
+      expect(error).toContain('web-app-prod');
+      expect(error).toContain('web-app');
+      expect(error).toMatch(/rename the service|keyed exactly/i);
+    });
+
+    it('passes a shared compose file when ONE of several service keys matches the containerName', () => {
+      // Shared/hand-maintained file backing multiple BRIDGEPORT deployments.
+      const yaml = [
+        'services:',
+        '  api-prod:',
+        '    image: registry.com/api:v1',
+        '  web-prod:',
+        '    image: registry.com/web:v1',
+        '  worker-prod:',
+        '    image: registry.com/worker:v1',
+        '',
+      ].join('\n');
+      expect(validateGeneratedCompose(yaml, 'web-prod')).toBeNull();
+    });
+
+    it('fails a shared compose file when NONE of the service keys match the containerName', () => {
+      const yaml = [
+        'services:',
+        '  api-prod:',
+        '    image: registry.com/api:v1',
+        '  worker-prod:',
+        '    image: registry.com/worker:v1',
+        '',
+      ].join('\n');
+
+      const error = validateGeneratedCompose(yaml, 'web-prod');
+      expect(error).not.toBeNull();
+      expect(error).toContain('web-prod');
+      // The actual service keys should be surfaced for debugging.
+      expect(error).toContain('api-prod');
+      expect(error).toContain('worker-prod');
+    });
+
+    it('reports a clear error when there is no services: section', () => {
+      const yaml = 'version: "3"\nvolumes:\n  data: {}\n';
+      const error = validateGeneratedCompose(yaml, 'web-prod');
+      expect(error).not.toBeNull();
+      expect(error).toMatch(/no "services:" section/i);
+    });
+
+    it('reports a clear error when the content is not valid YAML', () => {
+      const error = validateGeneratedCompose('services: [unterminated', 'web-prod');
+      expect(error).not.toBeNull();
+      expect(error).toMatch(/not valid YAML/i);
+    });
+
+    it('reports a clear error when the document does not parse to an object', () => {
+      // A scalar YAML document (no top-level mapping) is not a compose document.
+      const error = validateGeneratedCompose('just-a-string', 'web-prod');
+      expect(error).not.toBeNull();
+      expect(error).toMatch(/did not parse to a compose document/i);
+    });
+
+    it('the DEFAULT generator produces a compose whose service key passes validation (regression for service.name bug)', async () => {
+      // Generate a default (non-template) compose where the SERVICE name and the
+      // deployment containerName differ — the exact condition that triggered the
+      // original mismatch. The generated artifact must validate cleanly.
+      mockPrisma.serviceDeployment.findUniqueOrThrow.mockResolvedValue(
+        buildDeployment({ serviceName: 'web-app', containerName: 'web-app-prod' }) as any
+      );
+
+      const artifacts = await generateDeploymentArtifacts('dep-1');
+      const parsed = YAML.parse(artifacts.compose.content);
+
+      // Service key equals the containerName, NOT the service name.
+      expect(Object.keys(parsed.services)).toEqual(['web-app-prod']);
+      // And feeding the generated content back through the validator passes.
+      expect(validateGeneratedCompose(artifacts.compose.content, 'web-app-prod')).toBeNull();
     });
   });
 });
