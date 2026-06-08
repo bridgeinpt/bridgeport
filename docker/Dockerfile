@@ -12,12 +12,15 @@ FROM golang:1.26-alpine AS cli-build
 WORKDIR /build
 ARG CLI_VERSION=dev
 COPY cli/ ./
+# The CLI module's `replace github.com/bridgeinpt/bridgeport/client => ../client`
+# resolves to /client (cli is at /build), so the client module must be present there.
+COPY client/ /client
 # Build for all supported platforms
 RUN mkdir -p dist && \
-    CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w -X github.com/bridgeinpt/bridgeport-cli/cmd.Version=${CLI_VERSION}" -o dist/bridgeport-darwin-amd64 . && \
-    CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w -X github.com/bridgeinpt/bridgeport-cli/cmd.Version=${CLI_VERSION}" -o dist/bridgeport-darwin-arm64 . && \
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X github.com/bridgeinpt/bridgeport-cli/cmd.Version=${CLI_VERSION}" -o dist/bridgeport-linux-amd64 . && \
-    CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X github.com/bridgeinpt/bridgeport-cli/cmd.Version=${CLI_VERSION}" -o dist/bridgeport-linux-arm64 .
+    CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w -X github.com/bridgeinpt/bridgeport/cli/cmd.Version=${CLI_VERSION}" -o dist/bridgeport-darwin-amd64 . && \
+    CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w -X github.com/bridgeinpt/bridgeport/cli/cmd.Version=${CLI_VERSION}" -o dist/bridgeport-darwin-arm64 . && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -X github.com/bridgeinpt/bridgeport/cli/cmd.Version=${CLI_VERSION}" -o dist/bridgeport-linux-amd64 . && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X github.com/bridgeinpt/bridgeport/cli/cmd.Version=${CLI_VERSION}" -o dist/bridgeport-linux-arm64 .
 # Write CLI version to file for runtime access
 RUN echo "${CLI_VERSION}" > cli-version.txt
 

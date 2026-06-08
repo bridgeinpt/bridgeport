@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"syscall"
 
-	"github.com/bridgeinpt/bridgeport-cli/internal/ssh"
+	"github.com/bridgeinpt/bridgeport/cli/internal/ssh"
 )
 
 // ExecOptions configures docker exec behavior

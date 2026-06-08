@@ -11,6 +11,7 @@ Thank you for your interest in contributing to BRIDGEPORT! Whether you're fixing
 - [Code Style](#code-style)
 - [Testing](#testing)
 - [Pull Request Process](#pull-request-process)
+- [Releasing the Go Client Module](#releasing-the-go-client-module)
 - [Common Pitfalls](#common-pitfalls)
 - [Getting Help](#getting-help)
 
@@ -275,6 +276,28 @@ For detailed patterns and examples, see the Testing section in [CLAUDE.md](CLAUD
 - [ ] Migration files committed (if schema changed)
 - [ ] Documentation updated (if behavior changed)
 - [ ] HTTP API changes follow the [API Stability Policy](docs/api-stability.md) (semver, deprecation window, OpenAPI `deprecated: true`) and are noted in the release's `## API changes`
+
+## Releasing the Go Client Module
+
+The Go SDK in `client/` (`github.com/bridgeinpt/bridgeport/client`) is a separate Go
+module within this repo. Because it is part of the HTTP API's contract surface,
+treat it like the API itself:
+
+- **Tag with the `client/` prefix.** Following Go's multi-module convention, the
+  client module is released as `client/vX.Y.Z` (not a bare `vX.Y.Z` — those are
+  the product/Docker release tags driven by `release.yml`). External consumers
+  `go get` a tagged version.
+- **Bump it in the same PR as wire-shape changes.** Any change that alters the
+  request/response shapes the client depends on (new/renamed fields, removed
+  endpoints, changed types) MUST update the client and be released alongside the
+  API change, so the published SDK never lags the contract it describes. Creating
+  the `client/vX.Y.Z` tag is a manual `git tag client/vX.Y.Z && git push origin
+  client/vX.Y.Z` step today; the product release flow does not create it
+  automatically.
+- **The CLI stays in lockstep locally.** `cli/go.mod` consumes the client via a
+  `replace github.com/bridgeinpt/bridgeport/client => ../client` directive, so the
+  CLI always builds against the in-repo client without needing a tagged release.
+  Tagging is only for external `go get` consumers.
 
 ## Common Pitfalls
 

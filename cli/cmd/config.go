@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/bridgeinpt/bridgeport-cli/internal/config"
-	"github.com/bridgeinpt/bridgeport-cli/internal/output"
+	"github.com/bridgeinpt/bridgeport/cli/internal/config"
+	"github.com/bridgeinpt/bridgeport/cli/internal/output"
 	"github.com/spf13/cobra"
 )
 

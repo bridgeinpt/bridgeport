@@ -69,6 +69,29 @@ updates:
         applies-to: version-updates
         update-types: [minor, patch]
 
+  # Go client SDK module
+  - package-ecosystem: gomod
+    directory: /client
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - client
+    cooldown:
+      default-days: 3
+      semver-major-days: 3
+      semver-minor-days: 3
+      semver-patch-days: 3
+    groups:
+      client-security:
+        applies-to: security-updates
+        patterns: ["*"]
+      client-minor-and-patch:
+        applies-to: version-updates
+        update-types: [minor, patch]
+
   # Monitoring agent (Go)
   - package-ecosystem: gomod
     directory: /bridgeport-agent
@@ -103,10 +126,8 @@ updates:
       - dependencies
       - ci
     cooldown:
+      # github-actions does not support the semver-*-days cooldown granularity
       default-days: 3
-      semver-major-days: 3
-      semver-minor-days: 3
-      semver-patch-days: 3
     groups:
       actions-security:
         applies-to: security-updates
@@ -126,10 +147,8 @@ updates:
       - dependencies
       - docker
     cooldown:
+      # docker does not support the semver-*-days cooldown granularity
       default-days: 3
-      semver-major-days: 3
-      semver-minor-days: 3
-      semver-patch-days: 3
     groups:
       docker-security:
         applies-to: security-updates

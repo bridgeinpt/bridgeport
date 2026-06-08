@@ -3,9 +3,9 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/bridgeinpt/bridgeport-cli/internal/api"
-	"github.com/bridgeinpt/bridgeport-cli/internal/docker"
-	"github.com/bridgeinpt/bridgeport-cli/internal/output"
+	"github.com/bridgeinpt/bridgeport/client"
+	"github.com/bridgeinpt/bridgeport/cli/internal/docker"
+	"github.com/bridgeinpt/bridgeport/cli/internal/output"
 	"github.com/spf13/cobra"
 )
 
@@ -36,16 +36,16 @@ func runRun(cmd *cobra.Command, args []string) error {
 	serverName := args[1]
 	serviceName := args[2]
 
-	client := getClient()
+	c := getClient()
 
 	// Find server
-	server, err := client.GetServerByEnvAndName(envName, serverName)
+	server, err := c.GetServerByEnvAndName(envName, serverName)
 	if err != nil {
 		return err
 	}
 
 	// Find service
-	service, err := client.GetServiceByName(server.ID, serviceName)
+	service, err := c.GetServiceByName(server.ID, serviceName)
 	if err != nil {
 		return err
 	}
@@ -62,13 +62,13 @@ func runRun(cmd *cobra.Command, args []string) error {
 	commandName := args[3]
 
 	// Get the actual command to run
-	commandStr, err := client.GetRunCommand(service.ID, commandName)
+	commandStr, err := c.GetRunCommand(service.ID, commandName)
 	if err != nil {
 		return fmt.Errorf("failed to get command: %w", err)
 	}
 
 	// Get SSH credentials
-	creds, err := client.GetSSHKey(server.EnvironmentID)
+	creds, err := c.GetSSHKey(server.EnvironmentID)
 	if err != nil {
 		return fmt.Errorf("failed to get SSH key: %w", err)
 	}
@@ -91,7 +91,7 @@ func runRun(cmd *cobra.Command, args []string) error {
 	})
 }
 
-func listCommands(service *api.Service) error {
+func listCommands(service *client.Service) error {
 	if service.ServiceType == nil || len(service.ServiceType.Commands) == 0 {
 		fmt.Printf("No predefined commands available for %s\n", service.Name)
 		if service.ServiceType == nil {

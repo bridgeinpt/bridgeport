@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/bridgeinpt/bridgeport-cli/internal/api"
-	"github.com/bridgeinpt/bridgeport-cli/internal/config"
-	"github.com/bridgeinpt/bridgeport-cli/internal/output"
+	"github.com/bridgeinpt/bridgeport/client"
+	"github.com/bridgeinpt/bridgeport/cli/internal/config"
+	"github.com/bridgeinpt/bridgeport/cli/internal/output"
 	"github.com/spf13/cobra"
 )
 
@@ -18,7 +18,7 @@ var (
 	verbose   bool
 
 	cfg       *config.Config
-	apiClient *api.Client
+	apiClient *client.Client
 )
 
 // Version is set at build time
@@ -65,7 +65,7 @@ Get started:
 		}
 
 		// Create API client
-		apiClient = api.NewClient(cfg.URL, cfg.Token)
+		apiClient = client.NewClient(cfg.URL, cfg.Token)
 
 		// Check authentication if required
 		if !skipAuth && !cfg.IsAuthenticated() {
@@ -95,7 +95,7 @@ func init() {
 }
 
 // getClient returns the configured API client
-func getClient() *api.Client {
+func getClient() *client.Client {
 	return apiClient
 }
 

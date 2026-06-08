@@ -1,4 +1,5 @@
-package api
+// Package client is the Go SDK for the BRIDGEPORT HTTP API.
+package client
 
 import (
 	"bytes"

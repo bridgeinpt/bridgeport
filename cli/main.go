@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/bridgeinpt/bridgeport-cli/cmd"
+	"github.com/bridgeinpt/bridgeport/cli/cmd"
 )
 
 func main() {

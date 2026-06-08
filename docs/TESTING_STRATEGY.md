@@ -839,7 +839,7 @@ func TestIngestPayload(t *testing.T) {
 
 **What to test:**
 - `cmd/*.go`: Command parsing, flag handling, output formatting
-- `internal/api/`: API client request construction, response parsing, auth token handling
+- `client/` (now a standalone Go SDK module, `github.com/bridgeinpt/bridgeport/client`): API client request construction, response parsing, auth token handling
 - `internal/config/`: Config file read/write, credential storage
 - `internal/ssh/`: SSH connection setup, command execution (mock SSH server)
 - `internal/docker/`: Docker command construction via SSH
@@ -1680,7 +1680,7 @@ This is a one-shot implementation. Build everything in order — each phase buil
 87. `bridgeport-agent/collector/docker_test.go`
 88. `bridgeport-agent/main_test.go`
 89. `cli/cmd/*_test.go` (all commands)
-90. `cli/internal/api/client_test.go`
+90. `client/client_test.go`
 91. `cli/internal/config/*_test.go`
 92. `cli/internal/output/*_test.go`
 
