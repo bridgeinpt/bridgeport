@@ -245,6 +245,7 @@ Outgoing webhooks send notification data as JSON POST requests to your endpoints
   "data": {
     "serviceName": "api-backend",
     "serviceId": "svc_abc123",
+    "imageName": "registry.example.com/my-registry/api-backend",
     "serverName": "web-server-01",
     "imageTag": "v2.3.1",
     "error": "Image pull error"
@@ -255,7 +256,7 @@ Outgoing webhooks send notification data as JSON POST requests to your endpoints
 ```
 
 > [!NOTE]
-> `deployment_failed` payloads include `serviceId`, `serverName`, and `imageTag` for both direct service failures and failures that trigger a deployment plan rollback. This lets downstream handlers (Slack messages, incident tools) build deep links back to the exact service and tag without extra lookups.
+> `deployment_failed` payloads include `serviceId`, `imageName`, `serverName`, and `imageTag` for both direct service failures and failures that trigger a deployment plan rollback. `deployment_success` payloads carry the same set (plus the full `imageTags` list). This lets downstream handlers (Slack messages, incident tools) build deep links back to the exact service and identify the image without extra lookups.
 
 ### Slack Notifications
 
@@ -263,8 +264,11 @@ The built-in Slack integration renders a compact message per notification. Recen
 
 - **No redundant message block.** The Slack Block Kit payload omits the free-text `message` block when the structured fields already convey the same information -- the title plus context fields are enough.
 - **No footer timestamp.** Slack already renders the message time; the duplicate `{timestamp}` footer block was removed.
+- **No internal type code.** The `Type: system.deployment_success` context line was removed -- the header (emoji + title + color) already tells a reader what happened, and the raw type code is only meaningful for debugging routing rules.
+- **Full image reference.** Deployment messages include the full image path (e.g., `registry.example.com/my-registry/web-app`) on its own line, so it's clear *which* image was deployed, not just the tag.
 - **Deployment success** messages include every tag pointing to the deployed digest (e.g., `v2.3.1, latest`) rather than just the one that was requested, so you can see the full set of identifiers at a glance.
-- **Action buttons** use `serviceId` to link back to the service detail page in BRIDGEPORT when `publicUrl` is configured.
+- **Failure reason inline.** `deployment_failed` messages render the error (truncated to 500 chars) directly in the channel, so you can see *why* a deploy failed without clicking through.
+- **Action buttons** use `serviceId` to link back to the service detail page in BRIDGEPORT when `publicUrl` is configured. Both success and failure messages carry `serviceId`, so the **View Service** button appears consistently on either outcome.
 
 ### Retry Behavior
 

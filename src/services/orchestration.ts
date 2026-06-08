@@ -382,6 +382,7 @@ export async function executePlan(planId: string): Promise<void> {
                 planName: plan.name,
                 serviceName: failedSvc?.name,
                 serviceId: failedSvc?.id,
+                imageName: plan.containerImage?.imageName ?? undefined,
                 serverName: failedStep.serviceDeployment?.server?.name,
                 imageTag: failedStep.targetTag,
                 error: failedStep.error,
@@ -441,6 +442,7 @@ export async function executePlan(planId: string): Promise<void> {
                 planName: plan.name,
                 serviceName: svcName,
                 serviceId: step.serviceDeployment.service.id,
+                imageName: plan.containerImage?.imageName ?? undefined,
                 serverName: step.serviceDeployment.server?.name,
                 imageTag: step.targetTag,
                 error: updatedStep.error,
@@ -687,6 +689,7 @@ export async function rollbackPlan(
           serviceDeployment: { include: { server: true, service: true } },
         },
       },
+      containerImage: true,
     },
   });
 
@@ -768,6 +771,7 @@ export async function rollbackPlan(
       planName: plan.name,
       serviceName: failedSvc?.name,
       serviceId: failedSvc?.id,
+      imageName: plan.containerImage?.imageName ?? undefined,
       serverName: failedStep?.serviceDeployment?.server?.name,
       imageTag: failedStep?.targetTag,
       error: 'Deployment rolled back due to failure',

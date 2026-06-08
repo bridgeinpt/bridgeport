@@ -286,7 +286,7 @@ describe('slack-notifications', () => {
       expect(actionsBlock).toBeUndefined();
     });
 
-    it('should include context block with notification type code', () => {
+    it('should not include a context block exposing the notification type code', () => {
       const message = buildSlackMessage({
         title: 'Test',
         message: 'Test message',
@@ -297,7 +297,52 @@ describe('slack-notifications', () => {
       const contextBlock = message.attachments[0].blocks.find(
         (b: any) => b.type === 'context'
       );
-      expect(contextBlock).toBeDefined();
+      expect(contextBlock).toBeUndefined();
+      expect(JSON.stringify(message)).not.toContain(baseNotificationType.code);
+    });
+
+    it('should include the full image reference when imageName is in data', () => {
+      const message = buildSlackMessage({
+        title: 'Deployed',
+        message: 'Success',
+        data: { imageName: 'registry.digitalocean.com/my-registry/celery-beat' },
+        notificationType: baseNotificationType as any,
+      });
+
+      const text = JSON.stringify(message);
+      expect(text).toContain('*Image:*');
+      expect(text).toContain('registry.digitalocean.com/my-registry/celery-beat');
+    });
+
+    it('should render the failure reason when error is in data', () => {
+      const message = buildSlackMessage({
+        title: 'Deployment Failed',
+        message: 'Failure',
+        data: { error: 'manifest unknown: manifest tagged by "latest" is not found' },
+        notificationType: { ...baseNotificationType, severity: 'critical' } as any,
+      });
+
+      const text = JSON.stringify(message);
+      expect(text).toContain('*Error:*');
+      expect(text).toContain('manifest unknown');
+    });
+
+    it('should truncate very long error messages', () => {
+      const longError = 'x'.repeat(1000);
+      const message = buildSlackMessage({
+        title: 'Deployment Failed',
+        message: 'Failure',
+        data: { error: longError },
+        notificationType: { ...baseNotificationType, severity: 'critical' } as any,
+      });
+
+      const errorBlock = message.attachments[0].blocks.find(
+        (b: any) => b.type === 'section' && b.text?.text?.startsWith('*Error:*')
+      );
+      expect(errorBlock).toBeDefined();
+      expect(errorBlock!.text!.text).toContain('…');
+      // 500 chars of error + fences/label, never the full 1000-char string
+      expect(errorBlock!.text!.text.length).toBeLessThan(longError.length);
     });
   });
 

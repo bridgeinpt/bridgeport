@@ -331,6 +331,33 @@ export function buildSlackMessage(
     });
   }
 
+  // Full image reference on its own line — the registry path is too long for a
+  // two-column field. Shown as a code span so it reads as a pull-able ref.
+  if (typeof data.imageName === 'string' && data.imageName) {
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*Image:*\n\`${data.imageName}\``,
+      },
+    });
+  }
+
+  // Surface the failure reason inline so the channel shows *why* a deploy failed
+  // without anyone having to click through. Truncated to keep messages compact.
+  if (typeof data.error === 'string' && data.error.trim()) {
+    const MAX_ERROR_LEN = 500;
+    const errorText =
+      data.error.length > MAX_ERROR_LEN ? `${data.error.slice(0, MAX_ERROR_LEN)}…` : data.error;
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: `*Error:*\n\`\`\`${errorText}\`\`\``,
+      },
+    });
+  }
+
   // Action buttons (if BRIDGEPORT URL is configured)
   if (bridgeportUrl) {
     const buttons: SlackBlock['elements'] = [];
@@ -403,18 +430,6 @@ export function buildSlackMessage(
       });
     }
   }
-
-  // Context block with the notification type code — gives operators a quick
-  // way to see which rule fired in Slack without opening BRIDGEPORT.
-  blocks.push({
-    type: 'context',
-    elements: [
-      {
-        type: 'mrkdwn',
-        text: `Type: \`${notificationType.code}\``,
-      },
-    ],
-  });
 
   return {
     attachments: [
