@@ -126,10 +126,8 @@ updates:
       - dependencies
       - ci
     cooldown:
+      # github-actions does not support the semver-*-days cooldown granularity
       default-days: 3
-      semver-major-days: 3
-      semver-minor-days: 3
-      semver-patch-days: 3
     groups:
       actions-security:
         applies-to: security-updates
@@ -149,10 +147,8 @@ updates:
       - dependencies
       - docker
     cooldown:
+      # docker does not support the semver-*-days cooldown granularity
       default-days: 3
-      semver-major-days: 3
-      semver-minor-days: 3
-      semver-patch-days: 3
     groups:
       docker-security:
         applies-to: security-updates
