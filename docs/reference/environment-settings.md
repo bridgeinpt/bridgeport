@@ -206,7 +206,7 @@ Per-environment notification routing. Lives outside the module registry because 
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `slackChannelId` | `string \| null` | `null` (inherit) | Override the global default Slack channel for unrouted notifications in this environment. When `null`, notifications fall back to the global default channel (the one marked `isDefault`). Explicit `SlackTypeRouting` rules still take precedence over this override. |
+| `slackChannelId` | `string \| null` | `null` (inherit) | This environment's Slack channel. Used two ways: (1) for a type routed to **more than one** channel, the override collapses the fan-out and sends only to this channel (per-environment alert splitting); (2) for an **unrouted** type, it stands in for the global default. A type routed to exactly **one** channel is unaffected and reaches that channel from every environment. When `null`, notifications fall back to the global default channel (the one marked `isDefault`). See [notifications guide → Per-Environment Channel Override](../guides/notifications.md#per-environment-channel-override). |
 
 **API:**
 

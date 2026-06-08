@@ -472,6 +472,31 @@ async function sendSlackMessage(
   }
 }
 
+/**
+ * Resolve the per-environment Slack override channel, if one is configured and
+ * usable. Returns the channel when the env's NotificationSettings points at an
+ * ENABLED channel; returns null otherwise. A dangling pointer (target channel
+ * disabled or deleted) is logged so operators can clean it up.
+ */
+async function resolveEnvOverrideChannel(
+  environmentId: string
+): Promise<SlackChannel | null> {
+  const envSettings = await prisma.notificationSettings.findUnique({
+    where: { environmentId },
+    include: { slackChannel: true },
+  });
+  if (envSettings?.slackChannel && envSettings.slackChannel.enabled) {
+    return envSettings.slackChannel;
+  }
+  if (envSettings?.slackChannelId) {
+    const reason = envSettings.slackChannel ? 'disabled' : 'missing';
+    console.warn(
+      `[slack] Slack override for env ${environmentId} points at ${reason} channel ${envSettings.slackChannelId}; ignoring override.`
+    );
+  }
+  return null;
+}
+
 export async function dispatchSlackNotification(
   notificationType: NotificationType,
   title: string,
@@ -499,33 +524,29 @@ export async function dispatchSlackNotification(
     return true;
   });
 
-  // If no specific routings match, use default channel — but allow a
-  // per-environment override (NotificationSettings.slackChannelId) to take
-  // precedence over the global default. Explicit SlackTypeRouting matches
-  // above are NOT overridden here.
+  // Resolve which channel(s) actually receive this notification:
+  //   * exactly 1 match → a single explicit routing; env-agnostic, left
+  //     untouched (e.g. "Updates" -> #ntf-bridgeport reaches that channel from
+  //     every environment). The env override is not consulted.
+  //   * more than 1 match → a fan-out. If the originating environment has an
+  //     override channel, demultiplex the fan-out and send ONLY to that env's
+  //     channel, so an environment's alerts can be isolated (and muted)
+  //     independently. With no usable override, the full fan-out is preserved.
+  //   * 0 matches → unrouted; use the env override as the fallback, else the
+  //     global default channel.
   let channelsToNotify: SlackChannel[] = matchingRoutings.map((r) => r.channel);
 
-  if (channelsToNotify.length === 0) {
-    let overrideChannel: SlackChannel | null = null;
+  if (channelsToNotify.length > 1) {
     if (environmentId) {
-      const envSettings = await prisma.notificationSettings.findUnique({
-        where: { environmentId },
-        include: { slackChannel: true },
-      });
-      if (envSettings?.slackChannel && envSettings.slackChannel.enabled) {
-        overrideChannel = envSettings.slackChannel;
-      } else if (envSettings?.slackChannelId) {
-        // The env has an override set but the target channel is either
-        // disabled or no longer exists. This is observability-only — we
-        // still fall back to the global default below — but surface the
-        // dangling pointer so operators can clean it up.
-        const targetId = envSettings.slackChannelId;
-        const reason = envSettings.slackChannel ? 'disabled' : 'missing';
-        console.warn(
-          `[slack] Slack override for env ${environmentId} points at ${reason} channel ${targetId}; falling back to default.`
-        );
+      const overrideChannel = await resolveEnvOverrideChannel(environmentId);
+      if (overrideChannel) {
+        channelsToNotify = [overrideChannel];
       }
     }
+  } else if (channelsToNotify.length === 0) {
+    const overrideChannel = environmentId
+      ? await resolveEnvOverrideChannel(environmentId)
+      : null;
 
     if (overrideChannel) {
       channelsToNotify = [overrideChannel];
