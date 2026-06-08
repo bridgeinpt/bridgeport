@@ -24,6 +24,8 @@ BRIDGEPORT is a lightweight, self-hosted deployment management tool for Docker-b
 - **Plugins** -- new service types or database types (JSON definitions in `plugins/`)
 - **Tests** -- more coverage is always welcome
 
+Participation in this project is governed by our [Code of Conduct](CODE_OF_CONDUCT.md). By contributing, you agree to uphold it and to help keep the community welcoming for everyone.
+
 ## Development Setup
 
 ### Prerequisites
