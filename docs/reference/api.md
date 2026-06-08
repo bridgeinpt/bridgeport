@@ -42,6 +42,9 @@ BRIDGEPORT publishes a self-describing OpenAPI 3 specification so programmatic c
 
 Both endpoints are unauthenticated so CI tools, code generators, and reverse-proxy probes can pull the spec without minting a token. The spec includes the standard error envelope as a shared component (`#/components/schemas/ErrorEnvelope`).
 
+> [!TIP]
+> `/openapi.json` is the canonical wire contract. See the [API Stability Policy](../api-stability.md) for the compatibility guarantees, semver rules, and how to pin against a spec snapshot.
+
 ```bash
 # Pull the spec
 curl https://deploy.example.com/openapi.json > openapi.json
@@ -411,6 +414,7 @@ curl -X POST "$BRIDGEPORT_URL/api/webhooks/deploy" \
 
 ## Related Docs
 
+- [API Stability Policy](../api-stability.md) -- Compatibility contract, semver rules, deprecation window, and current deprecations
 - [Real-Time Events (SSE)](events.md) -- Live event stream for health, deployments, and notifications
 - [CLI Reference](cli.md) -- Command-line interface for terminal workflows
 - [Environment Settings](environment-settings.md) -- Per-environment configuration reference
