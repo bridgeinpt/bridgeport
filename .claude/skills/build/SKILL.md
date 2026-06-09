@@ -231,10 +231,11 @@ Do not commit. Report which tests you added and the final pass/fail status.
 """)
 ```
 
-After it finishes, run the full relevant suite to confirm nothing broke:
+After it finishes, run the full relevant suite to confirm nothing broke. **Do not use `npm test`** (bare `vitest run`) — this repo has no root vitest config, so it skips `tests/setup.ts` (leaving `MASTER_KEY`/`JWT_SECRET` unset, so every route test errors at collection with "(0 test)"), runs `ui/**` tests under the node env without jsdom, and globs any `.claude/worktrees/` copies — yielding hundreds of false failures. Run the two scoped configs instead:
 
 ```bash
-npm test
+npx vitest run --config config/vitest.config.ts        # integration (real SQLite)
+npx vitest run --config config/vitest.unit.config.ts   # unit (mocked Prisma)
 ```
 
 And if `ui/` was modified:
