@@ -322,11 +322,11 @@ A service can be deployed to multiple servers (one `ServiceDeployment` per serve
 
 **View deployment history:**
 ```http
-GET /api/services/:id/deployments?limit=20
+GET /api/services/:id/deployments-history?limit=20
 Authorization: Bearer <token>
 ```
 
-Returns recent deployments ordered newest first, each with `id`, `imageTag`, `previousTag`, `status`, `triggeredBy`, `startedAt`, `completedAt`, and `durationMs`.
+Returns recent deployments ordered newest first, each with `id`, `imageTag`, `previousTag`, `status`, `triggeredBy`, `startedAt`, `completedAt`, `durationMs`, and `serviceDeployment.server` (`{ id, name }`, nullable for legacy rows whose per-server deployment is gone).
 
 **View a single deployment with logs:**
 ```http

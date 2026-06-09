@@ -1492,6 +1492,24 @@ export default function ServiceDetail() {
         </div>
       )}
 
+      {/* Servers */}
+      {service.serviceDeployments && service.serviceDeployments.length > 0 && (
+        <div className="panel">
+          <h3 className="text-lg font-semibold text-white mb-4">Servers</h3>
+          <div className="flex flex-wrap gap-2">
+            {service.serviceDeployments.map((dep) => (
+              <Link
+                key={dep.id}
+                to={`/servers/${dep.server.id}`}
+                className="px-2 py-0.5 bg-slate-700 rounded text-sm text-primary-400 hover:underline"
+              >
+                {dep.server.name}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Deployment History */}
       <div className="panel">
             <h3 className="text-lg font-semibold text-white mb-4">
@@ -1505,6 +1523,7 @@ export default function ServiceDetail() {
                       <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
                         <th className="pb-3 font-medium">Tag</th>
                         <th className="pb-3 font-medium">Status</th>
+                        <th className="pb-3 font-medium">Server</th>
                         <th className="pb-3 font-medium">Triggered By</th>
                         <th className="pb-3 font-medium">Started</th>
                         <th className="pb-3 font-medium">Duration</th>
@@ -1532,6 +1551,18 @@ export default function ServiceDetail() {
                               >
                                 {deployment.status}
                               </span>
+                            </td>
+                            <td className="py-3">
+                              {deployment.serviceDeployment?.server ? (
+                                <Link
+                                  to={`/servers/${deployment.serviceDeployment.server.id}`}
+                                  className="text-primary-400 hover:underline"
+                                >
+                                  {deployment.serviceDeployment.server.name}
+                                </Link>
+                              ) : (
+                                <span className="text-slate-500">—</span>
+                              )}
                             </td>
                             <td className="py-3">{deployment.triggeredBy}</td>
                             <td className="py-3 text-sm">
@@ -1567,7 +1598,7 @@ export default function ServiceDetail() {
                           </tr>
                           {expandedDeployment === deployment.id && deployment.logs && (
                             <tr key={`${deployment.id}-logs`}>
-                              <td colSpan={6} className="p-0">
+                              <td colSpan={7} className="p-0">
                                 <pre className="p-4 bg-slate-950 text-xs text-slate-300 font-mono overflow-x-auto max-h-64 overflow-y-auto">
                                   {deployment.logs}
                                 </pre>

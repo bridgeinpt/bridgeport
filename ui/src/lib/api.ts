@@ -1045,6 +1045,7 @@ export interface Deployment {
   startedAt: string;
   completedAt: string | null;
   serviceId: string;
+  serviceDeployment?: { server: { id: string; name: string } | null } | null;
 }
 
 export interface SecretUsageService {
