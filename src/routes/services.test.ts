@@ -4,7 +4,8 @@ import { createTestUser } from '../../tests/factories/user.js';
 import { createTestEnvironment } from '../../tests/factories/environment.js';
 import { createTestServer } from '../../tests/factories/server.js';
 import { createTestContainerImage } from '../../tests/factories/container-image.js';
-import { createTestService } from '../../tests/factories/service.js';
+import { createTestService, createTestServiceDeployment } from '../../tests/factories/service.js';
+import { createTestDeployment } from '../../tests/factories/deployment.js';
 import { generateTestToken } from '../../tests/helpers/auth.js';
 
 describe('service routes', () => {
@@ -333,6 +334,69 @@ describe('service routes', () => {
 
       expect(res.statusCode).toBe(200);
       expect(res.json().service).not.toHaveProperty('typeTag');
+    });
+  });
+
+  // ==================== GET /api/services/:id/deployments-history ====================
+
+  describe('GET /api/services/:id/deployments-history', () => {
+    it('exposes serviceDeployment.server { id, name } for a deployment linked to a per-server deployment, and null for legacy rows', async () => {
+      // Fresh service + per-server deployment so we control exactly which rows
+      // come back (the file creates other services in the same env).
+      const svc = await createTestService(app.prisma, {
+        environmentId: envId,
+        containerImageId: imageId,
+        name: 'dh-svc',
+      });
+      const serviceDeployment = await createTestServiceDeployment(app.prisma, {
+        serviceId: svc.id,
+        serverId,
+        containerName: 'dh-container',
+      });
+
+      // (a) A Deployment linked to the per-server deployment (which has a Server).
+      const linked = await app.prisma.deployment.create({
+        data: {
+          imageTag: 'v2.0.0',
+          status: 'success',
+          triggeredBy: 'test@test.com',
+          completedAt: new Date(),
+          serviceId: svc.id,
+          serviceDeploymentId: serviceDeployment.id,
+        },
+      });
+
+      // (b) A legacy Deployment row whose serviceDeploymentId is null (the
+      // per-server deployment is gone). The factory leaves serviceDeploymentId
+      // unset, so this row models the legacy case.
+      const legacy = await createTestDeployment(app.prisma, {
+        serviceId: svc.id,
+        imageTag: 'v1.0.0',
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/services/${svc.id}/deployments-history`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const deployments = res.json().deployments as Array<{
+        id: string;
+        serviceDeployment: { server: { id: string; name: string } | null } | null;
+      }>;
+
+      const linkedRow = deployments.find((d) => d.id === linked.id);
+      expect(linkedRow).toBeDefined();
+      expect(linkedRow!.serviceDeployment).toEqual({
+        server: { id: serverId, name: 'svc-server' },
+      });
+
+      const legacyRow = deployments.find((d) => d.id === legacy.id);
+      expect(legacyRow).toBeDefined();
+      // Degrades gracefully: legacy row has no per-server deployment, and the
+      // endpoint must not throw.
+      expect(legacyRow!.serviceDeployment).toBeNull();
     });
   });
 

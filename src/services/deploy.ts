@@ -767,14 +767,21 @@ export async function deployServiceTemplate(
   return { results, halted };
 }
 
+export type DeploymentHistoryEntry = Deployment & {
+  serviceDeployment: { server: { id: string; name: string } | null } | null;
+};
+
 export async function getDeploymentHistory(
   serviceId: string,
   limit: number = 20
-): Promise<Deployment[]> {
+): Promise<DeploymentHistoryEntry[]> {
   return prisma.deployment.findMany({
     where: { serviceId },
     orderBy: { startedAt: 'desc' },
     take: limit,
+    include: {
+      serviceDeployment: { select: { server: { select: { id: true, name: true } } } },
+    },
   });
 }
 

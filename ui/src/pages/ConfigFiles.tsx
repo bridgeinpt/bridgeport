@@ -1107,6 +1107,14 @@ export default function ConfigFiles() {
                       binary
                     </span>
                   )}
+                  {!file.isBinary &&
+                    file.language &&
+                    file.language !== 'text' &&
+                    file.language !== 'plaintext' && (
+                      <span className="px-1.5 py-0.5 text-xs bg-blue-900/30 text-blue-400 rounded" title={`Language: ${file.language}`}>
+                        {file.language}
+                      </span>
+                    )}
                 </div>
                 <p className="text-sm text-slate-400 truncate font-mono">{file.filename}</p>
                 {file.isBinary && file.fileSize && (

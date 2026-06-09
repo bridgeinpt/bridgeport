@@ -497,7 +497,9 @@ export default function Services() {
                             return <span>{servers.join(', ')}</span>;
                           })()}
                           <span className="text-slate-500"> · </span>
-                          <span>{service.serviceType?.displayName || 'Generic'}</span>
+                          <span className="badge badge-neutral">
+                            {service.serviceType?.displayName || 'Generic'}
+                          </span>
                           <span className="text-slate-500"> · </span>
                           <span className="font-mono">
                             {service.containerImage?.imageName?.split('/').pop() || 'unknown'}
