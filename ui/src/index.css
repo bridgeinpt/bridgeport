@@ -29,11 +29,13 @@
 }
 
 /*
- * Tailwind v4 Preflight changed several defaults vs. v3. These rules restore
- * the v3 behaviour so the migration stays like-for-like (no visual changes).
+ * Tailwind v4's Preflight dropped three defaults that v3 set. Restore them so
+ * markup relying on them keeps rendering as before. The colors resolve to v4's
+ * own gray-200/gray-400 (the palette the rest of the UI now uses); the literal
+ * fallbacks only apply if the default palette is ever cleared.
  */
 @layer base {
-  /* Default border/divide color changed from gray-200 to currentColor. */
+  /* v4 defaults bare `border`/`divide` to currentColor; v3 used gray-200. */
   *,
   ::after,
   ::before,
@@ -48,8 +50,8 @@
     cursor: pointer;
   }
 
-  /* v4 changed the default placeholder color to a translucent currentColor;
-     restore v3's gray-400 for inputs that don't set their own color. */
+  /* v4 sets the default placeholder to a translucent currentColor; restore a
+     solid gray-400 placeholder for inputs that don't set their own color. */
   input::placeholder,
   textarea::placeholder {
     color: var(--color-gray-400, #9ca3af);

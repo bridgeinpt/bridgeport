@@ -111,7 +111,7 @@ export function Modal({
     <div
       ref={overlayRef}
       onClick={handleOverlayClick}
-      className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center"
+      className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center"
       style={{ zIndex }}
       role="dialog"
       aria-modal="true"
