@@ -147,8 +147,7 @@
                 "required": [
                   "email",
                   "password"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -206,8 +205,7 @@
                 "required": [
                   "email",
                   "password"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -295,8 +293,7 @@
                 },
                 "required": [
                   "name"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -497,10 +494,8 @@
                   }
                 },
                 "required": [
-                  "sshPrivateKey",
-                  "sshUser"
-                ],
-                "additionalProperties": false
+                  "sshPrivateKey"
+                ]
               }
             }
           }
@@ -837,8 +832,7 @@
                 "required": [
                   "name",
                   "hostname"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -968,8 +962,7 @@
                     "type": "string",
                     "minLength": 1
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -1260,10 +1253,8 @@
                             "required": [
                               "name",
                               "container_name",
-                              "image_name",
-                              "image_tag"
-                            ],
-                            "additionalProperties": false
+                              "image_name"
+                            ]
                           }
                         }
                       },
@@ -1271,15 +1262,13 @@
                         "name",
                         "private_ip",
                         "tags"
-                      ],
-                      "additionalProperties": false
+                      ]
                     }
                   }
                 },
                 "required": [
                   "servers"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -1576,11 +1565,7 @@
                     "type": "string",
                     "minLength": 1
                   }
-                },
-                "required": [
-                  "name"
-                ],
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -1735,8 +1720,7 @@
                       "swap": {
                         "type": "boolean"
                       }
-                    },
-                    "additionalProperties": false
+                    }
                   },
                   "swapSizeMb": {
                     "type": "integer",
@@ -1746,8 +1730,7 @@
                 },
                 "required": [
                   "components"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -1847,8 +1830,7 @@
                 "required": [
                   "sizeMb",
                   "confirm"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -1991,6 +1973,59 @@
         "tags": [
           "services"
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "containerImageId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "imageTag": {
+                    "default": "latest",
+                    "type": "string"
+                  },
+                  "composeTemplate": {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "healthCheckUrl": {
+                    "nullable": true,
+                    "type": "string"
+                  },
+                  "baseEnv": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "deployStrategy": {
+                    "type": "string",
+                    "enum": [
+                      "sequential",
+                      "parallel"
+                    ]
+                  },
+                  "containerName": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "name",
+                  "containerImageId"
+                ]
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "schema": {
@@ -2122,10 +2157,8 @@
                 },
                 "required": [
                   "name",
-                  "containerImageId",
-                  "imageTag"
-                ],
-                "additionalProperties": false
+                  "containerImageId"
+                ]
               }
             }
           }
@@ -2294,21 +2327,17 @@
                   },
                   "healthWaitMs": {
                     "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
+                    "minimum": 0
                   },
                   "healthRetries": {
                     "type": "integer",
-                    "minimum": 1,
-                    "maximum": 9007199254740991
+                    "minimum": 1
                   },
                   "healthIntervalMs": {
                     "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
+                    "minimum": 0
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -2480,8 +2509,7 @@
                 "required": [
                   "serverId",
                   "containerName"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -2568,8 +2596,7 @@
                       "type": "string"
                     }
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -2723,12 +2750,7 @@
                       "parallel"
                     ]
                   }
-                },
-                "required": [
-                  "generateArtifacts",
-                  "pullImage"
-                ],
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -2818,12 +2840,7 @@
                       "parallel"
                     ]
                   }
-                },
-                "required": [
-                  "generateArtifacts",
-                  "pullImage"
-                ],
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -3352,8 +3369,7 @@
                 },
                 "required": [
                   "commandName"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -3462,10 +3478,8 @@
                 },
                 "required": [
                   "key",
-                  "value",
-                  "neverReveal"
-                ],
-                "additionalProperties": false
+                  "value"
+                ]
               }
             }
           }
@@ -3587,8 +3601,7 @@
                   "neverReveal": {
                     "type": "boolean"
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -3742,8 +3755,7 @@
                 "required": [
                   "key",
                   "value"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -3822,8 +3834,7 @@
                   "description": {
                     "type": "string"
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -3971,10 +3982,8 @@
                 },
                 "required": [
                   "service",
-                  "environment",
-                  "generateArtifacts"
-                ],
-                "additionalProperties": false
+                  "environment"
+                ]
               }
             }
           }
@@ -4073,8 +4082,7 @@
                   "imageName",
                   "environment",
                   "imageTag"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -4221,8 +4229,7 @@
                 },
                 "required": [
                   "composeTemplate"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -4463,8 +4470,7 @@
                   "fileSize": {
                     "type": "integer",
                     "minimum": 0,
-                    "exclusiveMinimum": true,
-                    "maximum": 9007199254740991
+                    "exclusiveMinimum": true
                   },
                   "autoResync": {
                     "type": "boolean"
@@ -4484,8 +4490,7 @@
                   "name",
                   "filename",
                   "content"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -4621,8 +4626,7 @@
                     "nullable": true,
                     "type": "integer",
                     "minimum": 0,
-                    "exclusiveMinimum": true,
-                    "maximum": 9007199254740991
+                    "exclusiveMinimum": true
                   },
                   "autoResync": {
                     "type": "boolean"
@@ -4637,8 +4641,7 @@
                       "type": "string"
                     }
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -4777,8 +4780,7 @@
                       "type": "string"
                     }
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -4987,8 +4989,7 @@
                 "required": [
                   "configFileId",
                   "targetPath"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -5123,8 +5124,7 @@
                 },
                 "required": [
                   "targetPath"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -5586,8 +5586,7 @@
                 "required": [
                   "name",
                   "content"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -5708,8 +5707,7 @@
                   "content": {
                     "type": "string"
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -5931,8 +5929,7 @@
                   "name",
                   "type",
                   "registryUrl"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -6076,8 +6073,7 @@
                     "nullable": true,
                     "type": "string"
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -6497,10 +6493,8 @@
                 },
                 "required": [
                   "email",
-                  "password",
-                  "role"
-                ],
-                "additionalProperties": false
+                  "password"
+                ]
               }
             }
           }
@@ -6651,8 +6645,7 @@
                       "viewer"
                     ]
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -6803,8 +6796,7 @@
                 },
                 "required": [
                   "newPassword"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -7235,8 +7227,7 @@
                       },
                       "required": [
                         "containerName"
-                      ],
-                      "additionalProperties": false
+                      ]
                     }
                   },
                   "serviceHealthChecks": {
@@ -7272,8 +7263,7 @@
                         "containerName",
                         "healthCheckUrl",
                         "success"
-                      ],
-                      "additionalProperties": false
+                      ]
                     }
                   },
                   "tcpCheckResults": {
@@ -7309,8 +7299,7 @@
                         "port",
                         "success",
                         "durationMs"
-                      ],
-                      "additionalProperties": false
+                      ]
                     }
                   },
                   "certCheckResults": {
@@ -7358,8 +7347,7 @@
                         "port",
                         "success",
                         "durationMs"
-                      ],
-                      "additionalProperties": false
+                      ]
                     }
                   },
                   "containers": {
@@ -7409,8 +7397,7 @@
                             "required": [
                               "privatePort",
                               "type"
-                            ],
-                            "additionalProperties": false
+                            ]
                           }
                         },
                         "labels": {
@@ -7442,8 +7429,7 @@
                               "destination",
                               "mode",
                               "type"
-                            ],
-                            "additionalProperties": false
+                            ]
                           }
                         },
                         "networkMode": {
@@ -7458,8 +7444,7 @@
                         "state",
                         "status",
                         "created"
-                      ],
-                      "additionalProperties": false
+                      ]
                     }
                   },
                   "topProcesses": {
@@ -7496,8 +7481,7 @@
                             "cpuPercent",
                             "memoryMb",
                             "threads"
-                          ],
-                          "additionalProperties": false
+                          ]
                         }
                       },
                       "byMemory": {
@@ -7531,8 +7515,7 @@
                             "cpuPercent",
                             "memoryMb",
                             "threads"
-                          ],
-                          "additionalProperties": false
+                          ]
                         }
                       },
                       "stats": {
@@ -7560,19 +7543,16 @@
                           "sleeping",
                           "stopped",
                           "zombie"
-                        ],
-                        "additionalProperties": false
+                        ]
                       }
                     },
                     "required": [
                       "byCpu",
                       "byMemory",
                       "stats"
-                    ],
-                    "additionalProperties": false
+                    ]
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -7811,8 +7791,7 @@
                       "dataOnly": {
                         "type": "boolean"
                       }
-                    },
-                    "additionalProperties": false
+                    }
                   },
                   "pgDumpTimeoutMs": {
                     "type": "number",
@@ -7823,8 +7802,7 @@
                 "required": [
                   "name",
                   "type"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -8023,16 +8001,14 @@
                       "dataOnly": {
                         "type": "boolean"
                       }
-                    },
-                    "additionalProperties": false
+                    }
                   },
                   "pgDumpTimeoutMs": {
                     "type": "number",
                     "minimum": 30000,
                     "maximum": 3600000
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -8451,8 +8427,7 @@
                 },
                 "required": [
                   "cronExpression"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -8919,7 +8894,7 @@
             },
             "in": "query",
             "name": "limit",
-            "required": true
+            "required": false
           },
           {
             "schema": {
@@ -8929,7 +8904,7 @@
             },
             "in": "query",
             "name": "offset",
-            "required": true
+            "required": false
           },
           {
             "schema": {
@@ -8938,7 +8913,7 @@
             },
             "in": "query",
             "name": "unreadOnly",
-            "required": true
+            "required": false
           },
           {
             "schema": {
@@ -9089,8 +9064,7 @@
                       "type": "string"
                     }
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -9199,8 +9173,7 @@
                     "minimum": 60,
                     "maximum": 86400
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -9334,11 +9307,8 @@
                 },
                 "required": [
                   "host",
-                  "port",
-                  "secure",
                   "fromAddress"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -9495,8 +9465,7 @@
                 "required": [
                   "name",
                   "url"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -9629,8 +9598,7 @@
                       "type": "string"
                     }
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -9851,8 +9819,7 @@
                 "required": [
                   "name",
                   "webhookUrl"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -9971,8 +9938,7 @@
                   "enabled": {
                     "type": "boolean"
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -10191,16 +10157,14 @@
                       },
                       "required": [
                         "channelId"
-                      ],
-                      "additionalProperties": false
+                      ]
                     }
                   }
                 },
                 "required": [
                   "typeId",
                   "routings"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -10428,10 +10392,8 @@
                 },
                 "required": [
                   "name",
-                  "imageName",
-                  "tagFilter"
-                ],
-                "additionalProperties": false
+                  "imageName"
+                ]
               }
             }
           }
@@ -10546,8 +10508,7 @@
                   "autoUpdate": {
                     "type": "boolean"
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -10678,11 +10639,7 @@
                     "default": true,
                     "type": "boolean"
                   }
-                },
-                "required": [
-                  "autoRollback"
-                ],
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -11153,8 +11110,7 @@
                 "required": [
                   "dependsOnId",
                   "type"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -11382,10 +11338,8 @@
                 },
                 "required": [
                   "serviceIds",
-                  "imageTag",
-                  "autoRollback"
-                ],
-                "additionalProperties": false
+                  "imageTag"
+                ]
               }
             }
           }
@@ -11730,8 +11684,7 @@
                 "required": [
                   "name",
                   "displayName"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -11836,8 +11789,7 @@
                     "minLength": 1,
                     "maxLength": 100
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -12097,16 +12049,14 @@
                   },
                   "sortOrder": {
                     "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
+                    "minimum": 0
                   }
                 },
                 "required": [
                   "name",
                   "displayName",
                   "command"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -12202,11 +12152,9 @@
                   },
                   "sortOrder": {
                     "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
+                    "minimum": 0
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -12459,8 +12407,7 @@
                         "name",
                         "label",
                         "type"
-                      ],
-                      "additionalProperties": false
+                      ]
                     }
                   },
                   "backupCommand": {
@@ -12470,17 +12417,14 @@
                     "type": "string"
                   },
                   "defaultPort": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
+                    "type": "integer"
                   }
                 },
                 "required": [
                   "name",
                   "displayName",
                   "connectionFields"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -12613,8 +12557,7 @@
                         "name",
                         "label",
                         "type"
-                      ],
-                      "additionalProperties": false
+                      ]
                     }
                   },
                   "backupCommand": {
@@ -12627,12 +12570,9 @@
                   },
                   "defaultPort": {
                     "nullable": true,
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
+                    "type": "integer"
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -12892,16 +12832,14 @@
                   },
                   "sortOrder": {
                     "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
+                    "minimum": 0
                   }
                 },
                 "required": [
                   "name",
                   "displayName",
                   "command"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -12997,11 +12935,9 @@
                   },
                   "sortOrder": {
                     "type": "integer",
-                    "minimum": 0,
-                    "maximum": 9007199254740991
+                    "minimum": 0
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -13178,10 +13114,8 @@
                   }
                 },
                 "required": [
-                  "accessKey",
-                  "region"
-                ],
-                "additionalProperties": false
+                  "accessKey"
+                ]
               }
             }
           }
@@ -13357,8 +13291,7 @@
                 },
                 "required": [
                   "enabled"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -13481,7 +13414,7 @@
             },
             "in": "query",
             "name": "hours",
-            "required": true
+            "required": false
           },
           {
             "schema": {
@@ -13491,7 +13424,7 @@
             },
             "in": "query",
             "name": "page",
-            "required": true
+            "required": false
           },
           {
             "schema": {
@@ -13502,7 +13435,7 @@
             },
             "in": "query",
             "name": "limit",
-            "required": true
+            "required": false
           },
           {
             "schema": {
@@ -13569,11 +13502,7 @@
                       "services"
                     ]
                   }
-                },
-                "required": [
-                  "type"
-                ],
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -13638,7 +13567,7 @@
             },
             "in": "query",
             "name": "hours",
-            "required": true
+            "required": false
           },
           {
             "schema": {
@@ -13673,7 +13602,7 @@
             },
             "in": "query",
             "name": "maxPoints",
-            "required": true
+            "required": false
           },
           {
             "schema": {
@@ -13993,7 +13922,7 @@
             },
             "in": "query",
             "name": "hours",
-            "required": true
+            "required": false
           },
           {
             "schema": {
@@ -14028,7 +13957,7 @@
             },
             "in": "query",
             "name": "maxPoints",
-            "required": true
+            "required": false
           },
           {
             "schema": {
@@ -14594,8 +14523,7 @@
                     "minimum": 1,
                     "maximum": 365
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -14781,8 +14709,7 @@
                     "nullable": true,
                     "type": "integer",
                     "minimum": 0,
-                    "exclusiveMinimum": true,
-                    "maximum": 9007199254740991
+                    "exclusiveMinimum": true
                   },
                   "protocol": {
                     "nullable": true,
@@ -14806,10 +14733,8 @@
                   "sourceType",
                   "sourceId",
                   "targetType",
-                  "targetId",
-                  "direction"
-                ],
-                "additionalProperties": false
+                  "targetId"
+                ]
               }
             }
           }
@@ -14988,16 +14913,14 @@
                       "required": [
                         "x",
                         "y"
-                      ],
-                      "additionalProperties": false
+                      ]
                     }
                   }
                 },
                 "required": [
                   "environmentId",
                   "positions"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -15126,8 +15049,7 @@
                   "label",
                   "x",
                   "y"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -15232,8 +15154,7 @@
                     "minimum": 0,
                     "exclusiveMinimum": true
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -15417,8 +15338,7 @@
                   "name",
                   "x",
                   "y"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -15531,8 +15451,7 @@
                     "minimum": 0,
                     "exclusiveMinimum": true
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -15986,8 +15905,7 @@
                     "nullable": true,
                     "type": "string"
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -16136,6 +16054,63 @@
     },
     "/api/environments/{envId}/config-scan/preview": {
       "post": {
+        "summary": "Preview diffs for a proposed secret/var substitution",
+        "tags": [
+          "environments"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "hardcoded_value",
+                      "missing_reference"
+                    ]
+                  },
+                  "value": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Z][A-Z0-9_]*$"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "secret",
+                      "var"
+                    ]
+                  },
+                  "fileIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "existingSecretId": {
+                    "nullable": true,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "value",
+                  "key",
+                  "type",
+                  "fileIds",
+                  "existingSecretId"
+                ]
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "schema": {
@@ -16147,14 +16122,98 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Default Response"
+          "400": {
+            "description": "Bad request — malformed input or failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — token scope or role does not permit this operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
     },
     "/api/environments/{envId}/config-scan/apply": {
       "post": {
+        "summary": "Create a secret/var and substitute the value in config files",
+        "tags": [
+          "environments"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "hardcoded_value",
+                      "missing_reference"
+                    ]
+                  },
+                  "value": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Z][A-Z0-9_]*$"
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "secret",
+                      "var"
+                    ]
+                  },
+                  "fileIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "existingSecretId": {
+                    "nullable": true,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "value",
+                  "key",
+                  "type",
+                  "fileIds",
+                  "existingSecretId"
+                ]
+              }
+            }
+          }
+        },
         "parameters": [
           {
             "schema": {
@@ -16166,8 +16225,35 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Default Response"
+          "400": {
+            "description": "Bad request — malformed input or failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — token scope or role does not permit this operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -16234,10 +16320,8 @@
                   }
                 },
                 "required": [
-                  "name",
-                  "role"
-                ],
-                "additionalProperties": false
+                  "name"
+                ]
               }
             }
           }
@@ -16362,8 +16446,7 @@
                   "disabled": {
                     "type": "boolean"
                   }
-                },
-                "additionalProperties": false
+                }
               }
             }
           }
@@ -16550,8 +16633,7 @@
                   "role",
                   "allEnvironments",
                   "expiresInDays"
-                ],
-                "additionalProperties": false
+                ]
               }
             }
           }
@@ -16676,8 +16758,7 @@
                           "required": [
                             "type",
                             "configFileId"
-                          ],
-                          "additionalProperties": false
+                          ]
                         }
                       ]
                     }
@@ -16688,10 +16769,8 @@
                   }
                 },
                 "required": [
-                  "operations",
-                  "rollbackOnFailure"
-                ],
-                "additionalProperties": false
+                  "operations"
+                ]
               }
             }
           }

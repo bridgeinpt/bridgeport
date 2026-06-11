@@ -29,42 +29,9 @@ import { initializeCrypto } from '../src/lib/crypto.js';
 import errorHandlerPlugin from '../src/plugins/error-handler.js';
 import openapiPlugin from '../src/plugins/openapi.js';
 import authenticatePlugin from '../src/plugins/authenticate.js';
-
-// Route imports — kept in sync with src/server.ts registration.
-import { authRoutes } from '../src/routes/auth.js';
-import { environmentRoutes } from '../src/routes/environments.js';
-import { serverRoutes } from '../src/routes/servers.js';
-import { serviceRoutes } from '../src/routes/services.js';
-import { secretRoutes } from '../src/routes/secrets.js';
-import { webhookRoutes } from '../src/routes/webhooks.js';
-import { composeRoutes } from '../src/routes/compose.js';
-import { auditRoutes } from '../src/routes/audit.js';
-import { configFileRoutes } from '../src/routes/config-files.js';
-import { configFragmentRoutes } from '../src/routes/config-fragments.js';
-import { registryRoutes } from '../src/routes/registries.js';
-import { userRoutes } from '../src/routes/users.js';
-import { metricsRoutes } from '../src/routes/metrics.js';
-import { databaseRoutes } from '../src/routes/databases.js';
-import { notificationRoutes } from '../src/routes/notifications.js';
-import { smtpRoutes } from '../src/routes/admin/smtp.js';
-import { webhookAdminRoutes } from '../src/routes/admin/webhooks.js';
-import { slackAdminRoutes } from '../src/routes/admin/slack.js';
-import { sentryAdminRoutes } from '../src/routes/admin/sentry.js';
-import { containerImageRoutes } from '../src/routes/container-images.js';
-import { serviceDependencyRoutes } from '../src/routes/service-dependencies.js';
-import { deploymentPlanRoutes } from '../src/routes/deployment-plans.js';
-import { settingsRoutes } from '../src/routes/settings.js';
-import { spacesRoutes } from '../src/routes/spaces.js';
-import { monitoringRoutes } from '../src/routes/monitoring.js';
-import { systemSettingsRoutes } from '../src/routes/system-settings.js';
-import { downloadRoutes } from '../src/routes/downloads.js';
-import { topologyRoutes } from '../src/routes/topology.js';
-import { environmentSettingsRoutes } from '../src/routes/environment-settings.js';
-import { eventRoutes } from '../src/routes/events.js';
-import { configScanRoutes } from '../src/routes/config-scan.js';
-import { serviceAccountRoutes } from '../src/routes/service-accounts.js';
-import { apiTokenRoutes } from '../src/routes/api-tokens.js';
-import { syncBatchRoutes } from '../src/routes/sync-batch.js';
+// SINGLE SOURCE OF TRUTH for the route set — shared with src/server.ts and
+// tests/helpers/app.ts so the dumped spec can never drift from the live routes.
+import { registerApiRoutes } from '../src/register-routes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -111,40 +78,8 @@ async function buildSpecApp() {
   const { default: multipart } = await import('@fastify/multipart');
   await fastify.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } });
 
-  await fastify.register(authRoutes);
-  await fastify.register(environmentRoutes);
-  await fastify.register(serverRoutes);
-  await fastify.register(serviceRoutes);
-  await fastify.register(secretRoutes);
-  await fastify.register(webhookRoutes);
-  await fastify.register(composeRoutes);
-  await fastify.register(auditRoutes);
-  await fastify.register(configFileRoutes);
-  await fastify.register(configFragmentRoutes);
-  await fastify.register(registryRoutes);
-  await fastify.register(userRoutes);
-  await fastify.register(metricsRoutes);
-  await fastify.register(databaseRoutes);
-  await fastify.register(notificationRoutes);
-  await fastify.register(smtpRoutes);
-  await fastify.register(webhookAdminRoutes);
-  await fastify.register(slackAdminRoutes);
-  await fastify.register(sentryAdminRoutes);
-  await fastify.register(containerImageRoutes);
-  await fastify.register(serviceDependencyRoutes);
-  await fastify.register(deploymentPlanRoutes);
-  await fastify.register(settingsRoutes);
-  await fastify.register(spacesRoutes);
-  await fastify.register(monitoringRoutes);
-  await fastify.register(systemSettingsRoutes);
-  await fastify.register(downloadRoutes);
-  await fastify.register(topologyRoutes);
-  await fastify.register(environmentSettingsRoutes);
-  await fastify.register(eventRoutes);
-  await fastify.register(configScanRoutes);
-  await fastify.register(serviceAccountRoutes);
-  await fastify.register(apiTokenRoutes);
-  await fastify.register(syncBatchRoutes);
+  // Single source of truth — same route set/order as src/server.ts and tests.
+  await registerApiRoutes(fastify);
 
   await fastify.ready();
   return fastify;

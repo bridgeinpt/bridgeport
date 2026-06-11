@@ -404,6 +404,9 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['services'],
         summary: 'Create a service template and attach a deployment on a server (legacy)',
         params: serverIdParamsSchema,
+        // Mirrors the validateBody(...) call below (single source: the same Zod
+        // expression). Docs-only; runtime validation stays with validateBody.
+        body: createServiceSchema.extend({ containerName: z.string().min(1).optional() }),
         errors: [400, 401, 404, 409],
       }),
     },

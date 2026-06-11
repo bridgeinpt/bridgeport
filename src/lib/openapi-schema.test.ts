@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
-import { zodToOpenApi, markPropertyDeprecated, routeSchema } from './openapi-schema.js';
+import { zodToOpenApi, routeSchema } from './openapi-schema.js';
 // `openapi-schema.ts` itself imports ERROR_ENVELOPE_SCHEMA_ID from this module,
 // so referencing it here adds no extra dependency weight and keeps the $ref
 // assertions tied to the single source of truth (not a magic string).
@@ -62,45 +62,67 @@ describe('zodToOpenApi', () => {
 
     expect(typeof limit.exclusiveMinimum).not.toBe('number');
   });
-});
 
-describe('markPropertyDeprecated', () => {
-  it('sets deprecated: true on an existing property', () => {
-    const jsonSchema = {
-      type: 'object',
-      properties: {
-        success: { type: 'boolean' },
-        status: { type: 'string' },
-      },
-    };
+  it('strips a spurious `additionalProperties: false` (runtime strips unknown keys, contract is open)', () => {
+    // Zod's default strip-mode object emits `additionalProperties: false` under
+    // OUTPUT semantics; none of our schemas are `.strict()`, so it's spurious.
+    const schema = z.object({ name: z.string() });
 
-    markPropertyDeprecated(jsonSchema, 'success');
+    const result = zodToOpenApi(schema)!;
 
-    expect((jsonSchema.properties.success as Record<string, unknown>).deprecated).toBe(true);
-    // Untouched siblings stay clean.
-    expect((jsonSchema.properties.status as Record<string, unknown>).deprecated).toBeUndefined();
+    expect(result).not.toHaveProperty('additionalProperties');
   });
 
-  it('is a no-op when the property is absent (does not throw)', () => {
-    const jsonSchema = {
-      type: 'object',
-      properties: { status: { type: 'string' } },
-    };
+  it('preserves `additionalProperties: true` (deliberate open-object marker)', () => {
+    const schema = z.object({ name: z.string() }).catchall(z.unknown());
 
-    expect(() => markPropertyDeprecated(jsonSchema, 'missing')).not.toThrow();
-    expect(jsonSchema.properties).not.toHaveProperty('missing');
+    const result = zodToOpenApi(schema)!;
+
+    expect(result.additionalProperties).not.toBe(false);
   });
 
-  it('is a no-op when `properties` is missing entirely (does not throw)', () => {
-    const jsonSchema = { type: 'object' };
+  it('strips the bogus Number.MAX_SAFE_INTEGER maximum from one-sided int bounds', () => {
+    const schema = z.object({ n: z.number().int().min(0) });
 
-    expect(() => markPropertyDeprecated(jsonSchema, 'anything')).not.toThrow();
+    const result = zodToOpenApi(schema)!;
+    const n = (result.properties as Record<string, Record<string, unknown>>).n;
+
+    expect(n.minimum).toBe(0);
+    expect(n).not.toHaveProperty('maximum');
   });
 
-  it('returns the same object reference (for chaining)', () => {
-    const jsonSchema = { type: 'object', properties: { a: {} } };
+  it("with io='input' does NOT mark `.default()` fields as required and omits additionalProperties:false", () => {
+    // INPUT semantics model the client's view: defaulted fields are optional and
+    // unknown keys are stripped (not rejected). This is the request-body view.
+    const schema = z.object({
+      page: z.number().int().min(1).default(1),
+      name: z.string(),
+    });
 
-    expect(markPropertyDeprecated(jsonSchema, 'a')).toBe(jsonSchema);
+    const result = zodToOpenApi(schema, 'input')!;
+
+    expect(result.required).toEqual(['name']); // `page` (defaulted) is NOT required
+    expect(result).not.toHaveProperty('additionalProperties');
+  });
+
+  it("with io='output' marks `.default()` fields as required (server always emits them)", () => {
+    const schema = z.object({
+      page: z.number().int().min(1).default(1),
+      name: z.string(),
+    });
+
+    const result = zodToOpenApi(schema, 'output')!;
+
+    // OUTPUT view: a defaulted field is always present on the wire → required.
+    expect(result.required).toEqual(expect.arrayContaining(['page', 'name']));
+  });
+
+  it('returns undefined (does NOT throw) for a falsy schema argument', () => {
+    let result: unknown;
+    expect(() => {
+      result = zodToOpenApi(undefined as unknown as z.ZodType);
+    }).not.toThrow();
+    expect(result).toBeUndefined();
   });
 });
 
@@ -198,10 +220,12 @@ describe('routeSchema', () => {
   });
 
   it('omits a request fragment entirely when its Zod conversion fails', () => {
-    // A `.transform()` body cannot be represented; the helper must omit `body`
-    // rather than emit an empty/broken key.
+    // A `z.custom()` body cannot be represented in JSON Schema (it throws under
+    // BOTH input and output semantics — unlike `.transform()`, whose INPUT view
+    // resolves to its source type). The helper must omit `body` rather than emit
+    // an empty/broken key. Request fragments convert with `io: 'input'`.
     const schema = routeSchema({
-      body: z.string().transform((s) => s.length) as unknown as z.ZodType,
+      body: z.custom(() => true) as unknown as z.ZodType,
       params: z.object({ id: z.string() }),
     }) as Record<string, unknown>;
 

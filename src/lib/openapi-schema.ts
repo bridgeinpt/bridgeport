@@ -14,10 +14,24 @@
  *    validation into Fastify's pipeline, because that would bypass the
  *    readonly-field 422 logic and the custom error envelope.
  *
- * 2. NEVER CRASH REGISTRATION. Some Zod schemas use `.transform()` (which
- *    `z.toJSONSchema()` cannot represent and THROWS on) or `.refine()` (silently
- *    dropped). Every conversion is wrapped in try/catch: on failure we omit that
- *    fragment rather than break route registration. Docs are best-effort.
+ * 2. NEVER CRASH REGISTRATION. `z.toJSONSchema()` (Zod 4.4.3) converts the vast
+ *    majority of our schemas — including `.coerce`, `.default()`, and `.refine()`
+ *    schemas (the refine *constraint* is silently dropped, but the base shape
+ *    converts fine). It only THROWS on genuinely non-representable constructs
+ *    such as `z.custom()`, or `.transform()` under OUTPUT semantics (the
+ *    transform's INPUT view resolves to its source type, so `io: 'input'`
+ *    converts a transform fine). Every conversion is wrapped in try/catch: on a
+ *    real error we emit a non-fatal `console.warn` and omit that fragment rather
+ *    than break route registration. Docs are best-effort, but failures are now
+ *    VISIBLE during `openapi:dump`/CI.
+ *
+ *    INPUT vs OUTPUT semantics: request schemas (body/params/querystring) are
+ *    converted with `io: 'input'`; response schemas with `io: 'output'`. This
+ *    matters because the runtime validates with Zod `.parse()`, whose INPUT view
+ *    of a strip-mode object (a) does NOT mark `.default()` fields as `required`
+ *    (they're optional for the client) and (b) does NOT emit
+ *    `additionalProperties: false` (unknown keys are stripped, not rejected).
+ *    The default `io: 'output'` would mistype both. See Fix 1 / issue #198.
  *
  * 3. RESPONSE-SCHEMA TRUNCATION. Attaching a `response` schema activates
  *    `fast-json-stringify`, which DROPS any response key not declared in the
@@ -71,39 +85,101 @@ const DEFAULT_ERROR_DESCRIPTIONS: Record<number, string> = {
   500: 'Internal server error.',
 };
 
+/** Conversion direction for {@link zodToOpenApi}. See module header note 2. */
+export type ConversionIo = 'input' | 'output';
+
+/** Number.MAX_SAFE_INTEGER — the bogus UPPER bound Zod emits for a one-sided
+ * `.int().min()/.positive()`. Its negative twin (MIN_SAFE_INTEGER) is the bogus
+ * LOWER bound emitted for a one-sided `.int().max()`. Both are stripped by
+ * {@link sanitizeConvertedSchema}. */
+const MAX_SAFE_INTEGER_BOUND = 9007199254740991;
+const MIN_SAFE_INTEGER_BOUND = -9007199254740991;
+
 /**
- * Convert a Zod schema to OpenAPI 3.0 JSON Schema. Returns `undefined` on any
- * failure (e.g. `.transform()` which cannot be represented) so callers can omit
- * the fragment without crashing route registration.
+ * Recursively clean a converted JSON Schema fragment IN PLACE, then return it.
  *
- * We target `openapi-3.0` to match the plugin's `openapi: '3.0.3'` (avoids
- * draft-2020-12 keywords like `prefixItems` that an OpenAPI 3.0 validator would
- * reject).
+ * Two fixups, both of which make the spec faithful to the actual runtime
+ * contract (issue #198):
+ *
+ *  1. Delete `additionalProperties` when it is exactly `false`. The runtime
+ *     validates with Zod `.parse()` in the default STRIP mode — unknown keys are
+ *     silently dropped, NOT rejected — so the wire contract is OPEN. None of our
+ *     route schemas use `.strict()` (verified), so any `additionalProperties:
+ *     false` Zod emits here is spurious. `additionalProperties: true` is left
+ *     untouched (it's a deliberate "open object" marker).
+ *  2. Delete a `maximum` of exactly Number.MAX_SAFE_INTEGER (and a paired
+ *     `exclusiveMaximum`), and a `minimum` of exactly Number.MIN_SAFE_INTEGER
+ *     (and a paired `exclusiveMinimum`) — these are garbage one-sided bounds Zod
+ *     synthesizes for `.int().min()`/`.positive()` (bogus max) and `.int().max()`
+ *     (bogus min). Removing them keeps the spec honest about genuinely unbounded
+ *     fields.
  */
-export function zodToOpenApi(schema: ZodType): Record<string, unknown> | undefined {
-  try {
-    return z.toJSONSchema(schema, { target: 'openapi-3.0' }) as Record<string, unknown>;
-  } catch {
-    // Best-effort: a non-representable schema (transform, etc.) is simply
-    // omitted from the spec. Validation is unaffected (still done by Zod).
-    return undefined;
+function sanitizeConvertedSchema(node: unknown): unknown {
+  if (Array.isArray(node)) {
+    for (const item of node) sanitizeConvertedSchema(item);
+    return node;
   }
+  if (node && typeof node === 'object') {
+    const obj = node as Record<string, unknown>;
+
+    if (obj.additionalProperties === false) {
+      delete obj.additionalProperties;
+    }
+    if (obj.maximum === MAX_SAFE_INTEGER_BOUND) {
+      delete obj.maximum;
+      // The `exclusiveMaximum` boolean (OpenAPI 3.0 form) only has meaning
+      // alongside `maximum`; drop it too when we strip the bogus bound.
+      if (typeof obj.exclusiveMaximum === 'boolean') delete obj.exclusiveMaximum;
+    }
+    if (obj.minimum === MIN_SAFE_INTEGER_BOUND) {
+      delete obj.minimum;
+      if (typeof obj.exclusiveMinimum === 'boolean') delete obj.exclusiveMinimum;
+    }
+
+    for (const value of Object.values(obj)) sanitizeConvertedSchema(value);
+  }
+  return node;
 }
 
 /**
- * Mark a single property of an already-converted JSON Schema object as
- * `deprecated: true`. No-op if the property is absent. Used for the sync
- * envelope's `success` alias (issue #127). Returns the same object for chaining.
+ * Convert a Zod schema to OpenAPI 3.0 JSON Schema. Returns `undefined` on a
+ * genuine conversion error (e.g. `.transform()`, which has no JSON Schema
+ * representation) so callers can omit the fragment without crashing route
+ * registration. Failures emit a non-fatal `console.warn` so a silently
+ * unconvertible schema is visible during `openapi:dump`/CI.
+ *
+ * `io` selects INPUT vs OUTPUT semantics (default `'output'`). Request schemas
+ * (body/params/querystring) MUST pass `'input'` — see module header note 2.
+ *
+ * We target `openapi-3.0` to match the plugin's `openapi: '3.0.3'` (avoids
+ * draft-2020-12 keywords like `prefixItems` that an OpenAPI 3.0 validator would
+ * reject). The result is post-processed by {@link sanitizeConvertedSchema}.
  */
-export function markPropertyDeprecated(
-  jsonSchema: Record<string, unknown>,
-  property: string
-): Record<string, unknown> {
-  const props = jsonSchema.properties as Record<string, Record<string, unknown>> | undefined;
-  if (props && props[property]) {
-    props[property].deprecated = true;
+export function zodToOpenApi(
+  schema: ZodType,
+  io: ConversionIo = 'output'
+): Record<string, unknown> | undefined {
+  // Guard a programming error (a forgotten/undefined schema arg) distinctly
+  // from a normal "not representable" miss.
+  if (!schema) {
+    // eslint-disable-next-line no-console
+    console.warn('[openapi] zodToOpenApi called with a falsy schema argument (programming error)');
+    return undefined;
   }
-  return jsonSchema;
+  try {
+    const json = z.toJSONSchema(schema, { target: 'openapi-3.0', io }) as Record<string, unknown>;
+    return sanitizeConvertedSchema(json) as Record<string, unknown>;
+  } catch (err) {
+    // A non-representable schema (transform, etc.) is omitted from the spec.
+    // Validation is unaffected (still done by Zod). Warn so it's not invisible.
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[openapi] zodToOpenApi conversion failed (io=${io}); omitting fragment: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
+    return undefined;
+  }
 }
 
 /** Build the OpenAPI response object referencing the shared ErrorEnvelope. */
@@ -132,18 +208,21 @@ export function routeSchema(options: RouteSchemaOptions): FastifySchema {
   if (options.description) schema.description = options.description;
   if (options.deprecated) schema.deprecated = true;
 
+  // Request schemas use INPUT semantics: the runtime parses these with Zod, so
+  // `.default()` fields are optional and unknown keys are stripped (not
+  // rejected). See zodToOpenApi / module header note 2.
   if (options.body) {
-    const body = zodToOpenApi(options.body);
+    const body = zodToOpenApi(options.body, 'input');
     if (body) schema.body = body;
   }
 
   if (options.params) {
-    const params = zodToOpenApi(options.params);
+    const params = zodToOpenApi(options.params, 'input');
     if (params) schema.params = params;
   }
 
   if (options.querystring) {
-    const querystring = zodToOpenApi(options.querystring);
+    const querystring = zodToOpenApi(options.querystring, 'input');
     if (querystring) schema.querystring = querystring;
   }
 
@@ -154,7 +233,8 @@ export function routeSchema(options: RouteSchemaOptions): FastifySchema {
     for (const [code, value] of Object.entries(options.response)) {
       const numericCode = Number(code);
       if (value instanceof z.ZodType) {
-        const converted = zodToOpenApi(value);
+        // Response schemas use OUTPUT semantics (what the server serializes).
+        const converted = zodToOpenApi(value, 'output');
         if (converted) responses[numericCode] = converted;
       } else {
         responses[numericCode] = value;

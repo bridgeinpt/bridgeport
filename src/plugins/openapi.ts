@@ -83,7 +83,19 @@ async function openapiPlugin(fastify: FastifyInstance): Promise<void> {
     // Map shared schemas ($id) to `#/components/schemas/<$id>` so route
     // `$ref`s render as clean component references in the spec.
     refResolver: {
-      buildLocalReference: (json) => String(json.$id),
+      buildLocalReference: (json) => {
+        // A missing `$id` would silently collapse to the literal string
+        // 'undefined', producing `#/components/schemas/undefined`. Fail fast at
+        // build time instead — every shared schema we register has an `$id`.
+        if (!json.$id) {
+          throw new Error(
+            `openapi refResolver: shared schema is missing an $id (cannot build a local $ref). Got: ${JSON.stringify(
+              json
+            ).slice(0, 200)}`
+          );
+        }
+        return String(json.$id);
+      },
     },
     openapi: {
       openapi: '3.0.3',

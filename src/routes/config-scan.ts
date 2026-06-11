@@ -5,6 +5,7 @@ import { requireOperator } from '../plugins/authorize.js';
 import { logAudit, actorFrom } from '../services/audit.js';
 import { userIdForFk } from '../services/auth.js';
 import { validateBody, getErrorMessage } from '../lib/helpers.js';
+import { routeSchema } from '../lib/openapi-schema.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
 import { extractKeyValues, substituteFullValue } from '../lib/config-scan-parsing.js';
 import { syncUsageForConfigFile } from '../lib/key-usage-extraction.js';
@@ -33,6 +34,8 @@ const applySchema = z
 
 // Preview uses the same schema as apply
 const previewSchema = applySchema;
+
+const envIdParamsSchema = z.object({ envId: z.string() });
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -327,7 +330,17 @@ export async function configScanRoutes(fastify: FastifyInstance): Promise<void> 
   // -------------------------------------------------------------------------
   fastify.post(
     '/api/environments/:envId/config-scan/preview',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['environments'],
+        summary: 'Preview diffs for a proposed secret/var substitution',
+        params: envIdParamsSchema,
+        // Mirrors the validateBody(previewSchema, ...) call below (docs-only).
+        body: previewSchema,
+        errors: [400, 401, 403],
+      }),
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       const body = validateBody(previewSchema, request, reply);
@@ -375,7 +388,17 @@ export async function configScanRoutes(fastify: FastifyInstance): Promise<void> 
   // -------------------------------------------------------------------------
   fastify.post(
     '/api/environments/:envId/config-scan/apply',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['environments'],
+        summary: 'Create a secret/var and substitute the value in config files',
+        params: envIdParamsSchema,
+        // Mirrors the validateBody(applySchema, ...) call below (docs-only).
+        body: applySchema,
+        errors: [400, 401, 403],
+      }),
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       const body = validateBody(applySchema, request, reply);
