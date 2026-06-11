@@ -79,6 +79,18 @@ async function buildServer() {
     },
   });
 
+  // Route `schema` options (body/params/querystring) are attached for OpenAPI
+  // DOCUMENTATION ONLY — derived from the existing Zod schemas via
+  // src/lib/openapi-schema.ts. Runtime validation stays with Zod
+  // (`validateBody`/`validateUpdateBody`), which preserves the readonly-field
+  // 422 logic and the custom error envelope. A no-op validator compiler tells
+  // Fastify NOT to compile/validate those schemas with Ajv (which also can't
+  // parse the OpenAPI 3.0 dialect, e.g. boolean `exclusiveMinimum`). The app
+  // has never relied on Fastify request validation, so this changes no behavior
+  // — it just keeps the doc schemas inert. @fastify/swagger still reads them for
+  // the spec, and `response` schemas still use the separate serializer compiler.
+  fastify.setValidatorCompiler(() => () => true);
+
   // Initialize crypto with master key
   initializeCrypto(config.MASTER_KEY);
 

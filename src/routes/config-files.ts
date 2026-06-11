@@ -24,6 +24,7 @@ import {
   type ConfigSyncTarget,
 } from '../lib/dry-run.js';
 import { getSecretsForEnv } from '../services/secrets.js';
+import { routeSchema } from '../lib/openapi-schema.js';
 
 const createConfigFileSchema = z.object({
   name: z.string().min(1),
@@ -59,6 +60,14 @@ const attachFileSchema = z.object({
   configFileId: z.string(),
   targetPath: z.string().min(1),
 });
+
+const updateServiceFileSchema = z.object({ targetPath: z.string().min(1) });
+
+const idParamsSchema = z.object({ id: z.string() });
+const envIdParamsSchema = z.object({ envId: z.string() });
+const serverIdParamsSchema = z.object({ serverId: z.string() });
+const restoreParamsSchema = z.object({ id: z.string(), historyId: z.string() });
+const serviceFileParamsSchema = z.object({ serviceId: z.string(), fileId: z.string() });
 
 /**
  * Validate `fragmentIds` payload before any write. Three failure modes the
@@ -109,7 +118,15 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // List config files for environment
   fastify.get(
     '/api/environments/:envId/config-files',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'List config files for an environment with sync status',
+        params: envIdParamsSchema,
+        errors: [401],
+      }),
+    },
     async (request) => {
       const { envId } = request.params as { envId: string };
       const { limit, offset } = parsePaginationQuery(request.query as Record<string, unknown>);
@@ -206,7 +223,15 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // Get config file with content
   fastify.get(
     '/api/config-files/:id',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Get a config file with content and service attachments',
+        params: idParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -264,7 +289,16 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // Create config file
   fastify.post(
     '/api/environments/:envId/config-files',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Create a config file in an environment',
+        params: envIdParamsSchema,
+        body: createConfigFileSchema,
+        errors: [400, 401, 403, 409],
+      }),
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       const body = validateBody(createConfigFileSchema, request, reply);
@@ -365,7 +399,16 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // Update config file
   fastify.patch(
     '/api/config-files/:id',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Update a config file',
+        params: idParamsSchema,
+        body: updateConfigFileSchema,
+        errors: [400, 401, 403, 404, 422],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       // Rejects PATCH of derived/system fields (id, createdAt, etc.) atomically.
@@ -515,7 +558,16 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   });
   fastify.post(
     '/api/config-files/:id/preview',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Preview rendered config content with fragments and placeholders resolved (secrets redacted)',
+        params: idParamsSchema,
+        body: previewBodySchema,
+        errors: [400, 401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       // Body is optional — when absent the preview renders the saved state.
@@ -612,7 +664,15 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // Get config file history
   fastify.get(
     '/api/config-files/:id/history',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Get edit history for a config file',
+        params: idParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -642,7 +702,15 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // Restore config file from history
   fastify.post(
     '/api/config-files/:id/restore/:historyId',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Restore a config file from a history entry',
+        params: restoreParamsSchema,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id, historyId } = request.params as { id: string; historyId: string };
 
@@ -700,7 +768,15 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // Delete config file
   fastify.delete(
     '/api/config-files/:id',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Delete a config file',
+        params: idParamsSchema,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -732,7 +808,15 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // Get files attached to a service
   fastify.get(
     '/api/services/:id/files',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'List config files attached to a service',
+        params: idParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -769,7 +853,16 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // Attach file to service
   fastify.post(
     '/api/services/:id/files',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Attach a config file to a service',
+        params: idParamsSchema,
+        body: attachFileSchema,
+        errors: [400, 401, 403, 409],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = validateBody(attachFileSchema, request, reply);
@@ -839,7 +932,15 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // Detach file from service
   fastify.delete(
     '/api/services/:serviceId/files/:fileId',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Detach a config file from a service',
+        params: serviceFileParamsSchema,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { serviceId, fileId } = request.params as { serviceId: string; fileId: string };
 
@@ -881,7 +982,16 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // Update service file target path
   fastify.patch(
     '/api/services/:serviceId/files/:fileId',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: "Update a service file attachment's target path",
+        params: serviceFileParamsSchema,
+        body: updateServiceFileSchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { serviceId, fileId } = request.params as { serviceId: string; fileId: string };
       const body = validateBody(z.object({ targetPath: z.string().min(1) }), request, reply);
@@ -943,7 +1053,15 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // Fans out per ServiceDeployment, picking override files where present and falling back to base.
   fastify.post(
     '/api/services/:id/sync-files',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Sync a service template\'s config files across all its deployments',
+        params: idParamsSchema,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -1330,7 +1448,15 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // Get config file sync status for all services on a server
   fastify.get(
     '/api/servers/:serverId/config-files-status',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Get config file sync status for all services on a server',
+        params: serverIdParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { serverId } = request.params as { serverId: string };
 
@@ -1446,7 +1572,15 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // Sync all config files for all services on a server
   fastify.post(
     '/api/servers/:serverId/sync-all-files',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Sync all config files for all services on a server',
+        params: serverIdParamsSchema,
+        errors: [400, 401, 403, 404, 500],
+      }),
+    },
     async (request, reply) => {
       const { serverId } = request.params as { serverId: string };
 
@@ -1675,7 +1809,15 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // Now delegates to the shared helper which already handles per-deployment fan-out.
   fastify.post(
     '/api/config-files/:id/sync-all',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Sync a config file to every (service, server) attachment',
+        params: idParamsSchema,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -1739,7 +1881,15 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // Upload asset file (binary)
   fastify.post(
     '/api/environments/:envId/asset-files/upload',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Upload a binary asset file (multipart) into an environment',
+        params: envIdParamsSchema,
+        errors: [400, 401, 403, 404, 409],
+      }),
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
 
@@ -1838,7 +1988,15 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
   // attachments, sync assignments, and history) intact.
   fastify.post(
     '/api/config-files/:id/replace-asset',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Replace the content of an existing binary asset file (multipart)',
+        params: idParamsSchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 

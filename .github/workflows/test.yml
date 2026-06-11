@@ -176,6 +176,31 @@ jobs:
       - run: npm run build
       - run: cd ui && npm ci && npm run build
 
+  # ── OpenAPI Spec Drift Check ────────────────────────────
+  # The checked-in openapi.json is generated from the route Zod schemas
+  # (src/lib/openapi-schema.ts → scripts/openapi-dump.ts). Regenerate it and
+  # fail if it drifted from the commit, so the published spec never goes stale.
+  openapi:
+    name: OpenAPI Spec Drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm install -g npm@latest
+      - run: npm ci
+      # The dump builds the app port-less without touching the DB; Prisma
+      # client types are still needed for the route imports to resolve.
+      - run: npx prisma generate
+      # Regenerate the spec, then fail if openapi.json changed vs. the commit.
+      - run: npm run openapi:check
+        env:
+          MASTER_KEY: ${{ env.TEST_MASTER_KEY }}
+          JWT_SECRET: ${{ env.TEST_JWT_SECRET }}
+
   # ── TypeScript Check ────────────────────────────────────
   typecheck:
     name: TypeScript Check

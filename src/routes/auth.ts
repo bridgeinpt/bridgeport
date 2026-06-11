@@ -5,6 +5,7 @@ import {
   validatePassword,
 } from '../services/auth.js';
 import { validateBody } from '../lib/helpers.js';
+import { routeSchema } from '../lib/openapi-schema.js';
 import { computeScopes } from '../lib/scopes.js';
 import { prisma } from '../lib/db.js';
 
@@ -21,7 +22,14 @@ const registerSchema = z.object({
 
 export async function authRoutes(fastify: FastifyInstance): Promise<void> {
   // Login
-  fastify.post('/api/auth/login', async (request, reply) => {
+  fastify.post('/api/auth/login', {
+    schema: routeSchema({
+      tags: ['auth'],
+      summary: 'Authenticate with email + password and receive a JWT',
+      body: loginSchema,
+      errors: [400, 401],
+    }),
+  }, async (request, reply) => {
     const body = validateBody(loginSchema, request, reply);
     if (!body) return;
 
@@ -39,7 +47,14 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
   });
 
   // Register (only if no users exist)
-  fastify.post('/api/auth/register', async (request, reply) => {
+  fastify.post('/api/auth/register', {
+    schema: routeSchema({
+      tags: ['auth'],
+      summary: 'Register the first (admin) user — disabled once any user exists',
+      body: registerSchema,
+      errors: [400, 403],
+    }),
+  }, async (request, reply) => {
     const body = validateBody(registerSchema, request, reply);
     if (!body) return;
 
@@ -64,7 +79,14 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
   // Get current user
   fastify.get(
     '/api/auth/me',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['auth'],
+        summary: 'Introspect the current user, role, environments, and scopes',
+        errors: [401],
+      }),
+    },
     async (request) => {
       const authUser = request.authUser!;
 

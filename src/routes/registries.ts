@@ -13,6 +13,7 @@ import { RegistryFactory } from '../lib/registry.js';
 import { logAudit, actorFrom } from '../services/audit.js';
 import { DISCOVERY_STATUS } from '../lib/constants.js';
 import { validateBody, validateUpdateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage } from '../lib/helpers.js';
+import { routeSchema } from '../lib/openapi-schema.js';
 
 const registryTypeSchema = z.enum(['digitalocean', 'dockerhub', 'generic']);
 
@@ -42,11 +43,23 @@ const updateRegistrySchema = z.object({
   autoLinkPattern: z.string().nullable().optional(),
 });
 
+const idParamsSchema = z.object({ id: z.string() });
+const envIdParamsSchema = z.object({ envId: z.string() });
+const repoTagsParamsSchema = z.object({ id: z.string(), repo: z.string() });
+
 export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
   // List registry connections for environment
   fastify.get(
     '/api/environments/:envId/registries',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'List registry connections for an environment',
+        params: envIdParamsSchema,
+        errors: [401],
+      }),
+    },
     async (request) => {
       const { envId } = request.params as { envId: string };
       const registries = await listRegistryConnections(envId);
@@ -57,7 +70,16 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
   // Create registry connection
   fastify.post(
     '/api/environments/:envId/registries',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Create a registry connection in an environment',
+        params: envIdParamsSchema,
+        body: createRegistrySchema,
+        errors: [400, 401, 409],
+      }),
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       const body = validateBody(createRegistrySchema, request, reply);
@@ -87,7 +109,15 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
   // Get registry connection
   fastify.get(
     '/api/registries/:id',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Get a registry connection',
+        params: idParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const registry = await findOrNotFound(getRegistryConnection(id), 'Registry connection', reply);
@@ -100,7 +130,16 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
   // Update registry connection
   fastify.patch(
     '/api/registries/:id',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Update a registry connection',
+        params: idParamsSchema,
+        body: updateRegistrySchema,
+        errors: [400, 401, 404, 422],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       // Rejects PATCH of derived/encrypted-storage fields (lastRefreshAt,
@@ -135,7 +174,15 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
   // Delete registry connection
   fastify.delete(
     '/api/registries/:id',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Delete a registry connection (blocked when images are attached)',
+        params: idParamsSchema,
+        errors: [400, 401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -166,7 +213,15 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
   // Test registry connection
   fastify.post(
     '/api/registries/:id/test',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Test connectivity for a registry connection',
+        params: idParamsSchema,
+        errors: [400, 401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -188,7 +243,15 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
   // List repositories in registry
   fastify.get(
     '/api/registries/:id/repositories',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'List repositories in a registry',
+        params: idParamsSchema,
+        errors: [401, 404, 500],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -209,7 +272,15 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
   // List tags for a repository
   fastify.get(
     '/api/registries/:id/repositories/:repo/tags',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'List tags for a repository in a registry',
+        params: repoTagsParamsSchema,
+        errors: [401, 404, 500],
+      }),
+    },
     async (request, reply) => {
       const { id, repo } = request.params as { id: string; repo: string };
 
@@ -230,7 +301,15 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
   // List services using this registry
   fastify.get(
     '/api/registries/:id/services',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'List services using this registry',
+        params: idParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -268,7 +347,15 @@ export async function registryRoutes(fastify: FastifyInstance): Promise<void> {
   // Force check updates for all services linked to this registry
   fastify.post(
     '/api/registries/:id/check-updates',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Force an update check for all services linked to this registry',
+        params: idParamsSchema,
+        errors: [400, 401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 

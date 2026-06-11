@@ -5,7 +5,10 @@ import { encrypt, decrypt } from '../lib/crypto.js';
 import { requireAdmin } from '../plugins/authorize.js';
 import { logAudit, actorFrom } from '../services/audit.js';
 import { safeJsonParse, validateBody, findOrNotFound, getErrorMessage } from '../lib/helpers.js';
+import { routeSchema } from '../lib/openapi-schema.js';
 import { S3Client, ListBucketsCommand, HeadBucketCommand } from '@aws-sdk/client-s3';
+
+const environmentIdParamSchema = z.object({ environmentId: z.string() });
 
 const spacesConfigSchema = z.object({
   accessKey: z.string().min(1),
@@ -23,7 +26,14 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
   // Get global Spaces configuration
   fastify.get(
     '/api/settings/spaces',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Get the global object-storage (Spaces) configuration',
+        errors: [401],
+      }),
+    },
     async () => {
       const config = await prisma.spacesConfig.findFirst({
         include: {
@@ -57,7 +67,15 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
   // Create or update global Spaces configuration (admin only)
   fastify.put(
     '/api/settings/spaces',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Create or update the global Spaces configuration (admin only)',
+        body: spacesConfigSchema,
+        errors: [400, 401, 403],
+      }),
+    },
     async (request, reply) => {
       const body = validateBody(spacesConfigSchema, request, reply);
       if (!body) return;
@@ -138,7 +156,14 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
   // Delete global Spaces configuration (admin only)
   fastify.delete(
     '/api/settings/spaces',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Delete the global Spaces configuration (admin only)',
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const existing = await findOrNotFound(prisma.spacesConfig.findFirst(), 'Spaces configuration', reply);
       if (!existing) return;
@@ -159,7 +184,14 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
   // Test Spaces connection
   fastify.post(
     '/api/settings/spaces/test',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Test the configured Spaces credentials and bucket access',
+        errors: [400, 401],
+      }),
+    },
     async (request, reply) => {
       const config = await prisma.spacesConfig.findFirst();
       if (!config) {
@@ -247,7 +279,14 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
   // List Spaces buckets
   fastify.get(
     '/api/settings/spaces/buckets',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'List configured or discoverable Spaces buckets',
+        errors: [400, 401],
+      }),
+    },
     async (request, reply) => {
       const config = await prisma.spacesConfig.findFirst();
       if (!config) {
@@ -296,7 +335,14 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
   // Get environment-specific Spaces enablement
   fastify.get(
     '/api/settings/spaces/environments',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'List environments and whether Spaces is enabled for each',
+        errors: [401],
+      }),
+    },
     async () => {
       const config = await prisma.spacesConfig.findFirst({
         include: {
@@ -324,7 +370,16 @@ export async function spacesRoutes(fastify: FastifyInstance): Promise<void> {
   // Enable/disable Spaces for a specific environment (admin only)
   fastify.put(
     '/api/settings/spaces/environments/:environmentId',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Enable or disable Spaces for a specific environment (admin only)',
+        params: environmentIdParamSchema,
+        body: updateEnvironmentSpacesSchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { environmentId } = request.params as { environmentId: string };
       const body = validateBody(updateEnvironmentSpacesSchema, request, reply);

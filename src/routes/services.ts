@@ -23,6 +23,14 @@ import { HEALTH_STATUS, CONTAINER_STATUS, DISCOVERY_STATUS, HEALTH_CHECK_STATUS 
 import { validateBody, validateUpdateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery, flattenDeploymentOntoService } from '../lib/helpers.js';
 import { isDryRun } from '../lib/dry-run.js';
 import { computeServiceDrift } from '../services/drift.js';
+import { routeSchema } from '../lib/openapi-schema.js';
+
+// --- param schemas (documentation only) ---
+
+const idParamsSchema = z.object({ id: z.string() });
+const envIdParamsSchema = z.object({ envId: z.string() });
+const serverIdParamsSchema = z.object({ serverId: z.string() });
+const depParamsSchema = z.object({ id: z.string(), depId: z.string() });
 
 // --- schemas ---
 
@@ -88,7 +96,15 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
   // List services (templates) attached to a server via their deployments.
   fastify.get(
     '/api/servers/:serverId/services',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'List services deployed on a server',
+        params: serverIdParamsSchema,
+        errors: [401],
+      }),
+    },
     async (request) => {
       const { serverId } = request.params as { serverId: string };
 
@@ -111,7 +127,15 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
   // List services (templates) for an environment.
   fastify.get(
     '/api/environments/:envId/services',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'List service templates in an environment',
+        params: envIdParamsSchema,
+        errors: [401],
+      }),
+    },
     async (request) => {
       const { envId } = request.params as { envId: string };
       const { limit, offset } = parsePaginationQuery(request.query as Record<string, unknown>);
@@ -167,7 +191,15 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
   // excluded here — the UI surfaces a separate "No type" chip computed client-side.
   fastify.get(
     '/api/environments/:envId/services/type-counts',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Count services per service type within an environment',
+        params: envIdParamsSchema,
+        errors: [401],
+      }),
+    },
     async (request) => {
       const { envId } = request.params as { envId: string };
 
@@ -207,7 +239,15 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
   // Get service template
   fastify.get(
     '/api/services/:id',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Get a service template with its deployments',
+        params: idParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -272,7 +312,15 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
   // per-deployment since runtime lives on ServiceDeployment.
   fastify.get(
     '/api/services/:id/drift',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Compute configuration drift for a service across its deployments',
+        params: idParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const result = await computeServiceDrift(id);
@@ -288,7 +336,16 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
   // Create service template (decoupled from servers).
   fastify.post(
     '/api/environments/:envId/services',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Create a service template in an environment',
+        params: envIdParamsSchema,
+        body: createServiceSchema,
+        errors: [400, 401, 409],
+      }),
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       const body = validateBody(createServiceSchema, request, reply);
@@ -341,7 +398,15 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
   // Retained for backwards compatibility with the CLI / older UI flows.
   fastify.post(
     '/api/servers/:serverId/services',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Create a service template and attach a deployment on a server (legacy)',
+        params: serverIdParamsSchema,
+        errors: [400, 401, 404, 409],
+      }),
+    },
     async (request, reply) => {
       const { serverId } = request.params as { serverId: string };
       const body = validateBody(
@@ -437,7 +502,16 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
   // Update service template
   fastify.patch(
     '/api/services/:id',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Update a service template',
+        params: idParamsSchema,
+        body: updateServiceSchema,
+        errors: [400, 401, 404, 422],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       // Rejects PATCH of read-only/derived fields (status, exposedPorts, etc.)
@@ -482,7 +556,15 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
   // Delete service template (and cascade its deployments).
   fastify.delete(
     '/api/services/:id',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Delete a service template and cascade its deployments',
+        params: idParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -516,7 +598,16 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
   // Add a deployment for an existing service template on a new server.
   fastify.post(
     '/api/services/:id/deployments',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Add a deployment of a service template on a server',
+        params: idParamsSchema,
+        body: createDeploymentSchema,
+        errors: [400, 401, 404, 409],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = validateBody(createDeploymentSchema, request, reply);
@@ -569,7 +660,16 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
   // Update a deployment (container name, compose path, env overrides).
   fastify.patch(
     '/api/services/:id/deployments/:depId',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Update a service deployment',
+        params: depParamsSchema,
+        body: updateDeploymentSchema,
+        errors: [400, 401, 404, 409, 422],
+      }),
+    },
     async (request, reply) => {
       const { id, depId } = request.params as { id: string; depId: string };
       // Rejects PATCH of derived deployment fields (status, exposedPorts, agent*
@@ -615,7 +715,15 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
   // Remove a deployment (does not remove the template).
   fastify.delete(
     '/api/services/:id/deployments/:depId',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Remove a service deployment (template is retained)',
+        params: depParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id, depId } = request.params as { id: string; depId: string };
 
@@ -653,7 +761,16 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
   // Deploy a service template across all its deployments (sequential | parallel).
   fastify.post(
     '/api/services/:id/deploy',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Deploy a service template across all of its deployments',
+        params: idParamsSchema,
+        body: deploySchema,
+        errors: [400, 401, 404, 500],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = validateBody(deploySchema, request, reply);
@@ -731,7 +848,16 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
   // Deploy a single ServiceDeployment (per-server target).
   fastify.post(
     '/api/services/:id/deployments/:depId/deploy',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Deploy a single service deployment (supports dry-run)',
+        params: depParamsSchema,
+        body: deploySchema,
+        errors: [400, 401, 404, 500],
+      }),
+    },
     async (request, reply) => {
       const { id, depId } = request.params as { id: string; depId: string };
       const body = validateBody(deploySchema, request, reply);
@@ -827,7 +953,15 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
   // Get deployment history (per Service template)
   fastify.get(
     '/api/services/:id/deployments-history',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Get deployment history for a service template',
+        params: idParamsSchema,
+        errors: [401],
+      }),
+    },
     async (request) => {
       const { id } = request.params as { id: string };
       const { limit } = request.query as { limit?: string };
@@ -840,7 +974,15 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
   // Get single deployment
   fastify.get(
     '/api/deployments/:id',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Get a single deployment record',
+        params: idParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const deployment = await findOrNotFound(getDeployment(id), 'Deployment', reply);
@@ -853,7 +995,15 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
   // Get container logs for a specific deployment.
   fastify.get(
     '/api/services/:id/deployments/:depId/logs',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Fetch recent container logs for a deployment',
+        params: depParamsSchema,
+        errors: [401, 500],
+      }),
+    },
     async (request, reply) => {
       const { depId } = request.params as { id: string; depId: string };
       const { tail, before } = request.query as { tail?: string; before?: string };
@@ -889,7 +1039,15 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
   // Stream container logs (SSE) for a specific deployment.
   fastify.get(
     '/api/services/:id/deployments/:depId/logs/stream',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Stream container logs for a deployment over SSE',
+        params: depParamsSchema,
+        errors: [400, 401, 404],
+      }),
+    },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { depId } = request.params as { id: string; depId: string };
 
@@ -947,7 +1105,15 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
   // Get available image tags (template-scoped — tag is shared across deployments).
   fastify.get(
     '/api/services/:id/image-tags',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'List available image tags for a service template',
+        params: idParamsSchema,
+        errors: [401, 500],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -964,7 +1130,15 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
   // Restart a specific deployment's container
   fastify.post(
     '/api/services/:id/deployments/:depId/restart',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Restart the container backing a deployment',
+        params: depParamsSchema,
+        errors: [400, 401, 404, 500],
+      }),
+    },
     async (request, reply) => {
       const { id, depId } = request.params as { id: string; depId: string };
 
@@ -1060,7 +1234,15 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
   // Refresh runtime status of a specific deployment.
   fastify.post(
     '/api/services/:id/deployments/:depId/health',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Refresh runtime status and health for a deployment',
+        params: depParamsSchema,
+        errors: [400, 401, 404, 500],
+      }),
+    },
     async (request, reply) => {
       const { id, depId } = request.params as { id: string; depId: string };
 
@@ -1238,7 +1420,15 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
   // Get service action history (audit + deployments)
   fastify.get(
     '/api/services/:id/history',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Get audit and deployment history for a service template',
+        params: idParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const { limit } = request.query as { limit?: string };
@@ -1287,7 +1477,15 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
   // Check for image updates (template-scope)
   fastify.post(
     '/api/services/:id/check-updates',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Check for a newer image tag for a service template',
+        params: idParamsSchema,
+        errors: [400, 401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -1325,7 +1523,16 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
   // Get predefined command (for CLI). Returns template + command (no per-deployment context).
   fastify.post(
     '/api/services/:id/run-command',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Resolve a predefined service-type command for the CLI',
+        params: idParamsSchema,
+        body: runCommandSchema,
+        errors: [400, 401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = validateBody(runCommandSchema, request, reply);

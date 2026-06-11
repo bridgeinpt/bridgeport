@@ -88,6 +88,11 @@ export async function buildTestApp(options: BuildTestAppOptions = {}): Promise<T
     logger: false, // Quiet in tests
   });
 
+  // Mirror production (src/server.ts): route `schema` options are attached for
+  // OpenAPI docs only — runtime validation stays with Zod. A no-op validator
+  // compiler keeps Fastify from validating (and Ajv-compiling) those schemas.
+  fastify.setValidatorCompiler(() => () => true);
+
   // Custom JSON parser that allows empty bodies (matches production server)
   fastify.addContentTypeParser(
     'application/json',

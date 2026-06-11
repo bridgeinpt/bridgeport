@@ -32,6 +32,10 @@ import { bundledAgentVersion } from '../lib/version.js';
 import { requireAdmin, requireOperator } from '../plugins/authorize.js';
 import { METRICS_MODE } from '../lib/constants.js';
 import { safeJsonParse, validateBody, validateUpdateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery, flattenDeploymentOntoService } from '../lib/helpers.js';
+import { routeSchema } from '../lib/openapi-schema.js';
+
+const idParamsSchema = z.object({ id: z.string() });
+const envIdParamsSchema = z.object({ envId: z.string() });
 
 const createServerSchema = z.object({
   name: z.string().min(1),
@@ -104,7 +108,15 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
   // Optional `?include=services-count` adds a `_count: { services }` field per server.
   fastify.get(
     '/api/environments/:envId/servers',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['servers'],
+        summary: 'List servers in an environment',
+        params: envIdParamsSchema,
+        errors: [401],
+      }),
+    },
     async (request) => {
       const { envId } = request.params as { envId: string };
       const query = request.query as Record<string, unknown>;
@@ -123,7 +135,15 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
   // Optional `?include=services` nests services + their containerImage.
   fastify.get(
     '/api/servers/:id',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['servers'],
+        summary: 'Get a server, optionally including its services',
+        params: idParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const query = request.query as Record<string, unknown>;
@@ -151,7 +171,15 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
   // deployment on this server. Read-only (viewer-accessible) — never mutates.
   fastify.get(
     '/api/servers/:id/drift',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['servers'],
+        summary: 'Compute configuration drift for all deployments on a server',
+        params: idParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const result = await computeServerDrift(id);
@@ -165,7 +193,16 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
   // Create server
   fastify.post(
     '/api/environments/:envId/servers',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['servers'],
+        summary: 'Create a server in an environment',
+        params: envIdParamsSchema,
+        body: createServerSchema,
+        errors: [400, 401, 409],
+      }),
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       const body = validateBody(createServerSchema, request, reply);
@@ -195,7 +232,16 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
   // Update server
   fastify.patch(
     '/api/servers/:id',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['servers'],
+        summary: 'Update a server',
+        params: idParamsSchema,
+        body: updateServerSchema,
+        errors: [400, 401, 404, 422],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       // Rejects PATCH of derived fields (status, agentStatus, lastCheckedAt,
@@ -251,7 +297,15 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
   // Delete server (admin only)
   fastify.delete(
     '/api/servers/:id',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['servers'],
+        summary: 'Delete a server (admin only)',
+        params: idParamsSchema,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -280,7 +334,15 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
   // Check server health
   fastify.post(
     '/api/servers/:id/health',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['servers'],
+        summary: 'Run a health check against a server',
+        params: idParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -296,7 +358,15 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
   // Discover containers on server
   fastify.post(
     '/api/servers/:id/discover',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['servers'],
+        summary: 'Discover containers running on a server',
+        params: idParamsSchema,
+        errors: [401, 500],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -337,7 +407,16 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
   // Import servers from Terraform output
   fastify.post(
     '/api/environments/:envId/servers/import-terraform',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['servers'],
+        summary: 'Import servers from Terraform output into an environment',
+        params: envIdParamsSchema,
+        body: importTerraformSchema,
+        errors: [400, 401, 500],
+      }),
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       const body = validateBody(importTerraformSchema, request, reply);
@@ -365,7 +444,15 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
   // Deploy monitoring agent to server
   fastify.post(
     '/api/servers/:id/agent/deploy',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['servers'],
+        summary: 'Deploy the monitoring agent to a server',
+        params: idParamsSchema,
+        errors: [401, 404, 500],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = request.body as { bridgeportUrl?: string } | undefined;
@@ -400,7 +487,15 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
   // Remove monitoring agent from server
   fastify.post(
     '/api/servers/:id/agent/remove',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['servers'],
+        summary: 'Remove the monitoring agent from a server',
+        params: idParamsSchema,
+        errors: [401, 404, 500],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -434,7 +529,15 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
   // Check agent status on server
   fastify.get(
     '/api/servers/:id/agent/status',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['servers'],
+        summary: 'Get monitoring agent status for a server',
+        params: idParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -457,7 +560,15 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
   // Update server metrics mode
   fastify.patch(
     '/api/servers/:id/metrics-mode',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['servers'],
+        summary: 'Change a server metrics mode (ssh, agent, or disabled)',
+        params: idParamsSchema,
+        errors: [400, 401, 404, 500],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = request.body as { mode: 'ssh' | 'agent' | 'disabled' };
@@ -516,7 +627,15 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
   // Detects Docker host gateway and checks SSH reachability
   fastify.get(
     '/api/environments/:envId/host-info',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['servers'],
+        summary: 'Detect the Docker host gateway and SSH reachability for an environment',
+        params: envIdParamsSchema,
+        errors: [401],
+      }),
+    },
     async (request) => {
       const { envId } = request.params as { envId: string };
       const hostInfo = await getHostInfo(envId);
@@ -528,7 +647,16 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
   // Creates a server entry for managing the host machine from inside a container
   fastify.post(
     '/api/environments/:envId/servers/register-host',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['servers'],
+        summary: 'Register the Docker host machine as a managed server',
+        params: envIdParamsSchema,
+        body: registerHostSchema,
+        errors: [400, 401],
+      }),
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       const body = registerHostSchema.safeParse(request.body || {});
@@ -562,7 +690,15 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
   // Get server process snapshot (from agent)
   fastify.get(
     '/api/servers/:id/processes',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['servers'],
+        summary: 'Get the latest process snapshot reported by the agent for a server',
+        params: idParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -604,7 +740,15 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
   // via GET /api/environments/:id.
   fastify.get(
     '/api/servers/:id/bootstrap',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['servers'],
+        summary: 'Get bootstrap status for a server (operator+)',
+        params: idParamsSchema,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const server = await findOrNotFound(
@@ -666,7 +810,16 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
   // changes system state and can install Docker / write to /etc/fstab.
   fastify.post(
     '/api/servers/:id/bootstrap',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['servers'],
+        summary: 'Start a bootstrap run on a server (operator+)',
+        params: idParamsSchema,
+        body: bootstrapRunSchema,
+        errors: [400, 401, 403, 404, 409],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = validateBody(bootstrapRunSchema, request, reply);
@@ -729,7 +882,16 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
   // Requires explicit `confirm: true` so accidental clicks don't write fstab.
   fastify.post(
     '/api/servers/:id/bootstrap/swap',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['servers'],
+        summary: 'Live-add a swap file to a server (operator+)',
+        params: idParamsSchema,
+        body: bootstrapSwapSchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = validateBody(bootstrapSwapSchema, request, reply);
@@ -759,7 +921,15 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
   // Prune unused Docker images on server to reclaim disk space
   fastify.post(
     '/api/servers/:id/prune-images',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['servers'],
+        summary: 'Prune unused Docker images on a server to reclaim disk space',
+        params: idParamsSchema,
+        errors: [401, 404, 500],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = request.body as { mode?: 'dangling' | 'all' } | undefined;

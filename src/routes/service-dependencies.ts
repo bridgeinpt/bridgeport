@@ -4,6 +4,10 @@ import { prisma, isPrismaNotFoundError } from '../lib/db.js';
 import { logAudit, actorFrom } from '../services/audit.js';
 import { resolveDependencyOrder } from '../services/orchestration.js';
 import { validateBody, findOrNotFound, handleUniqueConstraint } from '../lib/helpers.js';
+import { routeSchema } from '../lib/openapi-schema.js';
+
+const idParamSchema = z.object({ id: z.string() });
+const envIdParamSchema = z.object({ envId: z.string() });
 
 const createDependencySchema = z.object({
   dependsOnId: z.string().min(1),
@@ -14,7 +18,15 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
   // Get dependencies for a service
   fastify.get(
     '/api/services/:id/dependencies',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'List a service\'s dependencies and dependents',
+        params: idParamSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -57,7 +69,16 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
   // Add dependency to a service
   fastify.post(
     '/api/services/:id/dependencies',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Add a dependency to a service',
+        params: idParamSchema,
+        body: createDependencySchema,
+        errors: [400, 401, 404, 409],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = validateBody(createDependencySchema, request, reply);
@@ -169,7 +190,15 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
   // Delete dependency
   fastify.delete(
     '/api/dependencies/:id',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Delete a service dependency',
+        params: idParamSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -217,7 +246,15 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
   // Get dependency graph for environment
   fastify.get(
     '/api/environments/:envId/dependency-graph',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Get the service dependency graph and deployment order for an environment',
+        params: envIdParamSchema,
+        errors: [401],
+      }),
+    },
     async (request) => {
       const { envId } = request.params as { envId: string };
 
@@ -308,7 +345,15 @@ export async function serviceDependencyRoutes(fastify: FastifyInstance): Promise
   // Get available services to depend on (same environment, not self)
   fastify.get(
     '/api/services/:id/available-dependencies',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'List services this service can newly depend on',
+        params: idParamSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 

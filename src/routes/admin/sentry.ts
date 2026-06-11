@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { requireAdmin } from '../../plugins/authorize.js';
+import { routeSchema } from '../../lib/openapi-schema.js';
 import { logAudit, actorFrom } from '../../services/audit.js';
 import {
   captureException,
@@ -12,7 +13,14 @@ export async function sentryAdminRoutes(fastify: FastifyInstance): Promise<void>
   // Admin-only because the response discloses which DSNs are configured.
   fastify.get(
     '/api/admin/sentry/status',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Get Sentry configuration status',
+        errors: [401, 403],
+      }),
+    },
     async () => getSentryStatus()
   );
 
@@ -20,7 +28,14 @@ export async function sentryAdminRoutes(fastify: FastifyInstance): Promise<void>
   // actually left the process.
   fastify.post(
     '/api/admin/sentry/test/backend',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Send a test event to backend Sentry',
+        errors: [400, 401, 403],
+      }),
+    },
     async (request, reply) => {
       if (!isBackendSentryConfigured()) {
         return reply.code(400).send({

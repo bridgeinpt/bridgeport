@@ -7,6 +7,7 @@ import { buildDeploymentPlan, executePlan } from '../services/orchestration.js';
 import { logAudit } from '../services/audit.js';
 import { DEPLOYMENT_STATUS } from '../lib/constants.js';
 import { validateBody, findOrNotFound, getErrorMessage } from '../lib/helpers.js';
+import { routeSchema } from '../lib/openapi-schema.js';
 
 const deployWebhookSchema = z.object({
   service: z.string().min(1), // Service name or ID
@@ -40,7 +41,14 @@ function verifyWebhookSignature(
 
 export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
   // CI/CD deployment webhook
-  fastify.post('/api/webhooks/deploy', async (request, reply) => {
+  fastify.post('/api/webhooks/deploy', {
+    schema: routeSchema({
+      tags: ['services'],
+      summary: 'CI/CD webhook: deploy a service by name or ID',
+      body: deployWebhookSchema,
+      errors: [400, 401, 404, 500],
+    }),
+  }, async (request, reply) => {
     const signature = request.headers['x-webhook-signature'] as string;
     const webhookSecret = process.env.WEBHOOK_SECRET;
 
@@ -143,7 +151,13 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
   });
 
   // GitHub Actions compatible webhook
-  fastify.post('/api/webhooks/github', async (request, reply) => {
+  fastify.post('/api/webhooks/github', {
+    schema: routeSchema({
+      tags: ['services'],
+      summary: 'GitHub Actions webhook: deploy on package published events',
+      errors: [401],
+    }),
+  }, async (request, reply) => {
     const signature = request.headers['x-hub-signature-256'] as string;
     const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET;
 
@@ -228,7 +242,14 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
   });
 
   // Deploy all services for a ContainerImage (respects autoUpdate flag)
-  fastify.post('/api/webhooks/deploy-image', async (request, reply) => {
+  fastify.post('/api/webhooks/deploy-image', {
+    schema: routeSchema({
+      tags: ['services'],
+      summary: 'Webhook: deploy all services for a ContainerImage (respects autoUpdate)',
+      body: deployImageWebhookSchema,
+      errors: [400, 401, 404, 500],
+    }),
+  }, async (request, reply) => {
     const signature = request.headers['x-webhook-signature'] as string;
     const webhookSecret = process.env.WEBHOOK_SECRET;
 

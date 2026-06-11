@@ -7,6 +7,9 @@ import {
   getDeploymentArtifacts,
 } from '../services/compose.js';
 import { validateBody, findOrNotFound, getErrorMessage } from '../lib/helpers.js';
+import { routeSchema } from '../lib/openapi-schema.js';
+
+const idParamSchema = z.object({ id: z.string() });
 
 const composeTemplateSchema = z.object({
   composeTemplate: z.string().min(1),
@@ -16,7 +19,15 @@ export async function composeRoutes(fastify: FastifyInstance): Promise<void> {
   // Preview generated artifacts for a service (without deploying)
   fastify.get(
     '/api/services/:id/compose/preview',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Preview the generated deployment artifacts for a service',
+        params: idParamSchema,
+        errors: [400, 401],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -33,7 +44,15 @@ export async function composeRoutes(fastify: FastifyInstance): Promise<void> {
   // Get/set compose template for a service
   fastify.get(
     '/api/services/:id/compose/template',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Get the compose template for a service',
+        params: idParamSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -53,7 +72,16 @@ export async function composeRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.put(
     '/api/services/:id/compose/template',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Set a custom compose template for a service',
+        params: idParamSchema,
+        body: composeTemplateSchema,
+        errors: [400, 401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = validateBody(composeTemplateSchema, request, reply);
@@ -76,7 +104,15 @@ export async function composeRoutes(fastify: FastifyInstance): Promise<void> {
   // Delete compose template (revert to auto-generated)
   fastify.delete(
     '/api/services/:id/compose/template',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Delete the custom compose template (revert to auto-generated)',
+        params: idParamSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -96,7 +132,15 @@ export async function composeRoutes(fastify: FastifyInstance): Promise<void> {
   // Get artifacts from a specific deployment
   fastify.get(
     '/api/deployments/:id/artifacts',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Get the artifacts produced by a specific deployment',
+        params: idParamSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -115,7 +159,15 @@ export async function composeRoutes(fastify: FastifyInstance): Promise<void> {
   // Download a specific artifact
   fastify.get(
     '/api/artifacts/:id/download',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Download a single deployment artifact',
+        params: idParamSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 

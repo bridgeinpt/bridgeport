@@ -3,6 +3,10 @@ import { z } from 'zod';
 import { prisma } from '../lib/db.js';
 import { requireOperator } from '../plugins/authorize.js';
 import { safeJsonParse, validateBody, findOrNotFound, handleUniqueConstraint } from '../lib/helpers.js';
+import { routeSchema } from '../lib/openapi-schema.js';
+
+const idParams = z.object({ id: z.string() });
+const envIdParams = z.object({ envId: z.string() });
 
 // Connection endpoints can be services, databases, or user-placed external
 // entities. The DB columns are free-form `String` so this widening is
@@ -86,7 +90,14 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
   // List connections for an environment
   fastify.get(
     '/api/connections',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'List topology connections for an environment',
+        errors: [400, 401],
+      }),
+    },
     async (request, reply) => {
       const { environmentId } = request.query as { environmentId?: string };
       if (!environmentId) {
@@ -140,7 +151,15 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
   // Create a connection
   fastify.post(
     '/api/connections',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Create a topology connection between two nodes',
+        body: createConnectionSchema,
+        errors: [400, 401, 403, 404, 409],
+      }),
+    },
     async (request, reply) => {
       const data = validateBody(createConnectionSchema, request, reply);
       if (!data) return;
@@ -208,7 +227,15 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
   // Delete a connection
   fastify.delete(
     '/api/connections/:id',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Delete a topology connection',
+        params: idParams,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -226,7 +253,14 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
   // Get layout for an environment
   fastify.get(
     '/api/diagram-layout',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Get the saved diagram layout for an environment',
+        errors: [400, 401],
+      }),
+    },
     async (request, reply) => {
       const { environmentId } = request.query as { environmentId?: string };
       if (!environmentId) {
@@ -255,7 +289,15 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
   // Upsert layout for an environment
   fastify.put(
     '/api/diagram-layout',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Upsert the diagram layout for an environment',
+        body: upsertLayoutSchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const parsed = validateBody(upsertLayoutSchema, request, reply);
       if (!parsed) return;
@@ -294,7 +336,15 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
   // List external entities for an environment
   fastify.get(
     '/api/environments/:envId/external-entities',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'List external entities for an environment',
+        params: envIdParams,
+        errors: [401],
+      }),
+    },
     async (request) => {
       const { envId } = request.params as { envId: string };
       const entities = await prisma.externalEntity.findMany({
@@ -308,7 +358,16 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
   // Create an external entity scoped to an environment
   fastify.post(
     '/api/environments/:envId/external-entities',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Create an external entity in an environment',
+        params: envIdParams,
+        body: createExternalEntitySchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       const data = validateBody(createExternalEntitySchema, request, reply);
@@ -340,7 +399,16 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
   // Update an external entity
   fastify.patch(
     '/api/external-entities/:id',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Update an external entity',
+        params: idParams,
+        body: updateExternalEntitySchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const data = validateBody(updateExternalEntitySchema, request, reply);
@@ -374,7 +442,15 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
   // frontend filters out connections with missing endpoints when rendering.
   fastify.delete(
     '/api/external-entities/:id',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Delete an external entity (and its dangling connections)',
+        params: idParams,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const existing = await findOrNotFound(
@@ -406,7 +482,15 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
   // List clusters for an environment
   fastify.get(
     '/api/environments/:envId/server-clusters',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'List server clusters for an environment',
+        params: envIdParams,
+        errors: [401],
+      }),
+    },
     async (request) => {
       const { envId } = request.params as { envId: string };
       const clusters = await prisma.serverCluster.findMany({
@@ -421,7 +505,16 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
   // Create a server cluster
   fastify.post(
     '/api/environments/:envId/server-clusters',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Create a server cluster in an environment',
+        params: envIdParams,
+        body: createServerClusterSchema,
+        errors: [400, 401, 403, 404, 409],
+      }),
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       const data = validateBody(createServerClusterSchema, request, reply);
@@ -458,7 +551,16 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
   // Update a server cluster (name, collapsed flag, position, size)
   fastify.patch(
     '/api/server-clusters/:id',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Update a server cluster',
+        params: idParams,
+        body: updateServerClusterSchema,
+        errors: [400, 401, 403, 404, 409],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const data = validateBody(updateServerClusterSchema, request, reply);
@@ -496,7 +598,15 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
   // clusterId is set to NULL via the FK's onDelete: SetNull.
   fastify.delete(
     '/api/server-clusters/:id',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Delete a server cluster (servers are detached, not deleted)',
+        params: idParams,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const existing = await findOrNotFound(
@@ -515,7 +625,14 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
   // Export topology as Mermaid diagram
   fastify.get(
     '/api/diagram-export',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Export the environment topology as a Mermaid diagram',
+        errors: [400, 401],
+      }),
+    },
     async (request, reply) => {
       const { environmentId, format } = request.query as { environmentId?: string; format?: string };
       if (!environmentId) {

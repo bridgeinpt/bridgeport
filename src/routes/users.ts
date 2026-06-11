@@ -8,8 +8,11 @@ import type { UserRole } from '../services/auth.js';
 import { send, NOTIFICATION_TYPES } from '../services/notifications.js';
 import { getSystemSettings } from '../services/system-settings.js';
 import { validateBody, validateUpdateBody, findOrNotFound } from '../lib/helpers.js';
+import { routeSchema } from '../lib/openapi-schema.js';
 
 const SALT_ROUNDS = 12;
+
+const userIdParams = z.object({ id: z.string() });
 
 const createUserSchema = z.object({
   email: z.string().email(),
@@ -32,7 +35,14 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
   // List all users (admin only)
   fastify.get(
     '/api/users',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'List all users',
+        errors: [401, 403],
+      }),
+    },
     async () => {
       const users = await prisma.user.findMany({
         select: {
@@ -54,7 +64,14 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
   // Get active users (admin only) - users active within configured window
   fastify.get(
     '/api/users/active',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'List users active within the configured window',
+        errors: [401, 403],
+      }),
+    },
     async () => {
       const settings = await getSystemSettings();
       const activeWindowMs = settings.activeUserWindowMin * 60 * 1000;
@@ -80,7 +97,15 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
   // Get single user (admin or self)
   fastify.get(
     '/api/users/:id',
-    { preHandler: [fastify.authenticate, requireAdminOrSelf('id')] },
+    {
+      preHandler: [fastify.authenticate, requireAdminOrSelf('id')],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Get a single user (admin or self)',
+        params: userIdParams,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -104,7 +129,15 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
   // Create user (admin only)
   fastify.post(
     '/api/users',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Create a user',
+        body: createUserSchema,
+        errors: [400, 401, 403, 409],
+      }),
+    },
     async (request, reply) => {
       const body = validateBody(createUserSchema, request, reply);
       if (!body) return;
@@ -156,7 +189,16 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
   // Update user (admin can update anyone, users can update their own name only)
   fastify.patch(
     '/api/users/:id',
-    { preHandler: [fastify.authenticate, requireAdminOrSelf('id')] },
+    {
+      preHandler: [fastify.authenticate, requireAdminOrSelf('id')],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Update a user (admin updates anyone; users update their own name)',
+        params: userIdParams,
+        body: updateUserSchema,
+        errors: [400, 401, 403, 404, 422],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       // Rejects PATCH of derived fields (email, passwordHash, lastActiveAt,
@@ -221,7 +263,15 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
   // Delete user (admin only, cannot delete self)
   fastify.delete(
     '/api/users/:id',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Delete a user (cannot delete self)',
+        params: userIdParams,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -255,7 +305,16 @@ export async function userRoutes(fastify: FastifyInstance): Promise<void> {
   // Change password (admin can change anyone's, users can change their own)
   fastify.post(
     '/api/users/:id/change-password',
-    { preHandler: [fastify.authenticate, requireAdminOrSelf('id')] },
+    {
+      preHandler: [fastify.authenticate, requireAdminOrSelf('id')],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: "Change a user's password (admin or self)",
+        params: userIdParams,
+        body: changePasswordSchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = validateBody(changePasswordSchema, request, reply);

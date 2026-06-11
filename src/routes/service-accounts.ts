@@ -5,8 +5,11 @@ import { requireAdmin } from '../plugins/authorize.js';
 import { logAudit, actorFrom } from '../services/audit.js';
 import { userIdForFk } from '../services/auth.js';
 import { validateBody, findOrNotFound } from '../lib/helpers.js';
+import { routeSchema } from '../lib/openapi-schema.js';
 
 const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
+
+const serviceAccountIdParams = z.object({ id: z.string() });
 
 const createServiceAccountSchema = z.object({
   name: z
@@ -28,7 +31,14 @@ export async function serviceAccountRoutes(fastify: FastifyInstance): Promise<vo
   // List service accounts (admin only)
   fastify.get(
     '/api/admin/service-accounts',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'List service accounts',
+        errors: [401, 403],
+      }),
+    },
     async () => {
       const accounts = await prisma.serviceAccount.findMany({
         orderBy: { createdAt: 'desc' },
@@ -44,7 +54,15 @@ export async function serviceAccountRoutes(fastify: FastifyInstance): Promise<vo
   // Get one (admin only)
   fastify.get(
     '/api/admin/service-accounts/:id',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Get a service account',
+        params: serviceAccountIdParams,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const account = await findOrNotFound(
@@ -66,7 +84,15 @@ export async function serviceAccountRoutes(fastify: FastifyInstance): Promise<vo
   // Create (admin only)
   fastify.post(
     '/api/admin/service-accounts',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Create a service account',
+        body: createServiceAccountSchema,
+        errors: [400, 401, 403, 409],
+      }),
+    },
     async (request, reply) => {
       const body = validateBody(createServiceAccountSchema, request, reply);
       if (!body) return;
@@ -107,7 +133,16 @@ export async function serviceAccountRoutes(fastify: FastifyInstance): Promise<vo
   // Update (admin only)
   fastify.patch(
     '/api/admin/service-accounts/:id',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Update a service account',
+        params: serviceAccountIdParams,
+        body: updateServiceAccountSchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = validateBody(updateServiceAccountSchema, request, reply);
@@ -149,7 +184,15 @@ export async function serviceAccountRoutes(fastify: FastifyInstance): Promise<vo
   // Delete (admin only) — cascades to its tokens via FK ON DELETE CASCADE
   fastify.delete(
     '/api/admin/service-accounts/:id',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Delete a service account (cascades to its tokens)',
+        params: serviceAccountIdParams,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 

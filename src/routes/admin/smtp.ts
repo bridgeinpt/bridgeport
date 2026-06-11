@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireAdmin } from '../../plugins/authorize.js';
 import { validateBody } from '../../lib/helpers.js';
+import { routeSchema } from '../../lib/openapi-schema.js';
 import {
   getSmtpConfig,
   saveSmtpConfig,
@@ -29,7 +30,14 @@ export async function smtpRoutes(fastify: FastifyInstance): Promise<void> {
   // Get SMTP configuration
   fastify.get(
     '/api/admin/smtp',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Get the SMTP email configuration',
+        errors: [401, 403],
+      }),
+    },
     async () => {
       const config = await getSmtpConfig();
       return { config };
@@ -39,7 +47,15 @@ export async function smtpRoutes(fastify: FastifyInstance): Promise<void> {
   // Save SMTP configuration
   fastify.put(
     '/api/admin/smtp',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Save the SMTP email configuration',
+        body: smtpConfigSchema,
+        errors: [400, 401, 403],
+      }),
+    },
     async (request, reply) => {
       const body = validateBody(smtpConfigSchema, request, reply);
       if (!body) return;
@@ -62,7 +78,14 @@ export async function smtpRoutes(fastify: FastifyInstance): Promise<void> {
   // Test SMTP connection
   fastify.post(
     '/api/admin/smtp/test',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Test SMTP connection or send a test email',
+        errors: [400, 401, 403],
+      }),
+    },
     async (request, reply) => {
       const body = request.body as { to?: string } | undefined;
 

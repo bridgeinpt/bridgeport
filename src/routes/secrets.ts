@@ -12,6 +12,10 @@ import { logAudit, actorFrom } from '../services/audit.js';
 import { validateBody, validateUpdateBody, findOrNotFound, handleUniqueConstraint } from '../lib/helpers.js';
 import { requireOperator, requireAdmin } from '../plugins/authorize.js';
 import { triggerAutoResyncForKey } from '../services/config-file-auto-resync.js';
+import { routeSchema } from '../lib/openapi-schema.js';
+
+const idParamsSchema = z.object({ id: z.string() });
+const envIdParamsSchema = z.object({ envId: z.string() });
 
 const createSecretSchema = z.object({
   key: z.string().min(1).regex(/^[A-Z][A-Z0-9_]*$/, 'Key must be uppercase with underscores'),
@@ -45,7 +49,15 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
   // that was O(secrets × configFiles × content size).
   fastify.get(
     '/api/environments/:envId/secrets',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['secrets'],
+        summary: 'List secrets (without values) with usage information',
+        params: envIdParamsSchema,
+        errors: [401],
+      }),
+    },
     async (request) => {
       const { envId } = request.params as { envId: string };
       const secrets = await listSecrets(envId);
@@ -126,7 +138,16 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
   // Create secret
   fastify.post(
     '/api/environments/:envId/secrets',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['secrets'],
+        summary: 'Create a secret in an environment',
+        params: envIdParamsSchema,
+        body: createSecretSchema,
+        errors: [400, 401, 409],
+      }),
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       const body = validateBody(createSecretSchema, request, reply);
@@ -160,7 +181,15 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
   // through — see src/plugins/authenticate.ts `enforceRoleForMethod`.)
   fastify.get(
     '/api/secrets/:id/value',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['secrets'],
+        summary: 'Reveal the decrypted value of a secret (admin only)',
+        params: idParamsSchema,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -224,7 +253,16 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
   // Update secret
   fastify.patch(
     '/api/secrets/:id',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['secrets'],
+        summary: 'Update a secret value or metadata',
+        params: idParamsSchema,
+        body: updateSecretSchema,
+        errors: [400, 401, 404, 422],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       // Rejects PATCH of derived/encrypted-storage fields (key, encryptedValue,
@@ -285,7 +323,15 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
   // Delete secret
   fastify.delete(
     '/api/secrets/:id',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['secrets'],
+        summary: 'Delete a secret',
+        params: idParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -319,7 +365,15 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
   // instead of re-scanning every ConfigFile's content per request.
   fastify.get(
     '/api/environments/:envId/vars',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['secrets'],
+        summary: 'List vars with usage information',
+        params: envIdParamsSchema,
+        errors: [401],
+      }),
+    },
     async (request) => {
       const { envId } = request.params as { envId: string };
 
@@ -408,7 +462,16 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
   // Create var
   fastify.post(
     '/api/environments/:envId/vars',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['secrets'],
+        summary: 'Create a var in an environment (operator+)',
+        params: envIdParamsSchema,
+        body: createVarSchema,
+        errors: [400, 401, 403, 409],
+      }),
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       const body = validateBody(createVarSchema, request, reply);
@@ -452,7 +515,16 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
   // Update var
   fastify.patch(
     '/api/vars/:id',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['secrets'],
+        summary: 'Update a var value or metadata (operator+)',
+        params: idParamsSchema,
+        body: updateVarSchema,
+        errors: [400, 401, 403, 404, 422],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       // Rejects PATCH of derived fields (id/key/environmentId/timestamps)
@@ -517,7 +589,15 @@ export async function secretRoutes(fastify: FastifyInstance): Promise<void> {
   // Delete var
   fastify.delete(
     '/api/vars/:id',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['secrets'],
+        summary: 'Delete a var (operator+)',
+        params: idParamsSchema,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 

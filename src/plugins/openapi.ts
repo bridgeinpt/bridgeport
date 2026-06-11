@@ -17,11 +17,74 @@ import type { FastifyInstance } from 'fastify';
 import fp from 'fastify-plugin';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
-import { appVersion } from '../lib/version.js';
 import { ERROR_CODES } from '../lib/errors.js';
+
+/**
+ * The canonical error envelope, registered as a SHARED Fastify schema (`$id`)
+ * rather than only as an OpenAPI component. This lets route `schema.response`
+ * entries `$ref: 'ErrorEnvelope#'` resolve in BOTH @fastify/swagger (spec) and
+ * fast-json-stringify (the response serializer) — a plain component-only schema
+ * would break the serializer with `Cannot find reference ...`. See
+ * `src/lib/openapi-schema.ts`.
+ *
+ * Exported so `routeSchema()` can reference the same `$id` consistently.
+ */
+export const ERROR_ENVELOPE_SCHEMA_ID = 'ErrorEnvelope';
+
+export const errorEnvelopeSchema = {
+  $id: ERROR_ENVELOPE_SCHEMA_ID,
+  type: 'object',
+  // NOTE: intentionally NO `required` and `additionalProperties: true`.
+  // This schema does double duty: it documents the envelope in the spec AND is
+  // the response serializer (fast-json-stringify) for routes that declare error
+  // responses. Several routes still emit the LEGACY `{error}` body and rely on
+  // the error-handler `onSend` hook to reshape it into `{code, message}` — but
+  // serialization runs BEFORE that hook. A strict `required: ['code','message']`
+  // would make fast-json-stringify THROW (`"code" is required`) on those legacy
+  // bodies, turning a 4xx into a 500. Staying permissive lets the legacy body
+  // pass through untouched so `onSend` can canonicalize it. The envelope ALWAYS
+  // carries `code` + `message` on the wire (guaranteed by the error handler) —
+  // see docs/api-stability.md for the authoritative contract.
+  additionalProperties: true,
+  properties: {
+    code: {
+      type: 'string',
+      enum: [...ERROR_CODES],
+      description: 'Stable, machine-readable error code. Always present on the wire.',
+    },
+    message: {
+      type: 'string',
+      description: 'Human-readable error message. Always present on the wire.',
+    },
+    field: {
+      type: 'string',
+      description: 'Field name when the error is tied to a specific input (e.g. validation).',
+    },
+    hint: {
+      type: 'string',
+      description: 'Optional, human-friendly hint for resolving the error.',
+    },
+    requestId: {
+      type: 'string',
+      description: 'Server-assigned request ID; quote this when reporting issues.',
+    },
+  },
+  example: {
+    code: 'READONLY_FIELD',
+    message: 'Field "exposedPorts" is read-only and cannot be set via PATCH.',
+    field: 'exposedPorts',
+    hint: 'Exposed ports are discovered from the running container. Change the ports mapping in the compose file at composePath and redeploy.',
+    requestId: 'req_01H0…',
+  },
+} as const;
 
 async function openapiPlugin(fastify: FastifyInstance): Promise<void> {
   await fastify.register(swagger, {
+    // Map shared schemas ($id) to `#/components/schemas/<$id>` so route
+    // `$ref`s render as clean component references in the spec.
+    refResolver: {
+      buildLocalReference: (json) => String(json.$id),
+    },
     openapi: {
       openapi: '3.0.3',
       info: {
@@ -29,7 +92,12 @@ async function openapiPlugin(fastify: FastifyInstance): Promise<void> {
         description:
           'HTTP API for BRIDGEPORT — a self-hosted deployment management tool for Docker-based infrastructure. ' +
           'All error responses follow the standard envelope: `{code, message, field?, hint?, requestId?}`.',
-        version: process.env.APP_VERSION || appVersion || '1.0.0',
+        // The spec version is intentionally pinned to a stable literal so the
+        // checked-in `openapi.json` snapshot is byte-identical across builds.
+        // The build/git stamp lives in `/health.version`, not the contract —
+        // see docs/api-stability.md. The runtime build version is still
+        // available via `APP_VERSION`; we just don't leak it into the spec.
+        version: '1.0.0',
       },
       components: {
         securitySchemes: {
@@ -43,40 +111,6 @@ async function openapiPlugin(fastify: FastifyInstance): Promise<void> {
           },
         },
         schemas: {
-          ErrorEnvelope: {
-            type: 'object',
-            required: ['code', 'message'],
-            properties: {
-              code: {
-                type: 'string',
-                enum: [...ERROR_CODES],
-                description: 'Stable, machine-readable error code.',
-              },
-              message: {
-                type: 'string',
-                description: 'Human-readable error message.',
-              },
-              field: {
-                type: 'string',
-                description: 'Field name when the error is tied to a specific input (e.g. validation).',
-              },
-              hint: {
-                type: 'string',
-                description: 'Optional, human-friendly hint for resolving the error.',
-              },
-              requestId: {
-                type: 'string',
-                description: 'Server-assigned request ID; quote this when reporting issues.',
-              },
-            },
-            example: {
-              code: 'READONLY_FIELD',
-              message: 'Field "exposedPorts" is read-only and cannot be set via PATCH.',
-              field: 'exposedPorts',
-              hint: 'Exposed ports are discovered from the running container. Change the ports mapping in the compose file at composePath and redeploy.',
-              requestId: 'req_01H0…',
-            },
-          },
           // Standard envelope returned by every sync endpoint
           // (`POST /api/config-files/:id/sync-all`,
           //  `POST /api/services/:id/sync-files`,
@@ -132,6 +166,11 @@ async function openapiPlugin(fastify: FastifyInstance): Promise<void> {
       ],
     },
   });
+
+  // Register the ErrorEnvelope as a shared schema so route response `$ref`s
+  // resolve in both the spec and the response serializer. @fastify/swagger
+  // auto-collects shared schemas into `#/components/schemas/ErrorEnvelope`.
+  fastify.addSchema(errorEnvelopeSchema);
 
   await fastify.register(swaggerUi, {
     routePrefix: '/api/docs',

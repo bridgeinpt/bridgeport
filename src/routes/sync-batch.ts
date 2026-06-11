@@ -20,6 +20,7 @@ import { requireOperator } from '../plugins/authorize.js';
 import { actorFrom } from '../services/audit.js';
 import { ApiError } from '../lib/errors.js';
 import { validateBody } from '../lib/helpers.js';
+import { routeSchema } from '../lib/openapi-schema.js';
 import {
   executeBatch,
   hashCanonicalBody,
@@ -41,6 +42,8 @@ const batchBodySchema = z.object({
   rollbackOnFailure: z.boolean().default(true),
 });
 
+const batchIdParamsSchema = z.object({ batchId: z.string() });
+
 /** Trim & sanity-check an Idempotency-Key header. */
 function readIdempotencyKey(raw: unknown): string | undefined {
   if (typeof raw !== 'string') return undefined;
@@ -60,7 +63,15 @@ export async function syncBatchRoutes(fastify: FastifyInstance): Promise<void> {
   // Execute (or replay) a transactional batch of config-file syncs.
   fastify.post(
     '/api/sync/batch',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Execute (or replay) a transactional batch of config-file syncs',
+        body: batchBodySchema,
+        errors: [400, 401, 403, 409],
+      }),
+    },
     async (request, reply) => {
       const body = validateBody(batchBodySchema, request, reply);
       if (!body) return;
@@ -113,7 +124,15 @@ export async function syncBatchRoutes(fastify: FastifyInstance): Promise<void> {
   // env check by design.
   fastify.get(
     '/api/sync/batch/:batchId',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Fetch a persisted sync batch and its operations',
+        params: batchIdParamsSchema,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { batchId } = request.params as { batchId: string };
 
