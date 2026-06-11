@@ -31,6 +31,7 @@ import {
   type SyncOutcome,
 } from './config-file-auto-resync.js';
 import { logAudit } from './audit.js';
+import { emitWebhookEvent } from './webhook-subscriptions.js';
 import { syncUsageForConfigFile } from '../lib/key-usage-extraction.js';
 import { getErrorMessage } from '../lib/helpers.js';
 
@@ -567,6 +568,17 @@ export async function executeBatch(input: BatchExecuteInput): Promise<BatchExecu
     where: { id: batch.id },
     data: { status: finalStatus, completedAt: new Date() },
   });
+
+  // Fire-and-forget webhook event with the FINAL batch status in the payload
+  // (issue #126). One event per batch — not per terminal sub-status. Skipped
+  // when the batch couldn't be scoped to an environment (mixed/unknown env).
+  if (environmentId) {
+    void emitWebhookEvent('sync.completed', environmentId, {
+      batchId: batch.id,
+      status: finalStatus,
+      operationCount: opStatus.length,
+    });
+  }
 
   return {
     batchId: batch.id,

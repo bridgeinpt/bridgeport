@@ -8,6 +8,7 @@ import { readFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { sendSystemNotification, NOTIFICATION_TYPES } from './notifications.js';
+import { emitWebhookEvent } from './webhook-subscriptions.js';
 import { safeJsonParse } from '../lib/helpers.js';
 
 // Default pg_dump timeout (5 minutes)
@@ -777,6 +778,15 @@ async function executeBackup(backupId: string): Promise<void> {
       db.environmentId,
       { databaseName: db.name }
     );
+
+    // Fire-and-forget webhook event (issue #126). emitWebhookEvent never throws.
+    void emitWebhookEvent('backup.completed', db.environmentId, {
+      backupId,
+      databaseId: db.id,
+      databaseName: db.name,
+      success: true,
+      status: 'completed',
+    });
   } catch (error) {
     // Clean up temp file on error
     if (tempPath) {
@@ -817,6 +827,16 @@ async function executeBackup(backupId: string): Promise<void> {
         step: backupError.step,
       }
     );
+
+    // Fire-and-forget webhook event (issue #126). emitWebhookEvent never throws.
+    void emitWebhookEvent('backup.failed', db.environmentId, {
+      backupId,
+      databaseId: db.id,
+      databaseName: db.name,
+      success: false,
+      status: 'failed',
+      error: backupError.message,
+    });
 
     throw error;
   }

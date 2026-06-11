@@ -19,6 +19,7 @@ import { PrismaClient } from '@prisma/client';
 import { setupTestDb, teardownTestDb, getTestPrisma } from './db.js';
 import { initializeCrypto } from '../../src/lib/crypto.js';
 import authenticatePlugin from '../../src/plugins/authenticate.js';
+import idempotencyPlugin from '../../src/lib/idempotency.js';
 import errorHandlerPlugin from '../../src/plugins/error-handler.js';
 import openapiPlugin from '../../src/plugins/openapi.js';
 // SINGLE SOURCE OF TRUTH for the route set — shared with src/server.ts and the
@@ -90,6 +91,9 @@ export async function buildTestApp(options: BuildTestAppOptions = {}): Promise<T
   await fastify.register(openapiPlugin);
 
   await fastify.register(authenticatePlugin);
+  // Idempotency-Key hooks (issue #126) — mirror server.ts so tests exercise the
+  // same pipeline. No-op unless a POST carries an Idempotency-Key header.
+  await fastify.register(idempotencyPlugin);
   await fastify.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } });
 
   // Register all API routes — single source of truth shared with the server

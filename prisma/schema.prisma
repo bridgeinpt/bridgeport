@@ -106,6 +106,7 @@ model Environment {
   externalEntities    ExternalEntity[]
   serverClusters      ServerCluster[]
   apiTokenScopes      ApiTokenEnvironment[]
+  webhookSubscriptions WebhookSubscription[]
 
   // Per-module settings (one row per environment, created eagerly)
   generalSettings       GeneralSettings?
@@ -928,6 +929,72 @@ model WebhookConfig {
   failureCount    Int       @default(0)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+}
+
+// ==================== Env-scoped Webhook Subscriptions (issue #126) ====================
+//
+// A SEPARATE system from WebhookConfig above. WebhookConfig is the global,
+// admin-scoped outgoing-notification fan-out (header `X-Webhook-Signature`).
+// WebhookSubscription is the per-environment, operator-managed subscription with
+// signed (`X-BridgePort-Signature`), background-retried deliveries and a full
+// delivery history. The two do not share code or models.
+model WebhookSubscription {
+  id              String      @id @default(cuid())
+  environmentId   String
+  environment     Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  url             String
+  encryptedSecret String? // AES-256-GCM ciphertext of the signing secret (see lib/crypto)
+  secretNonce     String? // IV/nonce paired with encryptedSecret
+  events          String // JSON array of subscribed event codes (SQLite has no native JSON)
+  enabled         Boolean     @default(true)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  deliveries WebhookDelivery[]
+
+  @@index([environmentId])
+}
+
+// One delivery attempt-set for a single (subscription, event) pair. The
+// scheduler retries pending/failed rows with exponential backoff until either a
+// 2xx response (status="delivered") or the attempt cap (status="failed").
+model WebhookDelivery {
+  id             String              @id @default(cuid())
+  subscriptionId String
+  subscription   WebhookSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  event          String
+  payload        String // JSON body sent to the subscriber
+  status         String              @default("pending") // pending | delivered | failed
+  attempts       Int                 @default(0)
+  nextAttemptAt  DateTime?
+  lastError      String?
+  responseStatus Int?
+  createdAt      DateTime            @default(now())
+  deliveredAt    DateTime?
+
+  @@index([status, nextAttemptAt])
+  @@index([subscriptionId, createdAt])
+}
+
+// Idempotency-Key support for mutating POSTs (issue #126). A row is created the
+// first time a (key, method, path) is seen; the response is cached on it so a
+// retry with the same key+body short-circuits the handler. Rows expire after a
+// fixed retention window (see lib/idempotency).
+model IdempotencyKey {
+  id             String   @id @default(cuid())
+  key            String
+  environmentId  String?
+  method         String
+  path           String
+  requestHash    String
+  responseStatus Int?
+  responseBody   String?
+  inProgress     Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
+
+  @@unique([key, method, path])
+  @@index([expiresAt])
 }
 
 // Tracks consecutive failures for bounce logic

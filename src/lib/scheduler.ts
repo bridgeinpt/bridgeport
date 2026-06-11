@@ -26,6 +26,8 @@ import { getSystemSettings } from '../services/system-settings.js';
 import { cleanupOldAuditLogs } from '../services/audit.js';
 import { logAgentEvent } from '../services/agent-events.js';
 import { runDatabaseMetricsCollection, cleanupOldDatabaseMetrics } from '../services/database-monitoring-collector.js';
+import { deliverPending, cleanupOldDeliveries } from '../services/webhook-subscriptions.js';
+import { cleanupExpiredIdempotencyKeys } from './idempotency.js';
 import { eventBus } from './event-bus.js';
 
 interface GlobalSchedulerConfig {
@@ -39,6 +41,7 @@ interface GlobalSchedulerConfig {
   metricsRetentionDays: number;
   notificationRetentionDays: number;
   healthLogRetentionDays: number;
+  webhookDeliveryRetentionDays: number;
 }
 
 const DEFAULT_CONFIG: GlobalSchedulerConfig = {
@@ -52,7 +55,12 @@ const DEFAULT_CONFIG: GlobalSchedulerConfig = {
   metricsRetentionDays: 7,
   notificationRetentionDays: 30,
   healthLogRetentionDays: 30,
+  webhookDeliveryRetentionDays: 30,
 };
+
+// Webhook delivery sweep interval (issue #126). Short enough that deliveries
+// land within ~5s of an emit; the setImmediate kick on enqueue usually beats it.
+const WEBHOOK_DELIVERY_INTERVAL_MS = 3 * 1000;
 
 const timers = new Map<string, NodeJS.Timeout>();
 let isRunning = false;
@@ -889,6 +897,50 @@ async function runDigestCleanup(): Promise<void> {
 }
 
 /**
+ * Deliver due webhook deliveries (issue #126). Runs on a short interval so
+ * deliveries land within a few seconds of an emit even if the setImmediate kick
+ * was missed. `deliverPending` self-guards against overlapping runs.
+ */
+async function runWebhookDeliveries(): Promise<void> {
+  try {
+    await deliverPending();
+  } catch (error) {
+    captureException(error, { scheduler: 'webhookDeliveries' });
+    console.error('[Scheduler] Webhook delivery run failed:', error);
+  }
+}
+
+/**
+ * Clean up old webhook deliveries (delivered/failed beyond retention).
+ */
+async function runWebhookDeliveryCleanup(retentionDays: number): Promise<void> {
+  try {
+    const deleted = await cleanupOldDeliveries(retentionDays);
+    if (deleted > 0) {
+      console.log(`[Scheduler] Cleaned up ${deleted} old webhook delivery records`);
+    }
+  } catch (error) {
+    captureException(error, { scheduler: 'webhookDeliveryCleanup' });
+    console.error('[Scheduler] Webhook delivery cleanup failed:', error);
+  }
+}
+
+/**
+ * Clean up expired Idempotency-Key rows (issue #126).
+ */
+async function runIdempotencyKeyCleanup(): Promise<void> {
+  try {
+    const deleted = await cleanupExpiredIdempotencyKeys();
+    if (deleted > 0) {
+      console.log(`[Scheduler] Cleaned up ${deleted} expired idempotency key records`);
+    }
+  } catch (error) {
+    captureException(error, { scheduler: 'idempotencyKeyCleanup' });
+    console.error('[Scheduler] Idempotency key cleanup failed:', error);
+  }
+}
+
+/**
  * Prune unused Docker images on all servers that have autoPruneImages enabled.
  */
 async function runImagePrune(): Promise<void> {
@@ -962,6 +1014,12 @@ export function startScheduler(config: Partial<GlobalSchedulerConfig> = {}): voi
   timers.set('auditLogCleanup', setInterval(runAuditLogCleanup, 24 * 60 * 60 * 1000)); // Daily
   timers.set('digestCleanup', setInterval(runDigestCleanup, 24 * 60 * 60 * 1000)); // Daily
   timers.set('imagePrune', setInterval(runImagePrune, 7 * 24 * 60 * 60 * 1000)); // Weekly
+
+  // Webhook deliveries (issue #126): a short-interval sweep + daily cleanups for
+  // delivery history and expired idempotency keys.
+  timers.set('webhookDeliveries', setInterval(runWebhookDeliveries, WEBHOOK_DELIVERY_INTERVAL_MS));
+  timers.set('webhookDeliveryCleanup', setInterval(() => runWebhookDeliveryCleanup(cfg.webhookDeliveryRetentionDays), 24 * 60 * 60 * 1000)); // Daily
+  timers.set('idempotencyKeyCleanup', setInterval(runIdempotencyKeyCleanup, 24 * 60 * 60 * 1000)); // Daily
 
   // Notification queue drain — safety net in case the setImmediate kick on
   // enqueue is missed (e.g. process under heavy load). Most drains happen on

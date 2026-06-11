@@ -13,6 +13,8 @@ BRIDGEPORT exposes a JSON REST API for all operations -- deployments, server man
   - [Token Scope Enforcement](#token-scope-enforcement)
   - [Using Tokens](#using-tokens)
 - [Error Format](#error-format)
+- [Idempotency-Key](#idempotency-key)
+- [Webhook Subscriptions](#webhook-subscriptions)
 - [Endpoint Categories](#endpoint-categories)
 - [CI/CD Integration Examples](#cicd-integration-examples)
 - [Related Docs](#related-docs)
@@ -331,6 +333,114 @@ Validation errors may include a legacy `details` array alongside the envelope wh
 
 ---
 
+## Idempotency-Key
+
+Any mutating `POST` can be made safe to retry by sending an `Idempotency-Key` header. This lets a flaky network or a CI retry loop re-send a request (e.g. "deploy this service") without risking a second deployment.
+
+```bash
+curl -X POST "$BRIDGEPORT_URL/api/environments/$ENV_ID/servers" \
+  -H "Authorization: Bearer $BRIDGEPORT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: 7c1f0e6e-1f0a-4d2b-9b3a-3e2d1c0b9a87" \
+  -d '{"name":"web-1","hostname":"10.0.0.5"}'
+```
+
+**How it works**
+
+- The key is scoped to the tuple `(key, HTTP method, route path)`. The same key on a different route is independent.
+- The request body is hashed (SHA-256 of its JSON serialization) and stored with the key.
+- **First request** with a given key runs normally. On a `2xx` the response status + body are cached against the key.
+- **Replay (same key + same body)** short-circuits: the cached response is returned verbatim and the handler does **not** run again — so no second deploy is queued. Replayed responses carry an `Idempotent-Replayed: true` header.
+- **Replay while the first request is still running** (a concurrent retry) returns `409 CONFLICT` with the hint to retry once the original completes.
+- **Same key + different body** returns `409` with code `IDEMPOTENCY_KEY_REUSED` — keys must not be reused for a different payload.
+- On a **non-2xx** the key record is discarded so the client can retry the same key cleanly.
+
+**Scope & lifetime**
+
+- Records expire **24 hours** after creation; after that the same key is treated as new. Expired records are cleaned up by a daily scheduler job.
+- The feature engages **only** when the `Idempotency-Key` header is present on a `POST`. All other requests are unaffected.
+- Keys are capped at 200 characters. A UUID is the recommended form.
+- File-upload (`multipart/form-data`) POSTs are **not** idempotency-protected — their bodies aren't a stable JSON object — and pass through unaffected.
+- `POST /api/sync/batch` has its own built-in idempotency handling (see [Sync Batches](#endpoint-categories)); the global mechanism above does not double-handle it.
+
+---
+
+## Webhook Subscriptions
+
+Env-scoped webhook subscriptions let external systems receive a signed HTTP callback when a lifecycle event completes in an environment (a deploy finishes, a plan completes, a backup runs, a sync batch settles). This is distinct from [incoming CI/CD webhooks](../guides/webhooks.md) (which trigger deployments) and from the global admin **outgoing webhooks** (which fan out notification events). Subscriptions are managed per-environment by operators.
+
+### Endpoints
+
+| Method | Path | Role | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/environments/:envId/webhooks` | operator+ | Create a subscription |
+| `GET` | `/api/environments/:envId/webhooks` | viewer+ | List subscriptions |
+| `GET` | `/api/environments/:envId/webhooks/:id` | viewer+ | Get one subscription |
+| `DELETE` | `/api/environments/:envId/webhooks/:id` | operator+ | Delete a subscription |
+| `GET` | `/api/environments/:envId/webhooks/:id/deliveries` | viewer+ | Paginated delivery history (`?limit=&offset=`) |
+
+Create body:
+
+```json
+{
+  "url": "https://example.com/hooks/bridgeport",
+  "secret": "a-shared-signing-secret",
+  "events": ["deployment.completed", "deployment.failed"],
+  "enabled": true
+}
+```
+
+The `secret` is **write-only**: it is encrypted at rest (AES-256-GCM) and is **never** returned by any endpoint. Responses expose only `hasSecret: boolean`.
+
+### Event codes
+
+A subscription must list one or more of these canonical event codes:
+
+| Event | Fired when |
+|-------|------------|
+| `deployment.completed` | A single-service deployment succeeds |
+| `deployment.failed` | A single-service deployment fails |
+| `plan.completed` | A deployment plan reaches `COMPLETED` (final status in payload) |
+| `plan.failed` | A deployment plan reaches a terminal `FAILED` (auto-rollback disabled; when auto-rollback takes over, `plan.rolled_back` fires instead) |
+| `plan.rolled_back` | A deployment plan failed with auto-rollback enabled and reached the terminal `ROLLED_BACK` state |
+| `backup.completed` | A database backup succeeds |
+| `backup.failed` | A database backup fails |
+| `sync.completed` | A sync batch settles (final batch status in payload — one event per batch) |
+
+### Delivery payload
+
+Every delivery `POST`s a JSON body of the form:
+
+```json
+{
+  "event": "deployment.completed",
+  "environmentId": "clxxxx",
+  "timestamp": "2026-06-11T21:00:00.000Z",
+  "data": { "deploymentId": "...", "serviceName": "...", "status": "success" }
+}
+```
+
+The `data` object's keys depend on the event (deployment/plan/backup/sync context).
+
+### Signature verification
+
+When a subscription has a `secret`, each delivery includes an `X-BridgePort-Signature` header:
+
+```
+X-BridgePort-Signature: sha256=<hex HMAC-SHA256(secret, rawRequestBody)>
+```
+
+Verify it by computing the HMAC-SHA256 of the **raw request body** with your stored secret and comparing (constant-time) against the hex value after `sha256=`. Two additional headers aid debugging: `X-BridgePort-Event` (the event code) and `X-BridgePort-Delivery` (the delivery id).
+
+### Retry policy
+
+- Deliveries are sent in the background and recorded in delivery history with a `status` of `pending`, `delivered`, or `failed`.
+- A `2xx` response marks the delivery `delivered`.
+- Any non-2xx, timeout (10s per attempt), or network error is retried with **exponential backoff** (5s, 10s, 20s, 40s, …, capped at 5 minutes) up to **5 attempts**, after which the delivery is `failed` (terminal).
+- Delivery history rows are retained for 30 days, then cleaned up by a scheduler job.
+
+---
+
 ## Endpoint Categories
 
 BRIDGEPORT's API is organized into the following categories. Each category corresponds to a route module in `src/routes/`.
@@ -354,7 +464,8 @@ BRIDGEPORT's API is organized into the following categories. Each category corre
 | **Monitoring** | `/api/monitoring/*` | Health logs, metrics history, SSH testing |
 | **Topology** | `/api/environments/:envId/topology/*` | Service connections, diagram layouts |
 | **Notifications** | `/api/notifications/*` | User notifications, preferences |
-| **Webhooks** | `/api/webhooks/*` | Incoming CI/CD webhook triggers |
+| **Webhooks (incoming)** | `/api/webhooks/*` | Incoming CI/CD webhook triggers |
+| **Webhook Subscriptions** | `/api/environments/:envId/webhooks/*` | Env-scoped signed event callbacks with retry + delivery history ([details](#webhook-subscriptions)) |
 | **Events** | `/api/events` | Real-time SSE stream |
 | **Audit** | `/api/audit-logs` | Audit log viewer |
 | **Settings** | `/api/settings/*` | Service types, system settings |

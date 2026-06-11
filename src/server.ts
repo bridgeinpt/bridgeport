@@ -14,6 +14,7 @@ import { config } from './lib/config.js';
 import { initializeCrypto } from './lib/crypto.js';
 import { initializeDatabase, disconnectDatabase } from './lib/db.js';
 import authenticatePlugin from './plugins/authenticate.js';
+import idempotencyPlugin from './lib/idempotency.js';
 import errorHandlerPlugin from './plugins/error-handler.js';
 import openapiPlugin from './plugins/openapi.js';
 import { registerApiRoutes } from './register-routes.js';
@@ -128,6 +129,14 @@ async function buildServer() {
 
   // Register authenticate decorator (must be before routes)
   await fastify.register(authenticatePlugin);
+
+  // Idempotency-Key support for mutating POSTs (issue #126). This is a GLOBAL
+  // preHandler that runs BEFORE the route-level `fastify.authenticate`, so it
+  // has no `request.authUser`. To keep keys from colliding across tenants, the
+  // stored key folds in a hash of the request credential (Authorization/Cookie
+  // header) — see lib/idempotency.ts. Engages only when the Idempotency-Key
+  // header is present, so it's a no-op for every other request.
+  await fastify.register(idempotencyPlugin);
 
   await fastify.register(multipart, {
     limits: {
