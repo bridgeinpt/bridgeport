@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
       # pnpm via npm (version pinned to package.json's packageManager):
       # pnpm/action-setup isn't on this repo's GitHub Actions allowlist.
       - run: npm install -g pnpm@11.5.3
@@ -52,7 +52,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
       # pnpm via npm (version pinned to package.json's packageManager):
       # pnpm/action-setup isn't on this repo's GitHub Actions allowlist.
       - run: npm install -g pnpm@11.5.3
@@ -82,7 +82,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
       # pnpm via npm (version pinned to package.json's packageManager):
       # pnpm/action-setup isn't on this repo's GitHub Actions allowlist.
       - run: npm install -g pnpm@11.5.3
@@ -102,7 +102,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
       # pnpm via npm (version pinned to package.json's packageManager):
       # pnpm/action-setup isn't on this repo's GitHub Actions allowlist.
       - run: npm install -g pnpm@11.5.3
@@ -122,7 +122,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
       # pnpm via npm (version pinned to package.json's packageManager):
       # pnpm/action-setup isn't on this repo's GitHub Actions allowlist.
       - run: npm install -g pnpm@11.5.3
@@ -139,7 +139,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
       # pnpm via npm (version pinned to package.json's packageManager):
       # pnpm/action-setup isn't on this repo's GitHub Actions allowlist.
       - run: npm install -g pnpm@11.5.3
@@ -167,7 +167,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
       # pnpm via npm (version pinned to package.json's packageManager):
       # pnpm/action-setup isn't on this repo's GitHub Actions allowlist.
       - run: npm install -g pnpm@11.5.3
@@ -185,7 +185,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
+          node-version: 24
       # pnpm via npm (version pinned to package.json's packageManager):
       # pnpm/action-setup isn't on this repo's GitHub Actions allowlist.
       - run: npm install -g pnpm@11.5.3
