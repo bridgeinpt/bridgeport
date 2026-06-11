@@ -16900,6 +16900,7 @@
                         "deployment.failed",
                         "plan.completed",
                         "plan.failed",
+                        "plan.rolled_back",
                         "backup.completed",
                         "backup.failed",
                         "sync.completed"
