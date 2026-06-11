@@ -30,9 +30,10 @@
 
 /*
  * Tailwind v4's Preflight dropped three defaults that v3 set. Restore them so
- * markup relying on them keeps rendering as before. The colors resolve to v4's
- * own gray-200/gray-400 (the palette the rest of the UI now uses); the literal
- * fallbacks only apply if the default palette is ever cleared.
+ * any element that relied on the Preflight default — rather than an explicit
+ * `border-*` / `placeholder-*` / `cursor-*` utility — keeps rendering as it did
+ * under v3. The colors resolve to v4's gray-200/gray-400; the literal hex
+ * fallbacks only apply if the default palette is ever cleared via `@theme`.
  */
 @layer base {
   /* v4 defaults bare `border`/`divide` to currentColor; v3 used gray-200. */
