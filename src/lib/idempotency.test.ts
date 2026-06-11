@@ -18,7 +18,19 @@ import { Prisma } from '@prisma/client';
 import idempotencyPlugin, {
   cleanupExpiredIdempotencyKeys,
   IDEMPOTENCY_RETENTION_MS,
+  STALE_INPROGRESS_MS,
 } from './idempotency.js';
+
+/** Scope hash for a request with the given Authorization header (or none). */
+function scopeOf(authorization?: string): string {
+  const credential = authorization ?? '';
+  return createHash('sha256').update(credential).digest('hex').slice(0, 16);
+}
+
+/** Build the storedKey the preHandler computes for a raw key + credential. */
+function storedKeyOf(rawKey: string, authorization?: string): string {
+  return `${scopeOf(authorization)}:${rawKey}`;
+}
 
 const mockPrisma = vi.mocked(prisma, true);
 
@@ -150,7 +162,9 @@ describe('idempotency preHandler', () => {
       data: Record<string, unknown>;
     }).data;
     expect(data).toMatchObject({
-      key: 'key-123',
+      // storedKey folds the credential scope (no Authorization header → empty
+      // credential) into the raw client key.
+      key: storedKeyOf('key-123'),
       method: 'POST',
       path: '/api/environments/:envId/webhooks',
       environmentId: 'env-1',
@@ -192,6 +206,7 @@ describe('idempotency preHandler', () => {
       inProgress: true,
       responseStatus: null,
       responseBody: null,
+      createdAt: new Date(), // fresh → still live, must 409
       expiresAt: new Date(Date.now() + 60_000),
     } as never);
 
@@ -231,23 +246,142 @@ describe('idempotency preHandler', () => {
     expect(mockPrisma.idempotencyKey.create).toHaveBeenCalledTimes(1);
   });
 
-  it('treats an expired row as absent and creates a new one', async () => {
+  it('deletes an expired row and creates a new one (no spurious 409)', async () => {
     const { preHandler } = await loadHooks();
     mockPrisma.idempotencyKey.findUnique.mockResolvedValue({
+      id: 'row-old',
       requestHash: hashOf({ stale: true }),
       inProgress: false,
       responseStatus: 201,
       responseBody: '{}',
+      createdAt: new Date(Date.now() - IDEMPOTENCY_RETENTION_MS - 1_000),
       expiresAt: new Date(Date.now() - 1_000), // already expired
     } as never);
+    mockPrisma.idempotencyKey.delete.mockResolvedValue({} as never);
     mockPrisma.idempotencyKey.create.mockResolvedValue({ id: 'row-new' } as never);
 
     const reply = makeReply();
     await preHandler(makeRequest(), reply);
 
-    // Expired → no replay, a fresh row is created.
+    // Expired → the stale row is deleted, no replay, a fresh row is created.
     expect(reply.sent).toBeFalsy();
+    expect(mockPrisma.idempotencyKey.delete).toHaveBeenCalledWith({ where: { id: 'row-old' } });
     expect(mockPrisma.idempotencyKey.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('looks the row up under the credential-scoped storedKey', async () => {
+    const { preHandler } = await loadHooks();
+    mockPrisma.idempotencyKey.findUnique.mockResolvedValue(null);
+    mockPrisma.idempotencyKey.create.mockResolvedValue({ id: 'row-1' } as never);
+
+    await preHandler(
+      makeRequest({ headers: { 'idempotency-key': 'key-123', authorization: 'Bearer tok-A' } }),
+      makeReply()
+    );
+
+    const where = (mockPrisma.idempotencyKey.findUnique.mock.calls[0][0] as {
+      where: { key_method_path: { key: string } };
+    }).where;
+    expect(where.key_method_path.key).toBe(storedKeyOf('key-123', 'Bearer tok-A'));
+  });
+
+  it('scopes the stored key per credential — two tokens with the same key+body do not collide', async () => {
+    const { preHandler } = await loadHooks();
+    const body = { url: 'https://x.test', events: ['plan.completed'] };
+
+    // Token A creates a fresh row (no prior row).
+    mockPrisma.idempotencyKey.findUnique.mockResolvedValueOnce(null);
+    mockPrisma.idempotencyKey.create.mockResolvedValue({ id: 'row-A' } as never);
+    await preHandler(
+      makeRequest({ body, headers: { 'idempotency-key': 'shared', authorization: 'Bearer tok-A' } }),
+      makeReply()
+    );
+
+    // Token B uses the SAME raw key + body. Because the storedKey differs by
+    // credential, B's lookup finds nothing of A's → no replay, no 409.
+    mockPrisma.idempotencyKey.findUnique.mockResolvedValueOnce(null);
+    const replyB = makeReply();
+    await preHandler(
+      makeRequest({ body, headers: { 'idempotency-key': 'shared', authorization: 'Bearer tok-B' } }),
+      replyB
+    );
+
+    expect(replyB.sent).toBeFalsy(); // not a replay of A
+    const keyA = (mockPrisma.idempotencyKey.create.mock.calls[0][0] as { data: { key: string } }).data.key;
+    const keyB = (mockPrisma.idempotencyKey.create.mock.calls[1][0] as { data: { key: string } }).data.key;
+    expect(keyA).toBe(storedKeyOf('shared', 'Bearer tok-A'));
+    expect(keyB).toBe(storedKeyOf('shared', 'Bearer tok-B'));
+    expect(keyA).not.toBe(keyB);
+  });
+
+  it('takes over a STALE inProgress row (older than the threshold) instead of 409', async () => {
+    const { preHandler } = await loadHooks();
+    const body = { url: 'https://x.test', events: ['plan.completed'] };
+    mockPrisma.idempotencyKey.findUnique.mockResolvedValue({
+      id: 'row-stale',
+      requestHash: hashOf(body),
+      inProgress: true,
+      responseStatus: null,
+      responseBody: null,
+      createdAt: new Date(Date.now() - STALE_INPROGRESS_MS - 1_000), // dead
+      expiresAt: new Date(Date.now() + 60_000),
+    } as never);
+    mockPrisma.idempotencyKey.delete.mockResolvedValue({} as never);
+    mockPrisma.idempotencyKey.create.mockResolvedValue({ id: 'row-fresh' } as never);
+
+    const reply = makeReply();
+    await preHandler(makeRequest({ body }), reply);
+
+    expect(mockPrisma.idempotencyKey.delete).toHaveBeenCalledWith({ where: { id: 'row-stale' } });
+    expect(mockPrisma.idempotencyKey.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('still 409s a FRESH inProgress row (younger than the threshold)', async () => {
+    const { preHandler } = await loadHooks();
+    const body = { url: 'https://x.test', events: ['plan.completed'] };
+    mockPrisma.idempotencyKey.findUnique.mockResolvedValue({
+      id: 'row-live',
+      requestHash: hashOf(body),
+      inProgress: true,
+      responseStatus: null,
+      responseBody: null,
+      createdAt: new Date(Date.now() - 1_000), // still live
+      expiresAt: new Date(Date.now() + 60_000),
+    } as never);
+
+    await expect(preHandler(makeRequest({ body }), makeReply())).rejects.toMatchObject({
+      code: 'CONFLICT',
+    });
+    expect(mockPrisma.idempotencyKey.delete).not.toHaveBeenCalled();
+    expect(mockPrisma.idempotencyKey.create).not.toHaveBeenCalled();
+  });
+
+  it('replays an empty stored body with no JSON content-type (no fabricated {})', async () => {
+    const { preHandler } = await loadHooks();
+    const body = { url: 'https://x.test', events: ['plan.completed'] };
+    const headerSpy = vi.fn();
+    mockPrisma.idempotencyKey.findUnique.mockResolvedValue({
+      requestHash: hashOf(body),
+      inProgress: false,
+      responseStatus: 204,
+      responseBody: null, // originally-empty/204 response
+      expiresAt: new Date(Date.now() + 60_000),
+    } as never);
+
+    const reply = makeReply();
+    reply.header = function (this: unknown, name: string, value: string) {
+      headerSpy(name, value);
+      return this;
+    } as never;
+    await preHandler(makeRequest({ body }), reply);
+
+    expect(reply.statusCode).toBe(204);
+    expect(reply.sentBody).toBe(''); // empty, not '{}'
+    // No JSON content-type header for an empty body.
+    const setJson = headerSpy.mock.calls.some(
+      ([n, v]) => n === 'content-type' && String(v).includes('application/json')
+    );
+    expect(setJson).toBe(false);
   });
 });
 

@@ -19,6 +19,8 @@
  */
 
 import { createHmac } from 'node:crypto';
+import { lookup as dnsLookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import { prisma } from '../lib/db.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
 import { safeJsonParse, getErrorMessage } from '../lib/helpers.js';
@@ -34,6 +36,7 @@ export const WEBHOOK_EVENTS = [
   'deployment.failed',
   'plan.completed',
   'plan.failed',
+  'plan.rolled_back',
   'backup.completed',
   'backup.failed',
   'sync.completed',
@@ -58,6 +61,86 @@ export const SIGNATURE_HEADER = 'X-BridgePort-Signature';
 // Guard against overlapping sweeps (the scheduler interval + the setImmediate
 // kick on enqueue could otherwise run concurrently and double-POST a row).
 let delivering = false;
+
+/** Max concurrent deliveries per sweep — bounds a sweep to ~one timeout, not N. */
+const DELIVERY_CONCURRENCY = 10;
+
+/**
+ * SSRF guard: is `ip` (a literal IPv4/IPv6 address) in a loopback, private,
+ * link-local, or otherwise non-routable range? Covers the cloud metadata
+ * endpoint (169.254.169.254 falls in link-local) and IPv6-mapped IPv4.
+ */
+function isBlockedIp(ip: string): boolean {
+  const family = isIP(ip);
+  if (family === 4) return isBlockedIpv4(ip);
+  if (family === 6) {
+    const lower = ip.toLowerCase();
+    if (lower === '::1' || lower === '::') return true; // loopback / unspecified
+    // Unique local (fc00::/7) and link-local (fe80::/10).
+    if (/^f[cd][0-9a-f]{2}:/.test(lower)) return true;
+    if (/^fe[89ab][0-9a-f]:/.test(lower)) return true;
+    // IPv4-mapped (::ffff:a.b.c.d) — range-check the embedded IPv4.
+    const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (mapped) return isBlockedIpv4(mapped[1]);
+    return false;
+  }
+  return false;
+}
+
+function isBlockedIpv4(ip: string): boolean {
+  const parts = ip.split('.').map((p) => Number(p));
+  if (parts.length !== 4 || parts.some((p) => Number.isNaN(p) || p < 0 || p > 255)) {
+    return true; // malformed — block to be safe
+  }
+  const [a, b] = parts;
+  if (a === 127) return true; // loopback 127.0.0.0/8
+  if (a === 10) return true; // private 10.0.0.0/8
+  if (a === 172 && b >= 16 && b <= 31) return true; // private 172.16.0.0/12
+  if (a === 192 && b === 168) return true; // private 192.168.0.0/16
+  if (a === 169 && b === 254) return true; // link-local 169.254.0.0/16 (incl. metadata)
+  if (a === 0) return true; // 0.0.0.0/8
+  return false;
+}
+
+/**
+ * Reject a webhook destination that targets internal/loopback/link-local/
+ * metadata infrastructure. Blocks non-http(s) schemes, `localhost`/`*.local`,
+ * and any literal IP in a non-routable range. For hostnames, resolve via DNS and
+ * range-check every returned address (so a public name pointing at an internal
+ * IP is also blocked). Returns true when the URL must NOT be delivered to.
+ */
+export async function isBlockedWebhookHost(url: string): Promise<boolean> {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return true; // unparseable — block
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return true;
+
+  let host = parsed.hostname.toLowerCase();
+  // IPv6 literals arrive bracketed in URL.hostname on some runtimes; strip them.
+  if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
+
+  if (host === 'localhost' || host === 'localhost.localdomain') return true;
+  if (host.endsWith('.local')) return true;
+
+  // Literal IP — range-check directly, no DNS needed.
+  if (isIP(host) !== 0) return isBlockedIp(host);
+
+  // Hostname — resolve and range-check every address. A DNS failure (NXDOMAIN,
+  // timeout) is NOT treated as blocked: an unresolvable host is not an SSRF
+  // target (it points at nothing internal), and the delivery fetch will simply
+  // fail on its own. We only block when an address actually lands in a
+  // non-routable range — so a public name pointing at an internal IP is caught.
+  try {
+    const records = await dnsLookup(host, { all: true });
+    return records.some((r) => isBlockedIp(r.address));
+  } catch {
+    return false;
+  }
+}
 
 /** Public-facing shape — NEVER includes the decrypted secret. */
 export interface WebhookSubscriptionOutput {
@@ -102,6 +185,14 @@ export async function createWebhookSubscription(
   environmentId: string,
   input: CreateSubscriptionInput
 ): Promise<WebhookSubscriptionOutput> {
+  // SSRF guard: refuse a destination that targets internal/loopback/metadata
+  // infrastructure. The route layer maps the thrown error to a 400.
+  if (await isBlockedWebhookHost(input.url)) {
+    throw new Error(
+      'Webhook URL targets a private, loopback, link-local, or metadata address, which is not allowed'
+    );
+  }
+
   const data: {
     environmentId: string;
     url: string;
@@ -305,13 +396,25 @@ export async function deliverPending(): Promise<void> {
       },
     });
 
-    for (const delivery of due) {
-      await deliverOne(delivery).catch((err) => {
-        // deliverOne already records failures on the row; this catch is a
-        // last-resort guard so a single throw never aborts the loop.
-        console.error(`[Webhooks] delivery ${delivery.id} threw:`, err);
-      });
-    }
+    // Process the batch with bounded concurrency so one hung subscriber (up to
+    // DELIVERY_TIMEOUT_MS) can't head-of-line-block every other due delivery.
+    // deliverOne isolates per-row failures and persists its own outcome, so
+    // concurrent execution is safe.
+    const queue = [...due];
+    const runWorker = async (): Promise<void> => {
+      for (;;) {
+        const delivery = queue.shift();
+        if (!delivery) return;
+        await deliverOne(delivery).catch((err) => {
+          // deliverOne already records failures on the row; this catch is a
+          // last-resort guard so a single throw never aborts the worker.
+          console.error(`[Webhooks] delivery ${delivery.id} threw:`, err);
+        });
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(DELIVERY_CONCURRENCY, due.length) }, runWorker)
+    );
   } finally {
     delivering = false;
   }
@@ -333,6 +436,17 @@ async function deliverOne(delivery: DueDelivery): Promise<void> {
   // A disabled subscription's queued deliveries are abandoned (terminal).
   if (!sub.enabled) {
     await markFailed(delivery.id, delivery.attempts + 1, 'Subscription disabled');
+    return;
+  }
+
+  // SSRF guard at delivery time: the host may have been safe at create time but
+  // now resolve (via DNS) to an internal address. Re-check before POSTing.
+  if (await isBlockedWebhookHost(sub.url)) {
+    await markFailed(
+      delivery.id,
+      delivery.attempts + 1,
+      'Destination resolves to a blocked (private/loopback/link-local/metadata) address'
+    );
     return;
   }
 
@@ -366,6 +480,9 @@ async function deliverOne(delivery: DueDelivery): Promise<void> {
       method: 'POST',
       headers,
       body: delivery.payload,
+      // Do NOT auto-follow redirects: a 3xx could point at internal
+      // infrastructure (SSRF). It instead falls through as a non-2xx failure.
+      redirect: 'manual',
       signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
     });
 

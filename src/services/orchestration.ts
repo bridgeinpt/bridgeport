@@ -515,8 +515,8 @@ export async function executePlan(planId: string): Promise<void> {
     }
 
     // Only emit plan.failed when FAILED is the terminal state. With autoRollback
-    // on, rollbackPlan transitions the plan to ROLLED_BACK, so we let that path
-    // own the outcome rather than emit a misleading plan.failed.
+    // on, rollbackPlan transitions the plan to ROLLED_BACK and emits the terminal
+    // plan.rolled_back event itself, so we must NOT also emit plan.failed here.
     if (!plan.autoRollback) {
       void emitWebhookEvent('plan.failed', plan.environmentId, {
         planId: plan.id,
@@ -799,6 +799,18 @@ export async function rollbackPlan(
 
   const failedStep = plan.steps.find((s) => s.status === STEP_STATUS.FAILED);
   const failedSvc = failedStep?.serviceDeployment?.service ?? failedStep?.service;
+
+  // Terminal webhook for the rollback path (issue #126). executePlan defers to
+  // rollbackPlan to own the outcome when autoRollback is on, so this is the ONE
+  // terminal event for an auto-rolled-back plan. Fires exactly once, here, at the
+  // ROLLED_BACK transition. Fire-and-forget: emitWebhookEvent never throws.
+  void emitWebhookEvent('plan.rolled_back', plan.environmentId, {
+    planId: plan.id,
+    planName: plan.name,
+    status: PLAN_STATUS.ROLLED_BACK,
+    serviceName: failedSvc?.name,
+    error: failedStep?.error ?? undefined,
+  });
 
   await sendSystemNotification(
     NOTIFICATION_TYPES.SYSTEM_DEPLOYMENT_FAILED,

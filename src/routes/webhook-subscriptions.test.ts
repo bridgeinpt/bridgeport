@@ -120,6 +120,28 @@ describe('webhook subscription routes (issue #126)', () => {
 
       expect(res.statusCode).toBe(400);
     });
+
+    it('rejects an SSRF metadata-IP destination with 400', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/environments/${envAId}/webhooks`,
+        headers: { authorization: `Bearer ${operatorToken}` },
+        payload: { url: 'http://169.254.169.254/latest/meta-data/', events: ['deployment.completed'] },
+      });
+
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('rejects a localhost destination with 400', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/environments/${envAId}/webhooks`,
+        headers: { authorization: `Bearer ${operatorToken}` },
+        payload: { url: 'http://localhost/hook', events: ['deployment.completed'] },
+      });
+
+      expect(res.statusCode).toBe(400);
+    });
   });
 
   // ==================== GET list + GET one (env scoping) ====================

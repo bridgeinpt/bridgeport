@@ -30,7 +30,7 @@ import {
 } from '../services/webhook-subscriptions.js';
 import { logAudit, actorFrom } from '../services/audit.js';
 import { requireOperator } from '../plugins/authorize.js';
-import { validateBody, parsePaginationQuery } from '../lib/helpers.js';
+import { validateBody, parsePaginationQuery, getErrorMessage } from '../lib/helpers.js';
 import { routeSchema } from '../lib/openapi-schema.js';
 
 const envIdParamsSchema = z.object({ envId: z.string() });
@@ -68,7 +68,13 @@ export async function webhookSubscriptionRoutes(fastify: FastifyInstance): Promi
         return reply.code(400).send({ error: 'Invalid event code(s)' });
       }
 
-      const subscription = await createWebhookSubscription(envId, body);
+      let subscription;
+      try {
+        subscription = await createWebhookSubscription(envId, body);
+      } catch (err) {
+        // SSRF guard (and any other create-time validation) → 400.
+        return reply.code(400).send({ error: getErrorMessage(err, 'Invalid webhook subscription') });
+      }
 
       await logAudit({
         action: 'create',

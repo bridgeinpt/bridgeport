@@ -25,6 +25,13 @@ vi.mock('../lib/crypto.js', () => ({
   decrypt: vi.fn().mockReturnValue('shhh-secret'),
 }));
 
+// Mock DNS so the SSRF host check is deterministic: hostnames resolve to a
+// public address by default; individual tests override for blocked cases.
+const mockDnsLookup = vi.fn();
+vi.mock('node:dns/promises', () => ({
+  lookup: (...args: unknown[]) => mockDnsLookup(...args),
+}));
+
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
@@ -36,6 +43,7 @@ import {
   emitWebhookEvent,
   deliverPending,
   cleanupOldDeliveries,
+  isBlockedWebhookHost,
   SIGNATURE_HEADER,
 } from './webhook-subscriptions.js';
 
@@ -49,6 +57,8 @@ beforeEach(() => {
   // Restore default crypto behavior (clearAllMocks wipes implementations).
   mockEncrypt.mockReturnValue({ ciphertext: 'enc-ciphertext', nonce: 'enc-nonce' });
   mockDecrypt.mockReturnValue('shhh-secret');
+  // Default DNS: hostnames resolve to a public, routable address.
+  mockDnsLookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
 });
 
 describe('createWebhookSubscription', () => {
@@ -113,6 +123,16 @@ describe('createWebhookSubscription', () => {
     expect(createArg.data.secretNonce).toBeUndefined();
     expect(out.hasSecret).toBe(false);
   });
+
+  it('rejects an SSRF destination (metadata IP) before any row is created', async () => {
+    await expect(
+      createWebhookSubscription('env-1', {
+        url: 'http://169.254.169.254/latest/meta-data/',
+        events: ['deployment.completed'],
+      })
+    ).rejects.toThrow(/private|loopback|link-local|metadata/i);
+    expect(mockPrisma.webhookSubscription.create).not.toHaveBeenCalled();
+  });
 });
 
 describe('areValidEvents', () => {
@@ -128,6 +148,42 @@ describe('areValidEvents', () => {
   it('accepts a valid subset of the canonical events', () => {
     expect(areValidEvents(['deployment.completed'])).toBe(true);
     expect(areValidEvents(['plan.completed', 'backup.failed', 'sync.completed'])).toBe(true);
+  });
+
+  it('accepts the new plan.rolled_back event', () => {
+    expect(areValidEvents(['plan.rolled_back'])).toBe(true);
+  });
+});
+
+describe('isBlockedWebhookHost (SSRF guard)', () => {
+  it('blocks loopback, private, link-local, and metadata literal IPs', async () => {
+    expect(await isBlockedWebhookHost('http://127.0.0.1/')).toBe(true);
+    expect(await isBlockedWebhookHost('http://10.0.0.5/')).toBe(true);
+    expect(await isBlockedWebhookHost('http://172.16.0.1/')).toBe(true);
+    expect(await isBlockedWebhookHost('http://192.168.1.1/')).toBe(true);
+    expect(await isBlockedWebhookHost('http://169.254.169.254/latest/meta-data/')).toBe(true);
+    expect(await isBlockedWebhookHost('http://[::1]/')).toBe(true);
+  });
+
+  it('blocks localhost and *.local hostnames without a DNS round-trip', async () => {
+    expect(await isBlockedWebhookHost('http://localhost/')).toBe(true);
+    expect(await isBlockedWebhookHost('http://printer.local/')).toBe(true);
+    expect(mockDnsLookup).not.toHaveBeenCalled();
+  });
+
+  it('blocks non-http(s) schemes', async () => {
+    expect(await isBlockedWebhookHost('ftp://example.com/')).toBe(true);
+    expect(await isBlockedWebhookHost('file:///etc/passwd')).toBe(true);
+  });
+
+  it('blocks a public hostname that resolves to a private address', async () => {
+    mockDnsLookup.mockResolvedValue([{ address: '10.1.2.3', family: 4 }]);
+    expect(await isBlockedWebhookHost('https://evil.example.com/')).toBe(true);
+  });
+
+  it('allows a public host that resolves to a routable address', async () => {
+    mockDnsLookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
+    expect(await isBlockedWebhookHost('https://hook.example.com/')).toBe(false);
   });
 });
 
@@ -317,6 +373,64 @@ describe('deliverPending', () => {
     // Both rows were attempted (fetch fired twice); the loop survived the throw
     // on del-bad's first update and went on to process del-good.
     expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('sends with redirect:manual so 3xx is not auto-followed (SSRF)', async () => {
+    mockPrisma.webhookDelivery.findMany.mockResolvedValue([dueRow()] as never);
+    mockPrisma.webhookDelivery.update.mockResolvedValue({} as never);
+    mockFetch.mockResolvedValue({ ok: true, status: 200 });
+
+    await deliverPending();
+
+    const init = mockFetch.mock.calls[0][1] as { redirect?: string };
+    expect(init.redirect).toBe('manual');
+  });
+
+  it('marks failed (no POST) when the destination resolves to a blocked address', async () => {
+    mockPrisma.webhookDelivery.findMany.mockResolvedValue([dueRow()] as never);
+    mockPrisma.webhookDelivery.update.mockResolvedValue({} as never);
+    // DNS now resolves the host to an internal address (rebinding / changed DNS).
+    mockDnsLookup.mockResolvedValue([{ address: '169.254.169.254', family: 4 }]);
+
+    await deliverPending();
+
+    expect(mockFetch).not.toHaveBeenCalled();
+    const data = (mockPrisma.webhookDelivery.update.mock.calls[0][0] as { data: Record<string, unknown> }).data;
+    expect(data.status).toBe('failed');
+    expect(String(data.lastError)).toMatch(/blocked|private|loopback|link-local|metadata/i);
+  });
+
+  it('processes the batch concurrently — a hung row does not block the others', async () => {
+    // Three due rows; the first fetch never resolves until released. With
+    // concurrent workers, the other two still complete.
+    mockPrisma.webhookDelivery.findMany.mockResolvedValue([
+      dueRow({ id: 'del-slow' }),
+      dueRow({ id: 'del-1' }),
+      dueRow({ id: 'del-2' }),
+    ] as never);
+    mockPrisma.webhookDelivery.update.mockResolvedValue({} as never);
+
+    let releaseSlow: (v: unknown) => void = () => {};
+    const slow = new Promise((resolve) => {
+      releaseSlow = resolve;
+    });
+    mockFetch.mockImplementation((url: string, init: { body: string }) => {
+      // Distinguish rows by a marker isn't possible (same url), so block only the
+      // FIRST fetch invocation.
+      if (mockFetch.mock.calls.length === 1) return slow.then(() => ({ ok: true, status: 200 }));
+      return Promise.resolve({ ok: true, status: 200 });
+    });
+
+    const sweep = deliverPending();
+    // Let microtasks flush; the two fast rows should resolve while the slow one
+    // is still pending.
+    await new Promise((r) => setTimeout(r, 20));
+    // del-1 and del-2 delivered (2 updates) even though del-slow is still hung.
+    expect(mockPrisma.webhookDelivery.update.mock.calls.length).toBeGreaterThanOrEqual(2);
+
+    releaseSlow(undefined);
+    await sweep;
+    expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 
   it('guards against overlapping sweeps (a concurrent call returns early)', async () => {

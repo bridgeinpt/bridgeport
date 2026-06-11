@@ -1,22 +1,37 @@
 /**
  * Idempotency-Key support for mutating POSTs (issue #126).
  *
- * Registered as a Fastify plugin AFTER the authenticate decorator so the env
- * scope (`request.authUser`) is known. It engages ONLY when a request is a POST
- * carrying an `Idempotency-Key` header — every other request passes straight
- * through, so the feature naturally covers /deployments,
- * /deployment-plans/:id/execute, /backups/:id/run, /servers, etc. without any
- * per-route wiring.
+ * Registered as a global Fastify plugin. NOTE: this global preHandler runs
+ * BEFORE the route-level `fastify.authenticate` preHandler, so it does NOT have
+ * `request.authUser`. To keep idempotency keys from colliding across tenants
+ * (and to neutralize the pre-auth ordering for replays), the stored key folds a
+ * credential scope into its value: `storedKey = sha256(credential):rawClientKey`
+ * where the credential is the raw Authorization (or Cookie) header. The
+ * `@@unique([key, method, path])` constraint then separates principals
+ * automatically — two different tokens reusing the same Idempotency-Key value on
+ * the same route get DISTINCT rows, so there is no cross-tenant replay/leak and
+ * no spurious 409. A replay can only ever match a request bearing the SAME
+ * credential. We never store the raw Authorization value — only its hash, folded
+ * into the key.
+ *
+ * It engages ONLY when a request is a POST carrying an `Idempotency-Key` header
+ * — every other request passes straight through, so the feature naturally covers
+ * /deployments, /deployment-plans/:id/execute, /backups/:id/run, /servers, etc.
+ * without any per-route wiring.
  *
  * Contract:
- *   - First time a (key, method, routerPath) is seen → an IdempotencyKey row is
- *     created (inProgress=true, expiresAt = now + 24h). The handler runs, and an
- *     onSend hook persists the response (2xx) or deletes the row (non-2xx, so a
- *     retry can proceed).
+ *   - First time a (storedKey, method, routerPath) is seen → an IdempotencyKey
+ *     row is created (inProgress=true, expiresAt = now + 24h). The handler runs,
+ *     and an onSend hook persists the response (2xx) or deletes the row (non-2xx,
+ *     so a retry can proceed).
  *   - A replay with the SAME body whose stored response exists → the handler is
  *     SKIPPED and the cached response is returned verbatim (no second deploy).
- *   - A replay with the SAME body still inProgress (a concurrent retry) → 409.
+ *   - A replay with the SAME body still inProgress (a concurrent retry) → 409,
+ *     UNLESS the inProgress row is older than STALE_INPROGRESS_MS, in which case
+ *     it is treated as dead (a crashed request) and taken over.
  *   - A replay with a DIFFERENT body → 409 IDEMPOTENCY_KEY_REUSED.
+ *   - An EXPIRED row is deleted and replaced (a key legitimately reused after the
+ *     24h window is honored without waiting for the daily cleanup).
  *
  * The `@@unique([key, method, path])` constraint is used to win create races:
  * a P2002 on insert means another request beat us to it, so we treat it as a
@@ -37,6 +52,14 @@ import { ApiError } from './errors.js';
 
 /** How long a stored idempotency result is honored before it expires. */
 export const IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1000; // 24h
+
+/**
+ * How long an `inProgress` row is trusted before it is treated as dead. The row
+ * is created inProgress=true BEFORE the handler runs; if the process crashes or
+ * the connection drops, onResponse never fires and the row would otherwise wedge
+ * the key until the 24h expiry. After this threshold a retry takes the row over.
+ */
+export const STALE_INPROGRESS_MS = 5 * 60 * 1000; // 5 min
 
 /**
  * Routes that run their OWN idempotency handling and must NOT be double-handled
@@ -121,6 +144,22 @@ function resolveEnvironmentId(request: FastifyRequest): string | null {
   return params.envId ?? params.id ?? null;
 }
 
+/**
+ * Derive a per-credential scope from the request, computed PRE-auth (this hook
+ * runs before `fastify.authenticate`). The app authenticates via the
+ * `Authorization: Bearer <token>` header (JWT or API token); a session may also
+ * arrive via a Cookie header. We hash whichever is present so the raw credential
+ * is never stored. An unauthenticated request hashes the empty string (a
+ * constant) — harmless, since such requests are rejected by authenticate anyway.
+ */
+function scopeHash(request: FastifyRequest): string {
+  const auth = request.headers.authorization;
+  const cookie = request.headers.cookie;
+  const credential =
+    (typeof auth === 'string' ? auth : '') || (typeof cookie === 'string' ? cookie : '') || '';
+  return createHash('sha256').update(credential).digest('hex').slice(0, 16);
+}
+
 async function preHandler(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   if (request.method.toUpperCase() !== 'POST') return;
 
@@ -134,11 +173,22 @@ async function preHandler(request: FastifyRequest, reply: FastifyReply): Promise
   // Non-JSON body (multipart upload, etc.) — skip idempotency gracefully.
   if (requestHash === null) return;
 
+  // Fold the credential scope into the stored key so different principals never
+  // share a row (the @@unique([key,method,path]) constraint separates them). The
+  // raw client key is kept only for hashing — never persisted on its own.
+  const storedKey = `${scopeHash(request)}:${key}`;
+
   const existing = await prisma.idempotencyKey.findUnique({
-    where: { key_method_path: { key, method: 'POST', path: routerPath } },
+    where: { key_method_path: { key: storedKey, method: 'POST', path: routerPath } },
   });
 
-  if (existing && existing.expiresAt > new Date()) {
+  const now = new Date();
+
+  if (existing && existing.expiresAt <= now) {
+    // Expired row — delete it (best-effort) so the fresh create below does not
+    // collide with the unique constraint, then fall through to create.
+    await prisma.idempotencyKey.delete({ where: { id: existing.id } }).catch(() => {});
+  } else if (existing) {
     if (existing.requestHash !== requestHash) {
       throw new ApiError(
         'IDEMPOTENCY_KEY_REUSED',
@@ -147,20 +197,31 @@ async function preHandler(request: FastifyRequest, reply: FastifyReply): Promise
       );
     }
     if (existing.inProgress) {
-      // A concurrent request with the same key+body is still running.
-      throw new ApiError(
-        'CONFLICT',
-        'A request with this Idempotency-Key is still in progress',
-        { field: 'Idempotency-Key', hint: 'Retry once the original request completes.' }
-      );
+      const stale = existing.createdAt.getTime() < now.getTime() - STALE_INPROGRESS_MS;
+      if (stale) {
+        // The original request crashed/dropped before onResponse finalized the
+        // row. Treat it as dead, delete it, and take over with a fresh create.
+        await prisma.idempotencyKey.delete({ where: { id: existing.id } }).catch(() => {});
+      } else {
+        // A concurrent request with the same key+body is still running.
+        throw new ApiError(
+          'CONFLICT',
+          'A request with this Idempotency-Key is still in progress',
+          { field: 'Idempotency-Key', hint: 'Retry once the original request completes.' }
+        );
+      }
+    } else {
+      // Replay: short-circuit with the stored response. The handler does NOT run.
+      // Only set a JSON content-type when there is actually a JSON body to send;
+      // an originally-empty/204 response replays with an EMPTY body.
+      const hasBody = !!existing.responseBody;
+      reply.code(existing.responseStatus ?? 200).header('idempotent-replayed', 'true');
+      if (hasBody) {
+        reply.header('content-type', 'application/json; charset=utf-8');
+      }
+      reply.send(hasBody ? existing.responseBody : '');
+      return;
     }
-    // Replay: short-circuit with the stored response. The handler does NOT run.
-    reply
-      .code(existing.responseStatus ?? 200)
-      .header('content-type', 'application/json; charset=utf-8')
-      .header('idempotent-replayed', 'true')
-      .send(existing.responseBody ?? '{}');
-    return;
   }
 
   // No live row — create one. Use the unique constraint to win races: a P2002
@@ -168,7 +229,7 @@ async function preHandler(request: FastifyRequest, reply: FastifyReply): Promise
   try {
     const row = await prisma.idempotencyKey.create({
       data: {
-        key,
+        key: storedKey,
         method: 'POST',
         path: routerPath,
         requestHash,
@@ -177,7 +238,7 @@ async function preHandler(request: FastifyRequest, reply: FastifyReply): Promise
         expiresAt: new Date(Date.now() + IDEMPOTENCY_RETENTION_MS),
       },
     });
-    setFreshMarker(request, { rowId: row.id, key });
+    setFreshMarker(request, { rowId: row.id, key: storedKey });
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       // Lost the race. A row now exists (possibly with a stale expiresAt if the

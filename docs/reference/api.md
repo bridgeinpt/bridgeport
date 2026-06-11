@@ -401,7 +401,8 @@ A subscription must list one or more of these canonical event codes:
 | `deployment.completed` | A single-service deployment succeeds |
 | `deployment.failed` | A single-service deployment fails |
 | `plan.completed` | A deployment plan reaches `COMPLETED` (final status in payload) |
-| `plan.failed` | A deployment plan reaches a terminal `FAILED` (not when auto-rollback takes over) |
+| `plan.failed` | A deployment plan reaches a terminal `FAILED` (auto-rollback disabled; when auto-rollback takes over, `plan.rolled_back` fires instead) |
+| `plan.rolled_back` | A deployment plan failed with auto-rollback enabled and reached the terminal `ROLLED_BACK` state |
 | `backup.completed` | A database backup succeeds |
 | `backup.failed` | A database backup fails |
 | `sync.completed` | A sync batch settles (final batch status in payload — one event per batch) |
