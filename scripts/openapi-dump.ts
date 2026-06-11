@@ -9,8 +9,8 @@
  * root.
  *
  * Run:
- *   npm run openapi:dump    # regenerate the snapshot
- *   npm run openapi:check   # regenerate + fail if it drifted from git
+ *   pnpm run openapi:dump    # regenerate the snapshot
+ *   pnpm run openapi:check   # regenerate + fail if it drifted from git
  *
  * Determinism: the OpenAPI `info.version` is pinned to a stable literal in
  * src/plugins/openapi.ts so the snapshot is byte-identical across builds and

@@ -69,8 +69,8 @@ A snapshot of the spec is checked in at `openapi.json` (repo root). Regenerate
 it whenever you add or change a route schema:
 
 ```bash
-npm run openapi:dump    # rebuild openapi.json from the live route schemas
-npm run openapi:check   # rebuild + fail if it drifted from git (used in CI)
+pnpm run openapi:dump    # rebuild openapi.json from the live route schemas
+pnpm run openapi:check   # rebuild + fail if it drifted from git (used in CI)
 ```
 
 The `openapi` job in `.github/workflows/test.yml` runs `openapi:check` on every

@@ -188,15 +188,16 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 20
-          cache: npm
-      - run: npm install -g npm@latest
-      - run: npm ci
+          node-version: 24
+      # pnpm via npm (version pinned to package.json's packageManager):
+      # pnpm/action-setup isn't on this repo's GitHub Actions allowlist.
+      - run: npm install -g pnpm@11.5.3
+      - run: pnpm install --frozen-lockfile
       # The dump builds the app port-less without touching the DB; Prisma
       # client types are still needed for the route imports to resolve.
-      - run: npx prisma generate
+      - run: pnpm exec prisma generate
       # Regenerate the spec, then fail if openapi.json changed vs. the commit.
-      - run: npm run openapi:check
+      - run: pnpm run openapi:check
         env:
           MASTER_KEY: ${{ env.TEST_MASTER_KEY }}
           JWT_SECRET: ${{ env.TEST_JWT_SECRET }}
