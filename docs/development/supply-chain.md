@@ -33,7 +33,7 @@ minimumReleaseAge: 1440
 
 npm runs `preinstall`, `install`, and `postinstall` lifecycle scripts from every package in the dependency tree by default. A single compromised transitive dependency can therefore execute arbitrary code on a developer machine or in CI the moment dependencies are installed.
 
-pnpm flips this: it **blocks all dependency build scripts by default**. The `allowBuilds` map is the explicit allowlist — each package is set to `true` (allowed to run its scripts) or `false` (denied). Anything not listed stays blocked, and with pnpm's default `strictDepBuilds: true`, an unlisted package that *wants* to build fails the install loudly rather than silently shipping a broken/unbuilt module.
+pnpm flips this: it **blocks all dependency build scripts by default**. The `allowBuilds` map is the explicit allowlist — each package is set to `true` (allowed to run its scripts) or `false` (denied). Anything not listed stays blocked. By default pnpm only *warns* about a blocked build (the install still succeeds), so we additionally set `strictDepBuilds: true` — an unlisted package that *wants* to build then fails the install loudly rather than silently shipping a broken/unbuilt module.
 
 This replaces the old npm `.npmrc` `ignore-scripts=true` (plus the manual `npm rebuild` dance): allowlisted native modules build automatically at install time, so there is **no separate rebuild step** in CI or the Dockerfile.
 
