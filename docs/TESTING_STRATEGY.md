@@ -1315,11 +1315,12 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: pnpm
+          node-version: 24
+      # pnpm via npm (pinned to packageManager): pnpm/action-setup isn't on
+      # this repo's GitHub Actions allowlist, and pnpm 11 needs Node >= 22.13.
+      - run: npm install -g pnpm@11.5.3
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec prisma generate
       - run: pnpm exec vitest run --config config/vitest.unit.config.ts --reporter=github-actions
@@ -1330,11 +1331,12 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: pnpm
+          node-version: 24
+      # pnpm via npm (pinned to packageManager): pnpm/action-setup isn't on
+      # this repo's GitHub Actions allowlist, and pnpm 11 needs Node >= 22.13.
+      - run: npm install -g pnpm@11.5.3
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter bridgeport-ui exec vitest run "src/lib/" --reporter=github-actions
 
@@ -1358,11 +1360,12 @@ jobs:
     needs: unit-backend
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: pnpm
+          node-version: 24
+      # pnpm via npm (pinned to packageManager): pnpm/action-setup isn't on
+      # this repo's GitHub Actions allowlist, and pnpm 11 needs Node >= 22.13.
+      - run: npm install -g pnpm@11.5.3
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec prisma generate
       - run: pnpm exec vitest run --config config/vitest.config.ts --coverage --reporter=github-actions
@@ -1381,11 +1384,12 @@ jobs:
     needs: unit-frontend
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: pnpm
+          node-version: 24
+      # pnpm via npm (pinned to packageManager): pnpm/action-setup isn't on
+      # this repo's GitHub Actions allowlist, and pnpm 11 needs Node >= 22.13.
+      - run: npm install -g pnpm@11.5.3
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter bridgeport-ui exec vitest run --coverage --reporter=github-actions
       - uses: codecov/codecov-action@v4
@@ -1403,11 +1407,12 @@ jobs:
       contains(github.event.pull_request.changed_files, 'prisma/')
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: pnpm
+          node-version: 24
+      # pnpm via npm (pinned to packageManager): pnpm/action-setup isn't on
+      # this repo's GitHub Actions allowlist, and pnpm 11 needs Node >= 22.13.
+      - run: npm install -g pnpm@11.5.3
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec vitest run --config config/vitest.config.ts tests/migrations/
 
@@ -1419,11 +1424,12 @@ jobs:
     if: github.event_name == 'schedule'
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: pnpm
+          node-version: 24
+      # pnpm via npm (pinned to packageManager): pnpm/action-setup isn't on
+      # this repo's GitHub Actions allowlist, and pnpm 11 needs Node >= 22.13.
+      - run: npm install -g pnpm@11.5.3
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
@@ -1444,11 +1450,12 @@ jobs:
     needs: [unit-backend, unit-frontend]
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: pnpm
+          node-version: 24
+      # pnpm via npm (pinned to packageManager): pnpm/action-setup isn't on
+      # this repo's GitHub Actions allowlist, and pnpm 11 needs Node >= 22.13.
+      - run: npm install -g pnpm@11.5.3
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec prisma generate
       - run: pnpm run build
@@ -1461,11 +1468,12 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: pnpm
+          node-version: 24
+      # pnpm via npm (pinned to packageManager): pnpm/action-setup isn't on
+      # this repo's GitHub Actions allowlist, and pnpm 11 needs Node >= 22.13.
+      - run: npm install -g pnpm@11.5.3
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec prisma generate
       - run: pnpm exec tsc --noEmit
