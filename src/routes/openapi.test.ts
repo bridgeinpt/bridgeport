@@ -62,6 +62,139 @@ describe('OpenAPI plugin', () => {
     });
   });
 
+  describe('schema coverage (Zod → spec wiring)', () => {
+    const HTTP_METHODS = new Set(['get', 'post', 'put', 'patch', 'delete']);
+
+    // Iterate every operation in the spec, returning the list of operation
+    // objects (skipping the path-level shared `parameters` key, which is not an
+    // operation).
+    function eachOperation(spec: Record<string, unknown>): Array<Record<string, unknown>> {
+      const ops: Array<Record<string, unknown>> = [];
+      const paths = (spec.paths || {}) as Record<string, Record<string, unknown>>;
+      for (const methods of Object.values(paths)) {
+        for (const [method, op] of Object.entries(methods)) {
+          if (!HTTP_METHODS.has(method)) continue;
+          if (op && typeof op === 'object') ops.push(op as Record<string, unknown>);
+        }
+      }
+      return ops;
+    }
+
+    const WRITE_METHODS = new Set(['post', 'put', 'patch']);
+
+    // Iterate every operation paired with its HTTP method, so write-only gates
+    // can filter on the method.
+    function eachOperationWithMethod(
+      spec: Record<string, unknown>
+    ): Array<{ method: string; op: Record<string, unknown> }> {
+      const out: Array<{ method: string; op: Record<string, unknown> }> = [];
+      const paths = (spec.paths || {}) as Record<string, Record<string, unknown>>;
+      for (const methods of Object.values(paths)) {
+        for (const [method, op] of Object.entries(methods)) {
+          if (!HTTP_METHODS.has(method)) continue;
+          if (op && typeof op === 'object') out.push({ method, op: op as Record<string, unknown> });
+        }
+      }
+      return out;
+    }
+
+    function hasRequestSchema(op: Record<string, unknown>): boolean {
+      const params = op.parameters;
+      const hasParams = Array.isArray(params) && params.length > 0;
+      return Boolean(op.requestBody) || hasParams;
+    }
+
+    it('declares request schemas (body/params) on most operations', async () => {
+      const res = await app.inject({ method: 'GET', url: '/openapi.json' });
+      const spec = res.json();
+
+      const ops = eachOperation(spec);
+      const withRequest = ops.filter(hasRequestSchema).length;
+      const coverage = withRequest / ops.length;
+
+      // The Zod-derived request schemas are wired in via src/lib/openapi-schema.ts.
+      // Actual coverage is ~87% (240/275). The threshold is intentionally set a
+      // few points below that so it isn't flaky, and MUST RATCHET UPWARD as more
+      // routes gain typed schemas — never lower it to make a change pass.
+      expect(ops.length).toBeGreaterThan(50);
+      expect(coverage).toBeGreaterThanOrEqual(0.85);
+    });
+
+    it('documents a request body on most WRITE operations (POST/PATCH/PUT)', async () => {
+      const res = await app.inject({ method: 'GET', url: '/openapi.json' });
+      const spec = res.json();
+
+      // The previous request-schema gate above counts a route as "covered" if it
+      // has ANY params, so a POST/PATCH/PUT that validates a real body but only
+      // declares `params:` would slip through with its body undocumented. This
+      // gate is stricter: of all write operations, what fraction declare a
+      // `requestBody`? (Many write ops are genuinely body-less actions —
+      // /health, /restart, /read-all — so this floor is naturally lower.)
+      const writeOps = eachOperationWithMethod(spec).filter((e) => WRITE_METHODS.has(e.method));
+      const writeWithBody = writeOps.filter((e) => Boolean(e.op.requestBody)).length;
+      const coverage = writeWithBody / writeOps.length;
+
+      // Actual coverage is ~62% (79/127). Floor set a few points below so it
+      // isn't flaky, and MUST RATCHET UPWARD as more write routes gain typed
+      // bodies — never lower it to make a change pass.
+      expect(writeOps.length).toBeGreaterThan(50);
+      expect(coverage).toBeGreaterThanOrEqual(0.58);
+    });
+
+    it('never marks a defaulted parameter as required (input semantics)', async () => {
+      const res = await app.inject({ method: 'GET', url: '/openapi.json' });
+      const spec = res.json();
+
+      // Request schemas are converted with `io: 'input'`, so a `.default()` field
+      // (e.g. monitoring/databases `page`/`limit`/`hours`) is OPTIONAL for the
+      // client. A parameter must NEVER carry both `default` and `required: true`.
+      const offenders: string[] = [];
+      for (const { op } of eachOperationWithMethod(spec)) {
+        for (const p of (op.parameters as Array<Record<string, unknown>>) ?? []) {
+          const schema = p.schema as Record<string, unknown> | undefined;
+          if (p.required === true && schema && 'default' in schema) {
+            offenders.push(String(p.name));
+          }
+        }
+      }
+      expect(offenders).toEqual([]);
+    });
+
+    it('never emits `additionalProperties: false` (runtime strips unknown keys)', async () => {
+      const res = await app.inject({ method: 'GET', url: '/openapi.json' });
+      const spec = res.json();
+
+      // No route schema uses `.strict()`, so any `additionalProperties: false`
+      // would be a spurious artifact of OUTPUT-mode conversion. The sanitizer in
+      // src/lib/openapi-schema.ts strips it; assert none survive.
+      expect(JSON.stringify(spec)).not.toContain('"additionalProperties":false');
+    });
+
+    it('references the shared ErrorEnvelope from at least one operation', async () => {
+      const res = await app.inject({ method: 'GET', url: '/openapi.json' });
+      const spec = res.json();
+
+      const ops = eachOperation(spec);
+      const referencesErrorEnvelope = ops.some((op) =>
+        JSON.stringify(op.responses ?? {}).includes(
+          '#/components/schemas/ErrorEnvelope'
+        )
+      );
+      expect(referencesErrorEnvelope).toBe(true);
+    });
+
+    it("flags the sync envelope's deprecated `success` alias with deprecated: true", async () => {
+      const res = await app.inject({ method: 'GET', url: '/openapi.json' });
+      const spec = res.json();
+
+      const syncResult = spec.components?.schemas?.SyncResult;
+      expect(syncResult).toBeDefined();
+      // `status` is the supported terminal outcome; `success` is the deprecated
+      // alias (issue #127) and must be machine-flagged for client generators.
+      expect(syncResult.properties.success.deprecated).toBe(true);
+    });
+  });
+
   describe('GET /api/docs', () => {
     // @fastify/swagger-ui registers /api/docs as a redirect to
     // /api/docs/static/index.html. Follow the redirect once to land on the

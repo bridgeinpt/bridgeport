@@ -5,6 +5,10 @@ import { requireAdmin } from '../plugins/authorize.js';
 import { logAudit, actorFrom } from '../services/audit.js';
 import { safeJsonParse, validateBody, findOrNotFound } from '../lib/helpers.js';
 import { resetTypeToDefaults, exportTypeAsJson, getLastSyncResult } from '../services/plugin-loader.js';
+import { routeSchema } from '../lib/openapi-schema.js';
+
+const idParamSchema = z.object({ id: z.string() });
+const idCommandIdParamSchema = z.object({ id: z.string(), commandId: z.string() });
 
 const createServiceTypeSchema = z.object({
   name: z.string().min(1).max(50).regex(/^[a-z0-9-]+$/),
@@ -80,7 +84,14 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
 
   fastify.get(
     '/api/settings/plugin-sync-status',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Get the result of the last plugin sync',
+        errors: [401],
+      }),
+    },
     async () => {
       return { syncResult: getLastSyncResult() };
     }
@@ -91,7 +102,14 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
   // List all service types with their commands
   fastify.get(
     '/api/settings/service-types',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'List all service types with their commands',
+        errors: [401],
+      }),
+    },
     async () => {
       const serviceTypes = await prisma.serviceType.findMany({
         include: {
@@ -112,7 +130,15 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
   // Get a single service type
   fastify.get(
     '/api/settings/service-types/:id',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Get a single service type',
+        params: idParamSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -136,7 +162,15 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
   // Create a service type (admin only)
   fastify.post(
     '/api/settings/service-types',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Create a service type (admin only)',
+        body: createServiceTypeSchema,
+        errors: [400, 401, 403, 409],
+      }),
+    },
     async (request, reply) => {
       const body = validateBody(createServiceTypeSchema, request, reply);
       if (!body) return;
@@ -174,7 +208,16 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
   // Update a service type (admin only)
   fastify.patch(
     '/api/settings/service-types/:id',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Update a service type (admin only)',
+        params: idParamSchema,
+        body: updateServiceTypeSchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = validateBody(updateServiceTypeSchema, request, reply);
@@ -211,7 +254,15 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
   // Delete a service type (admin only)
   fastify.delete(
     '/api/settings/service-types/:id',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Delete a service type (admin only)',
+        params: idParamSchema,
+        errors: [401, 403, 404, 409],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -245,7 +296,15 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
   // Reset service type to plugin defaults (admin only)
   fastify.post(
     '/api/settings/service-types/:id/reset',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Reset a service type to its plugin defaults (admin only)',
+        params: idParamSchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -278,7 +337,15 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
   // Export service type as JSON (admin only)
   fastify.post(
     '/api/settings/service-types/:id/export',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Export a service type as a plugin JSON file (admin only)',
+        params: idParamSchema,
+        errors: [400, 401, 403],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -296,7 +363,16 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
   // Add a command to a service type (admin only)
   fastify.post(
     '/api/settings/service-types/:id/commands',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Add a command to a service type (admin only)',
+        params: idParamSchema,
+        body: createCommandSchema,
+        errors: [400, 401, 403, 404, 409],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = validateBody(createCommandSchema, request, reply);
@@ -353,7 +429,16 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
   // Update a command (admin only)
   fastify.patch(
     '/api/settings/service-types/:id/commands/:commandId',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Update a service type command (admin only)',
+        params: idCommandIdParamSchema,
+        body: updateCommandSchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id, commandId } = request.params as { id: string; commandId: string };
       const body = validateBody(updateCommandSchema, request, reply);
@@ -388,7 +473,15 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
   // Delete a command (admin only)
   fastify.delete(
     '/api/settings/service-types/:id/commands/:commandId',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Delete a service type command (admin only)',
+        params: idCommandIdParamSchema,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id, commandId } = request.params as { id: string; commandId: string };
 
@@ -417,7 +510,15 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
   // Reorder commands (admin only)
   fastify.put(
     '/api/settings/service-types/:id/commands/reorder',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Reorder the commands of a service type (admin only)',
+        params: idParamSchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = z.array(z.string()).safeParse(request.body);
@@ -453,7 +554,14 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
   // List all database types with their commands
   fastify.get(
     '/api/settings/database-types',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'List all database types with their commands',
+        errors: [401],
+      }),
+    },
     async () => {
       const databaseTypes = await prisma.databaseType.findMany({
         include: {
@@ -479,7 +587,15 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
   // Get a single database type
   fastify.get(
     '/api/settings/database-types/:id',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Get a single database type',
+        params: idParamSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -508,7 +624,15 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
   // Create a database type (admin only)
   fastify.post(
     '/api/settings/database-types',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Create a database type (admin only)',
+        body: createDatabaseTypeSchema,
+        errors: [400, 401, 403, 409],
+      }),
+    },
     async (request, reply) => {
       const body = validateBody(createDatabaseTypeSchema, request, reply);
       if (!body) return;
@@ -556,7 +680,16 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
   // Update a database type (admin only)
   fastify.patch(
     '/api/settings/database-types/:id',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Update a database type (admin only)',
+        params: idParamSchema,
+        body: updateDatabaseTypeSchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = validateBody(updateDatabaseTypeSchema, request, reply);
@@ -605,7 +738,15 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
   // Delete a database type (admin only)
   fastify.delete(
     '/api/settings/database-types/:id',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Delete a database type (admin only)',
+        params: idParamSchema,
+        errors: [401, 403, 404, 409],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -639,7 +780,15 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
   // Reset database type to plugin defaults (admin only)
   fastify.post(
     '/api/settings/database-types/:id/reset',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Reset a database type to its plugin defaults (admin only)',
+        params: idParamSchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -677,7 +826,15 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
   // Export database type as JSON (admin only)
   fastify.post(
     '/api/settings/database-types/:id/export',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Export a database type as a plugin JSON file (admin only)',
+        params: idParamSchema,
+        errors: [400, 401, 403],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -695,7 +852,16 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
   // Add a command to a database type (admin only)
   fastify.post(
     '/api/settings/database-types/:id/commands',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Add a command to a database type (admin only)',
+        params: idParamSchema,
+        body: createCommandSchema,
+        errors: [400, 401, 403, 404, 409],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = validateBody(createCommandSchema, request, reply);
@@ -750,7 +916,16 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
   // Update a database type command (admin only)
   fastify.patch(
     '/api/settings/database-types/:id/commands/:commandId',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Update a database type command (admin only)',
+        params: idCommandIdParamSchema,
+        body: updateCommandSchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id, commandId } = request.params as { id: string; commandId: string };
       const body = validateBody(updateCommandSchema, request, reply);
@@ -785,7 +960,15 @@ export async function settingsRoutes(fastify: FastifyInstance): Promise<void> {
   // Delete a database type command (admin only)
   fastify.delete(
     '/api/settings/database-types/:id/commands/:commandId',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Delete a database type command (admin only)',
+        params: idCommandIdParamSchema,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id, commandId } = request.params as { id: string; commandId: string };
 

@@ -22,6 +22,8 @@
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
+    "openapi:dump": "tsx scripts/openapi-dump.ts",
+    "openapi:check": "tsx scripts/openapi-dump.ts && git diff --exit-code openapi.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:unit": "vitest run --testPathPattern='src/lib/.*\\.test\\.ts$'",

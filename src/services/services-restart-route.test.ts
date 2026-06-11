@@ -122,6 +122,7 @@ vi.mock('../services/system-settings.js', () => ({
 }));
 
 import { serviceRoutes } from '../routes/services.js';
+import { errorEnvelopeSchema } from '../plugins/openapi.js';
 
 async function buildAppWithRestart(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
@@ -132,6 +133,11 @@ async function buildAppWithRestart(): Promise<FastifyInstance> {
       request.authUser = { id: 'u-1', email: 'u@test', role: 'admin' };
     }
   );
+  // Route error responses declare `$ref: 'ErrorEnvelope#'` (issue #198); the
+  // shared schema is normally registered by the @fastify/swagger plugin. This
+  // minimal app skips that plugin, so register the shared schema directly or
+  // fast-json-stringify can't build the error serializers.
+  app.addSchema(errorEnvelopeSchema);
   await app.register(serviceRoutes);
   await app.ready();
   return app;

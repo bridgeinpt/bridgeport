@@ -17,6 +17,7 @@ import { logAgentEvent } from '../services/agent-events.js';
 import crypto from 'crypto';
 import { SERVER_STATUS, HEALTH_STATUS, CONTAINER_STATUS, METRICS_MODE, AGENT_STATUS, DISCOVERY_STATUS } from '../lib/constants.js';
 import { findOrNotFound, validateBody } from '../lib/helpers.js';
+import { routeSchema } from '../lib/openapi-schema.js';
 import { createResponseCache } from '../lib/response-cache.js';
 
 // Short-TTL, single-flight cache for the env metrics summary — polled by every
@@ -49,6 +50,10 @@ const metricsQuerySchema = z.object({
   to: z.string().datetime().optional(),
   limit: z.coerce.number().min(1).max(1000).optional(),
 });
+
+const idParamsSchema = z.object({ id: z.string() });
+const envIdParamsSchema = z.object({ envId: z.string() });
+const summaryQuerySchema = z.object({ includeServices: z.string().optional() });
 
 const serviceHealthCheckSchema = z.object({
   containerName: z.string(),
@@ -178,7 +183,16 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
   // Get metrics for a server
   fastify.get(
     '/api/servers/:id/metrics',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Get metrics for a server',
+        params: idParamsSchema,
+        querystring: metricsQuerySchema,
+        errors: [400, 401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const query = metricsQuerySchema.safeParse(request.query);
@@ -204,7 +218,16 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
   // Get metrics for a service
   fastify.get(
     '/api/services/:id/metrics',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Get metrics for a service',
+        params: idParamsSchema,
+        querystring: metricsQuerySchema,
+        errors: [400, 401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const query = metricsQuerySchema.safeParse(request.query);
@@ -230,7 +253,16 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
   // Get environment metrics summary
   fastify.get(
     '/api/environments/:envId/metrics/summary',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Get the environment metrics summary',
+        params: envIdParamsSchema,
+        querystring: summaryQuerySchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       // Issue #171 — callers that only render server-level data (e.g.
@@ -253,7 +285,15 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
   // Collect metrics for a server (manual trigger)
   fastify.post(
     '/api/servers/:id/collect-metrics',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Manually trigger metrics collection for a server',
+        params: idParamsSchema,
+        errors: [400, 401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -289,7 +329,14 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
   );
 
   // Agent metrics ingest endpoint (token auth)
-  fastify.post('/api/metrics/ingest', async (request, reply) => {
+  fastify.post('/api/metrics/ingest', {
+    schema: routeSchema({
+      tags: ['monitoring'],
+      summary: 'Agent metrics ingest endpoint (agent-token authenticated)',
+      body: serverMetricsIngestSchema,
+      errors: [400, 401],
+    }),
+  }, async (request, reply) => {
     const authHeader = request.headers.authorization;
     if (!authHeader?.startsWith('Bearer ')) {
       return reply.code(401).send({ error: 'Missing or invalid authorization header' });
@@ -502,7 +549,13 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
   });
 
   // Get agent configuration (services with health check URLs for this server)
-  fastify.get('/api/agent/config', async (request, reply) => {
+  fastify.get('/api/agent/config', {
+    schema: routeSchema({
+      tags: ['monitoring'],
+      summary: 'Get agent configuration (agent-token authenticated)',
+      errors: [401],
+    }),
+  }, async (request, reply) => {
     const authHeader = request.headers.authorization;
     if (!authHeader?.startsWith('Bearer ')) {
       return reply.code(401).send({ error: 'Missing or invalid authorization header' });
@@ -577,7 +630,15 @@ export async function metricsRoutes(fastify: FastifyInstance): Promise<void> {
   // Regenerate agent token and redeploy the agent
   fastify.post(
     '/api/servers/:id/regenerate-agent-token',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Regenerate the agent token and redeploy the agent',
+        params: idParamsSchema,
+        errors: [400, 401, 404, 500],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 

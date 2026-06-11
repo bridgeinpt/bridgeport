@@ -9,6 +9,7 @@ import {
 import { requireAdmin } from '../plugins/authorize.js';
 import { logAudit, actorFrom } from '../services/audit.js';
 import { validateBody } from '../lib/helpers.js';
+import { routeSchema } from '../lib/openapi-schema.js';
 
 const updateSettingsSchema = z.object({
   sshCommandTimeoutMs: z.number().int().min(1000).max(600000).optional(),
@@ -50,7 +51,14 @@ export async function systemSettingsRoutes(fastify: FastifyInstance): Promise<vo
   // Get current system settings (all authenticated users)
   fastify.get(
     '/api/settings/system',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Get current system settings (sensitive fields masked)',
+        errors: [401],
+      }),
+    },
     async () => {
       const settings = await getSystemSettings();
       return {
@@ -63,7 +71,15 @@ export async function systemSettingsRoutes(fastify: FastifyInstance): Promise<vo
   // Update system settings (admin only)
   fastify.put(
     '/api/settings/system',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Update system settings (admin only)',
+        body: updateSettingsSchema,
+        errors: [400, 401, 403],
+      }),
+    },
     async (request, reply) => {
       const body = validateBody(updateSettingsSchema, request, reply);
       if (!body) return;
@@ -120,7 +136,14 @@ export async function systemSettingsRoutes(fastify: FastifyInstance): Promise<vo
   // Reset system settings to defaults (admin only)
   fastify.post(
     '/api/settings/system/reset',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Reset system settings to defaults (admin only)',
+        errors: [401, 403],
+      }),
+    },
     async (request) => {
       const settings = await resetSystemSettings();
 

@@ -11,6 +11,7 @@ import {
   parsePaginationQuery,
 } from '../lib/helpers.js';
 import { triggerAutoResyncForFragment } from '../services/config-file-auto-resync.js';
+import { routeSchema } from '../lib/openapi-schema.js';
 
 const createFragmentSchema = z.object({
   name: z.string().min(1),
@@ -23,6 +24,9 @@ const updateFragmentSchema = z.object({
   description: z.string().nullable().optional(),
   content: z.string().optional(),
 });
+
+const idParamsSchema = z.object({ id: z.string() });
+const envIdParamsSchema = z.object({ envId: z.string() });
 
 /**
  * Env-scoped CRUD for ConfigFragment — named, reusable text blocks that
@@ -42,7 +46,15 @@ export async function configFragmentRoutes(fastify: FastifyInstance): Promise<vo
   // large `content` bodies; an unbounded list grows linearly with adoption.
   fastify.get(
     '/api/environments/:envId/config-fragments',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'List config fragments for an environment',
+        params: envIdParamsSchema,
+        errors: [401],
+      }),
+    },
     async (request) => {
       const { envId } = request.params as { envId: string };
       const { limit, offset } = parsePaginationQuery(
@@ -83,7 +95,15 @@ export async function configFragmentRoutes(fastify: FastifyInstance): Promise<vo
   // Get a single fragment
   fastify.get(
     '/api/config-fragments/:id',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Get a config fragment with its "in use by" references',
+        params: idParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -136,7 +156,16 @@ export async function configFragmentRoutes(fastify: FastifyInstance): Promise<vo
   // Create fragment
   fastify.post(
     '/api/environments/:envId/config-fragments',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Create a config fragment in an environment',
+        params: envIdParamsSchema,
+        body: createFragmentSchema,
+        errors: [400, 401, 403, 409],
+      }),
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       const body = validateBody(createFragmentSchema, request, reply);
@@ -167,7 +196,16 @@ export async function configFragmentRoutes(fastify: FastifyInstance): Promise<vo
   // Update fragment
   fastify.patch(
     '/api/config-fragments/:id',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Update a config fragment (fans out auto-resync on content change)',
+        params: idParamsSchema,
+        body: updateFragmentSchema,
+        errors: [400, 401, 403, 404, 409, 422],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = validateUpdateBody(updateFragmentSchema, 'configFragment', request, reply);
@@ -216,7 +254,15 @@ export async function configFragmentRoutes(fastify: FastifyInstance): Promise<vo
   // Delete fragment (blocked when in use)
   fastify.delete(
     '/api/config-fragments/:id',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Delete a config fragment (blocked with 409 when in use)',
+        params: idParamsSchema,
+        errors: [401, 403, 404, 409],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 

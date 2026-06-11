@@ -40,7 +40,7 @@ BRIDGEPORT publishes a self-describing OpenAPI 3 specification so programmatic c
 | Raw OpenAPI 3 spec (JSON) | `GET /openapi.json` | No |
 | Swagger UI (interactive) | `GET /api/docs` | No |
 
-Both endpoints are unauthenticated so CI tools, code generators, and reverse-proxy probes can pull the spec without minting a token. The spec includes the standard error envelope as a shared component (`#/components/schemas/ErrorEnvelope`).
+Both endpoints are unauthenticated so CI tools, code generators, and reverse-proxy probes can pull the spec without minting a token. The spec includes the standard error envelope as a shared component (`#/components/schemas/ErrorEnvelope`), and most operations declare their request body / path params and reference that envelope on error responses.
 
 > [!TIP]
 > `/openapi.json` is the canonical wire contract. See the [API Stability Policy](../api-stability.md) for the compatibility guarantees, semver rules, and how to pin against a spec snapshot.
@@ -52,6 +52,31 @@ curl https://deploy.example.com/openapi.json > openapi.json
 # Open the interactive docs in a browser
 open https://deploy.example.com/api/docs
 ```
+
+### How the spec is generated (contributors)
+
+The request contracts in the spec are **derived from the same Zod schemas that
+validate requests at runtime** — there is a single source of truth, so the spec
+can't drift from the actual validators. The wiring lives in
+`src/lib/openapi-schema.ts` (`routeSchema()`), which converts each Zod schema
+with `z.toJSONSchema(..., { target: 'openapi-3.0' })` and attaches it to the
+Fastify route `schema` option **for documentation only**. Runtime validation
+stays with `validateBody()` / `validateUpdateBody()` (a no-op validator compiler
+keeps Fastify from re-validating the doc schemas), which preserves the
+read-only-field `422` behaviour and the custom error envelope.
+
+A snapshot of the spec is checked in at `openapi.json` (repo root). Regenerate
+it whenever you add or change a route schema:
+
+```bash
+pnpm run openapi:dump    # rebuild openapi.json from the live route schemas
+pnpm run openapi:check   # rebuild + fail if it drifted from git (used in CI)
+```
+
+The `openapi` job in `.github/workflows/test.yml` runs `openapi:check` on every
+PR, so a stale `openapi.json` fails CI. The spec's `info.version` is pinned to a
+stable literal so the snapshot is byte-identical across builds (the build/git
+stamp lives in `/health`, not the contract).
 
 ---
 

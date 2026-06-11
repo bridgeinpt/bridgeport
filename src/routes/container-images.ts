@@ -20,6 +20,7 @@ import { RegistryFactory } from '../lib/registry.js';
 import { getRegistryCredentials } from '../services/registries.js';
 import { extractRepoName, stripRegistryPrefix, parseTagFilter, getBestTag, getDefaultTag } from '../lib/image-utils.js';
 import { safeJsonParse, validateBody, validateUpdateBody, findOrNotFound, getErrorMessage, handleUniqueConstraint, parsePaginationQuery } from '../lib/helpers.js';
+import { routeSchema } from '../lib/openapi-schema.js';
 
 const createContainerImageSchema = z.object({
   name: z.string().min(1),
@@ -41,11 +42,24 @@ const deployImageSchema = z.object({
   autoRollback: z.boolean().default(true),
 });
 
+const idParamsSchema = z.object({ id: z.string() });
+const envIdParamsSchema = z.object({ envId: z.string() });
+const digestParamsSchema = z.object({ id: z.string(), digestId: z.string() });
+const linkParamsSchema = z.object({ id: z.string(), serviceId: z.string() });
+
 export async function containerImageRoutes(fastify: FastifyInstance): Promise<void> {
   // List container images for environment
   fastify.get(
     '/api/environments/:envId/container-images',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'List container images for an environment',
+        params: envIdParamsSchema,
+        errors: [401],
+      }),
+    },
     async (request) => {
       const { envId } = request.params as { envId: string };
       const { limit, offset } = parsePaginationQuery(request.query as Record<string, unknown>);
@@ -86,7 +100,16 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
   // Create container image
   fastify.post(
     '/api/environments/:envId/container-images',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Create a container image in an environment',
+        params: envIdParamsSchema,
+        body: createContainerImageSchema,
+        errors: [400, 401, 409],
+      }),
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       const body = validateBody(createContainerImageSchema, request, reply);
@@ -120,7 +143,15 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
   // Get container image
   fastify.get(
     '/api/container-images/:id',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Get a container image with digests and linked services',
+        params: idParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const image = await findOrNotFound(getContainerImage(id), 'Container image', reply);
@@ -159,7 +190,16 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
   // Update container image
   fastify.patch(
     '/api/container-images/:id',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Update a container image',
+        params: idParamsSchema,
+        body: updateContainerImageSchema,
+        errors: [400, 401, 404, 422],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       // Rejects PATCH of derived/system fields (lastCheckedAt, updateAvailable,
@@ -194,7 +234,15 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
   // Delete container image
   fastify.delete(
     '/api/container-images/:id',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Delete a container image (blocked when services depend on it)',
+        params: idParamsSchema,
+        errors: [400, 401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -230,7 +278,16 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
   // Deploy container image to all linked services
   fastify.post(
     '/api/container-images/:id/deploy',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Deploy a container image to all linked services',
+        params: idParamsSchema,
+        body: deployImageSchema,
+        errors: [400, 401, 404, 500],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = validateBody(deployImageSchema, request, reply);
@@ -301,7 +358,15 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
   // Get tag history for container image
   fastify.get(
     '/api/container-images/:id/history',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Get tag/deploy history for a container image',
+        params: idParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const { limit } = request.query as { limit?: string };
@@ -330,7 +395,15 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
   // List tags from registry for a container image (browse mode - unfiltered)
   fastify.get(
     '/api/container-images/:id/tags',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'List tags from the registry for a container image (unfiltered browse)',
+        params: idParamsSchema,
+        errors: [400, 401, 404, 500],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -353,7 +426,15 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
   // Check for updates from registry (triggers digest sync)
   fastify.post(
     '/api/container-images/:id/check-updates',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Check the registry for updates (triggers a digest sync)',
+        params: idParamsSchema,
+        errors: [400, 401, 404, 500],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -413,7 +494,15 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
   // List digests for a container image (paginated)
   fastify.get(
     '/api/container-images/:id/digests',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'List digests for a container image (paginated)',
+        params: idParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const { limit, offset } = parsePaginationQuery(request.query as Record<string, unknown>, { limit: 20, offset: 0 });
@@ -430,7 +519,15 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
   // Get a single digest detail
   fastify.get(
     '/api/container-images/:id/digests/:digestId',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Get a single digest detail',
+        params: digestParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { digestId } = request.params as { id: string; digestId: string };
 
@@ -444,7 +541,15 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
   // Link service to container image
   fastify.post(
     '/api/container-images/:id/link/:serviceId',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Link a service to a container image',
+        params: linkParamsSchema,
+        errors: [400, 401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id, serviceId } = request.params as { id: string; serviceId: string };
 
@@ -482,7 +587,15 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
   // Get services that could be re-linked (different containerImageId)
   fastify.get(
     '/api/container-images/:id/linkable-services',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'List services in the same environment that could be re-linked',
+        params: idParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 

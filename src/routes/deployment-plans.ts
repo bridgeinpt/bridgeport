@@ -14,6 +14,10 @@ import { logAudit, actorFrom } from '../services/audit.js';
 import { PLAN_STATUS, STEP_STATUS } from '../lib/constants.js';
 import { validateBody, findOrNotFound, getErrorMessage } from '../lib/helpers.js';
 import { isDryRun } from '../lib/dry-run.js';
+import { routeSchema } from '../lib/openapi-schema.js';
+
+const idParamSchema = z.object({ id: z.string() });
+const envIdParamSchema = z.object({ envId: z.string() });
 
 const createPlanSchema = z.object({
   serviceIds: z.array(z.string()).min(1),
@@ -25,7 +29,15 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
   // List deployment plans for environment
   fastify.get(
     '/api/environments/:envId/deployment-plans',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'List deployment plans for an environment',
+        params: envIdParamSchema,
+        errors: [401],
+      }),
+    },
     async (request) => {
       const { envId } = request.params as { envId: string };
       const { limit } = request.query as { limit?: string };
@@ -38,7 +50,16 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
   // Create and optionally execute a deployment plan
   fastify.post(
     '/api/environments/:envId/deployment-plans',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Create (and optionally execute) a deployment plan',
+        params: envIdParamSchema,
+        body: createPlanSchema,
+        errors: [400, 401],
+      }),
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       const { execute } = request.query as { execute?: string };
@@ -89,7 +110,15 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
   // Get deployment plan
   fastify.get(
     '/api/deployment-plans/:id',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Get a deployment plan by id',
+        params: idParamSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const plan = await findOrNotFound(getDeploymentPlan(id), 'Deployment plan', reply);
@@ -102,7 +131,15 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
   // Execute a pending deployment plan
   fastify.post(
     '/api/deployment-plans/:id/execute',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Execute a pending deployment plan (or dry-run preview)',
+        params: idParamSchema,
+        errors: [400, 401, 404, 500],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -172,7 +209,15 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
   // Cancel a pending or running deployment plan
   fastify.post(
     '/api/deployment-plans/:id/cancel',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Cancel a pending or running deployment plan',
+        params: idParamSchema,
+        errors: [400, 401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -203,7 +248,15 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
   // Manually trigger rollback for a deployment plan
   fastify.post(
     '/api/deployment-plans/:id/rollback',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Manually trigger rollback for a deployment plan',
+        params: idParamSchema,
+        errors: [400, 401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -255,7 +308,15 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
   // Stream deployment plan updates (SSE)
   fastify.get(
     '/api/deployment-plans/:id/stream',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['services'],
+        summary: 'Stream deployment plan status updates (SSE)',
+        params: idParamSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { id } = request.params as { id: string };
 

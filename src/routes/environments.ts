@@ -7,6 +7,7 @@ import { requireAdmin } from '../plugins/authorize.js';
 import { createDefaultSettings } from '../services/environment-settings.js';
 import { safeJsonParse, validateBody, findOrNotFound, getErrorMessage } from '../lib/helpers.js';
 import { computeEnvironmentDrift } from '../services/drift.js';
+import { routeSchema } from '../lib/openapi-schema.js';
 import { S3Client, ListBucketsCommand } from '@aws-sdk/client-s3';
 
 const createEnvSchema = z.object({
@@ -18,11 +19,21 @@ const updateSshSchema = z.object({
   sshUser: z.string().min(1).default('root'),
 });
 
+const idParamsSchema = z.object({ id: z.string() });
+const envIdParamsSchema = z.object({ envId: z.string() });
+
 export async function environmentRoutes(fastify: FastifyInstance): Promise<void> {
   // List environments. Env-scoped tokens see only their allowed environments.
   fastify.get(
     '/api/environments',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['environments'],
+        summary: 'List environments visible to the caller',
+        errors: [401],
+      }),
+    },
     async (request) => {
       const scope = request.authUser?.scope;
       const where =
@@ -48,7 +59,15 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
   // Per-resource detail lives on /api/environments/:envId/servers and /api/servers/:id.
   fastify.get(
     '/api/environments/:id',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['environments'],
+        summary: 'Get an environment with denormalized child counts',
+        params: idParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -80,7 +99,15 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
   // (viewer-accessible) — never mutates host state.
   fastify.get(
     '/api/environments/:envId/drift',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['environments'],
+        summary: 'Compute configuration drift across all deployments in an environment',
+        params: envIdParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       const result = await computeEnvironmentDrift(envId);
@@ -94,7 +121,15 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
   // Create environment (admin only)
   fastify.post(
     '/api/environments',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['environments'],
+        summary: 'Create an environment (admin only)',
+        body: createEnvSchema,
+        errors: [400, 401, 403, 409],
+      }),
+    },
     async (request, reply) => {
       const body = validateBody(createEnvSchema, request, reply);
       if (!body) return;
@@ -129,7 +164,15 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
   // Delete environment (admin only)
   fastify.delete(
     '/api/environments/:id',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['environments'],
+        summary: 'Delete an environment (admin only)',
+        params: idParamsSchema,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -159,7 +202,16 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
   // Update SSH settings for environment (admin only)
   fastify.put(
     '/api/environments/:id/ssh',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['environments'],
+        summary: 'Set the SSH private key and user for an environment (admin only)',
+        params: idParamsSchema,
+        body: updateSshSchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = validateBody(updateSshSchema, request, reply);
@@ -206,7 +258,15 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
   // Check if SSH key is configured for environment
   fastify.get(
     '/api/environments/:id/ssh',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['environments'],
+        summary: 'Check whether an SSH key is configured for an environment',
+        params: idParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -234,7 +294,15 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
   // Delete SSH key for environment (admin only)
   fastify.delete(
     '/api/environments/:id/ssh',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['environments'],
+        summary: 'Remove the configured SSH key for an environment (admin only)',
+        params: idParamsSchema,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -276,7 +344,15 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
   // This endpoint returns the actual private key for CLI tools to use
   fastify.get(
     '/api/environments/:id/ssh-key',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['environments'],
+        summary: 'Retrieve the decrypted SSH private key for CLI access (admin only)',
+        params: idParamsSchema,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -316,7 +392,15 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
   // List Spaces buckets
   fastify.get(
     '/api/environments/:id/spaces/buckets',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['environments'],
+        summary: 'List S3/Spaces buckets available to an environment',
+        params: idParamsSchema,
+        errors: [400, 401],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -364,7 +448,15 @@ export async function environmentRoutes(fastify: FastifyInstance): Promise<void>
   // Test Spaces configuration
   fastify.post(
     '/api/environments/:id/spaces/test',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['environments'],
+        summary: 'Test the S3/Spaces configuration for an environment',
+        params: idParamsSchema,
+        errors: [400, 401],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 

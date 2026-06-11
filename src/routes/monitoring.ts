@@ -10,6 +10,7 @@ import { getAgentEvents } from '../services/agent-events.js';
 import { logHealthCheck } from '../services/health-checks.js';
 import { SERVER_STATUS, HEALTH_STATUS, CONTAINER_STATUS, HEALTH_CHECK_STATUS, DISCOVERY_STATUS, type ServerStatus } from '../lib/constants.js';
 import { validateBody, findOrNotFound, getErrorMessage } from '../lib/helpers.js';
+import { routeSchema } from '../lib/openapi-schema.js';
 import { downsampleColumnar } from '../lib/metrics-downsample.js';
 import { createResponseCache } from '../lib/response-cache.js';
 
@@ -59,6 +60,10 @@ const runHealthChecksSchema = z.object({
   type: z.enum(['all', 'servers', 'services']).optional().default('all'),
 });
 
+const envIdParamsSchema = z.object({ envId: z.string() });
+const serverIdParamsSchema = z.object({ id: z.string() });
+const agentEventsQuerySchema = z.object({ limit: z.string().optional() });
+
 // If the cache's lastHealthCheckAt is older than this (or null), the
 // denormalized status is treated as no signal and reported as UNKNOWN.
 // Prevents stale 'success' from sticking forever once retention purges
@@ -70,7 +75,16 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
   // Get health check logs with filtering and pagination
   fastify.get(
     '/api/environments/:envId/health-logs',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'List health-check logs with filtering and pagination',
+        params: envIdParamsSchema,
+        querystring: healthLogQuerySchema,
+        errors: [400, 401, 404],
+      }),
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       const query = healthLogQuerySchema.safeParse(request.query);
@@ -156,7 +170,16 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
   // Trigger immediate health checks
   fastify.post(
     '/api/environments/:envId/health-checks/run',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Trigger immediate health checks for an environment',
+        params: envIdParamsSchema,
+        body: runHealthChecksSchema,
+        errors: [400, 401, 404],
+      }),
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       const body = validateBody(runHealthChecksSchema, request, reply);
@@ -326,6 +349,12 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
     {
       preHandler: [fastify.authenticate],
       schema: {
+        ...routeSchema({
+          tags: ['monitoring'],
+          summary: 'Get columnar server metrics history for charts',
+          params: envIdParamsSchema,
+          querystring: metricsHistoryQuerySchema,
+        }),
         response: {
           200: {
             type: 'object',
@@ -651,6 +680,12 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
     {
       preHandler: [fastify.authenticate],
       schema: {
+        ...routeSchema({
+          tags: ['monitoring'],
+          summary: 'Get columnar service metrics history for charts',
+          params: envIdParamsSchema,
+          querystring: metricsHistoryQuerySchema,
+        }),
         response: {
           200: {
             type: 'object',
@@ -938,7 +973,15 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
   // Test SSH connection for a single server
   fastify.post(
     '/api/servers/:id/test-ssh',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Test the SSH connection for a single server',
+        params: serverIdParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -1000,7 +1043,15 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
   // Test SSH connections for all servers in an environment
   fastify.post(
     '/api/environments/:envId/test-all-ssh',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Test SSH connections for all servers in an environment',
+        params: envIdParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
 
@@ -1073,7 +1124,15 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
   // Get monitoring overview stats
   fastify.get(
     '/api/environments/:envId/monitoring/overview',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Get monitoring overview stats for an environment',
+        params: envIdParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
 
@@ -1139,7 +1198,15 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
   // Get current health status of all servers and services
   fastify.get(
     '/api/environments/:envId/health-status',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Get current health status of servers, services, and databases',
+        params: envIdParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
 
@@ -1280,7 +1347,15 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
   // Get agents/SSH status for all servers
   fastify.get(
     '/api/environments/:envId/agents',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Get agent/SSH status for all servers in an environment',
+        params: envIdParamsSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
 
@@ -1347,7 +1422,16 @@ export async function monitoringRoutes(fastify: FastifyInstance): Promise<void> 
   // Get agent events for a server
   fastify.get(
     '/api/servers/:id/agent-events',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Get agent events for a server',
+        params: serverIdParamsSchema,
+        querystring: agentEventsQuerySchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const { limit } = request.query as { limit?: string };

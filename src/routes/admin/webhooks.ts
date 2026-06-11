@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireAdmin } from '../../plugins/authorize.js';
 import { validateBody, findOrNotFound } from '../../lib/helpers.js';
+import { routeSchema } from '../../lib/openapi-schema.js';
 import {
   listWebhooks,
   getWebhook,
@@ -32,11 +33,20 @@ const updateWebhookSchema = z.object({
   environmentIds: z.array(z.string()).optional(),
 });
 
+const idParamsSchema = z.object({ id: z.string() });
+
 export async function webhookAdminRoutes(fastify: FastifyInstance): Promise<void> {
   // List all webhooks
   fastify.get(
     '/api/admin/webhooks',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'List all outgoing webhooks',
+        errors: [401, 403],
+      }),
+    },
     async () => {
       const webhooks = await listWebhooks();
       return { webhooks };
@@ -46,7 +56,15 @@ export async function webhookAdminRoutes(fastify: FastifyInstance): Promise<void
   // Get single webhook
   fastify.get(
     '/api/admin/webhooks/:id',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Get a single outgoing webhook',
+        params: idParamsSchema,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const webhook = await findOrNotFound(getWebhook(id), 'Webhook', reply);
@@ -59,7 +77,15 @@ export async function webhookAdminRoutes(fastify: FastifyInstance): Promise<void
   // Create webhook
   fastify.post(
     '/api/admin/webhooks',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Create an outgoing webhook',
+        body: createWebhookSchema,
+        errors: [400, 401, 403],
+      }),
+    },
     async (request, reply) => {
       const body = validateBody(createWebhookSchema, request, reply);
       if (!body) return;
@@ -82,7 +108,16 @@ export async function webhookAdminRoutes(fastify: FastifyInstance): Promise<void
   // Update webhook
   fastify.put(
     '/api/admin/webhooks/:id',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Update an outgoing webhook',
+        params: idParamsSchema,
+        body: updateWebhookSchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = validateBody(updateWebhookSchema, request, reply);
@@ -110,7 +145,15 @@ export async function webhookAdminRoutes(fastify: FastifyInstance): Promise<void
   // Delete webhook
   fastify.delete(
     '/api/admin/webhooks/:id',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Delete an outgoing webhook',
+        params: idParamsSchema,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -134,7 +177,15 @@ export async function webhookAdminRoutes(fastify: FastifyInstance): Promise<void
   // Test webhook
   fastify.post(
     '/api/admin/webhooks/:id/test',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Send a test event to a webhook',
+        params: idParamsSchema,
+        errors: [400, 401, 403],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 

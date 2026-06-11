@@ -6,9 +6,12 @@ import { logAudit, actorFrom } from '../services/audit.js';
 import { createApiToken, listApiTokens, deleteApiToken } from '../services/auth.js';
 import { send, NOTIFICATION_TYPES } from '../services/notifications.js';
 import { validateBody, findOrNotFound, getErrorMessage } from '../lib/helpers.js';
+import { routeSchema } from '../lib/openapi-schema.js';
 
 // Hard cap: a token cannot live longer than this. Forces credential rotation.
 const MAX_TOKEN_LIFETIME_DAYS = 365;
+
+const tokenIdParams = z.object({ tokenId: z.string() });
 
 const createTokenSchema = z
   .object({
@@ -33,7 +36,14 @@ export async function apiTokenRoutes(fastify: FastifyInstance): Promise<void> {
   // List tokens (admin only; optional filter by owner)
   fastify.get(
     '/api/admin/tokens',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'List API tokens (optionally filtered by owner)',
+        errors: [401, 403],
+      }),
+    },
     async (request) => {
       const query = request.query as { ownerUserId?: string; ownerServiceAccountId?: string };
       const tokens = await listApiTokens({
@@ -47,7 +57,15 @@ export async function apiTokenRoutes(fastify: FastifyInstance): Promise<void> {
   // Create token (admin only)
   fastify.post(
     '/api/admin/tokens',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Create an API token (full token returned once)',
+        body: createTokenSchema,
+        errors: [400, 401, 403],
+      }),
+    },
     async (request, reply) => {
       const body = validateBody(createTokenSchema, request, reply);
       if (!body) return;
@@ -111,7 +129,15 @@ export async function apiTokenRoutes(fastify: FastifyInstance): Promise<void> {
   // Revoke token (admin only)
   fastify.delete(
     '/api/admin/tokens/:tokenId',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Revoke an API token',
+        params: tokenIdParams,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { tokenId } = request.params as { tokenId: string };
 

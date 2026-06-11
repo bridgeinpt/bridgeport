@@ -33,6 +33,11 @@ import {
   coerceNumeric,
 } from '../lib/helpers.js';
 import { downsampleColumnar } from '../lib/metrics-downsample.js';
+import { routeSchema } from '../lib/openapi-schema.js';
+
+const idParamSchema = z.object({ id: z.string() });
+const envIdParamSchema = z.object({ envId: z.string() });
+const envIdIdParamSchema = z.object({ envId: z.string(), id: z.string() });
 
 const storageTypeSchema = z.enum(['local', 'spaces']);
 const backupFormatSchema = z.enum(['plain', 'custom', 'tar']);
@@ -92,7 +97,15 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // List databases for environment
   fastify.get(
     '/api/environments/:envId/databases',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'List databases for an environment',
+        params: envIdParamSchema,
+        errors: [401],
+      }),
+    },
     async (request) => {
       const { envId } = request.params as { envId: string };
       const { limit, offset } = parsePaginationQuery(request.query as Record<string, unknown>);
@@ -103,7 +116,16 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // Create database
   fastify.post(
     '/api/environments/:envId/databases',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Create a database in an environment',
+        params: envIdParamSchema,
+        body: createDatabaseSchema,
+        errors: [400, 401, 403, 409],
+      }),
+    },
     async (request, reply) => {
       const { envId } = request.params as { envId: string };
       const body = validateBody(createDatabaseSchema, request, reply);
@@ -145,7 +167,15 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // Get database
   fastify.get(
     '/api/databases/:id',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Get a database by id',
+        params: idParamSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const database = await findOrNotFound(getDatabase(id), 'Database', reply);
@@ -158,7 +188,16 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // Update database
   fastify.patch(
     '/api/databases/:id',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Update a database',
+        params: idParamSchema,
+        body: updateDatabaseSchema,
+        errors: [400, 401, 403, 404, 422],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       // Rejects PATCH of derived/system fields (encryptedCredentials, monitoring
@@ -193,7 +232,15 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // Delete database
   fastify.delete(
     '/api/databases/:id',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Delete a database (must have no backups)',
+        params: idParamSchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -224,7 +271,15 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // Create backup
   fastify.post(
     '/api/databases/:id/backups',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Trigger a backup for a database',
+        params: idParamSchema,
+        errors: [401, 403, 404, 500],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -255,7 +310,15 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // List backups
   fastify.get(
     '/api/databases/:id/backups',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'List backups for a database',
+        params: idParamSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const { limit, offset } = parsePaginationQuery(request.query as Record<string, unknown>, { limit: 50, offset: 0 });
@@ -285,7 +348,15 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // Get backup details
   fastify.get(
     '/api/backups/:id',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Get backup details',
+        params: idParamSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -311,7 +382,15 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // Download backup
   fastify.get(
     '/api/backups/:id/download',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Download a backup (file stream or presigned URL)',
+        params: idParamSchema,
+        errors: [400, 401],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -337,7 +416,15 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // Delete backup
   fastify.delete(
     '/api/backups/:id',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Delete a backup',
+        params: idParamSchema,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -362,7 +449,15 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // Get backup schedule
   fastify.get(
     '/api/databases/:id/schedule',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Get the backup schedule for a database',
+        params: idParamSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -377,7 +472,16 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // Set backup schedule
   fastify.put(
     '/api/databases/:id/schedule',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Set the backup schedule for a database',
+        params: idParamSchema,
+        body: scheduleSchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = validateBody(scheduleSchema, request, reply);
@@ -410,7 +514,15 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // Delete backup schedule
   fastify.delete(
     '/api/databases/:id/schedule',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Delete the backup schedule for a database',
+        params: idParamSchema,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -824,7 +936,15 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // replaces the per-database N+1 fan-out (listDatabaseBackups + getBackupSchedule).
   fastify.get(
     '/api/environments/:envId/databases/backup-summary',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Get the backup summary for all databases in an environment',
+        params: envIdParamSchema,
+        errors: [401],
+      }),
+    },
     async (request) => {
       const { envId } = request.params as { envId: string };
       const databases = await listEnvironmentBackupSummary(envId);
@@ -835,7 +955,15 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // Get monitoring summary for all databases in an environment
   fastify.get(
     '/api/environments/:envId/databases/monitoring-summary',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Get the monitoring summary for all databases in an environment',
+        params: envIdParamSchema,
+        errors: [401],
+      }),
+    },
     async (request) => {
       const { envId } = request.params as { envId: string };
 
@@ -876,7 +1004,15 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // Get metrics history for a specific database
   fastify.get(
     '/api/environments/:envId/databases/:id/metrics',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Get metrics history for a specific database',
+        params: envIdIdParamSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { envId: string; id: string };
       const { hours } = request.query as { hours?: string };
@@ -920,7 +1056,15 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // Test database connection (lightweight ping)
   fastify.post(
     '/api/environments/:envId/databases/:id/test-connection',
-    { preHandler: [fastify.authenticate] },
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Test a database connection (lightweight ping)',
+        params: envIdIdParamSchema,
+        errors: [401, 404],
+      }),
+    },
     async (request, reply) => {
       const { envId, id } = request.params as { envId: string; id: string };
 
@@ -947,7 +1091,15 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // Update monitoring configuration for a database
   fastify.patch(
     '/api/environments/:envId/databases/:id/monitoring',
-    { preHandler: [fastify.authenticate, requireOperator] },
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Update monitoring configuration for a database',
+        params: envIdIdParamSchema,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { envId: string; id: string };
       const body = request.body as {

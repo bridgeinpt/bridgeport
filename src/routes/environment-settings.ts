@@ -11,7 +11,11 @@ import {
   type SettingsModule,
 } from '../services/environment-settings.js';
 import { findOrNotFound, getErrorMessage, validateBody } from '../lib/helpers.js';
+import { routeSchema } from '../lib/openapi-schema.js';
 import { testSlackChannel } from '../services/slack-notifications.js';
+
+const idParamSchema = z.object({ id: z.string() });
+const idModuleParamSchema = z.object({ id: z.string(), module: z.string() });
 
 const VALID_MODULES = ['general', 'monitoring', 'operations', 'data', 'configuration'] as const;
 
@@ -28,7 +32,15 @@ export async function environmentSettingsRoutes(fastify: FastifyInstance): Promi
   // GET /api/environments/:id/settings/registry
   fastify.get(
     '/api/environments/:id/settings/registry',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Get the environment settings registry (field definitions)',
+        params: idParamSchema,
+        errors: [401, 403],
+      }),
+    },
     async () => {
       return { registry: SETTINGS_REGISTRY };
     },
@@ -37,7 +49,15 @@ export async function environmentSettingsRoutes(fastify: FastifyInstance): Promi
   // GET /api/environments/:id/settings/:module
   fastify.get(
     '/api/environments/:id/settings/:module',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Get settings for a specific environment settings module',
+        params: idModuleParamSchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id, module } = request.params as { id: string; module: string };
 
@@ -58,7 +78,15 @@ export async function environmentSettingsRoutes(fastify: FastifyInstance): Promi
   // PATCH /api/environments/:id/settings/:module
   fastify.patch(
     '/api/environments/:id/settings/:module',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Update settings for a specific environment settings module',
+        params: idModuleParamSchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id, module } = request.params as { id: string; module: string };
 
@@ -95,7 +123,15 @@ export async function environmentSettingsRoutes(fastify: FastifyInstance): Promi
   // POST /api/environments/:id/settings/:module/reset
   fastify.post(
     '/api/environments/:id/settings/:module/reset',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Reset an environment settings module to its defaults',
+        params: idModuleParamSchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id, module } = request.params as { id: string; module: string };
 
@@ -131,7 +167,15 @@ export async function environmentSettingsRoutes(fastify: FastifyInstance): Promi
   // GET /api/environments/:id/settings/notifications
   fastify.get(
     '/api/environments/:id/settings/notifications',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Get the environment\'s Slack notification channel override and options',
+        params: idParamSchema,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -184,7 +228,16 @@ export async function environmentSettingsRoutes(fastify: FastifyInstance): Promi
   // PATCH /api/environments/:id/settings/notifications
   fastify.patch(
     '/api/environments/:id/settings/notifications',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Set the environment\'s Slack notification channel override',
+        params: idParamSchema,
+        body: updateNotificationSettingsSchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = validateBody(updateNotificationSettingsSchema, request, reply);
@@ -252,7 +305,15 @@ export async function environmentSettingsRoutes(fastify: FastifyInstance): Promi
   // but resolves the channel from environment context.
   fastify.post(
     '/api/environments/:id/settings/notifications/test',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Send a test Slack message via the environment\'s resolved channel',
+        params: idParamSchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 

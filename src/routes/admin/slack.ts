@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { requireAdmin } from '../../plugins/authorize.js';
 import { validateBody, findOrNotFound } from '../../lib/helpers.js';
+import { routeSchema } from '../../lib/openapi-schema.js';
 import {
   listSlackChannels,
   getSlackChannel,
@@ -58,13 +59,23 @@ const updateRoutingsSchema = z.object({
   })),
 });
 
+const idParamsSchema = z.object({ id: z.string() });
+const routingParamsSchema = z.object({ typeId: z.string(), channelId: z.string() });
+
 export async function slackAdminRoutes(fastify: FastifyInstance): Promise<void> {
   // ==================== Channel Endpoints ====================
 
   // List all Slack channels
   fastify.get(
     '/api/admin/slack/channels',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'List all Slack channels',
+        errors: [401, 403],
+      }),
+    },
     async () => {
       const channels = await listSlackChannels();
       return { channels };
@@ -74,7 +85,15 @@ export async function slackAdminRoutes(fastify: FastifyInstance): Promise<void> 
   // Get single Slack channel
   fastify.get(
     '/api/admin/slack/channels/:id',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Get a single Slack channel',
+        params: idParamsSchema,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const channel = await findOrNotFound(getSlackChannel(id), 'Slack channel', reply);
@@ -87,7 +106,15 @@ export async function slackAdminRoutes(fastify: FastifyInstance): Promise<void> 
   // Create Slack channel
   fastify.post(
     '/api/admin/slack/channels',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Create a Slack channel',
+        body: createChannelSchema,
+        errors: [400, 401, 403],
+      }),
+    },
     async (request, reply) => {
       const body = validateBody(createChannelSchema, request, reply);
       if (!body) return;
@@ -110,7 +137,16 @@ export async function slackAdminRoutes(fastify: FastifyInstance): Promise<void> 
   // Update Slack channel
   fastify.put(
     '/api/admin/slack/channels/:id',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Update a Slack channel',
+        params: idParamsSchema,
+        body: updateChannelSchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
       const body = validateBody(updateChannelSchema, request, reply);
@@ -138,7 +174,15 @@ export async function slackAdminRoutes(fastify: FastifyInstance): Promise<void> 
   // Delete Slack channel
   fastify.delete(
     '/api/admin/slack/channels/:id',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Delete a Slack channel',
+        params: idParamsSchema,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -162,7 +206,15 @@ export async function slackAdminRoutes(fastify: FastifyInstance): Promise<void> 
   // Test Slack channel
   fastify.post(
     '/api/admin/slack/channels/:id/test',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Send a test message to a Slack channel',
+        params: idParamsSchema,
+        errors: [400, 401, 403],
+      }),
+    },
     async (request, reply) => {
       const { id } = request.params as { id: string };
 
@@ -184,7 +236,14 @@ export async function slackAdminRoutes(fastify: FastifyInstance): Promise<void> 
   // Get all routing configurations
   fastify.get(
     '/api/admin/slack/routing',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'List all Slack notification routings',
+        errors: [401, 403],
+      }),
+    },
     async () => {
       const routings = await listSlackRoutings();
       return { routings };
@@ -194,7 +253,15 @@ export async function slackAdminRoutes(fastify: FastifyInstance): Promise<void> 
   // Update routings for a notification type
   fastify.put(
     '/api/admin/slack/routing',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Update Slack routings for a notification type',
+        body: updateRoutingsSchema,
+        errors: [400, 401, 403],
+      }),
+    },
     async (request, reply) => {
       const body = validateBody(updateRoutingsSchema, request, reply);
       if (!body) return;
@@ -216,7 +283,15 @@ export async function slackAdminRoutes(fastify: FastifyInstance): Promise<void> 
   // Delete a specific routing
   fastify.delete(
     '/api/admin/slack/routing/:typeId/:channelId',
-    { preHandler: [fastify.authenticate, requireAdmin] },
+    {
+      preHandler: [fastify.authenticate, requireAdmin],
+      schema: routeSchema({
+        tags: ['admin'],
+        summary: 'Delete a Slack routing for a type + channel',
+        params: routingParamsSchema,
+        errors: [401, 403, 404],
+      }),
+    },
     async (request, reply) => {
       const { typeId, channelId } = request.params as { typeId: string; channelId: string };
 

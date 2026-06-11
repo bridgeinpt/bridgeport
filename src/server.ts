@@ -16,46 +16,13 @@ import { initializeDatabase, disconnectDatabase } from './lib/db.js';
 import authenticatePlugin from './plugins/authenticate.js';
 import errorHandlerPlugin from './plugins/error-handler.js';
 import openapiPlugin from './plugins/openapi.js';
-import { authRoutes } from './routes/auth.js';
+import { registerApiRoutes } from './register-routes.js';
 import { bootstrapAdminUser } from './services/auth.js';
 import { bootstrapManagementEnvironment } from './services/host-detection.js';
 import { startScheduler, stopScheduler } from './lib/scheduler.js';
-import { environmentRoutes } from './routes/environments.js';
-import { serverRoutes } from './routes/servers.js';
-import { serviceRoutes } from './routes/services.js';
-import { secretRoutes } from './routes/secrets.js';
-import { webhookRoutes } from './routes/webhooks.js';
-import { composeRoutes } from './routes/compose.js';
-import { auditRoutes } from './routes/audit.js';
-import { configFileRoutes } from './routes/config-files.js';
-import { configFragmentRoutes } from './routes/config-fragments.js';
-import { registryRoutes } from './routes/registries.js';
-import { userRoutes } from './routes/users.js';
-import { metricsRoutes } from './routes/metrics.js';
-import { databaseRoutes } from './routes/databases.js';
-import { notificationRoutes } from './routes/notifications.js';
-import { smtpRoutes } from './routes/admin/smtp.js';
-import { webhookAdminRoutes } from './routes/admin/webhooks.js';
-import { slackAdminRoutes } from './routes/admin/slack.js';
-import { sentryAdminRoutes } from './routes/admin/sentry.js';
 import { initializeNotificationTypes } from './services/notifications.js';
 import { flushNotificationQueue } from './services/notification-queue.js';
 import { syncPlugins } from './services/plugin-loader.js';
-import { containerImageRoutes } from './routes/container-images.js';
-import { serviceDependencyRoutes } from './routes/service-dependencies.js';
-import { deploymentPlanRoutes } from './routes/deployment-plans.js';
-import { settingsRoutes } from './routes/settings.js';
-import { spacesRoutes } from './routes/spaces.js';
-import { monitoringRoutes } from './routes/monitoring.js';
-import { systemSettingsRoutes } from './routes/system-settings.js';
-import { downloadRoutes } from './routes/downloads.js';
-import { topologyRoutes } from './routes/topology.js';
-import { environmentSettingsRoutes } from './routes/environment-settings.js';
-import { eventRoutes } from './routes/events.js';
-import { configScanRoutes } from './routes/config-scan.js';
-import { serviceAccountRoutes } from './routes/service-accounts.js';
-import { apiTokenRoutes } from './routes/api-tokens.js';
-import { syncBatchRoutes } from './routes/sync-batch.js';
 import { sshPool } from './lib/ssh.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -78,6 +45,18 @@ async function buildServer() {
           : undefined,
     },
   });
+
+  // Route `schema` options (body/params/querystring) are attached for OpenAPI
+  // DOCUMENTATION ONLY — derived from the existing Zod schemas via
+  // src/lib/openapi-schema.ts. Runtime validation stays with Zod
+  // (`validateBody`/`validateUpdateBody`), which preserves the readonly-field
+  // 422 logic and the custom error envelope. A no-op validator compiler tells
+  // Fastify NOT to compile/validate those schemas with Ajv (which also can't
+  // parse the OpenAPI 3.0 dialect, e.g. boolean `exclusiveMinimum`). The app
+  // has never relied on Fastify request validation, so this changes no behavior
+  // — it just keeps the doc schemas inert. @fastify/swagger still reads them for
+  // the spec, and `response` schemas still use the separate serializer compiler.
+  fastify.setValidatorCompiler(() => () => true);
 
   // Initialize crypto with master key
   initializeCrypto(config.MASTER_KEY);
@@ -173,41 +152,9 @@ async function buildServer() {
     }
   );
 
-  // API routes
-  await fastify.register(authRoutes);
-  await fastify.register(environmentRoutes);
-  await fastify.register(serverRoutes);
-  await fastify.register(serviceRoutes);
-  await fastify.register(secretRoutes);
-  await fastify.register(webhookRoutes);
-  await fastify.register(composeRoutes);
-  await fastify.register(auditRoutes);
-  await fastify.register(configFileRoutes);
-  await fastify.register(configFragmentRoutes);
-  await fastify.register(registryRoutes);
-  await fastify.register(userRoutes);
-  await fastify.register(metricsRoutes);
-  await fastify.register(databaseRoutes);
-  await fastify.register(notificationRoutes);
-  await fastify.register(smtpRoutes);
-  await fastify.register(webhookAdminRoutes);
-  await fastify.register(slackAdminRoutes);
-  await fastify.register(sentryAdminRoutes);
-  await fastify.register(containerImageRoutes);
-  await fastify.register(serviceDependencyRoutes);
-  await fastify.register(deploymentPlanRoutes);
-  await fastify.register(settingsRoutes);
-  await fastify.register(spacesRoutes);
-  await fastify.register(monitoringRoutes);
-  await fastify.register(systemSettingsRoutes);
-  await fastify.register(downloadRoutes);
-  await fastify.register(topologyRoutes);
-  await fastify.register(environmentSettingsRoutes);
-  await fastify.register(eventRoutes);
-  await fastify.register(configScanRoutes);
-  await fastify.register(serviceAccountRoutes);
-  await fastify.register(apiTokenRoutes);
-  await fastify.register(syncBatchRoutes);
+  // API routes — single source of truth shared with the spec dumper and tests.
+  await registerApiRoutes(fastify);
+
   // Health check
   fastify.get('/health', async () => {
     return {

@@ -1,0 +1,4 @@
+# Pin the generated OpenAPI snapshot to LF so `openapi:check` doesn't trip on
+# CRLF line endings from a Windows checkout (would otherwise show the whole file
+# as drifted). The dumper writes LF; this keeps git from rewriting it.
+openapi.json text eol=lf
