@@ -226,9 +226,9 @@ For contributors who want to run BRIDGEPORT from source with hot reload.
 git clone https://github.com/bridgeinpt/bridgeport.git
 cd bridgeport
 
-# Install dependencies
-npm install
-cd ui && npm install && cd ..
+# Install dependencies (requires pnpm: `npm install -g pnpm`).
+# One install covers the whole workspace — backend root + ui/.
+pnpm install
 
 # Create your .env file
 cat > .env << 'EOF'
@@ -240,16 +240,16 @@ ADMIN_PASSWORD=devpassword123
 EOF
 
 # Generate Prisma client
-npm run db:generate
+pnpm run db:generate
 
 # Run database migrations
-npx prisma migrate dev
+pnpm exec prisma migrate dev
 
 # Start backend (port 3000)
-npm run dev
+pnpm run dev
 
 # In a second terminal: start frontend (port 5173)
-cd ui && npm run dev
+pnpm --filter bridgeport-ui run dev
 ```
 
 The frontend dev server proxies API requests to the backend automatically. Open **http://localhost:5173**.

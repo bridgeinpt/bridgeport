@@ -1,6 +1,13 @@
 version: 2
 updates:
-  # Backend (Fastify API)
+  # JS/TS workspace (Fastify backend + React UI).
+  #
+  # This is a single pnpm workspace: the root `pnpm-lock.yaml` resolves deps for
+  # both the root package and `ui/`, so one entry at `directory: /` covers the
+  # whole workspace. Dependabot uses `package-ecosystem: npm` for pnpm too — it
+  # auto-detects pnpm from the lockfile. The former separate `/` (backend) and
+  # `/ui` (frontend) entries are merged here because they can no longer target
+  # independent lockfiles; backend + frontend updates now share PRs/labels.
   - package-ecosystem: npm
     directory: /
     schedule:
@@ -9,6 +16,7 @@ updates:
     open-pull-requests-limit: 5
     labels:
       - dependencies
+      - frontend
       - backend
     cooldown:
       default-days: 5
@@ -16,33 +24,10 @@ updates:
       semver-minor-days: 5
       semver-patch-days: 3
     groups:
-      backend-security:
+      js-security:
         applies-to: security-updates
         patterns: ["*"]
-      backend-minor-and-patch:
-        applies-to: version-updates
-        update-types: [minor, patch]
-
-  # Frontend (React UI)
-  - package-ecosystem: npm
-    directory: /ui
-    schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 5
-    labels:
-      - dependencies
-      - frontend
-    cooldown:
-      default-days: 5
-      semver-major-days: 7
-      semver-minor-days: 5
-      semver-patch-days: 3
-    groups:
-      frontend-security:
-        applies-to: security-updates
-        patterns: ["*"]
-      frontend-minor-and-patch:
+      js-minor-and-patch:
         applies-to: version-updates
         update-types: [minor, patch]
 

@@ -52,9 +52,11 @@ else
     echo "No database found, will create fresh"
 fi
 
-# Run any pending migrations
+# Run any pending migrations.
+# pnpm is NOT installed in the runtime image; the prisma CLI ships in the
+# hoisted production node_modules, so invoke its bin directly.
 echo "Applying migrations..."
-npx prisma migrate deploy
+node_modules/.bin/prisma migrate deploy
 
 echo "=== Starting BRIDGEPORT ==="
 exec node dist/server.js

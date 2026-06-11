@@ -21,7 +21,7 @@ Get BRIDGEPORT running locally for development in under 10 minutes.
 | Tool | Version | Purpose | Install |
 |------|---------|---------|---------|
 | **Node.js** | 20+ | Backend and frontend | [nodejs.org](https://nodejs.org) |
-| **npm** | 11.10+ | Package management ([why](supply-chain.md#requirements)) | `npm install -g npm@latest` |
+| **pnpm** | 11+ | Package management ([why](supply-chain.md#requirements)) | `npm install -g pnpm` |
 | **Go** | 1.22+ | Agent and CLI (optional) | [go.dev](https://go.dev/dl/) |
 | **SQLite3** | 3.x | Database (dev/prod) | Usually pre-installed on macOS/Linux |
 
@@ -37,25 +37,18 @@ Get BRIDGEPORT running locally for development in under 10 minutes.
 git clone https://github.com/bridgeinpt/bridgeport.git
 cd bridgeport
 
-# Install backend dependencies
-npm install
-
-# Install frontend dependencies
-cd ui && npm install && cd ..
-
-# .npmrc sets ignore-scripts=true; pass --ignore-scripts=false on rebuild so
-# the native SQLite binding actually gets built.
-npm rebuild better-sqlite3 --ignore-scripts=false
+# One install covers the whole pnpm workspace (backend root + ui/)
+pnpm install
 ```
 
-Expected output (last few lines of `npm install`):
+Expected output (last few lines of `pnpm install`):
 
 ```
-added 312 packages in 8s
+Done in 8s using pnpm v11.5.3
 ```
 
 > [!NOTE]
-> The `.npmrc` files in `/` and `/ui` set `ignore-scripts=true` and `min-release-age=1` as supply-chain defenses. If a dependency needs a native rebuild (notably `better-sqlite3`), run `npm rebuild better-sqlite3 --ignore-scripts=false` after install — the `.npmrc` setting also gates `npm rebuild`, so the flag is required. See [supply-chain.md](supply-chain.md) for details and escape hatches.
+> This is a single pnpm workspace — the root [`pnpm-workspace.yaml`](../../pnpm-workspace.yaml) declares both `.` and `ui`, so one `pnpm install` resolves everything against one root `pnpm-lock.yaml`. Supply-chain defenses live there too: pnpm blocks dependency build scripts by default (`allowBuilds` is the allowlist; `better-sqlite3`'s native binding builds automatically, no manual rebuild), and `minimumReleaseAge` enforces a one-day cooldown on freshly published versions. See [supply-chain.md](supply-chain.md) for details and escape hatches.
 
 ---
 
@@ -98,10 +91,10 @@ Generate the Prisma client (TypeScript types for database access) and create the
 
 ```bash
 # Generate Prisma client types
-npm run db:generate
+pnpm run db:generate
 
 # Create the database and apply all migrations
-npx prisma migrate dev
+pnpm exec prisma migrate dev
 ```
 
 Expected output from `prisma migrate dev`:
@@ -135,7 +128,7 @@ BRIDGEPORT has two development servers that run simultaneously: the backend (Fas
 ### Terminal 1: Backend
 
 ```bash
-npm run dev
+pnpm run dev
 ```
 
 Expected output:
@@ -154,7 +147,7 @@ The backend runs on **port 3000** with hot reload via `tsx watch`.
 ### Terminal 2: Frontend
 
 ```bash
-cd ui && npm run dev
+pnpm --filter bridgeport-ui run dev
 ```
 
 Expected output:
@@ -265,14 +258,14 @@ See [Building](building.md) for full build instructions including the Docker ima
 
 | Task | Command |
 |------|---------|
-| Start backend | `npm run dev` |
-| Start frontend | `cd ui && npm run dev` |
-| Generate Prisma client | `npm run db:generate` |
-| Create a migration | `npx prisma migrate dev --name descriptive_name` |
-| Run integration tests | `npx vitest run --config config/vitest.config.ts` |
-| Run unit tests | `npx vitest run --config config/vitest.unit.config.ts` |
-| Build backend | `npm run build` |
-| Build frontend | `cd ui && npm run build` |
+| Start backend | `pnpm run dev` |
+| Start frontend | `pnpm --filter bridgeport-ui run dev` |
+| Generate Prisma client | `pnpm run db:generate` |
+| Create a migration | `pnpm exec prisma migrate dev --name descriptive_name` |
+| Run integration tests | `pnpm exec vitest run --config config/vitest.config.ts` |
+| Run unit tests | `pnpm exec vitest run --config config/vitest.unit.config.ts` |
+| Build backend | `pnpm run build` |
+| Build frontend | `pnpm --filter bridgeport-ui run build` |
 
 ---
 

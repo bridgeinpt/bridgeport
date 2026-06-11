@@ -13,16 +13,16 @@ BRIDGEPORT uses Vitest with **two separate configs** that must never be mixed:
 
 ```bash
 # Integration tests (routes, security, smoke)
-npx vitest run --config config/vitest.config.ts
+pnpm exec vitest run --config config/vitest.config.ts
 
 # Unit tests (services, lib)
-npx vitest run --config config/vitest.unit.config.ts
+pnpm exec vitest run --config config/vitest.unit.config.ts
 
 # Single test file
-npx vitest run src/routes/auth.test.ts
+pnpm exec vitest run src/routes/auth.test.ts
 
 # Watch mode
-npx vitest --watch src/routes/auth.test.ts
+pnpm exec vitest --watch src/routes/auth.test.ts
 ```
 
 ## Test File Placement

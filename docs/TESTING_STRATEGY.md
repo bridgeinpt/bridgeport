@@ -1317,13 +1317,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      # .npmrc sets ignore-scripts=true; rebuild native deps explicitly.
-      - run: npm rebuild better-sqlite3 --ignore-scripts=false
-      - run: npx prisma generate
-      - run: npx vitest run --project backend --testPathPattern='src/lib/.*\\.test\\.ts$' --reporter=github-actions
+          node-version: 24
+      # pnpm via npm (pinned to packageManager): pnpm/action-setup isn't on
+      # this repo's GitHub Actions allowlist, and pnpm 11 needs Node >= 22.13.
+      - run: npm install -g pnpm@11.5.3
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prisma generate
+      - run: pnpm exec vitest run --config config/vitest.unit.config.ts --reporter=github-actions
 
   unit-frontend:
     name: Frontend Unit Tests
@@ -1333,10 +1333,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
-      - run: cd ui && npm ci
-      - run: cd ui && npx vitest run --testPathPattern='lib/.*\\.test\\.tsx?$' --reporter=github-actions
+          node-version: 24
+      # pnpm via npm (pinned to packageManager): pnpm/action-setup isn't on
+      # this repo's GitHub Actions allowlist, and pnpm 11 needs Node >= 22.13.
+      - run: npm install -g pnpm@11.5.3
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter bridgeport-ui exec vitest run "src/lib/" --reporter=github-actions
 
   unit-go:
     name: Go Unit Tests
@@ -1360,12 +1362,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - run: npm rebuild better-sqlite3 --ignore-scripts=false
-      - run: npx prisma generate
-      - run: npx vitest run --project backend --coverage --reporter=github-actions
+          node-version: 24
+      # pnpm via npm (pinned to packageManager): pnpm/action-setup isn't on
+      # this repo's GitHub Actions allowlist, and pnpm 11 needs Node >= 22.13.
+      - run: npm install -g pnpm@11.5.3
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prisma generate
+      - run: pnpm exec vitest run --config config/vitest.config.ts --coverage --reporter=github-actions
         env:
           MASTER_KEY: test-key-for-ci-only-not-real
           JWT_SECRET: test-jwt-secret-for-ci-only
@@ -1383,10 +1386,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
-      - run: cd ui && npm ci
-      - run: cd ui && npx vitest run --coverage --reporter=github-actions
+          node-version: 24
+      # pnpm via npm (pinned to packageManager): pnpm/action-setup isn't on
+      # this repo's GitHub Actions allowlist, and pnpm 11 needs Node >= 22.13.
+      - run: npm install -g pnpm@11.5.3
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter bridgeport-ui exec vitest run --coverage --reporter=github-actions
       - uses: codecov/codecov-action@v4
         with:
           files: ui/coverage/lcov.info
@@ -1404,11 +1409,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - run: npm rebuild better-sqlite3 --ignore-scripts=false
-      - run: npx vitest run tests/migrations/
+          node-version: 24
+      # pnpm via npm (pinned to packageManager): pnpm/action-setup isn't on
+      # this repo's GitHub Actions allowlist, and pnpm 11 needs Node >= 22.13.
+      - run: npm install -g pnpm@11.5.3
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec vitest run --config config/vitest.config.ts tests/migrations/
 
   # ── Tier 3: System Tests (nightly) ──────────────────────
   system:
@@ -1420,15 +1426,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
+          node-version: 24
+      # pnpm via npm (pinned to packageManager): pnpm/action-setup isn't on
+      # this repo's GitHub Actions allowlist, and pnpm 11 needs Node >= 22.13.
+      - run: npm install -g pnpm@11.5.3
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
-      - run: npm ci
-      - run: npm rebuild better-sqlite3 --ignore-scripts=false
-      - run: npx prisma generate
-      - run: npx vitest run --project system
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prisma generate
+      - run: pnpm exec vitest run --config config/vitest.config.ts
         env:
           MASTER_KEY: test-key-for-ci-only-not-real
           JWT_SECRET: test-jwt-secret-for-ci-only
@@ -1445,12 +1452,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - run: npx prisma generate
-      - run: npm run build
-      - run: cd ui && npm ci && npm run build
+          node-version: 24
+      # pnpm via npm (pinned to packageManager): pnpm/action-setup isn't on
+      # this repo's GitHub Actions allowlist, and pnpm 11 needs Node >= 22.13.
+      - run: npm install -g pnpm@11.5.3
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prisma generate
+      - run: pnpm run build
+      - run: pnpm --filter bridgeport-ui run build
 
   # ── TypeScript Check ────────────────────────────────────
   typecheck:
@@ -1461,12 +1470,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - run: npx prisma generate
-      - run: npx tsc --noEmit
-      - run: cd ui && npm ci && npx tsc --noEmit
+          node-version: 24
+      # pnpm via npm (pinned to packageManager): pnpm/action-setup isn't on
+      # this repo's GitHub Actions allowlist, and pnpm 11 needs Node >= 22.13.
+      - run: npm install -g pnpm@11.5.3
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prisma generate
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm --filter bridgeport-ui exec tsc --noEmit
 ```
 
 ### 13.2 Codecov Configuration
@@ -1503,16 +1514,16 @@ ignore:
 
 ```bash
 # Backend tests in watch mode (re-runs on file change)
-npx vitest --project backend
+pnpm exec vitest --config config/vitest.config.ts
 
 # Frontend tests in watch mode
-cd ui && npx vitest
+pnpm --filter bridgeport-ui exec vitest
 
 # Run specific test file
-npx vitest src/services/deploy.test.ts
+pnpm exec vitest src/services/deploy.test.ts
 
 # Run tests matching a pattern
-npx vitest --testNamePattern="should roll back"
+pnpm exec vitest --testNamePattern="should roll back"
 ```
 
 ### 14.2 Pre-push Hook
@@ -1522,8 +1533,8 @@ Install via `husky` or `lefthook`:
 ```bash
 # .husky/pre-push
 #!/bin/sh
-npx vitest run --project backend --testPathPattern='src/lib/.*\.test\.ts$' --reporter=dot
-cd ui && npx vitest run --testPathPattern='lib/.*\.test\.tsx?$' --reporter=dot
+pnpm exec vitest run --config config/vitest.unit.config.ts --reporter=dot
+pnpm --filter bridgeport-ui exec vitest run "src/lib/" --reporter=dot
 ```
 
 This runs only Tier 1 (unit tests) before push — fast enough to not disrupt workflow.
@@ -1534,7 +1545,7 @@ This runs only Tier 1 (unit tests) before push — fast enough to not disrupt wo
 // .vscode/settings.json (additions)
 {
   "vitest.enable": true,
-  "vitest.commandLine": "npx vitest",
+  "vitest.commandLine": "pnpm exec vitest",
   "testing.automaticallyOpenPeekView": "failureVisible"
 }
 ```
