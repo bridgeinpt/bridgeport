@@ -52,7 +52,7 @@ function ServerGroupNodeComponent({ data, selected }: NodeProps) {
         minWidth={minWidth}
         minHeight={minHeight}
         color="#3b82f6"
-        handleClassName="!w-2 !h-2 !rounded-sm"
+        handleClassName="!w-2 !h-2 !rounded-xs"
       />
       {/* Header bar */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-blue-500/20">

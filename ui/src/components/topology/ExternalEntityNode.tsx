@@ -43,7 +43,7 @@ function ExternalEntityNodeComponent({ data, selected }: NodeProps) {
         minWidth={100}
         minHeight={40}
         color="#3b82f6"
-        handleClassName="!w-2 !h-2 !rounded-sm"
+        handleClassName="!w-2 !h-2 !rounded-xs"
       />
       <div className="flex items-center justify-between gap-2 h-full">
         <div className="flex items-center gap-2 min-w-0">

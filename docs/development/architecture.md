@@ -263,8 +263,11 @@ BRIDGEPORT uses **Zustand** for state management with the persist middleware:
 
 ### Styling
 
-- **Tailwind CSS** with a dark theme
-- Custom utility classes defined in the Tailwind config
+- **Tailwind CSS v4** with a dark theme — CSS-first config via the `@theme`
+  block in `ui/src/index.css` and the `@tailwindcss/vite` plugin (no
+  `tailwind.config.js` or PostCSS/autoprefixer pipeline)
+- Custom theme tokens (`primary`/`brand` colors, `card`/`modal` shadows) and
+  component classes (`.btn`, `.card`, `.badge`, …) defined in `ui/src/index.css`
 - Status colors via `ui/src/lib/status.ts` utilities
 
 ### Navigation Structure

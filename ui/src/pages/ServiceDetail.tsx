@@ -763,7 +763,7 @@ export default function ServiceDetail() {
                   onKeyDown={handleNameKeyDown}
                   onBlur={saveEditName}
                   disabled={savingName}
-                  className="text-xl font-bold bg-slate-800 text-white border border-primary-500 rounded px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="text-xl font-bold bg-slate-800 text-white border border-primary-500 rounded px-2 py-0.5 focus:outline-hidden focus:ring-2 focus:ring-primary-500"
                   style={{ minWidth: '200px' }}
                 />
                 {savingName && (
@@ -1223,7 +1223,7 @@ export default function ServiceDetail() {
                           onBlur={() => saveMountPath(file.configFileId)}
                           disabled={savingMountPath}
                           autoFocus
-                          className="flex-1 bg-slate-900 border border-primary-500 rounded px-2 py-0.5 text-green-400 font-mono text-xs focus:outline-none"
+                          className="flex-1 bg-slate-900 border border-primary-500 rounded px-2 py-0.5 text-green-400 font-mono text-xs focus:outline-hidden"
                         />
                       </div>
                     ) : (
