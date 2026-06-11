@@ -30,11 +30,12 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
           node-version: 20
-          cache: pnpm
+      # pnpm via npm (version pinned to package.json's packageManager):
+      # pnpm/action-setup isn't on this repo's GitHub Actions allowlist.
+      - run: npm install -g pnpm@11.5.3
       # The `allowBuilds` allowlist in pnpm-workspace.yaml lets better-sqlite3
       # compile its native binding during install, so no separate rebuild step
       # is needed. The supply-chain cooldown (minimumReleaseAge) is honoured by
@@ -49,11 +50,12 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
           node-version: 20
-          cache: pnpm
+      # pnpm via npm (version pinned to package.json's packageManager):
+      # pnpm/action-setup isn't on this repo's GitHub Actions allowlist.
+      - run: npm install -g pnpm@11.5.3
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter bridgeport-ui exec vitest run 'src/lib/'
 
@@ -78,11 +80,12 @@ jobs:
     needs: unit-backend
     steps:
       - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
           node-version: 20
-          cache: pnpm
+      # pnpm via npm (version pinned to package.json's packageManager):
+      # pnpm/action-setup isn't on this repo's GitHub Actions allowlist.
+      - run: npm install -g pnpm@11.5.3
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec prisma generate
       - run: pnpm exec vitest run --config config/vitest.config.ts --reporter=github-actions
@@ -97,11 +100,12 @@ jobs:
     needs: unit-frontend
     steps:
       - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
           node-version: 20
-          cache: pnpm
+      # pnpm via npm (version pinned to package.json's packageManager):
+      # pnpm/action-setup isn't on this repo's GitHub Actions allowlist.
+      - run: npm install -g pnpm@11.5.3
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter bridgeport-ui exec vitest run --coverage --reporter=github-actions
       - uses: codecov/codecov-action@v7
@@ -116,11 +120,12 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
           node-version: 20
-          cache: pnpm
+      # pnpm via npm (version pinned to package.json's packageManager):
+      # pnpm/action-setup isn't on this repo's GitHub Actions allowlist.
+      - run: npm install -g pnpm@11.5.3
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec vitest run --config config/vitest.config.ts tests/migrations/
 
@@ -132,11 +137,12 @@ jobs:
     if: github.event_name == 'schedule'
     steps:
       - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
           node-version: 20
-          cache: pnpm
+      # pnpm via npm (version pinned to package.json's packageManager):
+      # pnpm/action-setup isn't on this repo's GitHub Actions allowlist.
+      - run: npm install -g pnpm@11.5.3
       - uses: actions/setup-go@v6
         with:
           go-version: '1.25'
@@ -159,11 +165,12 @@ jobs:
     needs: [unit-backend, unit-frontend]
     steps:
       - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
           node-version: 20
-          cache: pnpm
+      # pnpm via npm (version pinned to package.json's packageManager):
+      # pnpm/action-setup isn't on this repo's GitHub Actions allowlist.
+      - run: npm install -g pnpm@11.5.3
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec prisma generate
       - run: pnpm run build
@@ -176,11 +183,12 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
           node-version: 20
-          cache: pnpm
+      # pnpm via npm (version pinned to package.json's packageManager):
+      # pnpm/action-setup isn't on this repo's GitHub Actions allowlist.
+      - run: npm install -g pnpm@11.5.3
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec prisma generate
       - run: pnpm exec tsc --noEmit

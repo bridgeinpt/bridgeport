@@ -80,11 +80,12 @@ jobs:
             scenarios: 'services-list,container-images-list,monitoring-overview,agents-status,health-status,metrics-summary,server-metrics-history,service-metrics-history,database-metrics-history,secrets-list,databases-list,database-monitoring-summary,config-files-list,dependency-graph,backup-summary'
     steps:
       - uses: actions/checkout@v6
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
           node-version: 20
-          cache: pnpm
+      # pnpm via npm (version pinned to package.json's packageManager):
+      # pnpm/action-setup isn't on this repo's GitHub Actions allowlist.
+      - run: npm install -g pnpm@11.5.3
       # The `allowBuilds` allowlist in pnpm-workspace.yaml lets better-sqlite3
       # compile its native binding during install (no separate rebuild step),
       # and pnpm honours the supply-chain cooldown (minimumReleaseAge) natively.
