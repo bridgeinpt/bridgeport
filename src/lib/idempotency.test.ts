@@ -21,15 +21,26 @@ import idempotencyPlugin, {
   STALE_INPROGRESS_MS,
 } from './idempotency.js';
 
-/** Scope hash for a request with the given Authorization header (or none). */
-function scopeOf(authorization?: string): string {
-  const credential = authorization ?? '';
-  return createHash('sha256').update(credential).digest('hex').slice(0, 16);
+/** The default Authorization header makeRequest attaches (idempotency only
+ * caches credentialed requests, so the default request must carry one). */
+const DEFAULT_AUTH = 'Bearer tok-default';
+
+/** Scope hash for a request with the given Authorization header. Defaults to
+ * makeRequest's DEFAULT_AUTH so storedKeyOf() lines up with makeRequest(). */
+function scopeOf(authorization: string = DEFAULT_AUTH): string {
+  return createHash('sha256').update(authorization).digest('hex').slice(0, 16);
 }
 
-/** Build the storedKey the preHandler computes for a raw key + credential. */
-function storedKeyOf(rawKey: string, authorization?: string): string {
-  return `${scopeOf(authorization)}:${rawKey}`;
+/**
+ * Build the storedKey the preHandler computes for a raw key + credential + env.
+ * The env segment defaults to 'env-1' to match makeRequest's params.envId.
+ */
+function storedKeyOf(
+  rawKey: string,
+  authorization: string = DEFAULT_AUTH,
+  envId: string = 'env-1'
+): string {
+  return `${scopeOf(authorization)}:${envId}:${rawKey}`;
 }
 
 const mockPrisma = vi.mocked(prisma, true);
@@ -75,7 +86,9 @@ function makeRequest(overrides: Record<string, unknown> = {}): Record<string, un
     method: 'POST',
     url: '/api/environments/env-1/webhooks',
     routeOptions: { url: '/api/environments/:envId/webhooks' },
-    headers: { 'idempotency-key': 'key-123' },
+    // idempotency only engages for credentialed requests, so the default
+    // request carries an Authorization header (see DEFAULT_AUTH).
+    headers: { 'idempotency-key': 'key-123', authorization: DEFAULT_AUTH },
     body: { url: 'https://x.test', events: ['plan.completed'] },
     params: { envId: 'env-1' },
     ...overrides,
@@ -312,6 +325,56 @@ describe('idempotency preHandler', () => {
     expect(keyA).toBe(storedKeyOf('shared', 'Bearer tok-A'));
     expect(keyB).toBe(storedKeyOf('shared', 'Bearer tok-B'));
     expect(keyA).not.toBe(keyB);
+  });
+
+  it('scopes the stored key per environment — same credential+key+body across two envs do not collide', async () => {
+    const { preHandler } = await loadHooks();
+    const body = { url: 'https://x.test', events: ['plan.completed'] };
+    const headers = { 'idempotency-key': 'shared', authorization: 'Bearer tok-A' };
+
+    // Env A: fresh row.
+    mockPrisma.idempotencyKey.findUnique.mockResolvedValueOnce(null);
+    mockPrisma.idempotencyKey.create.mockResolvedValue({ id: 'row-A' } as never);
+    await preHandler(
+      makeRequest({
+        body,
+        headers,
+        url: '/api/environments/env-A/webhooks',
+        params: { envId: 'env-A' },
+      }),
+      makeReply()
+    );
+
+    // Env B: same credential + raw key + body, different env. Must NOT replay A.
+    mockPrisma.idempotencyKey.findUnique.mockResolvedValueOnce(null);
+    const replyB = makeReply();
+    await preHandler(
+      makeRequest({
+        body,
+        headers,
+        url: '/api/environments/env-B/webhooks',
+        params: { envId: 'env-B' },
+      }),
+      replyB
+    );
+
+    expect(replyB.sent).toBeFalsy(); // not a replay of A
+    const keyA = (mockPrisma.idempotencyKey.create.mock.calls[0][0] as { data: { key: string } }).data.key;
+    const keyB = (mockPrisma.idempotencyKey.create.mock.calls[1][0] as { data: { key: string } }).data.key;
+    expect(keyA).toBe(storedKeyOf('shared', 'Bearer tok-A', 'env-A'));
+    expect(keyB).toBe(storedKeyOf('shared', 'Bearer tok-A', 'env-B'));
+    expect(keyA).not.toBe(keyB);
+  });
+
+  it('skips idempotency entirely for a credential-less request (no DB touch)', async () => {
+    const { preHandler } = await loadHooks();
+    // POST with an Idempotency-Key but NO Authorization/Cookie header.
+    await preHandler(
+      makeRequest({ headers: { 'idempotency-key': 'key-123' } }),
+      makeReply()
+    );
+    expect(mockPrisma.idempotencyKey.findUnique).not.toHaveBeenCalled();
+    expect(mockPrisma.idempotencyKey.create).not.toHaveBeenCalled();
   });
 
   it('takes over a STALE inProgress row (older than the threshold) instead of 409', async () => {

@@ -185,6 +185,23 @@ describe('isBlockedWebhookHost (SSRF guard)', () => {
     mockDnsLookup.mockResolvedValue([{ address: '93.184.216.34', family: 4 }]);
     expect(await isBlockedWebhookHost('https://hook.example.com/')).toBe(false);
   });
+
+  it('blocks IPv4-mapped IPv6 literals (hex-compressed by the URL parser)', async () => {
+    // `new URL('http://[::ffff:127.0.0.1]/')` normalizes the hostname to the
+    // hex-compressed form `[::ffff:7f00:1]`. The guard must decode the embedded
+    // IPv4 from that hex form and block it (loopback / private / metadata).
+    expect(await isBlockedWebhookHost('http://[::ffff:127.0.0.1]/')).toBe(true);
+    expect(
+      await isBlockedWebhookHost('http://[::ffff:169.254.169.254]/latest/meta-data/')
+    ).toBe(true);
+    expect(await isBlockedWebhookHost('http://[::ffff:10.0.0.1]/')).toBe(true);
+    // No DNS round-trip — these are literal IPs.
+    expect(mockDnsLookup).not.toHaveBeenCalled();
+  });
+
+  it('allows a normal public IPv6 literal', async () => {
+    expect(await isBlockedWebhookHost('http://[2606:4700:4700::1111]/')).toBe(false);
+  });
 });
 
 describe('emitWebhookEvent', () => {

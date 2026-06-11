@@ -5,14 +5,23 @@
  * BEFORE the route-level `fastify.authenticate` preHandler, so it does NOT have
  * `request.authUser`. To keep idempotency keys from colliding across tenants
  * (and to neutralize the pre-auth ordering for replays), the stored key folds a
- * credential scope into its value: `storedKey = sha256(credential):rawClientKey`
- * where the credential is the raw Authorization (or Cookie) header. The
- * `@@unique([key, method, path])` constraint then separates principals
- * automatically — two different tokens reusing the same Idempotency-Key value on
- * the same route get DISTINCT rows, so there is no cross-tenant replay/leak and
- * no spurious 409. A replay can only ever match a request bearing the SAME
- * credential. We never store the raw Authorization value — only its hash, folded
- * into the key.
+ * credential scope AND the resolved environment into its value:
+ * `storedKey = sha256(credential):envId:rawClientKey` where the credential is the
+ * raw Authorization (or Cookie) header. The `@@unique([key, method, path])`
+ * constraint then separates principals automatically — two different tokens (or
+ * one credential targeting two different environments) reusing the same
+ * Idempotency-Key value on the same route PATTERN get DISTINCT rows, so there is
+ * no cross-tenant/cross-env replay/leak and no spurious 409. (The route `path` is
+ * the pattern `/api/environments/:envId/...`, so the concrete env must live IN
+ * the key, otherwise a credential entitled to two environments could replay env
+ * A's cached response for an env-B mutation.) A replay can only ever match a
+ * request bearing the SAME credential and targeting the SAME environment. We
+ * never store the raw Authorization value — only its hash, folded into the key.
+ *
+ * Credential-less requests (no Authorization and no Cookie header) are NOT
+ * cached: idempotency is only meaningful for authenticated API clients, and such
+ * requests are rejected by route auth anyway. Caching them would write a 2xx body
+ * into the shared, attacker-known sha256('') scope namespace.
  *
  * It engages ONLY when a request is a POST carrying an `Idempotency-Key` header
  * — every other request passes straight through, so the feature naturally covers
@@ -20,6 +29,8 @@
  * without any per-route wiring.
  *
  * Contract:
+ *   - A credential-less request (no Authorization/Cookie) → idempotency is
+ *     skipped entirely (pass-through, no DB work).
  *   - First time a (storedKey, method, routerPath) is seen → an IdempotencyKey
  *     row is created (inProgress=true, expiresAt = now + 24h). The handler runs,
  *     and an onSend hook persists the response (2xx) or deletes the row (non-2xx,
@@ -138,10 +149,28 @@ function hashBody(body: unknown): string | null {
   }
 }
 
-/** Resolve the env id (if any) the request targets, for attribution only. */
+/**
+ * Resolve the env id (if any) the request targets. Folded into the stored key
+ * (so cross-env replays can't collide) and also persisted on the row for
+ * attribution.
+ */
 function resolveEnvironmentId(request: FastifyRequest): string | null {
   const params = (request.params ?? {}) as Record<string, string>;
   return params.envId ?? params.id ?? null;
+}
+
+/**
+ * True iff the request carries a credential we can scope a key under — a
+ * non-empty Authorization or Cookie header. Credential-less requests are not
+ * cached (see preHandler): they would all share the sha256('') scope namespace.
+ */
+function hasCredential(request: FastifyRequest): boolean {
+  const auth = request.headers.authorization;
+  const cookie = request.headers.cookie;
+  return (
+    (typeof auth === 'string' && auth.trim() !== '') ||
+    (typeof cookie === 'string' && cookie.trim() !== '')
+  );
 }
 
 /**
@@ -149,8 +178,8 @@ function resolveEnvironmentId(request: FastifyRequest): string | null {
  * runs before `fastify.authenticate`). The app authenticates via the
  * `Authorization: Bearer <token>` header (JWT or API token); a session may also
  * arrive via a Cookie header. We hash whichever is present so the raw credential
- * is never stored. An unauthenticated request hashes the empty string (a
- * constant) — harmless, since such requests are rejected by authenticate anyway.
+ * is never stored. Only called once `hasCredential(request)` is known true, so
+ * the empty-string (shared) scope is never persisted.
  */
 function scopeHash(request: FastifyRequest): string {
   const auth = request.headers.authorization;
@@ -173,10 +202,18 @@ async function preHandler(request: FastifyRequest, reply: FastifyReply): Promise
   // Non-JSON body (multipart upload, etc.) — skip idempotency gracefully.
   if (requestHash === null) return;
 
-  // Fold the credential scope into the stored key so different principals never
-  // share a row (the @@unique([key,method,path]) constraint separates them). The
-  // raw client key is kept only for hashing — never persisted on its own.
-  const storedKey = `${scopeHash(request)}:${key}`;
+  // No credential present (no Authorization/Cookie) — skip idempotency entirely.
+  // Caching here would write a 2xx body into the shared sha256('') scope
+  // namespace; such requests are rejected by route auth anyway. Pass through
+  // without any DB work.
+  if (!hasCredential(request)) return;
+
+  // Fold the credential scope AND the resolved environment into the stored key so
+  // different principals — and the same principal targeting different
+  // environments — never share a row (the @@unique([key,method,path]) constraint
+  // separates them; `path` is the route PATTERN, so the concrete envId must be in
+  // the key). The raw client key is kept only for hashing — never persisted alone.
+  const storedKey = `${scopeHash(request)}:${resolveEnvironmentId(request) ?? '-'}:${key}`;
 
   const existing = await prisma.idempotencyKey.findUnique({
     where: { key_method_path: { key: storedKey, method: 'POST', path: routerPath } },

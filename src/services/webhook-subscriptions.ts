@@ -74,17 +74,53 @@ function isBlockedIp(ip: string): boolean {
   const family = isIP(ip);
   if (family === 4) return isBlockedIpv4(ip);
   if (family === 6) {
+    // The WHATWG URL parser may have already stripped brackets, and the address
+    // may be hex-compressed (`::ffff:7f00:1`) or dotted (`::ffff:127.0.0.1`).
     const lower = ip.toLowerCase();
     if (lower === '::1' || lower === '::') return true; // loopback / unspecified
     // Unique local (fc00::/7) and link-local (fe80::/10).
     if (/^f[cd][0-9a-f]{2}:/.test(lower)) return true;
     if (/^fe[89ab][0-9a-f]:/.test(lower)) return true;
-    // IPv4-mapped (::ffff:a.b.c.d) — range-check the embedded IPv4.
-    const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-    if (mapped) return isBlockedIpv4(mapped[1]);
+
+    // IPv4-mapped (::ffff:x), IPv4-compatible (::x), and any other form that
+    // embeds a v4 in the low 32 bits. These can SSRF-bypass a naive dotted-only
+    // check because Node normalizes `::ffff:127.0.0.1` to `::ffff:7f00:1`. Decode
+    // the embedded IPv4 from EITHER the dotted-decimal or the hex-quartet form
+    // and range-check it. If it looks like such an address but cannot be cleanly
+    // decoded, fail closed (block) rather than allow.
+    const embedsV4 =
+      lower.startsWith('::ffff:') || lower.startsWith('::') || lower.includes('.');
+    if (embedsV4) {
+      const v4 = embeddedIpv4(lower);
+      if (v4 === null) return true; // undecodable but v4-shaped → fail closed
+      return isBlockedIpv4(v4);
+    }
     return false;
   }
   return false;
+}
+
+/**
+ * Decode the IPv4 embedded in the low 32 bits of an IPv4-mapped / IPv4-compatible
+ * IPv6 literal, accepting BOTH the dotted-decimal tail (`::ffff:127.0.0.1`) and
+ * the hex-quartet tail (`::ffff:7f00:1` → 127.0.0.1). Returns the dotted-decimal
+ * IPv4 string, or null when it cannot be cleanly decoded. `host` must be
+ * lower-cased and bracket-stripped.
+ */
+function embeddedIpv4(host: string): string | null {
+  // Dotted-decimal tail: `::ffff:a.b.c.d` or `::a.b.c.d`.
+  const dotted = host.match(/^::(?:ffff:(?:0:)?)?(\d+\.\d+\.\d+\.\d+)$/);
+  if (dotted) return dotted[1];
+
+  // Hex-quartet tail: `::ffff:HHHH:HHHH`, `::ffff:0:HHHH:HHHH`, or `::HHHH:HHHH`.
+  const hex = host.match(/^::(?:ffff:(?:0:)?)?([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (hex) {
+    const hi = parseInt(hex[1], 16);
+    const lo = parseInt(hex[2], 16);
+    if (Number.isNaN(hi) || Number.isNaN(lo)) return null;
+    return `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+  }
+  return null;
 }
 
 function isBlockedIpv4(ip: string): boolean {
