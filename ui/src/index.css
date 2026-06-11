@@ -1,6 +1,63 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/*
+ * CSS-first theme configuration (Tailwind v4) — replaces the
+ * `theme.extend` block that used to live in tailwind.config.js.
+ * Custom colors are exposed as `--color-*` so utilities like
+ * `bg-primary-600`, `text-brand-500`, `shadow-card` are generated.
+ */
+@theme {
+  --color-primary-50: #f0f9ff;
+  --color-primary-100: #e0f2fe;
+  --color-primary-200: #bae6fd;
+  --color-primary-300: #7dd3fc;
+  --color-primary-400: #38bdf8;
+  --color-primary-500: #0ea5e9;
+  --color-primary-600: #0284c7;
+  --color-primary-700: #0369a1;
+  --color-primary-800: #075985;
+  --color-primary-900: #0c4a6e;
+
+  --color-brand-400: #ff3333;
+  --color-brand-500: #e60000;
+  --color-brand-600: #cc0000;
+  --color-brand-700: #b30000;
+  --color-brand-800: #990000;
+
+  --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
+  --shadow-modal: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
+/*
+ * Tailwind v4's Preflight dropped three defaults that v3 set. Restore them so
+ * any element that relied on the Preflight default — rather than an explicit
+ * `border-*` / `placeholder-*` / `cursor-*` utility — keeps rendering as it did
+ * under v3. The colors resolve to v4's gray-200/gray-400; the literal hex
+ * fallbacks only apply if the default palette is ever cleared via `@theme`.
+ */
+@layer base {
+  /* v4 defaults bare `border`/`divide` to currentColor; v3 used gray-200. */
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentColor);
+  }
+
+  /* v4 dropped Preflight's `cursor: pointer` on buttons — restore it. */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  /* v4 sets the default placeholder to a translucent currentColor; restore a
+     solid gray-400 placeholder for inputs that don't set their own color. */
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-gray-400, #9ca3af);
+  }
+}
 
 :root {
   --bg-primary: #0f172a;
@@ -25,7 +82,7 @@ code, pre, .font-mono {
   /* Buttons - reduced density */
   .btn {
     @apply px-3 py-1.5 rounded-md font-medium transition-colors duration-200 text-sm
-           focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 focus:ring-offset-slate-900
+           focus:outline-hidden focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 focus:ring-offset-slate-900
            disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
@@ -47,7 +104,7 @@ code, pre, .font-mono {
 
   /* Inputs - reduced density */
   .input {
-    @apply w-full px-2.5 py-1.5 bg-slate-800 border border-slate-600 rounded-md text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
+    @apply w-full px-2.5 py-1.5 bg-slate-800 border border-slate-600 rounded-md text-sm text-white placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-primary-500 focus:border-transparent;
   }
 
   /* Cards - with subtle elevation */
@@ -195,5 +252,5 @@ code, pre, .font-mono {
 /* Focus states for select and textarea */
 select:focus,
 textarea:focus {
-  @apply outline-none ring-2 ring-primary-500 border-transparent;
+  @apply outline-hidden ring-2 ring-primary-500 border-transparent;
 }

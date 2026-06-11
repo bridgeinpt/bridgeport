@@ -52,7 +52,7 @@ function ServerClusterNodeComponent({ data, selected }: NodeProps) {
         minWidth={minWidth}
         minHeight={minHeight}
         color={accent}
-        handleClassName="!w-2 !h-2 !rounded-sm"
+        handleClassName="!w-2 !h-2 !rounded-xs"
       />
       {/* Header */}
       <div
