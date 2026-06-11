@@ -1,0 +1,42 @@
+# Single pnpm workspace covering the backend (root) and the React UI.
+# One root pnpm-lock.yaml resolves dependencies for both packages.
+packages:
+  - '.'
+  - 'ui'
+
+# Supply-chain hardening (replaces the old .npmrc `ignore-scripts=true`).
+#
+# pnpm refuses to run package install/build lifecycle scripts by default. The
+# `allowBuilds` map is the pnpm 11 successor to v10's `onlyBuiltDependencies`:
+# each package must be explicitly allowed (`true`) or denied (`false`) to run
+# its build scripts; anything not listed stays blocked. We also set
+# `strictDepBuilds: true` (it is OFF by default in pnpm 11) so an unlisted
+# dependency that wants to build fails the install loudly rather than silently
+# skipping its native binding — this is the "harder to regress" ratchet.
+#
+#   better-sqlite3 / ssh2 / cpu-features  → compile native bindings
+#   esbuild                               → links its platform binary
+#   @prisma/engines / prisma              → fetch + place the query engine
+#   protobufjs                            → build-time codegen (dep of dockerode)
+#   msw                                   → service-worker asset (dev/test only)
+allowBuilds:
+  better-sqlite3: true
+  '@prisma/engines': true
+  prisma: true
+  ssh2: true
+  cpu-features: true
+  esbuild: true
+  protobufjs: true
+  msw: true
+
+# Supply-chain cooldown: don't pull a freshly published version until it has
+# been on the registry for at least this many MINUTES. 1440 minutes = 1 day,
+# matching the old npm `min-release-age=1` (npm measured this in days). This is
+# also pnpm 11's default, but we pin it explicitly so the intent is documented.
+minimumReleaseAge: 1440
+
+# Fail `pnpm install` if any dependency wanting to run build scripts is not in
+# the allowBuilds map above. OFF by default in pnpm 11; we opt in so an
+# unlisted native dep is caught loudly in CI instead of silently shipping
+# without its binding.
+strictDepBuilds: true

@@ -75,7 +75,7 @@ model Server {
 ### Step 2: Create the Migration
 
 ```bash
-npx prisma migrate dev --name descriptive_name
+pnpm exec prisma migrate dev --name descriptive_name
 ```
 
 This command:
@@ -117,7 +117,7 @@ For more complex changes (renaming columns, adding required foreign keys), Prism
 ### Step 4: Test the Migration
 
 ```bash
-npm run dev  # Start the app and verify it works
+pnpm run dev  # Start the app and verify it works
 ```
 
 ### Step 5: Commit
@@ -217,7 +217,7 @@ Before merging any schema change, test it against a copy of real data:
 cp /path/to/prod/bridgeport.db ./test-migration.db
 
 # Run migrations against the copy
-DATABASE_URL=file:./test-migration.db npx prisma migrate deploy
+DATABASE_URL=file:./test-migration.db pnpm exec prisma migrate deploy
 ```
 
 If this succeeds, the migration is safe for production. If it fails, fix the SQL before committing.
@@ -233,7 +233,7 @@ If this succeeds, the migration is safe for production. If it fails, fix the SQL
 
 ```bash
 # WRONG - bypasses migration tracking
-npx prisma db push
+pnpm exec prisma db push
 ```
 
 `db push` modifies the database schema directly without creating migration files. This means:
@@ -270,7 +270,7 @@ Once a migration is committed and potentially deployed, it must stay in the repo
 
 Before merging any schema change, verify:
 
-- [ ] `npx prisma migrate dev` succeeded in your development environment
+- [ ] `pnpm exec prisma migrate dev` succeeded in your development environment
 - [ ] The generated SQL file is reviewed for data safety
 - [ ] Tested with existing data (not just an empty database)
 - [ ] Migration files are committed to git alongside `prisma/schema.prisma`

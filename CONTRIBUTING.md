@@ -34,9 +34,13 @@ Participation in this project is governed by our [Code of Conduct](CODE_OF_CONDU
 | Tool | Version | Used For |
 |------|---------|----------|
 | Node.js | 20+ | Backend and frontend |
-| npm | 9+ | Package management |
+| pnpm | 11+ | Package management |
 | Go | 1.21+ | Monitoring agent and CLI (optional) |
 | Docker | 20+ | Running BRIDGEPORT in containers (optional) |
+
+You need pnpm. Install it with `npm install -g pnpm` (or, on Node.js versions
+below 25, enable Corepack with `corepack enable && corepack prepare pnpm@latest --activate`).
+The repo pins its pnpm version via the `packageManager` field in `package.json`.
 
 ### Clone and Install
 
@@ -44,14 +48,21 @@ Participation in this project is governed by our [Code of Conduct](CODE_OF_CONDU
 git clone https://github.com/bridgeinpt/bridgeport.git
 cd bridgeport
 
-# Install backend dependencies
-npm install
-
-# Install frontend dependencies
-cd ui && npm install && cd ..
+# One install covers the whole workspace (backend root + ui/)
+pnpm install
 ```
 
-The repo ships `.npmrc` files that disable npm lifecycle scripts (`ignore-scripts=true`) and enforce a one-day release-age cooldown as supply-chain defenses. If a dependency needs a native rebuild after install, run `npm rebuild <pkg> --ignore-scripts=false` (notably `npm rebuild better-sqlite3 --ignore-scripts=false` for the backend — `.npmrc` also gates `npm rebuild`, so the flag is required). See [docs/development/supply-chain.md](docs/development/supply-chain.md) for the full rationale and escape hatches.
+This is a single pnpm workspace: the root `pnpm-workspace.yaml` declares both
+`.` (backend) and `ui` (frontend), so one `pnpm install` resolves everything
+against one root `pnpm-lock.yaml`.
+
+Supply-chain defenses live in `pnpm-workspace.yaml`: pnpm blocks dependency
+lifecycle scripts by default (`allowBuilds` is the explicit allowlist of
+packages permitted to build — e.g. `better-sqlite3`'s native binding builds at
+install time, no manual rebuild needed), and `minimumReleaseAge` enforces a
+one-day cooldown before a freshly published version can be installed. See
+[docs/development/supply-chain.md](docs/development/supply-chain.md) for the full
+rationale and escape hatches.
 
 ### Configure Environment
 
@@ -71,10 +82,10 @@ ADMIN_PASSWORD=password123
 
 ```bash
 # Generate Prisma client
-npm run db:generate
+pnpm run db:generate
 
 # Run migrations (creates dev.db)
-npx prisma migrate dev
+pnpm exec prisma migrate dev
 ```
 
 ### Start Development Servers
@@ -84,7 +95,7 @@ You need two terminals:
 **Terminal 1 -- Backend (port 3000):**
 
 ```bash
-npm run dev
+pnpm run dev
 ```
 
 Expected output:
@@ -97,7 +108,7 @@ Plugins synced successfully
 **Terminal 2 -- Frontend (port 5173):**
 
 ```bash
-cd ui && npm run dev
+cd ui && pnpm run dev
 ```
 
 Expected output:
@@ -154,16 +165,16 @@ Use descriptive branch names with a prefix:
 
 ```bash
 # Build backend (type-check)
-npm run build
+pnpm run build
 
 # Build frontend
-cd ui && npm run build && cd ..
+pnpm --filter bridgeport-ui run build
 
 # Run integration tests
-npx vitest run --config config/vitest.config.ts
+pnpm exec vitest run --config config/vitest.config.ts
 
 # Run unit tests
-npx vitest run --config config/vitest.unit.config.ts
+pnpm exec vitest run --config config/vitest.unit.config.ts
 ```
 
 ## Database Migration Guide
@@ -171,17 +182,17 @@ npx vitest run --config config/vitest.unit.config.ts
 BRIDGEPORT uses Prisma with SQLite. Schema changes must include migrations so that deployed containers automatically update their database on restart.
 
 > [!WARNING]
-> Never use `npx prisma db push` for schema changes. It bypasses the migration system and will break production deployments. Always use `npx prisma migrate dev`.
+> Never use `pnpm exec prisma db push` for schema changes. It bypasses the migration system and will break production deployments. Always use `pnpm exec prisma migrate dev`.
 
 ### Quick Steps
 
 1. Edit `prisma/schema.prisma`
 2. Create a migration:
    ```bash
-   npx prisma migrate dev --name descriptive_name
+   pnpm exec prisma migrate dev --name descriptive_name
    ```
 3. Review the generated SQL in `prisma/migrations/`
-4. Test with `npm run dev`
+4. Test with `pnpm run dev`
 5. Commit both the schema and migration files
 
 For the full migration guide, including handling breaking changes and emergency recovery, see [docs/development/database-migrations.md](docs/development/database-migrations.md).
@@ -229,23 +240,23 @@ BRIDGEPORT has two separate test configurations that must not be mixed:
 
 | Config | Scope | Command |
 |--------|-------|---------|
-| `config/vitest.config.ts` | Integration tests (routes, API) | `npx vitest run --config config/vitest.config.ts` |
-| `config/vitest.unit.config.ts` | Unit tests (services, lib) | `npx vitest run --config config/vitest.unit.config.ts` |
+| `config/vitest.config.ts` | Integration tests (routes, API) | `pnpm exec vitest run --config config/vitest.config.ts` |
+| `config/vitest.unit.config.ts` | Unit tests (services, lib) | `pnpm exec vitest run --config config/vitest.unit.config.ts` |
 
 ### Running Tests
 
 ```bash
 # All integration tests
-npx vitest run --config config/vitest.config.ts
+pnpm exec vitest run --config config/vitest.config.ts
 
 # All unit tests
-npx vitest run --config config/vitest.unit.config.ts
+pnpm exec vitest run --config config/vitest.unit.config.ts
 
 # Single test file
-npx vitest run src/routes/auth.test.ts
+pnpm exec vitest run src/routes/auth.test.ts
 
 # Watch mode for active development
-npx vitest --watch src/routes/auth.test.ts
+pnpm exec vitest --watch src/routes/auth.test.ts
 ```
 
 ### Writing Tests
@@ -270,8 +281,8 @@ For detailed patterns and examples, see the Testing section in [CLAUDE.md](CLAUD
 ### PR Checklist
 
 - [ ] Tests pass (`vitest run --config vitest.config.ts` and `vitest run --config vitest.unit.config.ts`)
-- [ ] Backend builds (`npm run build`)
-- [ ] Frontend builds (`cd ui && npm run build`)
+- [ ] Backend builds (`pnpm run build`)
+- [ ] Frontend builds (`pnpm --filter bridgeport-ui run build`)
 - [ ] New routes added to RBAC security tests (`tests/security/rbac-matrix.test.ts`)
 - [ ] Migration files committed (if schema changed)
 - [ ] Documentation updated (if behavior changed)
@@ -342,8 +353,8 @@ const service = await createTestService(prisma, { serverId, containerImageId: im
 Integration tests and unit tests use different Vitest configs with different isolation modes. Running unit tests with the integration config (or vice versa) causes data races or mock pollution. Always specify the config:
 
 ```bash
-npx vitest run --config config/vitest.config.ts       # Integration
-npx vitest run --config config/vitest.unit.config.ts   # Unit
+pnpm exec vitest run --config config/vitest.config.ts       # Integration
+pnpm exec vitest run --config config/vitest.unit.config.ts   # Unit
 ```
 
 ## Getting Help

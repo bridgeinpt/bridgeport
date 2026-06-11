@@ -51,29 +51,31 @@ Example output: `2026022514-a1b2c3d`
 
 ## Docker Image Build
 
-The production Docker image uses a **multi-stage build** with 6 stages to minimize the final image size:
+The production Docker image uses a **multi-stage build** to minimize the final image size. The Node stages share a `pnpm-base` stage (installs pnpm + copies the workspace manifests/lockfile for cache-friendly layering):
 
 ```mermaid
 graph TD
-    A[agent-build<br/>Go 1.22 Alpine] -->|bridgeport-agent binary<br/>+ agent-version.txt| F[production<br/>Node 22 Alpine]
-    B[cli-build<br/>Go 1.22 Alpine] -->|CLI binaries x4<br/>+ cli-version.txt| F
-    C[ui-build<br/>Node 22 Alpine] -->|ui/dist/| F
-    D[api-build<br/>Node 22 Alpine] -->|dist/ + prisma/| F
-    E[prisma-build<br/>Node 22 Alpine] -->|Prisma client + CLI| G[deps-prod<br/>Node 22 Alpine]
-    G -->|Pruned node_modules| F
+    A[agent-build<br/>Go Alpine] -->|bridgeport-agent binary<br/>+ agent-version.txt| F[production<br/>Node Alpine]
+    B[cli-build<br/>Go Alpine] -->|CLI binaries x4<br/>+ cli-version.txt| F
+    P[pnpm-base<br/>pnpm + manifests] --> C[ui-build]
+    P --> D[api-build]
+    P --> G[deps-prod]
+    C[ui-build<br/>Node Alpine] -->|ui/dist/| F
+    D[api-build<br/>Node Alpine] -->|dist/ + prisma/| F
+    G[deps-prod<br/>hoisted --prod install<br/>+ prisma generate] -->|Self-contained node_modules| F
 ```
 
 ### Build Stages
 
 | Stage | Base Image | Purpose |
 |-------|-----------|---------|
-| `agent-build` | `golang:1.22-alpine` | Compiles the Go agent for `linux/amd64` |
-| `cli-build` | `golang:1.22-alpine` | Compiles the Go CLI for 4 platforms (darwin/linux x amd64/arm64) |
-| `ui-build` | `node:22-alpine` | Builds the React frontend with Vite |
-| `api-build` | `node:22-alpine` | Compiles TypeScript backend with `tsc` |
-| `prisma-build` | `node:22-alpine` | Generates Prisma client |
-| `deps-prod` | `node:22-alpine` | Installs production-only npm dependencies, prunes unnecessary files |
-| `production` | `node:22-alpine` | Final image with all artifacts |
+| `agent-build` | `golang:*-alpine` | Compiles the Go agent for `linux/amd64` |
+| `cli-build` | `golang:*-alpine` | Compiles the Go CLI for 4 platforms (darwin/linux x amd64/arm64) |
+| `pnpm-base` | `node:*-alpine` | Installs pnpm, copies the workspace manifests + `pnpm-lock.yaml` (shared base for the Node stages) |
+| `ui-build` | `node:*-alpine` | Builds the React frontend with Vite (`pnpm --filter bridgeport-ui run build`) |
+| `api-build` | `node:*-alpine` | Compiles TypeScript backend with `tsc` (`pnpm run build`) |
+| `deps-prod` | `node:*-alpine` | Hoisted `--prod` install (`--config.nodeLinker=hoisted`) + `prisma generate`, then prunes unnecessary files. Produces a self-contained `node_modules` (prisma CLI + generated client + native bindings) — replaces the former separate `prisma-build` + `deps-prod` stages |
+| `production` | `node:*-alpine` | Final image with all artifacts |
 
 ### Build Command
 
@@ -124,25 +126,23 @@ The image runs as the `node` user (non-root) and exposes port 3000.
 The backend is compiled from TypeScript to JavaScript using `tsc`:
 
 ```bash
-# Install dependencies
-npm install
-
-# .npmrc sets ignore-scripts=true (which also gates `npm rebuild`); pass
-# --ignore-scripts=false so the native SQLite binding gets built.
+# Install dependencies (requires pnpm: `npm install -g pnpm`).
+# The allowBuilds allowlist in pnpm-workspace.yaml builds better-sqlite3's
+# native binding at install time — no separate rebuild step.
 # See docs/development/supply-chain.md.
-npm rebuild better-sqlite3 --ignore-scripts=false
+pnpm install
 
 # Generate Prisma client (required before build)
-npm run db:generate
+pnpm run db:generate
 
 # Compile TypeScript
-npm run build
+pnpm run build
 ```
 
 Output is written to `dist/`. The entry point is `dist/server.js`.
 
 > [!NOTE]
-> `npm run db:generate` must be run before `npm run build` because the TypeScript code imports Prisma-generated types. Without the generated client, compilation will fail with type errors.
+> `pnpm run db:generate` must be run before `pnpm run build` because the TypeScript code imports Prisma-generated types. Without the generated client, compilation will fail with type errors.
 
 ---
 
@@ -151,9 +151,8 @@ Output is written to `dist/`. The entry point is `dist/server.js`.
 The frontend is built with Vite:
 
 ```bash
-cd ui
-npm install
-npm run build
+# From the repo root — pnpm install already covered the ui workspace package.
+pnpm --filter bridgeport-ui run build
 ```
 
 Output is written to `ui/dist/`. In production, the Fastify backend serves these static files.
@@ -161,7 +160,7 @@ Output is written to `ui/dist/`. In production, the Fastify backend serves these
 The `VITE_APP_VERSION` environment variable is embedded at build time:
 
 ```bash
-VITE_APP_VERSION=20260225-a1b2c3d npm run build
+VITE_APP_VERSION=20260225-a1b2c3d pnpm --filter bridgeport-ui run build
 ```
 
 This makes the version available in the frontend via `import.meta.env.VITE_APP_VERSION`.

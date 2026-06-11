@@ -33,14 +33,14 @@ When making schema changes:
 # 1. Edit prisma/schema.prisma
 
 # 2. Create a migration (this generates SQL and applies it to dev DB)
-npx prisma migrate dev --name descriptive_name
+pnpm exec prisma migrate dev --name descriptive_name
 
 # 3. Review the generated SQL in prisma/migrations/YYYYMMDD_descriptive_name/
 #    - Prisma auto-generates safe migrations
 #    - For complex changes, edit the SQL to add data transformations
 
 # 4. Test the migration
-npm run dev  # Verify app works
+pnpm run dev  # Verify app works
 
 # 5. Commit the migration files with your code changes
 git add prisma/migrations/ prisma/schema.prisma
@@ -79,7 +79,7 @@ Edit the generated SQL file to add data transformation logic BEFORE committing.
 
 ```bash
 # ❌ NEVER use db push in production
-npx prisma db push  # This bypasses migrations!
+pnpm exec prisma db push  # This bypasses migrations!
 
 # ❌ NEVER commit schema changes without migrations
 git add prisma/schema.prisma  # Missing migrations!
@@ -92,20 +92,20 @@ sqlite3 prod.db "ALTER TABLE..."  # Breaks migration state!
 
 ```bash
 # ✅ ALWAYS use migrate dev for schema changes
-npx prisma migrate dev --name add_user_preferences
+pnpm exec prisma migrate dev --name add_user_preferences
 
 # ✅ ALWAYS commit migrations with schema
 git add prisma/schema.prisma prisma/migrations/
 
 # ✅ ALWAYS test migrations on a copy of production data
-cp prod.db test.db && DATABASE_URL=file:./test.db npx prisma migrate deploy
+cp prod.db test.db && DATABASE_URL=file:./test.db pnpm exec prisma migrate deploy
 ```
 
 ### PRE-DEPLOYMENT CHECKLIST
 
 Before merging any schema change:
 
-- [ ] `npx prisma migrate dev` succeeded
+- [ ] `pnpm exec prisma migrate dev` succeeded
 - [ ] Migration SQL file reviewed for data safety
 - [ ] Tested with existing data (not just empty database)
 - [ ] Migration files committed to git
@@ -143,28 +143,28 @@ Backend in `src/` (lib, routes, services, plugins), frontend in `ui/`, Go agent 
 ## Development Commands
 
 ```bash
-# Install dependencies
-npm install
-cd ui && npm install && cd ..
-# .npmrc disables install scripts; pass --ignore-scripts=false on rebuild so the
-# native binding actually gets built. See docs/development/supply-chain.md.
-npm rebuild better-sqlite3 --ignore-scripts=false
+# Install dependencies (single pnpm workspace covers root + ui/)
+# Requires pnpm: `npm install -g pnpm` (or Corepack on Node <25).
+pnpm install
+# The allowBuilds allowlist in pnpm-workspace.yaml builds better-sqlite3's
+# native binding at install time — no separate rebuild step needed.
+# See docs/development/supply-chain.md.
 
 # Generate Prisma client (required after schema changes)
-npm run db:generate
+pnpm run db:generate
 
 # Run migrations (development)
-npx prisma migrate dev --name descriptive_name
+pnpm exec prisma migrate dev --name descriptive_name
 
 # Start backend (port 3000)
-npm run dev
+pnpm run dev
 
 # Start frontend (port 5173, separate terminal)
-cd ui && npm run dev
+pnpm --filter bridgeport-ui run dev
 
 # Build
-npm run build
-cd ui && npm run build
+pnpm run build
+pnpm --filter bridgeport-ui run build
 
 # Build Go agent
 cd bridgeport-agent && make build-linux
@@ -178,9 +178,9 @@ cd cli && make build
 Two vitest configs that must never be mixed: **integration** (`config/vitest.config.ts`, real SQLite, `isolate: false`) and **unit** (`config/vitest.unit.config.ts`, mocked Prisma, `isolate: true`).
 
 ```bash
-npx vitest run --config config/vitest.config.ts       # Integration tests
-npx vitest run --config config/vitest.unit.config.ts   # Unit tests
-npx vitest run src/routes/auth.test.ts                 # Single file
+pnpm exec vitest run --config config/vitest.config.ts       # Integration tests
+pnpm exec vitest run --config config/vitest.unit.config.ts   # Unit tests
+pnpm exec vitest run src/routes/auth.test.ts                 # Single file
 ```
 
 > **Full guide** (examples, factories, what to test): [`docs/development/testing-guide.md`](docs/development/testing-guide.md)
