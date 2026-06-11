@@ -12,6 +12,7 @@ import { getEnvironmentSshKey } from '../routes/environments.js';
 import { checkServiceUpdate } from '../lib/scheduler.js';
 import { pruneServerImages } from './servers.js';
 import { sendSystemNotification, NOTIFICATION_TYPES } from './notifications.js';
+import { emitWebhookEvent } from './webhook-subscriptions.js';
 import { recordTagDeployment } from './image-management.js';
 import { safeJsonParse, getErrorMessage } from '../lib/helpers.js';
 import { runExclusive } from '../lib/keyed-lock.js';
@@ -452,6 +453,17 @@ export async function deployService(
       }
     );
 
+    // Fire-and-forget webhook event (issue #126). emitWebhookEvent never throws.
+    void emitWebhookEvent('deployment.completed', deployment.server.environmentId, {
+      deploymentId: finalDeployment.id,
+      serviceId: service.id,
+      serviceName: service.name,
+      serverName: deployment.server.name,
+      imageName: service.containerImage.imageName,
+      imageTag,
+      status: DEPLOYMENT_STATUS.SUCCESS,
+    });
+
     return { deployment: finalDeployment, logs: logs.join('\n'), previousTag };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -500,6 +512,18 @@ export async function deployService(
         error: errorMessage,
       }
     );
+
+    // Fire-and-forget webhook event (issue #126). emitWebhookEvent never throws.
+    void emitWebhookEvent('deployment.failed', deployment.server.environmentId, {
+      deploymentId: failedDeployment.id,
+      serviceId: service.id,
+      serviceName: service.name,
+      serverName: deployment.server.name,
+      imageName: service.containerImage.imageName,
+      imageTag,
+      status: DEPLOYMENT_STATUS.FAILED,
+      error: errorMessage,
+    });
 
     return { deployment: failedDeployment, logs: logs.join('\n'), previousTag };
   }

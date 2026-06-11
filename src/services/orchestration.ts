@@ -2,6 +2,7 @@ import { prisma } from '../lib/db.js';
 import { deployService, deployServiceDryRun } from './deploy.js';
 import { verifyServiceHealth } from './health-verification.js';
 import { sendSystemNotification, NOTIFICATION_TYPES } from './notifications.js';
+import { emitWebhookEvent } from './webhook-subscriptions.js';
 import { eventBus } from '../lib/event-bus.js';
 import { DEPLOYMENT_STATUS, PLAN_STATUS, STEP_STATUS } from '../lib/constants.js';
 import type { DeploymentPlan, DeploymentPlanStep, Server, Service, ServiceDependency, ServiceDeployment } from '@prisma/client';
@@ -388,6 +389,14 @@ export async function executePlan(planId: string): Promise<void> {
                 error: failedStep.error,
               }
             );
+
+            void emitWebhookEvent('plan.failed', plan.environmentId, {
+              planId: plan.id,
+              planName: plan.name,
+              status: PLAN_STATUS.FAILED,
+              serviceName: failedSvc?.name,
+              error: failedStep.error ?? undefined,
+            });
             return;
           }
         }
@@ -448,6 +457,14 @@ export async function executePlan(planId: string): Promise<void> {
                 error: updatedStep.error,
               }
             );
+
+            void emitWebhookEvent('plan.failed', plan.environmentId, {
+              planId: plan.id,
+              planName: plan.name,
+              status: PLAN_STATUS.FAILED,
+              serviceName: svcName,
+              error: updatedStep.error ?? undefined,
+            });
             return;
           }
         }
@@ -470,6 +487,13 @@ export async function executePlan(planId: string): Promise<void> {
         eventBus.emitEvent({ type: 'deployment_progress', data: { planId, serviceId: step.service.id, status: PLAN_STATUS.COMPLETED, environmentId: plan.environmentId } });
       }
     }
+
+    // Fire-and-forget webhook event (issue #126). Final status is in the payload.
+    void emitWebhookEvent('plan.completed', plan.environmentId, {
+      planId: plan.id,
+      planName: plan.name,
+      status: PLAN_STATUS.COMPLETED,
+    });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     log(`ERROR: ${errorMessage}`);
@@ -488,6 +512,18 @@ export async function executePlan(planId: string): Promise<void> {
       if (step.service && step.action === 'deploy') {
         eventBus.emitEvent({ type: 'deployment_progress', data: { planId, serviceId: step.service.id, status: PLAN_STATUS.FAILED, environmentId: plan.environmentId } });
       }
+    }
+
+    // Only emit plan.failed when FAILED is the terminal state. With autoRollback
+    // on, rollbackPlan transitions the plan to ROLLED_BACK, so we let that path
+    // own the outcome rather than emit a misleading plan.failed.
+    if (!plan.autoRollback) {
+      void emitWebhookEvent('plan.failed', plan.environmentId, {
+        planId: plan.id,
+        planName: plan.name,
+        status: PLAN_STATUS.FAILED,
+        error: errorMessage,
+      });
     }
 
     if (plan.autoRollback) {

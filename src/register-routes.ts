@@ -55,6 +55,7 @@ import { configScanRoutes } from './routes/config-scan.js';
 import { serviceAccountRoutes } from './routes/service-accounts.js';
 import { apiTokenRoutes } from './routes/api-tokens.js';
 import { syncBatchRoutes } from './routes/sync-batch.js';
+import { webhookSubscriptionRoutes } from './routes/webhook-subscriptions.js';
 
 /**
  * Register every API route plugin on the given Fastify instance, in the
@@ -96,4 +97,5 @@ export async function registerApiRoutes(fastify: FastifyInstance): Promise<void>
   await fastify.register(serviceAccountRoutes);
   await fastify.register(apiTokenRoutes);
   await fastify.register(syncBatchRoutes);
+  await fastify.register(webhookSubscriptionRoutes);
 }
