@@ -4,73 +4,89 @@ BRIDGEPORT applies a few defensive defaults to reduce the blast radius of compro
 
 ## Requirements
 
-You need **npm 11.10 or newer**. The `min-release-age` setting we use (see [Defaults](#defaults)) was added in npm 11.10.0; older npm versions silently ignore the key and the cooldown is **not enforced**.
+You need **pnpm 11 or newer** (`pnpm --version`). The supply-chain settings below live in [`pnpm-workspace.yaml`](../../pnpm-workspace.yaml) and rely on pnpm 11 semantics:
 
-Check your version with `npm --version`. If it is below 11.10:
+- `allowBuilds` (the pnpm 11 successor to v10's `onlyBuiltDependencies`) — the explicit allowlist of packages permitted to run install/build scripts.
+- `minimumReleaseAge` — the release-age cooldown, measured in **minutes**.
 
-```bash
-npm install -g npm@latest
-```
-
-Node.js 20.x ships with npm 10. CI installs `npm@latest` after `actions/setup-node` for the same reason — see [`.github/workflows/test.yml`](../../.github/workflows/test.yml).
+Install pnpm with `npm install -g pnpm` (or, on Node.js < 25, `corepack enable`). The repo pins its exact pnpm version via the `packageManager` field in [`package.json`](../../package.json). CI uses [`pnpm/action-setup`](https://github.com/pnpm/action-setup) to install the same version — see [`.github/workflows/test.yml`](../../.github/workflows/test.yml).
 
 ## Defaults
 
-Both `/.npmrc` and `/ui/.npmrc` set:
+[`pnpm-workspace.yaml`](../../pnpm-workspace.yaml) sets:
 
-```ini
-min-release-age=1
-ignore-scripts=true
+```yaml
+allowBuilds:
+  better-sqlite3: true
+  '@prisma/engines': true
+  prisma: true
+  ssh2: true
+  cpu-features: true
+  esbuild: true
+  protobufjs: true
+  msw: true
+
+minimumReleaseAge: 1440
 ```
 
-### `ignore-scripts=true`
+### Lifecycle-script blocking (`allowBuilds`)
 
-npm runs `preinstall`, `install`, and `postinstall` lifecycle scripts from every package in the dependency tree by default. A single compromised transitive dependency can therefore execute arbitrary code on a developer machine or in CI the moment `npm install` runs.
+npm runs `preinstall`, `install`, and `postinstall` lifecycle scripts from every package in the dependency tree by default. A single compromised transitive dependency can therefore execute arbitrary code on a developer machine or in CI the moment dependencies are installed.
 
-Setting `ignore-scripts=true` blocks all of those hooks. Packages that genuinely need a native compile step must be rebuilt explicitly with `npm rebuild <pkg> --ignore-scripts=false` after install — note the flag: `ignore-scripts` also applies to `npm rebuild`, so without it the rebuild silently produces no binary.
+pnpm flips this: it **blocks all dependency build scripts by default**. The `allowBuilds` map is the explicit allowlist — each package is set to `true` (allowed to run its scripts) or `false` (denied). Anything not listed stays blocked, and with pnpm's default `strictDepBuilds: true`, an unlisted package that *wants* to build fails the install loudly rather than silently shipping a broken/unbuilt module.
 
-### `min-release-age=1`
+This replaces the old npm `.npmrc` `ignore-scripts=true` (plus the manual `npm rebuild` dance): allowlisted native modules build automatically at install time, so there is **no separate rebuild step** in CI or the Dockerfile.
 
-A version published in the last 24 hours is statistically the most likely to be a malicious release (compromised maintainer account, supply chain attack, accidental publish). `min-release-age=1` tells npm to skip versions younger than one day when resolving ranges, giving the wider community time to spot and yank a bad release.
+> **pnpm 11 note:** v11 removed `onlyBuiltDependencies`, `neverBuiltDependencies`, `ignoredBuiltDependencies`, `onlyBuiltDependenciesFile`, and `ignoreDepScripts`, folding them all into the single `allowBuilds` map. If you copy config from an older pnpm guide, translate `onlyBuiltDependencies: [foo]` into `allowBuilds: { foo: true }`.
+
+### Release-age cooldown (`minimumReleaseAge: 1440`)
+
+A version published in the last 24 hours is statistically the most likely to be a malicious release (compromised maintainer account, supply chain attack, accidental publish). `minimumReleaseAge` tells pnpm to skip versions younger than the given age (in **minutes**) when resolving ranges, giving the wider community time to spot and yank a bad release. `1440` minutes = 1 day, matching the old npm `min-release-age=1` (npm measured this in days). pnpm 11 already defaults to 1440; we pin it explicitly so the intent is documented.
 
 This does not lock the lockfile — once a version is older than the cooldown it will be picked up normally on the next install.
 
-## Allowed native modules
+## Allowed native / build-script modules
 
-These dependencies ship native bindings and need post-install scripts (or an explicit rebuild) to be usable:
+These dependencies need their build scripts to be usable, which is why they appear in `allowBuilds`:
 
-- `better-sqlite3` — primary SQLite driver. The production [`docker/Dockerfile`](../../docker/Dockerfile) explicitly runs `npm rebuild better-sqlite3` after `npm ci --ignore-scripts` so the prebuilt binary is downloaded (or compiled from source as a fallback). The Dockerfile does not have an `.npmrc` in its build context, so the bare `npm rebuild` form works there; CI and local installs that see the `.npmrc` must use `npm rebuild better-sqlite3 --ignore-scripts=false`.
-- `prisma` / `@prisma/client` — Prisma's CLI fetches query-engine binaries during `prisma generate`. We invoke `prisma generate` explicitly in the Dockerfile and CI, so the install-time scripts being disabled is fine.
-- `ssh2` — uses an optional native crypto accelerator (`cpu-features`). The pure-JS fallback works everywhere; the native acceleration is only used when present.
-- `esbuild` — Vite uses esbuild's prebuilt binary. Vite invokes esbuild lazily on first use, which works without install scripts.
-
-CI workflows that run `npm ci` for the backend mirror the Dockerfile by running `npm rebuild better-sqlite3 --ignore-scripts=false` immediately after install (see [`.github/workflows/test.yml`](../../.github/workflows/test.yml) and [`stress.yml`](../../.github/workflows/stress.yml)).
+- `better-sqlite3` — primary SQLite driver; compiles (or downloads a prebuilt) native binding at install time. Because it is allowlisted, a plain `pnpm install` produces a working binding with no manual rebuild.
+- `@prisma/engines` / `prisma` — Prisma fetches query-engine binaries during install/`prisma generate`. We also invoke `prisma generate` explicitly in the Dockerfile and CI.
+- `ssh2` / `cpu-features` — `ssh2` uses an optional native crypto accelerator (`cpu-features`). The pure-JS fallback works everywhere; the native acceleration is only used when present.
+- `esbuild` — links its platform-specific prebuilt binary on install. Vite drives esbuild.
+- `protobufjs` — runs build-time codegen (pulled in transitively via `dockerode`).
+- `msw` — places its service-worker asset on install (dev/test only).
 
 ## Developer workflow
 
-### A package needs install scripts
+### A package needs build scripts
 
-If you're adding a new dependency that has a legitimate post-install step, install it once with scripts enabled:
+If you add a new dependency that has a legitimate build/post-install step, add it to the `allowBuilds` map in [`pnpm-workspace.yaml`](../../pnpm-workspace.yaml) with a `true` value, then reinstall:
 
-```bash
-npm install --foreground-scripts <pkg>
+```yaml
+allowBuilds:
+  # ...existing entries...
+  my-native-dep: true
 ```
 
-Or run `npm rebuild <pkg>` after a normal install. If the package becomes a permanent dependency that always needs rebuilding, add a corresponding `npm rebuild` step to the Dockerfile and the relevant CI workflows.
+```bash
+pnpm install
+```
+
+If you're unsure which packages want to build, run `pnpm install` and pnpm will list the ones it blocked, or use `pnpm approve-builds` interactively to pick them (it writes the result into `allowBuilds`).
 
 ### Emergency: bypassing the cooldown
 
 If you genuinely need to pull a brand-new version (CVE patch released minutes ago, hotfix you authored yourself, etc.), override the cooldown for a single install:
 
 ```bash
-npm install --min-release-age=0 <pkg>
+pnpm install --config.minimumReleaseAge=0 <pkg>
 ```
 
-Do not change the `.npmrc` default. The cooldown exists precisely so that the urgent-feeling case gets a second pair of eyes.
+Do not change the `minimumReleaseAge` default. The cooldown exists precisely so that the urgent-feeling case gets a second pair of eyes.
 
 ## Dependabot cooldown
 
-[`.github/dependabot.yml`](../../.github/dependabot.yml) applies a matching cooldown to each ecosystem so Dependabot does not open a PR for a version that `npm` would refuse to install locally. npm ecosystems use 3–7 days depending on semver bump; Docker, GitHub Actions, and Go modules use a flat 3-day cooldown.
+[`.github/dependabot.yml`](../../.github/dependabot.yml) applies a matching cooldown to each ecosystem so Dependabot does not open a PR for a version that pnpm would refuse to install locally. The single npm-ecosystem entry (which covers the whole pnpm workspace via the root `pnpm-lock.yaml`) uses 3–7 days depending on semver bump; Docker, GitHub Actions, and Go modules use a flat 3-day cooldown.
 
 Security updates bypass Dependabot's cooldown automatically — a CVE patch will still open immediately.
 

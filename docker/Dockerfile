@@ -24,73 +24,76 @@ RUN mkdir -p dist && \
 # Write CLI version to file for runtime access
 RUN echo "${CLI_VERSION}" > cli-version.txt
 
+# ─────────────────────────────────────────────────────────────────────────────
+# pnpm base: every Node stage shares the same pnpm + workspace manifests so the
+# `pnpm install` layers cache identically. corepack was removed from Node.js 25+
+# (node:26-alpine has no corepack), so pnpm is installed globally and pinned to
+# the same version as package.json's `packageManager` field.
+# ─────────────────────────────────────────────────────────────────────────────
+FROM node:26-alpine AS pnpm-base
+WORKDIR /app
+RUN npm install -g pnpm@11.5.3
+# Workspace manifests + lockfile first for cache-friendly layering: dependency
+# layers only bust when these files change, not on every source edit.
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
+COPY ui/package.json ./ui/
+
 # Build stage for UI
-FROM node:26-alpine AS ui-build
-WORKDIR /app/ui
+FROM pnpm-base AS ui-build
 ARG APP_VERSION=dev
+# Install the whole workspace (frozen against the committed lockfile). The
+# allowBuilds allowlist in pnpm-workspace.yaml runs native build scripts.
+RUN pnpm install --frozen-lockfile
 
-COPY ui/package.json ui/package-lock.json* ./
-RUN npm ci --ignore-scripts
-
-COPY ui/ ./
+COPY ui/ ./ui/
 # Pass version to Vite at build time
 ENV VITE_APP_VERSION=${APP_VERSION}
-RUN npm run build
+RUN pnpm --filter bridgeport-ui run build
 
 # Build stage for API (TypeScript compilation)
-FROM node:26-alpine AS api-build
-WORKDIR /app
-
-COPY package.json package-lock.json* ./
-RUN npm ci --ignore-scripts
+FROM pnpm-base AS api-build
+RUN pnpm install --frozen-lockfile
 
 COPY tsconfig.json prisma.config.ts ./
 COPY prisma/ ./prisma/
 
-# Generate Prisma types
-RUN npx prisma generate
+# Generate Prisma types (needed for tsc)
+RUN pnpm exec prisma generate
 
 COPY src/ ./src/
-RUN npm run build
+RUN pnpm run build
 
-# Prisma CLI stage - generates client and provides CLI for migrations
-FROM node:26-alpine AS prisma-build
-WORKDIR /app
-
-# Install prisma CLI (needed for generate and migrate deploy)
-# Use project lockfile to pin exact transitive dep versions
-COPY package.json package-lock.json* ./
-RUN npm ci --ignore-scripts
-
+# ─────────────────────────────────────────────────────────────────────────────
+# Production dependencies stage.
+#
+# We install with `--config.nodeLinker=hoisted` so the output node_modules is a
+# flat, npm-like tree (real directories, not symlinks into a .pnpm virtual
+# store). That layout copies cleanly across stages with a single `COPY --from`
+# — pnpm's default symlinked layout would leave dangling links once copied out
+# of its workspace context.
+#
+# This single stage replaces the old separate prisma-build + deps-prod stages:
+# the hoisted `--prod` install keeps the `prisma` CLI (for `migrate deploy` at
+# runtime) and `@prisma/client`, and `prisma generate` then materialises a real
+# generated client directly inside this node_modules.
+# ─────────────────────────────────────────────────────────────────────────────
+FROM pnpm-base AS deps-prod
+# prisma.config.ts + schema are needed for `prisma generate` below.
 COPY prisma.config.ts ./
 COPY prisma/ ./prisma/
 
-# Generate client (outputs to node_modules/@prisma/client)
-RUN npx prisma generate
-
-# Production dependencies stage
-FROM node:26-alpine AS deps-prod
-WORKDIR /app
-
-# python3/make/g++ are needed only if better-sqlite3's prebuilt binary is unavailable
-# for this platform; npm rebuild will fall back to compiling from source.
-RUN apk add --no-cache python3 make g++
-
-COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev --ignore-scripts && \
-    npm rebuild better-sqlite3 && \
+# python3/make/g++ are needed only if better-sqlite3's prebuilt binary is
+# unavailable for this platform; the native build falls back to compiling from
+# source. Installed and removed in one layer to keep the stage slim.
+RUN apk add --no-cache python3 make g++ && \
+    pnpm install --frozen-lockfile --prod --filter=bridgeport --config.nodeLinker=hoisted && \
     apk del python3 make g++
 
-# Copy all prisma-related packages from prisma-build (for both client and CLI)
-COPY --from=prisma-build /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=prisma-build /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=prisma-build /app/node_modules/prisma ./node_modules/prisma
-COPY --from=prisma-build /app/node_modules/.bin/prisma ./node_modules/.bin/prisma
-COPY --from=prisma-build /app/node_modules/effect ./node_modules/effect
-COPY --from=prisma-build /app/node_modules/fast-check ./node_modules/fast-check
-COPY --from=prisma-build /app/node_modules/pure-rand ./node_modules/pure-rand
+# Generate the Prisma client into this stage's node_modules (real files, not a
+# dangling symlink). Output lands in node_modules/@prisma/client for Prisma 7.
+RUN pnpm exec prisma generate
 
-# Remove packages only needed for prisma generate (not migrate deploy)
+# typescript / @types are only needed for `prisma generate`, not at runtime.
 RUN rm -rf node_modules/typescript node_modules/@types
 
 # Prune unnecessary files from node_modules to reduce image size
@@ -126,7 +129,8 @@ RUN apk add --no-cache openssl openssh-client docker-cli docker-cli-compose sqli
 RUN mkdir -p /app/data /app/uploads /app/.ssh && \
     chown -R node:node /app
 
-# Copy production node_modules (pruned)
+# Copy production node_modules (hoisted + pruned, self-contained: prisma CLI +
+# generated @prisma/client + native better-sqlite3 binding).
 COPY --from=deps-prod /app/node_modules ./node_modules
 
 # Copy built API

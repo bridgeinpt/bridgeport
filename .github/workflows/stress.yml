@@ -80,19 +80,16 @@ jobs:
             scenarios: 'services-list,container-images-list,monitoring-overview,agents-status,health-status,metrics-summary,server-metrics-history,service-metrics-history,database-metrics-history,secrets-list,databases-list,database-monitoring-summary,config-files-list,dependency-graph,backup-summary'
     steps:
       - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v6
         with:
           node-version: 20
-          cache: npm
-      # setup-node@v6 ships npm 10, which silently ignores `.npmrc`'s
-      # `min-release-age` key (added in npm 11.10). Install the modern npm
-      # globally so subsequent `npm ci` honours the supply-chain cooldown.
-      - run: npm install -g npm@latest
-      - run: npm ci
-      # .npmrc sets ignore-scripts=true (which also gates `npm rebuild`),
-      # so force scripts on here so the native binding actually gets built.
-      - run: npm rebuild better-sqlite3 --ignore-scripts=false
-      - run: npx prisma generate
+          cache: pnpm
+      # The `allowBuilds` allowlist in pnpm-workspace.yaml lets better-sqlite3
+      # compile its native binding during install (no separate rebuild step),
+      # and pnpm honours the supply-chain cooldown (minimumReleaseAge) natively.
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec prisma generate
       - name: Run stress tests (${{ matrix.shard }})
         env:
           STRESS_SERVERS: ${{ github.event.inputs.servers || '30' }}
@@ -106,7 +103,7 @@ jobs:
           STRESS_CI: 'true'
           # Soft mode on PRs only; manual + scheduled runs enforce thresholds.
           STRESS_SOFT: ${{ github.event_name == 'pull_request' && 'true' || 'false' }}
-        run: npm run test:stress
+        run: pnpm run test:stress
 
       - name: Upload stress report (${{ matrix.shard }})
         if: always()

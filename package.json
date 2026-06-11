@@ -10,6 +10,7 @@
     "url": "https://github.com/bridgeinpt/bridgeport/issues"
   },
   "homepage": "https://github.com/bridgeinpt/bridgeport#readme",
+  "packageManager": "pnpm@11.5.3",
   "type": "module",
   "main": "dist/server.js",
   "scripts": {

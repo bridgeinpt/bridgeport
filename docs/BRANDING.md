@@ -201,12 +201,12 @@ no fine details, flat vector
 
 ## 5. Verification
 
-1. `cd bridgeport/ui && npm run dev`
+1. `pnpm --filter bridgeport-ui run dev`
 2. Check Login page: new logo, "BRIDGEPORT", new tagline
 3. Check sidebar: logo and name updated
 4. Click About link -> verify About page renders
 5. Check browser tab: favicon + "BRIDGEPORT" title
-6. `npm run build` -> verify production build succeeds
+6. `pnpm --filter bridgeport-ui run build` -> verify production build succeeds
 
 ---
 
