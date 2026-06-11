@@ -111,6 +111,9 @@ importers:
       autocannon:
         specifier: ^8.0.0
         version: 8.0.0
+      fast-jwt:
+        specifier: 6.2.4
+        version: 6.2.4
       pino-pretty:
         specifier: ^13.0.0
         version: 13.1.3
