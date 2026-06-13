@@ -73,11 +73,17 @@ export const IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1000; // 24h
 export const STALE_INPROGRESS_MS = 5 * 60 * 1000; // 5 min
 
 /**
- * Routes that run their OWN idempotency handling and must NOT be double-handled
- * by this global hook. `/api/sync/batch` (issue #130) has bespoke
- * Idempotency-Key logic backed by the SyncBatch model.
+ * Routes that must NOT be handled by this global hook.
+ *  - `/api/sync/batch` (issue #130) runs its OWN idempotency logic backed by the
+ *    SyncBatch model, so double-handling here would conflict.
+ *  - `/mcp` (issue #208) calls `reply.hijack()`, which makes Fastify SKIP the
+ *    global onSend hook. If a client/proxy puts an Idempotency-Key on the OUTER
+ *    POST /mcp, our preHandler would create an inProgress row that onSend never
+ *    finalizes (hijacked) — wedging the key (409 to retries until the 24h
+ *    sweep). Idempotency on the streaming MCP envelope is meaningless anyway:
+ *    the real mutations are the injected sub-calls, which carry their own keys.
  */
-const IDEMPOTENCY_EXEMPT_PATHS = new Set<string>(['/api/sync/batch']);
+const IDEMPOTENCY_EXEMPT_PATHS = new Set<string>(['/api/sync/batch', '/mcp']);
 
 // Marker stashed on the request when this request created a fresh row. The
 // SYNCHRONOUS onSend hook captures the outgoing response onto it; the async

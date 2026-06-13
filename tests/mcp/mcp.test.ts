@@ -24,6 +24,7 @@ import { createTestServer } from '../factories/server.js';
 import { createTestContainerImage } from '../factories/container-image.js';
 import { createTestService, createTestServiceDeployment } from '../factories/service.js';
 import { createSecret } from '../../src/services/secrets.js';
+import { createApiToken } from '../../src/services/auth.js';
 
 /** Shape of a tools/call result block we assert on. */
 interface ToolText {
@@ -42,6 +43,8 @@ describe('MCP server (integration, SDK client)', () => {
   let adminToken: string;
   let operatorToken: string;
   let viewerToken: string;
+  /** A raw API token (not a JWT) scoped to a SINGLE environment, operator role. */
+  let envScopedOperatorToken: string;
   let envId: string;
   let serviceId: string;
   let configFileId: string;
@@ -76,6 +79,19 @@ describe('MCP server (integration, SDK client)', () => {
 
     const env = await createTestEnvironment(app.prisma, { name: 'mcp-env' });
     envId = env.id;
+
+    // An env-scoped (allEnvironments=false) OPERATOR API token. Its role grants
+    // services:write, but because it's env-scoped the MCP server must NOT
+    // register write tools (their global routes always FORBIDDEN_SCOPE for an
+    // env-scoped token). Owned by the operator user created above.
+    const { token: scopedToken } = await createApiToken({
+      name: 'mcp-env-scoped-operator',
+      role: 'operator',
+      allEnvironments: false,
+      environmentIds: [envId],
+      ownerUserId: operator.id,
+    });
+    envScopedOperatorToken = scopedToken;
 
     const server = await createTestServer(app.prisma, { environmentId: envId, name: 'mcp-server' });
     const image = await createTestContainerImage(app.prisma, { environmentId: envId });
@@ -158,6 +174,38 @@ describe('MCP server (integration, SDK client)', () => {
       ];
       for (const w of writeNames) {
         expect(names).not.toContain(w);
+      }
+    });
+
+    it('env-scoped OPERATOR token sees read tools but NO write tools (write tools target global routes)', async () => {
+      // An operator's role grants services:write, BUT this token is env-scoped,
+      // so the write tools (all global routes) are withheld — they'd only ever
+      // FORBIDDEN_SCOPE. Read + meta tools remain.
+      const client = await connect(envScopedOperatorToken);
+      const { tools } = await client.listTools();
+      const names = tools.map((t) => t.name);
+      expect(names).toContain('list_services');
+      expect(names).toContain('get_capabilities');
+      const writeNames = [
+        'deploy_service',
+        'execute_deployment_plan',
+        'restart_deployment',
+        'rollback_deployment_plan',
+        'run_database_backup',
+        'sync_config_file',
+      ];
+      for (const w of writeNames) {
+        expect(names).not.toContain(w);
+      }
+
+      // get_capabilities reflects the same reduced set (no write tools listed).
+      const caps = (await client.callTool({
+        name: 'get_capabilities',
+        arguments: {},
+      })) as ToolText;
+      const body = JSON.parse(firstText(caps)) as { tools: string[] };
+      for (const w of writeNames) {
+        expect(body.tools).not.toContain(w);
       }
     });
   });
@@ -265,9 +313,10 @@ describe('MCP server (integration, SDK client)', () => {
       });
       expect(restAudits).toBe(1);
 
-      // MCP path: two identical calls. The first runs; the second must replay
-      // (handler skipped) because the derived Idempotency-Key + same bearer +
-      // same route pattern collide on the @@unique constraint.
+      // MCP path: two identical calls in quick succession (same ~60s dedup
+      // window). The first runs; the second must replay (handler skipped)
+      // because the derived Idempotency-Key (tool + time-bucket + args) + same
+      // bearer + same route pattern collide on the @@unique constraint.
       const client = await connect(operatorToken);
       const first = (await client.callTool({
         name: 'sync_config_file',
@@ -301,6 +350,34 @@ describe('MCP server (integration, SDK client)', () => {
       // Attributed to the operator user, same as a REST call would be.
       expect(row?.userId).toBeTruthy();
     });
+
+    it('dryRun previews are NOT cached: two identical dry-runs both execute (no Idempotency-Key)', async () => {
+      // A dry-run attaches no Idempotency-Key, so re-running an identical preview
+      // recomputes instead of replaying a stale diff. Use a FRESH zero-attachment
+      // config file so the count is isolated. Two identical dry-runs => TWO audit
+      // rows (had they been keyed/deduped like a real sync, we'd see only one).
+      const dryCf = await app.prisma.configFile.create({
+        data: { name: 'dry-cf', filename: 'dry.env', content: 'Z=3', environmentId: envId },
+      });
+      const client = await connect(operatorToken);
+      const first = (await client.callTool({
+        name: 'sync_config_file',
+        arguments: { id: dryCf.id, dryRun: true },
+      })) as ToolText;
+      const second = (await client.callTool({
+        name: 'sync_config_file',
+        arguments: { id: dryCf.id, dryRun: true },
+      })) as ToolText;
+
+      expect(first.isError).toBeFalsy();
+      expect(second.isError).toBeFalsy();
+
+      // Both ran (no dedup) => two sync_files audit rows for this config file.
+      const dryAudits = await app.prisma.auditLog.count({
+        where: { action: 'sync_files', resourceId: dryCf.id },
+      });
+      expect(dryAudits).toBe(2);
+    });
   });
 
   // 6. Destructive annotations ---------------------------------------------
@@ -322,14 +399,17 @@ describe('MCP server (integration, SDK client)', () => {
 
   // 7. Error mapping --------------------------------------------------------
   describe('error mapping', () => {
-    it('callTool against a non-existent id => isError with the API error code in the text', async () => {
+    it('callTool against a non-existent id => isError with the API error code AND status in the text', async () => {
       const client = await connect(adminToken);
       const res = (await client.callTool({
         name: 'get_service',
         arguments: { id: 'does-not-exist-cuid' },
       })) as ToolText;
       expect(res.isError).toBe(true);
-      expect(firstText(res)).toContain('NOT_FOUND');
+      const text = firstText(res);
+      expect(text).toContain('NOT_FOUND');
+      // FIX 6: the HTTP status is now surfaced losslessly alongside the code.
+      expect(text).toContain('status: 404');
     });
   });
 

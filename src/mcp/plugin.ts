@@ -27,16 +27,26 @@ import { buildMcpServer } from './server.js';
 
 /**
  * Allowed Host header values for the transport's optional DNS-rebinding
- * protection. We enable it only when the operator has set a concrete HOST
- * (not the 0.0.0.0 wildcard), and always allow localhost so a co-located
- * client works out of the box. Misconfiguration here would break a correct
- * client, so the default (wildcard HOST) leaves protection OFF — documented in
- * docs/reference/mcp.md.
+ * protection, parsed from the explicit `MCP_ALLOWED_HOSTS` config (a
+ * comma-separated list of the PUBLIC hostnames clients reach /mcp through —
+ * e.g. "mcp.example.com").
+ *
+ * This is deliberately decoupled from `HOST` (the socket BIND address):
+ * conflating the two meant a concrete HOST rejected clients arriving via a
+ * reverse proxy / public hostname, while the common Docker default
+ * HOST=0.0.0.0 silently turned protection off. Returns `undefined` when the
+ * config is unset/empty, leaving protection OFF — the endpoint is
+ * bearer-authenticated, and an empty allowlist would break every client.
+ * Documented in docs/reference/mcp.md.
  */
 function buildAllowedHosts(): string[] | undefined {
-  const host = config.HOST;
-  if (!host || host === '0.0.0.0' || host === '::') return undefined;
-  return [host, `${host}:${config.PORT}`, 'localhost', `localhost:${config.PORT}`, '127.0.0.1', `127.0.0.1:${config.PORT}`];
+  const raw = config.MCP_ALLOWED_HOSTS;
+  if (!raw) return undefined;
+  const hosts = raw
+    .split(',')
+    .map((h) => h.trim())
+    .filter((h) => h.length > 0);
+  return hosts.length > 0 ? hosts : undefined;
 }
 
 async function mcpRoutes(fastify: FastifyInstance): Promise<void> {
@@ -53,13 +63,19 @@ async function mcpRoutes(fastify: FastifyInstance): Promise<void> {
       }
       const bearer = authHeader.slice(7);
 
-      const server = buildMcpServer({ app: fastify, authUser: request.authUser, bearer });
+      // The caller's real client IP, threaded onto every injected sub-call so
+      // @fastify/rate-limit buckets them under THIS caller's IP (not the
+      // light-my-request default of 127.0.0.1, which would share one bucket
+      // across all MCP callers). See src/mcp/inject.ts.
+      const callerIp = request.ip;
+
+      const server = buildMcpServer({ app: fastify, authUser: request.authUser, bearer, callerIp });
       const transport = new StreamableHTTPServerTransport({
         // Stateless: no session id, no session validation, no in-memory state.
         sessionIdGenerator: undefined,
-        // DNS-rebinding protection — only meaningful when a concrete host is
-        // configured (see buildAllowedHosts). When `allowedHosts` is undefined
-        // the SDK leaves host validation off.
+        // DNS-rebinding protection — enabled only when MCP_ALLOWED_HOSTS is set
+        // (see buildAllowedHosts). When `allowedHosts` is undefined the SDK
+        // leaves host validation off.
         enableDnsRebindingProtection: allowedHosts !== undefined,
         ...(allowedHosts ? { allowedHosts } : {}),
       });

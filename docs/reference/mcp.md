@@ -45,7 +45,10 @@ MCP_ENABLED=true
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `MCP_ENABLED` | boolean | `false` | Master switch for the MCP server. When `false`, the `/mcp` route is **not registered at all** (requests return `404`). |
+| `MCP_ENABLED` | boolean | `false` | Master switch for the MCP server. **Strictly parsed:** only `true` or `1` (case-insensitive, whitespace-trimmed) enable it; **anything else — including `false`, `0`, an empty string, or leaving it unset — keeps it off.** When off, the `/mcp` route is **not registered at all** (requests return `404`). |
+| `MCP_ALLOWED_HOSTS` | string (comma-separated) | _(unset)_ | Public `Host` header value(s) MCP clients use to reach `/mcp` (e.g. `mcp.example.com`). When set, enables DNS-rebinding protection limited to these hosts; off by default. See [Transport and Networking](#transport-and-networking). |
+
+> **Why `MCP_ENABLED` is parsed strictly.** It's a network-exposed, default-off security feature, so it must *fail closed*: a literal `MCP_ENABLED=false` (or `=0`) keeps the endpoint disabled. This differs from BRIDGEPORT's other boolean env flags by design.
 
 When enabled, the endpoint is:
 
@@ -108,6 +111,15 @@ The `/mcp` route is protected by the same authentication layer as the REST API. 
 
 Call `get_capabilities` to see the exact scope set and tool list your token resolved to.
 
+### Environment-scoped tokens have reduced MCP utility
+
+An **environment-scoped** API token (one whose scope is *not* "all environments") gets a deliberately narrower MCP surface:
+
+- **Write tools are hidden entirely.** Every write tool (`deploy_service`, `run_database_backup`, `sync_config_file`, etc.) targets a **global** route (e.g. `POST /api/services/:id/deploy`, `POST /api/databases/:id/backups`) with no environment in the path. BRIDGEPORT's token-scope check rejects *any* env-scoped token on those routes with `FORBIDDEN_SCOPE`, so advertising them would only produce guaranteed failures. They therefore don't appear in `tools/list` for an env-scoped token (and `get_capabilities` won't list them).
+- **Some global read tools will still return `FORBIDDEN_SCOPE`.** Read tools that take an `envId` and hit an environment-scoped route work for the environments the token covers; read tools backed by a global route may return a `FORBIDDEN_SCOPE` error result at call time.
+
+**Recommendation:** for full MCP functionality (all write tools + every read tool), use an **all-environments** API token with the role you intend. Use env-scoped tokens when you specifically want to limit a session to read access within particular environments.
+
 ---
 
 ## Tools
@@ -148,7 +160,7 @@ Backed by side-effect-free `GET` routes. Available to every role.
 
 ### Write Tools
 
-Require a write scope (`operator`/`admin`). Each carries the MCP `destructiveHint: true` annotation, and each injects an `Idempotency-Key` (see [Idempotency](#idempotency)).
+Require a write scope (`operator`/`admin`) and are hidden from environment-scoped tokens (see [above](#environment-scoped-tokens-have-reduced-mcp-utility)). Each carries the MCP `destructiveHint: true` annotation. Each **mutating** call injects a time-bucketed `Idempotency-Key`; `dryRun=true` previews are not cached (see [Idempotency](#idempotency)).
 
 | Tool | Arguments | Backing route |
 |------|-----------|---------------|
@@ -171,10 +183,13 @@ Require a write scope (`operator`/`admin`). Each carries the MCP `destructiveHin
 
 ## Idempotency
 
-Every write tool injects an `Idempotency-Key` header so BRIDGEPORT's idempotency middleware engages and a duplicated/retried identical call is **deduplicated** (the original result is replayed instead of running the mutation twice).
+Each **mutating** write call injects an `Idempotency-Key` header so BRIDGEPORT's idempotency middleware engages and a duplicated/retried identical call is **deduplicated** (the original result is replayed instead of running the mutation twice).
 
-- **Default:** the key is derived as `sha256(toolName + ":" + canonicalJSON(args))`. Two calls with the same tool and the same arguments (regardless of key order) produce the same key, so an accidental retry won't deploy twice.
-- **Override:** pass an explicit `idempotencyKey` string argument on any write tool to set the key yourself (for example, to tie an operation to an external job id). The override is excluded from the derived-key hash.
+- **Short dedup window (default).** The derived key folds in a **~60-second time bucket**: `sha256(toolName + ":" + timeBucket + ":" + canonicalJSON(args))`. So **identical calls within ~60s dedupe as retries** (the original result replays), while **an intended repeat of the same operation later executes normally** rather than silently replaying a stale success. For example, `run_database_backup({ id })` called twice within a minute returns the first result both times; called again ten minutes later it runs a **new** backup.
+- **Dry-run previews are never cached.** A call with `dryRun=true` (`execute_deployment_plan`, `sync_config_file`) attaches **no** `Idempotency-Key`, so re-running an identical preview always recomputes a fresh diff instead of replaying a stale one.
+- **Override.** Pass an explicit `idempotencyKey` string argument on any write tool to set the key yourself — to **force** dedup across the 60s windows (e.g. tie an operation to an external job id) or to **extend** the safety net. The override is excluded from the derived-key hash and is ignored for dry-run previews.
+
+> The outer `POST /mcp` envelope itself is **not** idempotency-managed — only the injected sub-calls are. (The transport hijacks the response, which would wedge a key applied to the envelope; meaningful idempotency lives on the real mutating sub-calls.)
 
 See the [API Reference](api.md) and issue #126 for the underlying idempotency contract (24-hour retention, conflict on same-key/different-body, etc.).
 
@@ -193,8 +208,8 @@ When you connect an MCP client, **tool outputs are sent to whatever model that c
 ## Transport and Networking
 
 - **Transport:** Streamable HTTP, stateless (`POST /mcp` only). `GET`/`DELETE /mcp` return `405` — there is no server-side session or SSE notification stream to resume.
-- **Rate limiting:** MCP requests are subject to the same global per-IP rate limit as the rest of the API. There is intentionally **no bypass** — a tool-call flood is throttled like any other client.
-- **DNS-rebinding / Origin protection:** enabled automatically when `HOST` is set to a concrete address (not the `0.0.0.0` wildcard); `localhost` and the configured host are allow-listed. When `HOST` is the wildcard, host validation is left off so a correctly configured client isn't broken — put BRIDGEPORT behind a reverse proxy that sets a proper `Host`/`Origin` for hardening.
+- **Rate limiting:** MCP requests — and every API sub-call a tool replays internally — are subject to the same global per-IP rate limit as the rest of the API. Each injected sub-call is **attributed to the calling client's real IP** (the same IP its direct API calls would use), so one caller's tool-call flood is throttled under that caller's bucket and can't starve others. There is intentionally **no bypass**.
+- **DNS-rebinding / Origin protection:** **off by default**, controlled by the explicit `MCP_ALLOWED_HOSTS` env var (a comma-separated list of the public `Host` header value(s) clients use, e.g. `mcp.example.com`). When set, the transport validates the request `Host` header against that allowlist; when unset/empty, host validation is left off. This is intentionally **decoupled from `HOST`** (the socket bind address): a public hostname behind a reverse proxy differs from the bind address, and the common `HOST=0.0.0.0` would otherwise either reject every proxied client or silently disable protection. The endpoint is bearer-authenticated regardless; setting `MCP_ALLOWED_HOSTS` (plus TLS) is recommended when exposing MCP to remote clients.
 - **TLS:** terminate TLS at your reverse proxy, exactly as for the REST API. Bearer tokens must only travel over HTTPS in production.
 
 ---

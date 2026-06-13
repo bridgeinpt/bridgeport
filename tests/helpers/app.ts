@@ -27,6 +27,7 @@ import openapiPlugin from '../../src/plugins/openapi.js';
 import { registerApiRoutes } from '../../src/register-routes.js';
 import { config } from '../../src/lib/config.js';
 import mcpPlugin from '../../src/mcp/plugin.js';
+import { bundledAgentVersion, cliVersion } from '../../src/lib/version.js';
 
 export interface TestApp extends FastifyInstance {
   prisma: PrismaClient;
@@ -115,11 +116,15 @@ export async function buildTestApp(options: BuildTestAppOptions = {}): Promise<T
     await fastify.register(mcpPlugin);
   }
 
-  // Health check endpoint
+  // Health check endpoint — mirror the production payload (src/server.ts) so the
+  // MCP get_version tool is exercised against a representative shape that
+  // includes bundledAgentVersion / cliVersion, not just {status,timestamp,version}.
   fastify.get('/health', async () => ({
     status: 'ok',
     timestamp: new Date().toISOString(),
     version: 'test',
+    bundledAgentVersion,
+    cliVersion,
   }));
 
   // Error handler is provided by errorHandlerPlugin above (canonical envelope).

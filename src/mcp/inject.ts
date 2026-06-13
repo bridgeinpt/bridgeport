@@ -28,6 +28,13 @@ export interface InjectApiOptions {
   idempotencyKey?: string;
   /** JSON body for POST requests. */
   body?: Record<string, unknown>;
+  /**
+   * The MCP caller's real client IP, passed to light-my-request as
+   * `remoteAddress` so the injected request's `req.ip` matches the caller's —
+   * keeping @fastify/rate-limit bucketing per-caller. Without it light-my-request
+   * defaults to 127.0.0.1 and every MCP caller would share a single bucket.
+   */
+  remoteAddress?: string;
 }
 
 /** Canonical API error envelope shape (subset we surface to MCP). */
@@ -81,6 +88,10 @@ export async function injectApi(
     method: options.method,
     url: options.url,
     headers,
+    // Attribute the injected call to the MCP caller's real IP so per-IP rate
+    // limiting buckets it under the caller (not light-my-request's 127.0.0.1
+    // default, which would collapse all MCP callers into one bucket).
+    ...(options.remoteAddress ? { remoteAddress: options.remoteAddress } : {}),
     // light-my-request accepts an object payload and serializes it; we pass the
     // raw object so the JSON content-type parser and idempotency body-hash see
     // the same canonical serialization a REST client would send.

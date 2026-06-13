@@ -77,4 +77,37 @@ describe('selectToolsForScopes', () => {
       expect.arrayContaining(WRITE_TOOL_NAMES)
     );
   });
+
+  describe('env-scoped tokens (isEnvScoped=true) hide write tools', () => {
+    it('an env-scoped OPERATOR (has services:write) sees NO write tools, but keeps read tools', () => {
+      const operatorScopes = computeScopes(user('operator'));
+      // Premise: an operator's role-derived scopes DO include services:write...
+      expect(operatorScopes).toContain('services:write');
+
+      // ...but with isEnvScoped=true the write tools are withheld (their global
+      // routes always FORBIDDEN_SCOPE for an env-scoped token).
+      const selected = selectToolsForScopes(operatorScopes, true).map((t) => t.name);
+      for (const w of WRITE_TOOL_NAMES) {
+        expect(selected).not.toContain(w);
+      }
+      // Read + meta tools remain.
+      expect(selected).toContain('list_services');
+      expect(selected).toContain('get_capabilities');
+    });
+
+    it('an all-environments operator (isEnvScoped=false) still sees write tools', () => {
+      const selected = selectToolsForScopes(computeScopes(user('operator')), false).map(
+        (t) => t.name
+      );
+      for (const w of WRITE_TOOL_NAMES) {
+        expect(selected).toContain(w);
+      }
+    });
+
+    it('defaults to NOT env-scoped (omitting the flag keeps write tools)', () => {
+      // JWT sessions pass no scope → not env-scoped → full write access.
+      const selected = names(computeScopes(user('admin')));
+      expect(selected).toEqual(expect.arrayContaining(WRITE_TOOL_NAMES));
+    });
+  });
 });

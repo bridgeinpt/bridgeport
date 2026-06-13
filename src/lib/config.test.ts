@@ -23,6 +23,13 @@ const envSchema = z.object({
   UPLOAD_DIR: z.string().default('./uploads'),
   ADMIN_EMAIL: z.string().email().optional(),
   ADMIN_PASSWORD: z.string().min(8).optional(),
+  // STRICT parse — kept in sync with src/lib/config.ts. ONLY "true"/"1"
+  // (case-insensitive, trimmed) enable it; everything else disables.
+  MCP_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => v?.trim().toLowerCase() === 'true' || v?.trim() === '1'),
+  MCP_ALLOWED_HOSTS: z.string().optional(),
   SCHEDULER_ENABLED: z.coerce.boolean().default(true),
   SCHEDULER_SERVER_HEALTH_INTERVAL: z.coerce.number().default(60),
   SCHEDULER_SERVICE_HEALTH_INTERVAL: z.coerce.number().default(60),
@@ -206,6 +213,61 @@ describe('config', () => {
       expect(result.success).toBe(true);
       if (result.success) {
         expect(result.data.SCHEDULER_ENABLED).toBe(true);
+      }
+    });
+  });
+
+  describe('MCP_ENABLED strict parsing (network-exposed security toggle)', () => {
+    function mcp(value: string | undefined): boolean {
+      const result = envSchema.safeParse(
+        value === undefined ? validEnv : { ...validEnv, MCP_ENABLED: value }
+      );
+      if (!result.success) throw new Error('unexpected parse failure');
+      return result.data.MCP_ENABLED;
+    }
+
+    it('enables ONLY for "true"/"1" (case-insensitive, whitespace-trimmed)', () => {
+      expect(mcp('true')).toBe(true);
+      expect(mcp('TRUE')).toBe(true);
+      expect(mcp('  True  ')).toBe(true);
+      expect(mcp('1')).toBe(true);
+      expect(mcp(' 1 ')).toBe(true);
+    });
+
+    it('DISABLES for "false"/"0"/""/unset (the footgun z.coerce.boolean would flip on)', () => {
+      // The whole point of FIX 2: a literal "false"/"0" must mean OFF, unlike
+      // z.coerce.boolean() (which makes any non-empty string truthy).
+      expect(mcp('false')).toBe(false);
+      expect(mcp('FALSE')).toBe(false);
+      expect(mcp('0')).toBe(false);
+      expect(mcp('')).toBe(false);
+      expect(mcp('yes')).toBe(false); // not an accepted truthy token
+      expect(mcp('on')).toBe(false);
+      expect(mcp(undefined)).toBe(false); // unset → default off
+    });
+
+    it('defaults to false when omitted', () => {
+      const result = envSchema.safeParse(validEnv);
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.data.MCP_ENABLED).toBe(false);
+    });
+  });
+
+  describe('MCP_ALLOWED_HOSTS', () => {
+    it('is optional (undefined when omitted)', () => {
+      const result = envSchema.safeParse(validEnv);
+      expect(result.success).toBe(true);
+      if (result.success) expect(result.data.MCP_ALLOWED_HOSTS).toBeUndefined();
+    });
+
+    it('accepts a comma-separated string', () => {
+      const result = envSchema.safeParse({
+        ...validEnv,
+        MCP_ALLOWED_HOSTS: 'mcp.example.com, mcp2.example.com',
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.MCP_ALLOWED_HOSTS).toBe('mcp.example.com, mcp2.example.com');
       }
     });
   });

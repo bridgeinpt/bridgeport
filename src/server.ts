@@ -181,9 +181,12 @@ async function buildServer() {
   // off the route is never registered, so /mcp returns 404. The plugin mounts
   // on the ROOT instance because its tool handlers replay calls through
   // `app.inject()`. NOTE: injected calls intentionally stay subject to the
-  // normal per-IP rate limit — we do NOT add /mcp (or a bypass header) to the
-  // rate-limit allowList, since a static bypass would be spoofable on every
-  // route and defeat login rate-limiting.
+  // normal per-IP rate limit — and each is attributed to the MCP caller's real
+  // IP (threaded through as `remoteAddress`; see src/mcp/inject.ts), so a
+  // caller's tool calls bucket under their own IP exactly like their direct API
+  // calls. We do NOT add /mcp (or a bypass header) to the rate-limit allowList,
+  // since a static bypass would be spoofable on every route and defeat login
+  // rate-limiting.
   if (config.MCP_ENABLED) {
     await fastify.register(mcpPlugin);
   }

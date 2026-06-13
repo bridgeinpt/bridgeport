@@ -28,6 +28,13 @@ export interface McpToolContext {
   /** Raw bearer token (without the "Bearer " prefix) of the MCP caller. */
   bearer: string;
   authUser: AuthUser;
+  /**
+   * The MCP caller's real client IP (`request.ip`). Threaded onto every injected
+   * sub-call as `remoteAddress` so @fastify/rate-limit buckets a caller's tool
+   * calls under their own IP — otherwise light-my-request defaults to 127.0.0.1
+   * and ALL MCP callers would share one rate-limit bucket.
+   */
+  callerIp: string;
   /** Names of the tools registered for this session (for get_capabilities). */
   registeredToolNames: string[];
 }

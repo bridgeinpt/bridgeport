@@ -16,6 +16,7 @@ interface Captured {
   url?: string;
   headers?: Record<string, string>;
   payload?: unknown;
+  remoteAddress?: string;
 }
 
 /**
@@ -32,6 +33,7 @@ function fakeApp(
       captured.url = opts.url;
       captured.headers = opts.headers;
       captured.payload = opts.payload;
+      captured.remoteAddress = opts.remoteAddress;
       return { statusCode: response.statusCode, payload: response.payload };
     },
   } as unknown as FastifyInstance;
@@ -135,5 +137,19 @@ describe('injectApi header policy', () => {
     expect(Object.keys(captured.headers ?? {}).sort()).toEqual(
       ['authorization', 'content-type', 'idempotency-key']
     );
+  });
+
+  it('threads remoteAddress to the inject call so rate-limiting buckets per caller', async () => {
+    const captured: Captured = {};
+    const app = fakeApp({ statusCode: 200, payload: '{}' }, captured);
+    await injectApi(app, { method: 'GET', url: '/api/x', bearer: 't', remoteAddress: '203.0.113.9' });
+    expect(captured.remoteAddress).toBe('203.0.113.9');
+  });
+
+  it('omits remoteAddress when none is provided (no override of the default)', async () => {
+    const captured: Captured = {};
+    const app = fakeApp({ statusCode: 200, payload: '{}' }, captured);
+    await injectApi(app, { method: 'GET', url: '/api/x', bearer: 't' });
+    expect(captured.remoteAddress).toBeUndefined();
   });
 });

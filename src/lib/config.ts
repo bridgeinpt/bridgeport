@@ -17,7 +17,25 @@ const envSchema = z.object({
   // MCP (Model Context Protocol) server — exposes a curated subset of the API
   // as agent tools at POST /mcp. Disabled by default; when off the route is not
   // registered at all (so /mcp → 404). See docs/reference/mcp.md.
-  MCP_ENABLED: z.coerce.boolean().default(false),
+  //
+  // STRICT parse (NOT z.coerce.boolean()): this is a network-exposed, default-off
+  // security toggle, so ONLY "true"/"1" (case-insensitive, trimmed) enable it.
+  // `Boolean(str)` (what z.coerce.boolean does) is true for ANY non-empty string,
+  // which means a literal `MCP_ENABLED=false` or `=0` would ENABLE the endpoint —
+  // a footgun for a feature that must fail closed. "false", "0", "", and unset all
+  // disable it here.
+  MCP_ENABLED: z
+    .string()
+    .optional()
+    .transform((v) => v?.trim().toLowerCase() === 'true' || v?.trim() === '1'),
+  // Comma-separated list of Host header values clients may send to /mcp (the
+  // PUBLIC hostname(s) clients reach the endpoint through, e.g.
+  // "mcp.example.com"). When set & non-empty, the MCP transport's DNS-rebinding
+  // protection is enabled and limited to these hosts; when unset/empty the
+  // protection is OFF (the endpoint is bearer-authenticated). This is decoupled
+  // from HOST (the bind address) on purpose — see src/mcp/plugin.ts and
+  // docs/reference/mcp.md.
+  MCP_ALLOWED_HOSTS: z.string().optional(),
   // Scheduler intervals (in seconds)
   SCHEDULER_ENABLED: z.coerce.boolean().default(true),
   SCHEDULER_SERVER_HEALTH_INTERVAL: z.coerce.number().default(60), // 1 minute

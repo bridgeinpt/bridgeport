@@ -10,8 +10,8 @@
  * Tools that hit the API are invoked with a FAKE Fastify-shaped context whose
  * `app.inject` returns canned responses, so no real Fastify/DB is needed.
  */
-import { describe, it, expect } from 'vitest';
-import { ALL_TOOLS, deriveIdempotencyKey } from './tools.js';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { ALL_TOOLS, deriveIdempotencyKey, IDEMPOTENCY_DEDUP_WINDOW_MS } from './tools.js';
 import type { McpToolContext, McpToolDef } from './types.js';
 import type { FastifyInstance } from 'fastify';
 import type { AuthUser } from '../services/auth.js';
@@ -40,6 +40,7 @@ function fakeCtx(
   return {
     app,
     bearer: 'test-bearer',
+    callerIp: '203.0.113.7',
     authUser:
       authUser ?? { id: 'u1', email: 'a@test', name: null, role: 'admin' },
     registeredToolNames,
@@ -47,8 +48,25 @@ function fakeCtx(
 }
 
 describe('deriveIdempotencyKey', () => {
-  it('is deterministic for identical tool name + args', () => {
+  // The derived key folds in a wall-clock time bucket, so freeze time to make
+  // "same window" vs "later window" deterministic (and avoid bucket-boundary
+  // flakiness in the same-window assertions).
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // Anchor at a window BOUNDARY (a multiple of the window size) so that adding
+  // `WINDOW_MS - 1` stays inside the same bucket and adding `WINDOW_MS` crosses
+  // exactly one bucket — otherwise the assertions are sensitive to where in the
+  // bucket the base timestamp happens to fall.
+  const WINDOW_START = 16_666_666 * IDEMPOTENCY_DEDUP_WINDOW_MS;
+
+  it('is deterministic within the same time window for identical tool name + args', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(WINDOW_START);
     const a = deriveIdempotencyKey('deploy_service', { id: 'svc1', pullImage: true });
+    // Advance to the LAST ms of the SAME bucket — still dedupes.
+    vi.setSystemTime(WINDOW_START + IDEMPOTENCY_DEDUP_WINDOW_MS - 1);
     const b = deriveIdempotencyKey('deploy_service', { id: 'svc1', pullImage: true });
     expect(a).toBe(b);
     // sha256 hex digest
@@ -56,24 +74,43 @@ describe('deriveIdempotencyKey', () => {
   });
 
   it('is independent of argument key ORDER (canonical JSON)', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(WINDOW_START);
     const a = deriveIdempotencyKey('deploy_service', { id: 'svc1', pullImage: true });
     const b = deriveIdempotencyKey('deploy_service', { pullImage: true, id: 'svc1' });
     expect(a).toBe(b);
   });
 
-  it('differs when the argument VALUES differ', () => {
+  it('differs in a LATER window so an intended repeat executes (not a stale replay)', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(WINDOW_START);
+    const a = deriveIdempotencyKey('run_database_backup', { id: 'db1' });
+    // Jump a full window forward → the next bucket → a different key, so the
+    // same operation later is NOT deduped against the earlier one.
+    vi.setSystemTime(WINDOW_START + IDEMPOTENCY_DEDUP_WINDOW_MS);
+    const b = deriveIdempotencyKey('run_database_backup', { id: 'db1' });
+    expect(a).not.toBe(b);
+  });
+
+  it('differs when the argument VALUES differ (same window)', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(WINDOW_START);
     const a = deriveIdempotencyKey('deploy_service', { id: 'svc1' });
     const b = deriveIdempotencyKey('deploy_service', { id: 'svc2' });
     expect(a).not.toBe(b);
   });
 
-  it('differs when the TOOL NAME differs (same args)', () => {
+  it('differs when the TOOL NAME differs (same args, same window)', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(WINDOW_START);
     const a = deriveIdempotencyKey('deploy_service', { id: 'x' });
     const b = deriveIdempotencyKey('restart_deployment', { id: 'x' });
     expect(a).not.toBe(b);
   });
 
   it('EXCLUDES the optional idempotencyKey arg from the hash input', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(WINDOW_START);
     // The override arg is not part of the logical operation, so two calls that
     // differ ONLY in idempotencyKey must derive the SAME stable key.
     const withKey = deriveIdempotencyKey('deploy_service', {
@@ -85,6 +122,8 @@ describe('deriveIdempotencyKey', () => {
   });
 
   it('still distinguishes real args even when idempotencyKey is present', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(WINDOW_START);
     const a = deriveIdempotencyKey('deploy_service', { id: 'svc1', idempotencyKey: 'k' });
     const b = deriveIdempotencyKey('deploy_service', { id: 'svc2', idempotencyKey: 'k' });
     expect(a).not.toBe(b);
@@ -141,8 +180,8 @@ describe('list_vars transform', () => {
   });
 });
 
-describe('read tool error mapping', () => {
-  it('maps a non-2xx envelope to an MCP error result carrying the code', async () => {
+describe('error mapping (mapResult)', () => {
+  it('maps a non-2xx envelope to an MCP error result carrying code + message + status', async () => {
     const ctx = fakeCtx({
       statusCode: 404,
       payload: JSON.stringify({ code: 'NOT_FOUND', message: 'Service not found' }),
@@ -151,6 +190,38 @@ describe('read tool error mapping', () => {
     expect(res.isError).toBe(true);
     expect(res.content[0].text).toContain('NOT_FOUND');
     expect(res.content[0].text).toContain('Service not found');
+    // The HTTP status is now surfaced losslessly.
+    expect(res.content[0].text).toContain('status: 404');
+  });
+
+  it('surfaces field and hint from the envelope (so an agent can self-correct)', async () => {
+    const ctx = fakeCtx({
+      statusCode: 422,
+      payload: JSON.stringify({
+        code: 'VALIDATION_ERROR',
+        message: 'Invalid strategy',
+        field: 'strategy',
+        hint: 'Use "sequential" or "parallel".',
+      }),
+    });
+    const res = await tool('get_service').handler({ id: 'x' }, ctx);
+    expect(res.isError).toBe(true);
+    const text = res.content[0].text;
+    expect(text).toContain('VALIDATION_ERROR');
+    expect(text).toContain('field: strategy');
+    expect(text).toContain('hint: Use "sequential" or "parallel".');
+    expect(text).toContain('status: 422');
+  });
+
+  it('falls back to status (and legacy { error } body) for a non-envelope error', async () => {
+    const ctx = fakeCtx({
+      statusCode: 404,
+      payload: JSON.stringify({ error: 'Config file not found' }),
+    });
+    const res = await tool('get_config_file').handler({ id: 'x' }, ctx);
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toContain('Config file not found');
+    expect(res.content[0].text).toContain('status: 404');
   });
 });
 
@@ -164,7 +235,7 @@ describe('get_capabilities synthesis', () => {
         throw new Error('get_capabilities must not inject');
       },
     } as unknown as FastifyInstance;
-    const ctx: McpToolContext = { app, bearer: 'b', authUser, registeredToolNames: names };
+    const ctx: McpToolContext = { app, bearer: 'b', callerIp: '198.51.100.4', authUser, registeredToolNames: names };
 
     const res = await tool('get_capabilities').handler({}, ctx);
     const out = JSON.parse(res.content[0].text) as {
@@ -209,5 +280,16 @@ describe('tool registry shape', () => {
     expect(names).not.toContain('get_secret_value');
     expect(names).not.toContain('reveal_secret');
     expect(names.some((n) => /reveal|secret.*value|value.*secret/i.test(n))).toBe(false);
+  });
+
+  it('deploy_service.strategy is constrained to the route enum (sequential|parallel)', () => {
+    // Mirrors the route's deploySchema (z.enum(['sequential','parallel'])) so the
+    // tool schema guides the model instead of letting an arbitrary string 400.
+    const strategy = tool('deploy_service').inputSchema.strategy;
+    expect(strategy.safeParse('sequential').success).toBe(true);
+    expect(strategy.safeParse('parallel').success).toBe(true);
+    expect(strategy.safeParse(undefined).success).toBe(true); // optional
+    expect(strategy.safeParse('rolling').success).toBe(false); // not in the enum
+    expect(strategy.safeParse('').success).toBe(false);
   });
 });

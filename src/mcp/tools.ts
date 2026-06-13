@@ -21,11 +21,21 @@
  */
 
 import { z } from 'zod';
-import { createHash } from 'node:crypto';
 import { appVersion } from '../lib/version.js';
 import { computeScopes } from '../lib/scopes.js';
-import { injectApi } from './inject.js';
+import { canonicalizeJson, hashCanonicalBody } from '../lib/canonical-json.js';
+import { injectApi, type InjectApiResult } from './inject.js';
 import type { McpToolContext, McpToolDef, McpToolResult } from './types.js';
+
+/**
+ * Dedup window for derived Idempotency-Keys. The derived key folds in a time
+ * bucket of this size, so two IDENTICAL calls within the same ~window dedupe as
+ * retries (the original result replays), while an INTENDED repeat of the same
+ * operation later (a different bucket) executes normally instead of silently
+ * replaying a stale success. Callers can pass an explicit `idempotencyKey` to
+ * force dedup across windows or to extend the safety net.
+ */
+export const IDEMPOTENCY_DEDUP_WINDOW_MS = 60_000;
 
 // ---------------------------------------------------------------------------
 // Result helpers
@@ -36,44 +46,64 @@ function jsonResult(value: unknown): McpToolResult {
   return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] };
 }
 
-/** Build an MCP error result from a `code: message` pair. */
-function errorResult(code: string, message: string): McpToolResult {
-  return { content: [{ type: 'text', text: `${code}: ${message}` }], isError: true };
+/**
+ * Map a non-ok `injectApi` result to an MCP error result, LOSSLESSLY: the HTTP
+ * status plus the canonical envelope's `code`, `message`, and (when present)
+ * `field` / `hint` are all surfaced so an agent can self-correct (e.g. fix the
+ * offending field, or follow the hint). For a non-envelope error body we fall
+ * back to the status and any string message. Used by BOTH the read and write
+ * factories so the mapping is identical everywhere.
+ */
+function mapResult(res: InjectApiResult): McpToolResult {
+  const parts: string[] = [];
+  if (res.error) {
+    parts.push(`${res.error.code}: ${res.error.message}`);
+    if (res.error.field) parts.push(`field: ${res.error.field}`);
+    if (res.error.hint) parts.push(`hint: ${res.error.hint}`);
+  } else if (typeof res.body === 'string' && res.body.trim() !== '') {
+    parts.push(res.body);
+  } else if (
+    res.body &&
+    typeof res.body === 'object' &&
+    typeof (res.body as Record<string, unknown>).error === 'string'
+  ) {
+    // Legacy `{ error: "..." }` body (some routes still emit this on 404).
+    parts.push((res.body as { error: string }).error);
+  } else {
+    parts.push('Request failed');
+  }
+  parts.push(`status: ${res.status}`);
+  return { content: [{ type: 'text', text: parts.join(' | ') }], isError: true };
 }
 
 /**
  * Derive a stable Idempotency-Key for a write tool call:
- *   sha256(toolName + ':' + canonicalJSON(args))
- * A duplicated/retried identical call therefore dedupes automatically. Callers
- * may override by passing an explicit `idempotencyKey` arg (handled by the
- * caller of this function).
+ *   sha256(toolName + ':' + timeBucket + ':' + canonicalJSON(args))
+ *
+ * The time bucket (`Math.floor(Date.now() / IDEMPOTENCY_DEDUP_WINDOW_MS)`) means
+ * only TRUE retries within the window dedupe; an intended repeat of the same
+ * operation in a later window derives a different key and executes normally
+ * (rather than silently replaying a stale cached success). Callers may override
+ * with an explicit `idempotencyKey` arg (handled by the caller of this function),
+ * which is excluded from the hashed args here.
  *
  * Canonical JSON sorts object keys so semantically-identical args (different key
- * order) hash to the same key. The optional `idempotencyKey` arg is excluded
- * from the hash input (it is not part of the logical operation).
+ * order) hash to the same key.
  */
 export function deriveIdempotencyKey(toolName: string, args: Record<string, unknown>): string {
   const { idempotencyKey: _omit, ...rest } = args;
   void _omit;
-  return createHash('sha256').update(`${toolName}:${canonicalJson(rest)}`).digest('hex');
+  const timeBucket = Math.floor(Date.now() / IDEMPOTENCY_DEDUP_WINDOW_MS);
+  return hashCanonicalBody(`${toolName}:${timeBucket}:${canonicalizeJson(rest)}`);
 }
 
-/** Deterministic JSON.stringify with sorted object keys (arrays keep order). */
-function canonicalJson(value: unknown): string {
-  return JSON.stringify(sortKeys(value));
-}
-
-function sortKeys(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortKeys);
-  if (value && typeof value === 'object') {
-    const out: Record<string, unknown> = {};
-    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
-      out[key] = sortKeys((value as Record<string, unknown>)[key]);
-    }
-    return out;
-  }
-  return value;
-}
+/**
+ * URL-segment encoder. Coerces to string and percent-encodes so an id/value
+ * interpolated into a path can never break out of its segment or inject query
+ * syntax. Used by every `buildUrl` so safe encoding is the default and a future
+ * tool can't accidentally drop it.
+ */
+const seg = (v: unknown): string => encodeURIComponent(String(v));
 
 // ---------------------------------------------------------------------------
 // Tool factories
@@ -103,9 +133,14 @@ function readTool(opts: {
     isWrite: false,
     handler: async (args, ctx) => {
       const url = opts.buildUrl(args);
-      const res = await injectApi(ctx.app, { method: 'GET', url, bearer: ctx.bearer });
+      const res = await injectApi(ctx.app, {
+        method: 'GET',
+        url,
+        bearer: ctx.bearer,
+        remoteAddress: ctx.callerIp,
+      });
       if (!res.ok) {
-        return errorResult(res.error?.code ?? 'ERROR', res.error?.message ?? `Request failed (${res.status})`);
+        return mapResult(res);
       }
       return jsonResult(opts.transform ? opts.transform(res.body) : res.body);
     },
@@ -136,7 +171,7 @@ function writeTool(opts: {
       .max(200)
       .optional()
       .describe(
-        'Optional Idempotency-Key override. If omitted, a stable key is derived from the tool name + arguments so an identical retried call is deduplicated.'
+        'Optional Idempotency-Key override. If omitted, a key is derived from the tool name + arguments + a ~60s time bucket, so an identical retried call within that window dedupes (the original result replays) while a later repeat executes. Pass an explicit value to force dedup across windows (e.g. tie to an external job id) or to extend the safety net. Ignored for dryRun previews (never cached).'
       ),
   };
   return {
@@ -151,17 +186,25 @@ function writeTool(opts: {
     handler: async (args, ctx) => {
       const url = opts.buildUrl(args);
       const body = opts.buildBody ? opts.buildBody(args) : undefined;
+      // A dry-run is a non-mutating preview — it must NOT be cached, or a second
+      // identical preview would replay a stale diff instead of recomputing. So
+      // attach NO Idempotency-Key for dryRun=true; otherwise use the caller's
+      // explicit override or the time-bucketed derived key.
+      const isDryRun = args.dryRun === true;
       const override = typeof args.idempotencyKey === 'string' ? args.idempotencyKey.trim() : '';
-      const idempotencyKey = override || deriveIdempotencyKey(opts.name, args);
+      const idempotencyKey = isDryRun
+        ? undefined
+        : override || deriveIdempotencyKey(opts.name, args);
       const res = await injectApi(ctx.app, {
         method: 'POST',
         url,
         bearer: ctx.bearer,
         idempotencyKey,
         body,
+        remoteAddress: ctx.callerIp,
       });
       if (!res.ok) {
-        return errorResult(res.error?.code ?? 'ERROR', res.error?.message ?? `Request failed (${res.status})`);
+        return mapResult(res);
       }
       return jsonResult(res.body);
     },
@@ -189,14 +232,14 @@ const readTools: McpToolDef[] = [
     title: 'Get environment',
     description: 'Get a single environment by id.',
     inputSchema: { id },
-    buildUrl: (a) => `/api/environments/${encodeURIComponent(String(a.id))}`,
+    buildUrl: (a) => `/api/environments/${seg(a.id)}`,
   }),
   readTool({
     name: 'list_servers',
     title: 'List servers',
     description: 'List servers in an environment.',
     inputSchema: { envId },
-    buildUrl: (a) => `/api/environments/${encodeURIComponent(String(a.envId))}/servers`,
+    buildUrl: (a) => `/api/environments/${seg(a.envId)}/servers`,
   }),
   readTool({
     name: 'get_server',
@@ -205,7 +248,7 @@ const readTools: McpToolDef[] = [
       'Get a single server by id, including its cached last-health-check fields. Pass includeServices=true to also list its deployments.',
     inputSchema: { id, includeServices: z.boolean().optional().describe('Include the flattened services array.') },
     buildUrl: (a) =>
-      `/api/servers/${encodeURIComponent(String(a.id))}${a.includeServices ? '?include=services' : ''}`,
+      `/api/servers/${seg(a.id)}${a.includeServices ? '?include=services' : ''}`,
   }),
   readTool({
     name: 'get_server_health',
@@ -213,35 +256,35 @@ const readTools: McpToolDef[] = [
     description:
       'Get the current cached health status of all servers, services, and databases in an environment (read-only; reads denormalized columns, never triggers a live SSH check).',
     inputSchema: { envId },
-    buildUrl: (a) => `/api/environments/${encodeURIComponent(String(a.envId))}/health-status`,
+    buildUrl: (a) => `/api/environments/${seg(a.envId)}/health-status`,
   }),
   readTool({
     name: 'list_services',
     title: 'List services',
     description: 'List service templates in an environment.',
     inputSchema: { envId },
-    buildUrl: (a) => `/api/environments/${encodeURIComponent(String(a.envId))}/services`,
+    buildUrl: (a) => `/api/environments/${seg(a.envId)}/services`,
   }),
   readTool({
     name: 'get_service',
     title: 'Get service',
     description: 'Get a single service template by id, including its deployments.',
     inputSchema: { id },
-    buildUrl: (a) => `/api/services/${encodeURIComponent(String(a.id))}`,
+    buildUrl: (a) => `/api/services/${seg(a.id)}`,
   }),
   readTool({
     name: 'get_service_logs',
     title: 'Get deployment logs',
     description:
-      'Fetch recent container logs for a specific deployment of a service. Logs may contain sensitive output — see the data-egress note in the MCP docs.',
+      'Fetch recent container logs for a specific deployment of a service. COST: performs a LIVE query to the target host over SSH/Docker (not a cached read) — slower and not free, so avoid tight polling. Logs may contain sensitive output — see the data-egress note in the MCP docs.',
     inputSchema: {
       id,
       depId: z.string().min(1).describe('ServiceDeployment id (per-server runtime). Get it from get_service.'),
       tail: z.number().int().min(1).max(10000).optional().describe('Number of trailing log lines (default from system settings).'),
     },
     buildUrl: (a) => {
-      const base = `/api/services/${encodeURIComponent(String(a.id))}/deployments/${encodeURIComponent(String(a.depId))}/logs`;
-      return a.tail !== undefined ? `${base}?tail=${encodeURIComponent(String(a.tail))}` : base;
+      const base = `/api/services/${seg(a.id)}/deployments/${seg(a.depId)}/logs`;
+      return a.tail !== undefined ? `${base}?tail=${seg(a.tail)}` : base;
     },
   }),
   readTool({
@@ -249,21 +292,21 @@ const readTools: McpToolDef[] = [
     title: 'List config files',
     description: 'List config files in an environment.',
     inputSchema: { envId },
-    buildUrl: (a) => `/api/environments/${encodeURIComponent(String(a.envId))}/config-files`,
+    buildUrl: (a) => `/api/environments/${seg(a.envId)}/config-files`,
   }),
   readTool({
     name: 'get_config_file',
     title: 'Get config file',
     description: 'Get a single config file by id (includes its content).',
     inputSchema: { id },
-    buildUrl: (a) => `/api/config-files/${encodeURIComponent(String(a.id))}`,
+    buildUrl: (a) => `/api/config-files/${seg(a.id)}`,
   }),
   readTool({
     name: 'list_config_fragments',
     title: 'List config fragments',
     description: 'List reusable config fragments in an environment.',
     inputSchema: { envId },
-    buildUrl: (a) => `/api/environments/${encodeURIComponent(String(a.envId))}/config-fragments`,
+    buildUrl: (a) => `/api/environments/${seg(a.envId)}/config-fragments`,
   }),
   readTool({
     name: 'list_secrets',
@@ -271,7 +314,7 @@ const readTools: McpToolDef[] = [
     description:
       'List secret keys and metadata (usage info) in an environment. Decrypted secret VALUES are never returned by this tool.',
     inputSchema: { envId },
-    buildUrl: (a) => `/api/environments/${encodeURIComponent(String(a.envId))}/secrets`,
+    buildUrl: (a) => `/api/environments/${seg(a.envId)}/secrets`,
   }),
   readTool({
     name: 'list_vars',
@@ -279,7 +322,7 @@ const readTools: McpToolDef[] = [
     description:
       'List variable keys, descriptions, and usage info in an environment. Variable VALUES are intentionally stripped from this tool’s output.',
     inputSchema: { envId },
-    buildUrl: (a) => `/api/environments/${encodeURIComponent(String(a.envId))}/vars`,
+    buildUrl: (a) => `/api/environments/${seg(a.envId)}/vars`,
     // The underlying route returns plaintext `value` for every role. Strip it
     // so the tool exposes key/description/usage/timestamps only (issue #208).
     transform: (body) => {
@@ -299,57 +342,57 @@ const readTools: McpToolDef[] = [
     title: 'Get server metrics',
     description: 'Get recent metrics samples for a server.',
     inputSchema: { id },
-    buildUrl: (a) => `/api/servers/${encodeURIComponent(String(a.id))}/metrics`,
+    buildUrl: (a) => `/api/servers/${seg(a.id)}/metrics`,
   }),
   readTool({
     name: 'get_service_metrics',
     title: 'Get service metrics',
     description: 'Get recent metrics samples for a service.',
     inputSchema: { id },
-    buildUrl: (a) => `/api/services/${encodeURIComponent(String(a.id))}/metrics`,
+    buildUrl: (a) => `/api/services/${seg(a.id)}/metrics`,
   }),
   readTool({
     name: 'get_metrics_history',
     title: 'Get metrics history',
     description: 'Get aggregated server metrics history for an environment.',
     inputSchema: { envId },
-    buildUrl: (a) => `/api/environments/${encodeURIComponent(String(a.envId))}/metrics/history`,
+    buildUrl: (a) => `/api/environments/${seg(a.envId)}/metrics/history`,
   }),
   readTool({
     name: 'list_health_checks',
     title: 'List health-check logs',
     description: 'List recent health-check log entries for an environment.',
     inputSchema: { envId },
-    buildUrl: (a) => `/api/environments/${encodeURIComponent(String(a.envId))}/health-logs`,
+    buildUrl: (a) => `/api/environments/${seg(a.envId)}/health-logs`,
   }),
   readTool({
     name: 'get_deployments',
     title: 'Get deployment history',
     description: 'Get the deployment history for a service template.',
     inputSchema: { id },
-    buildUrl: (a) => `/api/services/${encodeURIComponent(String(a.id))}/deployments-history`,
+    buildUrl: (a) => `/api/services/${seg(a.id)}/deployments-history`,
   }),
   readTool({
     name: 'list_deployment_plans',
     title: 'List deployment plans',
     description: 'List deployment plans for an environment.',
     inputSchema: { envId },
-    buildUrl: (a) => `/api/environments/${encodeURIComponent(String(a.envId))}/deployment-plans`,
+    buildUrl: (a) => `/api/environments/${seg(a.envId)}/deployment-plans`,
   }),
   readTool({
     name: 'get_deployment_plan',
     title: 'Get deployment plan',
     description: 'Get a single deployment plan by id.',
     inputSchema: { id },
-    buildUrl: (a) => `/api/deployment-plans/${encodeURIComponent(String(a.id))}`,
+    buildUrl: (a) => `/api/deployment-plans/${seg(a.id)}`,
   }),
   readTool({
     name: 'get_drift',
     title: 'Get server drift',
     description:
-      'Compute configuration drift between BridgePort’s stored view and actual host state for every deployment on a server (read-only).',
+      'Compute configuration drift between BridgePort’s stored view and actual host state for every deployment on a server (read-only — does not change anything). COST: performs a LIVE query to the target host over SSH/Docker (not a cached read) — slower and not free, so avoid tight polling.',
     inputSchema: { id },
-    buildUrl: (a) => `/api/servers/${encodeURIComponent(String(a.id))}/drift`,
+    buildUrl: (a) => `/api/servers/${seg(a.id)}/drift`,
   }),
   readTool({
     name: 'query_audit_log',
@@ -421,16 +464,19 @@ const writeTools: McpToolDef[] = [
     name: 'deploy_service',
     title: 'Deploy service',
     description:
-      'Deploy a service template across all of its deployments. DESTRUCTIVE: cycles running containers. Injects an Idempotency-Key so a retried identical call is deduplicated.',
+      'Deploy a service template across all of its deployments. DESTRUCTIVE: cycles running containers. Identical calls within ~60s dedupe as retries (the original result replays); a later repeat executes. Pass a unique idempotencyKey to force or extend that safety.',
     requiredScope: 'services:write',
     inputSchema: {
       id,
       imageTag: z.string().min(1).optional().describe('Image tag to deploy (defaults to the service’s configured tag).'),
       pullImage: z.boolean().optional().describe('Pull the image before deploying.'),
       generateArtifacts: z.boolean().optional().describe('Regenerate compose/env artifacts before deploying.'),
-      strategy: z.string().min(1).optional().describe('Deploy strategy override.'),
+      strategy: z
+        .enum(['sequential', 'parallel'])
+        .optional()
+        .describe('Deploy strategy override: "sequential" or "parallel". Defaults to the service’s configured strategy.'),
     },
-    buildUrl: (a) => `/api/services/${encodeURIComponent(String(a.id))}/deploy`,
+    buildUrl: (a) => `/api/services/${seg(a.id)}/deploy`,
     buildBody: (a) => {
       const body: Record<string, unknown> = {};
       for (const key of ['imageTag', 'pullImage', 'generateArtifacts', 'strategy'] as const) {
@@ -443,58 +489,58 @@ const writeTools: McpToolDef[] = [
     name: 'execute_deployment_plan',
     title: 'Execute deployment plan',
     description:
-      'Execute a pending deployment plan. Pass dryRun=true for a non-mutating preview. DESTRUCTIVE when dryRun is false. Injects an Idempotency-Key.',
+      'Execute a pending deployment plan. Pass dryRun=true for a non-mutating preview (previews are never cached and always recompute). DESTRUCTIVE when dryRun is false: identical real calls within ~60s dedupe as retries (the original result replays); a later repeat executes. Pass a unique idempotencyKey to force or extend that safety.',
     requiredScope: 'services:write',
     inputSchema: {
       id,
-      dryRun: z.boolean().optional().describe('Preview the plan without executing it.'),
+      dryRun: z.boolean().optional().describe('Preview the plan without executing it (not cached).'),
     },
     buildUrl: (a) =>
-      `/api/deployment-plans/${encodeURIComponent(String(a.id))}/execute${a.dryRun ? '?dryRun=true' : ''}`,
+      `/api/deployment-plans/${seg(a.id)}/execute${a.dryRun ? '?dryRun=true' : ''}`,
   }),
   writeTool({
     name: 'restart_deployment',
     title: 'Restart deployment',
     description:
-      'Restart the container backing a specific deployment. DESTRUCTIVE: bounces the running container. Injects an Idempotency-Key.',
+      'Restart the container backing a specific deployment. DESTRUCTIVE: bounces the running container. Identical calls within ~60s dedupe as retries (the original result replays); a later repeat executes. Pass a unique idempotencyKey to force or extend that safety.',
     requiredScope: 'services:write',
     inputSchema: {
       id,
       depId: z.string().min(1).describe('ServiceDeployment id. Get it from get_service.'),
     },
     buildUrl: (a) =>
-      `/api/services/${encodeURIComponent(String(a.id))}/deployments/${encodeURIComponent(String(a.depId))}/restart`,
+      `/api/services/${seg(a.id)}/deployments/${seg(a.depId)}/restart`,
   }),
   writeTool({
     name: 'rollback_deployment_plan',
     title: 'Rollback deployment plan',
     description:
-      'Manually trigger rollback for a completed or failed deployment plan. DESTRUCTIVE: re-deploys previous images. Injects an Idempotency-Key.',
+      'Manually trigger rollback for a completed or failed deployment plan. DESTRUCTIVE: re-deploys previous images. Identical calls within ~60s dedupe as retries (the original result replays); a later repeat executes. Pass a unique idempotencyKey to force or extend that safety.',
     requiredScope: 'services:write',
     inputSchema: { id },
-    buildUrl: (a) => `/api/deployment-plans/${encodeURIComponent(String(a.id))}/rollback`,
+    buildUrl: (a) => `/api/deployment-plans/${seg(a.id)}/rollback`,
   }),
   writeTool({
     name: 'run_database_backup',
     title: 'Run database backup',
     description:
-      'Trigger a backup for a database (requires operator role). Injects an Idempotency-Key so a retried identical call is deduplicated.',
+      'Trigger a backup for a database (requires operator role). Identical calls within ~60s dedupe as retries (the original result replays); a later repeat runs a NEW backup. Pass a unique idempotencyKey to force or extend that safety.',
     requiredScope: 'services:write',
     inputSchema: { id },
-    buildUrl: (a) => `/api/databases/${encodeURIComponent(String(a.id))}/backups`,
+    buildUrl: (a) => `/api/databases/${seg(a.id)}/backups`,
   }),
   writeTool({
     name: 'sync_config_file',
     title: 'Sync config file',
     description:
-      'Sync a config file to every (service, server) attachment (requires operator role). Pass dryRun=true for a non-mutating diff preview. Injects an Idempotency-Key.',
+      'Sync a config file to every (service, server) attachment (requires operator role). Pass dryRun=true for a non-mutating diff preview (previews are never cached and always recompute). For a real sync, identical calls within ~60s dedupe as retries (the original result replays); a later repeat executes. Pass a unique idempotencyKey to force or extend that safety.',
     requiredScope: 'services:write',
     inputSchema: {
       id,
-      dryRun: z.boolean().optional().describe('Preview the diff without writing to hosts.'),
+      dryRun: z.boolean().optional().describe('Preview the diff without writing to hosts (not cached).'),
     },
     buildUrl: (a) =>
-      `/api/config-files/${encodeURIComponent(String(a.id))}/sync-all${a.dryRun ? '?dryRun=true' : ''}`,
+      `/api/config-files/${seg(a.id)}/sync-all${a.dryRun ? '?dryRun=true' : ''}`,
   }),
 ];
 
