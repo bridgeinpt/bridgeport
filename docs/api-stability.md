@@ -11,6 +11,7 @@ This document is the compatibility contract for BRIDGEPORT's HTTP API. It tells 
 - [Changelog discipline](#changelog-discipline)
 - [Version discovery](#version-discovery)
 - [Current deprecations](#current-deprecations)
+- [Removed in 3.0](#removed-in-30)
 - [Reporting issues & questions](#reporting-issues--questions)
 
 ---
@@ -111,7 +112,7 @@ Every deprecation is recorded in the two **authoritative** places below, and —
 
 1. **The [Current deprecations](#current-deprecations) table in this document** — the complete, always-current list with replacements and removal targets. This is the canonical record.
 2. **An "API changes → Deprecated" entry in the release notes** — tells you *when* a surface was deprecated. See [Changelog discipline](#changelog-discipline) below.
-3. **`deprecated: true` in `/openapi.json`** — machine-readable and picked up by code generators and OpenAPI linters, applied **where the spec models the deprecated field** (e.g. the sync `success` alias). Coverage is best-effort and still expanding, so don't rely on a spec diff alone to catch every deprecation.
+3. **`deprecated: true` in `/openapi.json`** — machine-readable and picked up by code generators and OpenAPI linters, applied **where the spec models the deprecated field**. Coverage is best-effort and still expanding, so don't rely on a spec diff alone to catch every deprecation.
 
 If you're integrating, the table above is your source of truth; the release notes tell you when the clock started, and the spec annotations help your tooling flag the cases it already covers.
 
@@ -174,12 +175,28 @@ The following surfaces are deprecated but still present. Per the [deprecation wi
 
 | Surface | Deprecated in | Replacement | Removal target |
 |---------|---------------|-------------|----------------|
-| Sync response top-level `success: boolean` | 2.0 ([#127](https://github.com/bridgeinpt/bridgeport/issues/127)) | Use `status` (`'ok'` \| `'no_targets'` \| `'partial'` \| `'failed'`) | **3.0** (next major) |
 | `services[]` flattened shape + `service.server` accessor | 2.0 | Read `service.serviceDeployments[]` | **3.0** (next major) |
 
-### Sync response `success` alias
+### Service → ServiceDeployment split
 
-The sync endpoints (`POST /config-files/:id/sync-all`, `POST /services/:id/sync-files`, `POST /servers/:serverId/sync-all-files`) return:
+In `2.0` the service model was split: `Service` became a template (image, env, health, compose), and per-server runtime (container name, status, discovery, ports) moved to `ServiceDeployment`. For back-compat, responses still include a flattened `services[]` array (one row per deployment) and a `service.server`-style accessor that resolves to the first deployment's server. **New integrations should read `service.serviceDeployments[]`** rather than the flattened shape.
+
+> [!NOTE]
+> This deprecation was originally annotated "for this release only" in code comments. Under this now-formalized policy, that note is superseded: its guaranteed removal target is the next major (`3.0`), and it remains fully supported throughout the `2.x` series. This document — not the code comments — is the authority on removal timing.
+
+---
+
+## Removed in 3.0
+
+The following surfaces were deprecated in `2.x` and have now been **removed**. Integrations must migrate before upgrading to `3.0`.
+
+| Surface | Deprecated in | Removed in | Migration |
+|---------|---------------|------------|-----------|
+| Sync response top-level `success: boolean` | 2.0 ([#127](https://github.com/bridgeinpt/bridgeport/issues/127)) | 3.0 ([#235](https://github.com/bridgeinpt/bridgeport/issues/235)) | Read `status` instead |
+
+### Sync response `success` alias (removed)
+
+The sync endpoints (`POST /config-files/:id/sync-all`, `POST /services/:id/sync-files`, `POST /servers/:serverId/sync-all-files`) used to return a top-level `success: boolean` alongside `status`. That alias was removed in `3.0`; read `status === 'ok'` instead. Note that `status` carries information the boolean couldn't: a zero-target sync returns `200` with `status: 'no_targets'`, which you should surface as a warning, **not** as a green success — it is distinct from `'ok'`. The envelope is now:
 
 ```json
 {
@@ -190,15 +207,6 @@ The sync endpoints (`POST /config-files/:id/sync-all`, `POST /services/:id/sync-
   "results": [ ... ]
 }
 ```
-
-The richer `status` enum replaces the old top-level `success: boolean`. The boolean is kept as a deprecated alias (modeled as `deprecated: true` in the spec's shared `SyncResult` schema) for back-compat. Note that `status` carries information the boolean can't: a zero-target sync now returns `200` with `status: 'no_targets'` (previously a `400`), which you should surface as a warning rather than a green success — distinct from `'ok'`.
-
-### Service → ServiceDeployment split
-
-In `2.0` the service model was split: `Service` became a template (image, env, health, compose), and per-server runtime (container name, status, discovery, ports) moved to `ServiceDeployment`. For back-compat, responses still include a flattened `services[]` array (one row per deployment) and a `service.server`-style accessor that resolves to the first deployment's server. **New integrations should read `service.serviceDeployments[]`** rather than the flattened shape.
-
-> [!NOTE]
-> Both deprecations were originally annotated "for this release only" in code comments. Under this now-formalized policy, that note is superseded: their guaranteed removal target is the next major (`3.0`), and they remain fully supported throughout the `2.x` series. This document — not the code comments — is the authority on removal timing.
 
 ---
 

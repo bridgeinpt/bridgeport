@@ -183,15 +183,17 @@ describe('OpenAPI plugin', () => {
       expect(referencesErrorEnvelope).toBe(true);
     });
 
-    it("flags the sync envelope's deprecated `success` alias with deprecated: true", async () => {
+    it('does not expose the removed sync envelope `success` alias', async () => {
       const res = await app.inject({ method: 'GET', url: '/openapi.json' });
       const spec = res.json();
 
       const syncResult = spec.components?.schemas?.SyncResult;
       expect(syncResult).toBeDefined();
-      // `status` is the supported terminal outcome; `success` is the deprecated
-      // alias (issue #127) and must be machine-flagged for client generators.
-      expect(syncResult.properties.success.deprecated).toBe(true);
+      // The deprecated `success` alias was removed in 3.0 (issue #235); `status`
+      // is the canonical terminal outcome. The field must be gone from both the
+      // schema's properties and its required list.
+      expect(syncResult.properties.success).toBeUndefined();
+      expect(syncResult.required ?? []).not.toContain('success');
     });
   });
 
