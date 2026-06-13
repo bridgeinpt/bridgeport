@@ -383,3 +383,47 @@ export const ALL_RESOURCES: McpResourceDef[] = [
   configFragmentsResource,
   capabilitiesResource,
 ];
+
+/**
+ * The URI (static resources) or URI template (template resources) each resource
+ * is reachable at, keyed by resource `name`. Surfaced as `uriTemplate` in the
+ * admin status projection so an operator can see the exact addresses. Kept here
+ * (rather than on `McpResourceDef`) because the live `build`/`uri` wiring lives
+ * in the def while the registry only needs to advertise the address.
+ */
+const RESOURCE_URI_BY_NAME: Record<string, string> = {
+  'config-files': CONFIG_FILE_URI_TEMPLATE,
+  'config-fragments': CONFIG_FRAGMENT_URI_TEMPLATE,
+  capabilities: CAPABILITIES_URI,
+};
+
+/**
+ * Public, non-sensitive metadata for a single resource — the safe projection used
+ * by the admin MCP status page (`GET /api/admin/mcp`). Drops the `build`/`read`
+ * closures; exposes only the declarative annotations plus the URI/template.
+ */
+export interface McpResourceMetadata {
+  name: string;
+  title: string;
+  description: string;
+  requiredScope: string | null;
+  envScoped: boolean;
+  uriTemplate?: string;
+}
+
+/** Project a resource def to its public metadata (drops build/read internals). */
+export function toResourceMetadata(resource: McpResourceDef): McpResourceMetadata {
+  return {
+    name: resource.name,
+    title: resource.title,
+    description: resource.description,
+    requiredScope: resource.requiredScope,
+    envScoped: resource.envScoped,
+    uriTemplate: resource.uri ?? RESOURCE_URI_BY_NAME[resource.name],
+  };
+}
+
+/** Public metadata for every registered resource, in registry order. */
+export function listResourceMetadata(): McpResourceMetadata[] {
+  return ALL_RESOURCES.map(toResourceMetadata);
+}

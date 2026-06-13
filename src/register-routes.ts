@@ -40,6 +40,7 @@ import { smtpRoutes } from './routes/admin/smtp.js';
 import { webhookAdminRoutes } from './routes/admin/webhooks.js';
 import { slackAdminRoutes } from './routes/admin/slack.js';
 import { sentryAdminRoutes } from './routes/admin/sentry.js';
+import { mcpAdminRoutes } from './routes/admin/mcp.js';
 import { containerImageRoutes } from './routes/container-images.js';
 import { serviceDependencyRoutes } from './routes/service-dependencies.js';
 import { deploymentPlanRoutes } from './routes/deployment-plans.js';
@@ -82,6 +83,7 @@ export async function registerApiRoutes(fastify: FastifyInstance): Promise<void>
   await fastify.register(webhookAdminRoutes);
   await fastify.register(slackAdminRoutes);
   await fastify.register(sentryAdminRoutes);
+  await fastify.register(mcpAdminRoutes);
   await fastify.register(containerImageRoutes);
   await fastify.register(serviceDependencyRoutes);
   await fastify.register(deploymentPlanRoutes);

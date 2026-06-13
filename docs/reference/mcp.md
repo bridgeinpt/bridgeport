@@ -8,6 +8,7 @@ The MCP server is **disabled by default** and is a **thin projection** of the RE
 
 - [What the MCP Server Is](#what-the-mcp-server-is)
 - [Enabling It](#enabling-it)
+- [Admin Status Page](#admin-status-page)
 - [Client Setup](#client-setup)
   - [Claude Desktop / Cursor](#claude-desktop--cursor)
   - [Claude Code](#claude-code)
@@ -58,6 +59,19 @@ POST {BRIDGEPORT_URL}/mcp
 ```
 
 `MCP_ENABLED` is a deployment-level kill switch (an environment variable, not a database setting): flipping it off and restarting removes the endpoint entirely.
+
+---
+
+## Admin Status Page
+
+An admin-only page at **`/admin/mcp`** (in the UI, **Admin Settings → MCP Server**) is the in-app home for everything in this reference:
+
+- **Status** — an enabled/disabled badge (derived from the `MCP_ENABLED` env var; there is **no UI toggle** — enable/disable stays a deployment-level env-var decision), the live endpoint URL (`window.location.origin` + `/mcp`), and the DNS-rebinding-protection state (configured hosts, or a prompt to set `MCP_ALLOWED_HOSTS` for remote/proxied clients).
+- **Connect a client** — ready-to-copy config snippets for Claude Desktop, Cursor, and Claude Code, with a pointer to the **Integrations** page to mint an API / service-account token.
+- **Exposed surface** — the full tool inventory (name, description, read/write, required scope, destructive, env-scoped) and the resource inventory (name, description, URI template, scope, env-scoped), read from the in-process registries so it is accurate **whether or not MCP is currently enabled**.
+- **Safety / data egress** — a summary of the redaction boundary and write-tool semantics (mirrors [Data Egress](#data-egress-what-leaves-your-server)).
+
+It is backed by the admin-only `GET /api/admin/mcp` endpoint and is read-only — it is operational guidance and status, not a runtime switch.
 
 ---
 

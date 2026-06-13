@@ -929,3 +929,37 @@ const writeTools: McpToolDef[] = [
 
 /** The full tool registry: meta + read + write groups. */
 export const ALL_TOOLS: McpToolDef[] = [getCapabilitiesTool, ...readTools, ...writeTools];
+
+/**
+ * Public, non-sensitive metadata for a single tool — the safe projection used by
+ * the admin MCP status page (`GET /api/admin/mcp`). Deliberately OMITS the
+ * `handler`/`buildUrl`/`buildBody` internals (which would leak the backing route
+ * shapes); it exposes only the declarative annotations a viewer needs.
+ */
+export interface McpToolMetadata {
+  name: string;
+  title: string;
+  description: string;
+  requiredScope: string | null;
+  destructive: boolean;
+  readOnly: boolean;
+  envScoped: boolean;
+}
+
+/** Project a tool def to its public metadata (drops handler/buildUrl internals). */
+export function toToolMetadata(tool: McpToolDef): McpToolMetadata {
+  return {
+    name: tool.name,
+    title: tool.title,
+    description: tool.description,
+    requiredScope: tool.requiredScope,
+    destructive: tool.destructive,
+    readOnly: tool.readOnly,
+    envScoped: tool.envScoped,
+  };
+}
+
+/** Public metadata for every registered tool, in registry order. */
+export function listToolMetadata(): McpToolMetadata[] {
+  return ALL_TOOLS.map(toToolMetadata);
+}

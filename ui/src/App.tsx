@@ -40,6 +40,7 @@ import AdminAudit from './pages/admin/Audit';
 import AdminNotificationSettings from './pages/admin/NotificationSettings';
 import AdminAbout from './pages/admin/About';
 import AdminIntegrations from './pages/admin/Integrations';
+import AdminMcp from './pages/admin/Mcp';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { token, user } = useAuthStore();
@@ -92,6 +93,7 @@ export default function App() {
                 <Route path="audit" element={<AdminAudit />} />
                 <Route path="notifications" element={<AdminNotificationSettings />} />
                 <Route path="integrations" element={<AdminIntegrations />} />
+                <Route path="mcp" element={<AdminMcp />} />
                 <Route path="about" element={<AdminAbout />} />
               </Routes>
             </AdminLayout>
