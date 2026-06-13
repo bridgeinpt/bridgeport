@@ -5,14 +5,16 @@ packages:
   - 'ui'
 
 # Security overrides — force patched versions of transitive dependencies flagged
-# by Dependabot. Both live on dev/tooling-only paths (neither reaches the
-# production runtime or the Docker image), but we pin the fixed versions so the
-# alerts close and can't silently regress.
+# by Dependabot. All live on dev/tooling-only paths (none reach the production
+# runtime or the Docker image), but we pin the fixed versions so the alerts
+# close and can't silently regress.
 #   uuid               GHSA-w5hq-g745-h8pq  (<11.1.1)   via hyperid → autocannon (stress tests)
 #   @hono/node-server  GHSA-92pp-h63x-v22m  (<1.19.13)  via @prisma/dev → prisma
+#   esbuild            GHSA-g7r4-m6w7-qqqr  (<0.28.1)   via vite + tsx (build/dev tooling)
 overrides:
   uuid: '^11.1.1'
   '@hono/node-server': '^1.19.13'
+  esbuild: '^0.28.1'
 
 # Supply-chain hardening (replaces the old .npmrc `ignore-scripts=true`).
 #
