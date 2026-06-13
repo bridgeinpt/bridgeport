@@ -74,6 +74,14 @@ const envSchema = z.object({
   POSTGRES_STATEMENT_TIMEOUT_MS: z.coerce.number().int().min(1).default(30000),
   IDEMPOTENCY_RETENTION_MS: z.coerce.number().int().min(1000).default(86400000),
   IDEMPOTENCY_STALE_INPROGRESS_MS: z.coerce.number().int().min(1000).default(300000),
+  // Issue #242: remaining operational tunables. Defaults match the previously
+  // hardcoded literals — zero behavior change unless explicitly set.
+  MYSQL_CONNECTION_TIMEOUT_MS: z.coerce.number().int().min(1).default(10000),
+  MYSQL_STATEMENT_TIMEOUT_MS: z.coerce.number().int().min(1).default(30000),
+  WEBHOOK_DELIVERY_TIMEOUT_MS: z.coerce.number().int().min(500).default(10000),
+  WEBHOOK_DELIVERY_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(100).default(5),
+  RESPONSE_CACHE_MAX_ENTRIES: z.coerce.number().int().min(1).default(500),
+  SSH_EXEC_MAX_BUFFER_BYTES: z.coerce.number().int().min(1024).default(10485760), // 10 * 1024 * 1024 (10MB)
 });
 
 export type Config = z.infer<typeof envSchema>;

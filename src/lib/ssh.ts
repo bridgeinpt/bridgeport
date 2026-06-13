@@ -101,7 +101,7 @@ export class LocalClient implements CommandClient {
 
     try {
       const { stdout, stderr } = await execAsync(command, {
-        maxBuffer: 10 * 1024 * 1024, // 10MB buffer
+        maxBuffer: config.SSH_EXEC_MAX_BUFFER_BYTES,
         timeout,
         env: options?.env ? { ...process.env, ...options.env } : undefined,
       });

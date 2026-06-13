@@ -108,13 +108,13 @@ async function executeSQLQueries(
       user: conn.user,
       password: conn.password,
       ssl: conn.useSsl ? { rejectUnauthorized: false } : undefined,
-      connectTimeout: 10000,
+      connectTimeout: appConfig.MYSQL_CONNECTION_TIMEOUT_MS,
     });
 
     try {
       for (const query of config.queries) {
         try {
-          const [rows] = await connection.execute({ sql: query.query, timeout: 30000 });
+          const [rows] = await connection.execute({ sql: query.query, timeout: appConfig.MYSQL_STATEMENT_TIMEOUT_MS });
           results[query.name] = parseQueryResult(query, rows as Record<string, unknown>[]);
         } catch (err) {
           results[query.name] = { error: err instanceof Error ? err.message : String(err) };
@@ -381,7 +381,7 @@ export async function pingDatabase(
       user: credentials?.username || 'root',
       password: credentials?.password,
       ssl: database.useSsl ? { rejectUnauthorized: false } : undefined,
-      connectTimeout: 10000,
+      connectTimeout: appConfig.MYSQL_CONNECTION_TIMEOUT_MS,
     });
 
     try {

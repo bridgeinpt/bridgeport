@@ -33,8 +33,10 @@
  * that captures every input that changes the response (env id, query params).
  */
 
+import { config } from './config.js';
+
 const DEFAULT_TTL_MS = 5_000;
-const DEFAULT_MAX_ENTRIES = 500;
+const DEFAULT_MAX_ENTRIES = config.RESPONSE_CACHE_MAX_ENTRIES;
 
 // Integration tests run in a shared process (isolate: false) with these caches
 // as module-level singletons, and they routinely read → mutate → read the same

@@ -61,6 +61,13 @@ const envSchema = z.object({
   POSTGRES_STATEMENT_TIMEOUT_MS: z.coerce.number().int().min(1).default(30000),
   IDEMPOTENCY_RETENTION_MS: z.coerce.number().int().min(1000).default(86400000),
   IDEMPOTENCY_STALE_INPROGRESS_MS: z.coerce.number().int().min(1000).default(300000),
+  // Issue #242 operational tunables — kept in sync with src/lib/config.ts.
+  MYSQL_CONNECTION_TIMEOUT_MS: z.coerce.number().int().min(1).default(10000),
+  MYSQL_STATEMENT_TIMEOUT_MS: z.coerce.number().int().min(1).default(30000),
+  WEBHOOK_DELIVERY_TIMEOUT_MS: z.coerce.number().int().min(500).default(10000),
+  WEBHOOK_DELIVERY_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(100).default(5),
+  RESPONSE_CACHE_MAX_ENTRIES: z.coerce.number().int().min(1).default(500),
+  SSH_EXEC_MAX_BUFFER_BYTES: z.coerce.number().int().min(1024).default(10485760),
 });
 
 // Minimal valid env
@@ -538,6 +545,78 @@ describe('config', () => {
       it('accepts the boundary value 1', () => {
         expect(envSchema.safeParse({ ...validEnv, POSTGRES_CONNECTION_TIMEOUT_MS: '1' }).success).toBe(true);
         expect(envSchema.safeParse({ ...validEnv, POSTGRES_STATEMENT_TIMEOUT_MS: '1' }).success).toBe(true);
+      });
+    });
+  });
+
+  describe('issue #242 operational tunables', () => {
+    it('applies defaults matching the previously hardcoded literals when unset', () => {
+      const result = envSchema.safeParse(validEnv);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.MYSQL_CONNECTION_TIMEOUT_MS).toBe(10000);
+        expect(result.data.MYSQL_STATEMENT_TIMEOUT_MS).toBe(30000);
+        expect(result.data.WEBHOOK_DELIVERY_TIMEOUT_MS).toBe(10000);
+        expect(result.data.WEBHOOK_DELIVERY_MAX_ATTEMPTS).toBe(5);
+        expect(result.data.RESPONSE_CACHE_MAX_ENTRIES).toBe(500);
+        expect(result.data.SSH_EXEC_MAX_BUFFER_BYTES).toBe(10485760); // 10 * 1024 * 1024
+      }
+    });
+
+    it('coerces string env values to numbers', () => {
+      const result = envSchema.safeParse({
+        ...validEnv,
+        MYSQL_CONNECTION_TIMEOUT_MS: '15000',
+        WEBHOOK_DELIVERY_MAX_ATTEMPTS: '8',
+        RESPONSE_CACHE_MAX_ENTRIES: '1000',
+        SSH_EXEC_MAX_BUFFER_BYTES: '20971520',
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.MYSQL_CONNECTION_TIMEOUT_MS).toBe(15000);
+        expect(result.data.WEBHOOK_DELIVERY_MAX_ATTEMPTS).toBe(8);
+        expect(result.data.RESPONSE_CACHE_MAX_ENTRIES).toBe(1000);
+        expect(result.data.SSH_EXEC_MAX_BUFFER_BYTES).toBe(20971520);
+      }
+    });
+
+    describe('WEBHOOK_DELIVERY_MAX_ATTEMPTS (min 1, max 100)', () => {
+      it('accepts the boundary values 1 and 100', () => {
+        expect(envSchema.safeParse({ ...validEnv, WEBHOOK_DELIVERY_MAX_ATTEMPTS: '1' }).success).toBe(true);
+        expect(envSchema.safeParse({ ...validEnv, WEBHOOK_DELIVERY_MAX_ATTEMPTS: '100' }).success).toBe(true);
+      });
+
+      it('rejects 0 and values above 100', () => {
+        expect(envSchema.safeParse({ ...validEnv, WEBHOOK_DELIVERY_MAX_ATTEMPTS: '0' }).success).toBe(false);
+        expect(envSchema.safeParse({ ...validEnv, WEBHOOK_DELIVERY_MAX_ATTEMPTS: '101' }).success).toBe(false);
+      });
+    });
+
+    describe('WEBHOOK_DELIVERY_TIMEOUT_MS (min 500)', () => {
+      it('accepts 500 but rejects below 500', () => {
+        expect(envSchema.safeParse({ ...validEnv, WEBHOOK_DELIVERY_TIMEOUT_MS: '500' }).success).toBe(true);
+        expect(envSchema.safeParse({ ...validEnv, WEBHOOK_DELIVERY_TIMEOUT_MS: '499' }).success).toBe(false);
+      });
+    });
+
+    describe('SSH_EXEC_MAX_BUFFER_BYTES (min 1024)', () => {
+      it('accepts 1024 but rejects below 1024', () => {
+        expect(envSchema.safeParse({ ...validEnv, SSH_EXEC_MAX_BUFFER_BYTES: '1024' }).success).toBe(true);
+        expect(envSchema.safeParse({ ...validEnv, SSH_EXEC_MAX_BUFFER_BYTES: '1023' }).success).toBe(false);
+      });
+    });
+
+    describe('MYSQL_* / RESPONSE_CACHE_MAX_ENTRIES (min 1)', () => {
+      it('rejects 0', () => {
+        expect(envSchema.safeParse({ ...validEnv, MYSQL_CONNECTION_TIMEOUT_MS: '0' }).success).toBe(false);
+        expect(envSchema.safeParse({ ...validEnv, MYSQL_STATEMENT_TIMEOUT_MS: '0' }).success).toBe(false);
+        expect(envSchema.safeParse({ ...validEnv, RESPONSE_CACHE_MAX_ENTRIES: '0' }).success).toBe(false);
+      });
+
+      it('accepts the boundary value 1', () => {
+        expect(envSchema.safeParse({ ...validEnv, MYSQL_CONNECTION_TIMEOUT_MS: '1' }).success).toBe(true);
+        expect(envSchema.safeParse({ ...validEnv, MYSQL_STATEMENT_TIMEOUT_MS: '1' }).success).toBe(true);
+        expect(envSchema.safeParse({ ...validEnv, RESPONSE_CACHE_MAX_ENTRIES: '1' }).success).toBe(true);
       });
     });
   });
