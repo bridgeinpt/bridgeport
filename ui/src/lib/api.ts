@@ -1390,8 +1390,8 @@ export interface SyncResult {
 export type SyncStatus = 'ok' | 'no_targets' | 'partial' | 'failed';
 
 /**
- * Standard envelope returned by every sync endpoint. The deprecated `success`
- * alias is true iff `status === 'ok'` — new UI code branches on `status`.
+ * Standard envelope returned by every sync endpoint. UI code branches on
+ * `status`; per-target outcomes live on each item in `results`.
  */
 export interface SyncEnvelope<R> {
   status: SyncStatus;
@@ -1399,8 +1399,6 @@ export interface SyncEnvelope<R> {
   targetsSucceeded: number;
   targetsFailed: number;
   results: R[];
-  /** @deprecated use `status` (issue #127). */
-  success: boolean;
 }
 
 export const listConfigFiles = (envId: string, options?: { limit?: number; offset?: number }) => {

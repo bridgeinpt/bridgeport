@@ -2,6 +2,9 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { buildTestApp, type TestApp } from '../../tests/helpers/app.js';
 import { createTestUser } from '../../tests/factories/user.js';
 import { createTestEnvironment } from '../../tests/factories/environment.js';
+import { createTestServer } from '../../tests/factories/server.js';
+import { createTestContainerImage } from '../../tests/factories/container-image.js';
+import { createTestService, createTestServiceDeployment } from '../../tests/factories/service.js';
 import { generateTestToken } from '../../tests/helpers/auth.js';
 
 describe('config-files routes', () => {
@@ -280,10 +283,10 @@ describe('config-files routes', () => {
       expect(body.targetsSucceeded).toBe(0);
       expect(body.targetsFailed).toBe(0);
       expect(body.results).toEqual([]);
-      // Deprecated `success` field is kept for one release for back-compat —
-      // it's `false` because the sync did not actually accomplish anything.
-      expect(body).toHaveProperty('success');
-      expect(body.success).toBe(false);
+      // Issue #235: the deprecated top-level `success` alias has been removed.
+      // `status` is the canonical terminal outcome and must NOT be shadowed by
+      // a boolean alias.
+      expect(body).not.toHaveProperty('success');
     });
 
     it('returns 404 when the ConfigFile itself does not exist (null reserved for not-found)', async () => {
@@ -301,6 +304,132 @@ describe('config-files routes', () => {
       const body = res.json();
       expect(body.code ?? body.error).toBeTruthy();
     });
+  });
+
+  // ============= issue #235: SyncResult envelope drops `success` alias =============
+  // The three sync endpoints return { results, status, targetsAttempted,
+  // targetsSucceeded, targetsFailed } with NO top-level `success`. `status` is
+  // the canonical enum ('ok' | 'no_targets' | 'partial' | 'failed'). The
+  // per-target `results[].success` field is a DIFFERENT, retained contract and
+  // is intentionally not asserted here.
+
+  describe('POST /api/services/:id/sync-files (envelope)', () => {
+    it('returns 200 + status=no_targets (no top-level `success`) when the service has no deployments', async () => {
+      // A template with an attached file but zero deployments has nowhere to
+      // sync to — a deterministic `no_targets` that needs no SSH.
+      const image = await createTestContainerImage(app.prisma, { environmentId: envId });
+      const service = await createTestService(app.prisma, {
+        environmentId: envId,
+        containerImageId: image.id,
+        name: 'sync-files-no-targets',
+      });
+      const cf = await app.prisma.configFile.create({
+        data: {
+          name: 'sf-nt-config',
+          filename: 'sf-nt.env',
+          content: 'A=1',
+          environmentId: envId,
+        },
+      });
+      await app.prisma.serviceFile.create({
+        data: { serviceId: service.id, configFileId: cf.id, targetPath: '/etc/sf-nt.env' },
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/services/${service.id}/sync-files`,
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body).not.toHaveProperty('success');
+      expect(body.status).toBe('no_targets');
+      expect(body.targetsAttempted).toBe(0);
+      expect(body.targetsSucceeded).toBe(0);
+      expect(body.targetsFailed).toBe(0);
+      expect(body.results).toEqual([]);
+    });
+
+    it('returns 200 + status=failed (no top-level `success`) when every target is unreachable', async () => {
+      // A deployment to an SSH server with no configured key fails to create a
+      // client, so every per-target result is `success: false` and the
+      // envelope `status` resolves to 'failed'. Exercises the full live path
+      // through deriveSyncStatus, not just the no_targets early return.
+      const image = await createTestContainerImage(app.prisma, { environmentId: envId });
+      const service = await createTestService(app.prisma, {
+        environmentId: envId,
+        containerImageId: image.id,
+        name: 'sync-files-failed',
+      });
+      const server = await createTestServer(app.prisma, {
+        environmentId: envId,
+        name: 'sf-failed-server',
+        dockerMode: 'ssh',
+      });
+      await createTestServiceDeployment(app.prisma, {
+        serviceId: service.id,
+        serverId: server.id,
+      });
+      const cf = await app.prisma.configFile.create({
+        data: {
+          name: 'sf-failed-config',
+          filename: 'sf-failed.env',
+          content: 'A=1',
+          environmentId: envId,
+        },
+      });
+      await app.prisma.serviceFile.create({
+        data: { serviceId: service.id, configFileId: cf.id, targetPath: '/etc/sf-failed.env' },
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/services/${service.id}/sync-files`,
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body).not.toHaveProperty('success');
+      expect(body.status).toBe('failed');
+      expect(body.targetsAttempted).toBe(1);
+      expect(body.targetsSucceeded).toBe(0);
+      expect(body.targetsFailed).toBe(1);
+      // The per-target `results[].success` contract is intentionally preserved.
+      expect(body.results[0]).toHaveProperty('success', false);
+    });
+  });
+
+  describe('POST /api/servers/:serverId/sync-all-files (envelope)', () => {
+    it('returns 200 + status=no_targets (no top-level `success`) when the server has no deployments', async () => {
+      const server = await createTestServer(app.prisma, {
+        environmentId: envId,
+        name: 'saf-no-targets-server',
+      });
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/servers/${server.id}/sync-all-files`,
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body).not.toHaveProperty('success');
+      expect(body.status).toBe('no_targets');
+      expect(body.targetsAttempted).toBe(0);
+      expect(body.targetsSucceeded).toBe(0);
+      expect(body.targetsFailed).toBe(0);
+      expect(body.results).toEqual([]);
+    });
+
+    // NOTE: unlike POST /api/services/:id/sync-files (which builds a per-target
+    // `failed` envelope when a deployment's SSH client can't be created), this
+    // endpoint opens a single client to the one server up front and returns a
+    // 400 if that fails — so there is no `failed`-envelope path to assert here.
+    // The deprecated-`success`-removal contract is exercised via no_targets
+    // above and via the live-path returns covered by sync-files below.
   });
 
   // ==================== issue #127: PATCH readonly fields ====================

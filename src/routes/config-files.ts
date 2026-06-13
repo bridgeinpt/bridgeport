@@ -1300,8 +1300,6 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           targetsAttempted: 0,
           targetsSucceeded: 0,
           targetsFailed: 0,
-          // Deprecated: retained for one release as a top-level alias (issue #127).
-          success: false,
         };
       }
 
@@ -1440,8 +1438,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         environmentId: service.environmentId,
       });
 
-      // `success` is deprecated (issue #127); clients should prefer `status`.
-      return { results, status, targetsAttempted, targetsSucceeded, targetsFailed, success: allSuccess };
+      return { results, status, targetsAttempted, targetsSucceeded, targetsFailed };
     }
   );
 
@@ -1652,7 +1649,6 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
           targetsAttempted: 0,
           targetsSucceeded: 0,
           targetsFailed: 0,
-          success: false,
         };
       }
 
@@ -1800,8 +1796,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         environmentId: server.environmentId,
       });
 
-      // `success` is deprecated (issue #127); clients should prefer `status`.
-      return { results, status, targetsAttempted, targetsSucceeded, targetsFailed, success: allSuccess };
+      return { results, status, targetsAttempted, targetsSucceeded, targetsFailed };
     }
   );
 
@@ -1866,14 +1861,12 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         environmentId: outcome.environmentId,
       });
 
-      // `success` is deprecated (issue #127); clients should prefer `status`.
       return {
         results: outcome.results,
         status: outcome.status,
         targetsAttempted: outcome.targetsAttempted,
         targetsSucceeded: outcome.targetsSucceeded,
         targetsFailed: outcome.targetsFailed,
-        success: outcome.success,
       };
     }
   );

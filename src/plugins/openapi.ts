@@ -127,8 +127,7 @@ async function openapiPlugin(fastify: FastifyInstance): Promise<void> {
           // (`POST /api/config-files/:id/sync-all`,
           //  `POST /api/services/:id/sync-files`,
           //  `POST /api/servers/:serverId/sync-all-files`). The `status` field
-          // is the terminal outcome — clients should prefer it over the
-          // deprecated top-level `success`. See issue #127.
+          // is the canonical terminal outcome.
           SyncResult: {
             type: 'object',
             required: ['status', 'targetsAttempted', 'targetsSucceeded', 'targetsFailed', 'results'],
@@ -146,11 +145,6 @@ async function openapiPlugin(fastify: FastifyInstance): Promise<void> {
                 type: 'array',
                 description: 'Per-target results. Shape varies by endpoint (file/serviceName/targetPath/serverName/error).',
                 items: { type: 'object', additionalProperties: true },
-              },
-              success: {
-                type: 'boolean',
-                deprecated: true,
-                description: 'Deprecated alias for `status === "ok"`. Will be removed in a future release.',
               },
             },
           },
