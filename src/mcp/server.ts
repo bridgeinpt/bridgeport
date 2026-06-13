@@ -24,12 +24,17 @@
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import type {
+  ReadResourceCallback,
+  ReadResourceTemplateCallback,
+} from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { FastifyInstance } from 'fastify';
 import { computeScopes } from '../lib/scopes.js';
 import { appVersion } from '../lib/version.js';
 import type { AuthUser } from '../services/auth.js';
 import { ALL_TOOLS } from './tools.js';
-import type { McpToolContext, McpToolDef } from './types.js';
+import { ALL_RESOURCES } from './resources.js';
+import type { McpResourceContext, McpResourceDef, McpToolContext, McpToolDef } from './types.js';
 
 export interface BuildMcpServerOptions {
   /** Root Fastify instance (the one whose routes the tools inject into). */
@@ -72,8 +77,40 @@ export function selectToolsForScopes(scopes: string[], isEnvScoped = false): Mcp
 }
 
 /**
- * Build (but do not connect) an McpServer with the tools this caller is
- * entitled to. The caller is responsible for connecting it to a transport.
+ * Select the resources a caller holding `scopes` is entitled to. Identical
+ * gating contract to `selectToolsForScopes`: a resource is included iff its
+ * `requiredScope` is null (or held) AND it isn't withheld by env-scoping
+ * (`!isEnvScoped || resource.envScoped`).
+ *
+ * The config-file / config-fragment resources are `envScoped:false` because
+ * their READ replays a GLOBAL per-id route (`/api/config-files/:id`,
+ * `/api/config-fragments/:id`) that always FORBIDDEN_SCOPEs for an env-scoped
+ * token — so they're dropped for such tokens, exactly like the `get_config_file`
+ * tool. The capabilities resource is `envScoped:true` (no inject) and always
+ * present. Pure and side-effect-free for unit testing.
+ */
+export function selectResourcesForScopes(
+  scopes: string[],
+  isEnvScoped = false
+): McpResourceDef[] {
+  const scopeSet = new Set(scopes);
+  return ALL_RESOURCES.filter((resource) => {
+    const scopeOk = resource.requiredScope === null || scopeSet.has(resource.requiredScope);
+    const reachable = !isEnvScoped || resource.envScoped;
+    return scopeOk && reachable;
+  });
+}
+
+/**
+ * Build (but do not connect) an McpServer with the tools AND resources this
+ * caller is entitled to. The caller is responsible for connecting it to a
+ * transport.
+ *
+ * Resources (issue #208) are registered alongside tools and gated by the SAME
+ * scope/env-scoping contract (see `selectResourcesForScopes`). Registering any
+ * resource makes the SDK advertise the `resources` capability automatically, so
+ * the transport in plugin.ts needs no change. Resource reads replay through the
+ * same `injectApi` mechanism as tools.
  */
 export function buildMcpServer(options: BuildMcpServerOptions): McpServer {
   const { app, authUser, bearer, callerIp } = options;
@@ -88,12 +125,19 @@ export function buildMcpServer(options: BuildMcpServerOptions): McpServer {
   // keep the full surface. Env-scoped tokens get every global-route tool withheld
   // (their routes always FORBIDDEN_SCOPE — see selectToolsForScopes).
   const isEnvScoped = authUser.scope?.allEnvironments === false;
+  const scopes = computeScopes(authUser);
 
   // Tools available to this session: meta/read (requiredScope null) plus any
   // write tool whose required scope the caller holds — and, for env-scoped
   // tokens, only the ones whose backing route is reachable (tool.envScoped).
-  const availableTools = selectToolsForScopes(computeScopes(authUser), isEnvScoped);
+  const availableTools = selectToolsForScopes(scopes, isEnvScoped);
   const registeredToolNames = availableTools.map((t) => t.name);
+
+  // Resources available to this session, gated by the same contract. Computed
+  // before the contexts are built so the capabilities resource can report the
+  // exact resource set registered for this session.
+  const availableResources = selectResourcesForScopes(scopes, isEnvScoped);
+  const registeredResourceNames = availableResources.map((r) => r.name);
 
   const ctx: McpToolContext = { app, bearer, authUser, callerIp, registeredToolNames };
 
@@ -119,6 +163,42 @@ export function buildMcpServer(options: BuildMcpServerOptions): McpServer {
         return result as CallToolResult;
       }
     );
+  }
+
+  const resourceCtx: McpResourceContext = {
+    app,
+    bearer,
+    authUser,
+    callerIp,
+    registeredToolNames,
+    registeredResourceNames,
+  };
+
+  for (const resource of availableResources) {
+    const metadata = {
+      title: resource.title,
+      description: resource.description,
+      mimeType: resource.mimeType,
+    };
+    if (resource.build) {
+      // TEMPLATE resource: build the ResourceTemplate (with its lazy list
+      // callback) and a ReadResourceTemplateCallback, both closed over the
+      // session context.
+      server.registerResource(
+        resource.name,
+        resource.build(resourceCtx),
+        metadata,
+        resource.read(resourceCtx) as ReadResourceTemplateCallback
+      );
+    } else if (resource.uri) {
+      // STATIC resource: fixed URI + ReadResourceCallback.
+      server.registerResource(
+        resource.name,
+        resource.uri,
+        metadata,
+        resource.read(resourceCtx) as ReadResourceCallback
+      );
+    }
   }
 
   return server;

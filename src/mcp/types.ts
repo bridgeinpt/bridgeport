@@ -11,6 +11,11 @@
 
 import type { FastifyInstance } from 'fastify';
 import type { ZodType } from 'zod';
+import type {
+  ResourceTemplate,
+  ReadResourceCallback,
+  ReadResourceTemplateCallback,
+} from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { AuthUser } from '../services/auth.js';
 
 /** A zod "raw shape" — the object form accepted by McpServer.registerTool's `inputSchema`. */
@@ -96,4 +101,89 @@ export interface McpToolDef {
    * `args`; meta tools (get_capabilities) synthesize a result without injecting.
    */
   handler: (args: Record<string, unknown>, ctx: McpToolContext) => Promise<McpToolResult>;
+}
+
+/**
+ * Context handed to every resource list/read callback (issue #208). It is the
+ * resource-side parallel of `McpToolContext`: same `app`/`bearer`/`callerIp`
+ * (so reads replay through `injectApi` exactly like tools), the resolved
+ * `AuthUser` (for the locally-synthesized capabilities resource), and the names
+ * of the tools AND resources registered for this session (so capabilities can
+ * report the full surface). It carries no per-tool fields (no idempotency, no
+ * args) because resources are read-only.
+ */
+export interface McpResourceContext {
+  app: FastifyInstance;
+  /** Raw bearer token (without the "Bearer " prefix) of the MCP caller. */
+  bearer: string;
+  authUser: AuthUser;
+  /** The MCP caller's real client IP, threaded onto injected sub-calls. */
+  callerIp: string;
+  /** Names of the tools registered for this session (for the capabilities resource). */
+  registeredToolNames: string[];
+  /** Names of the resources registered for this session (for the capabilities resource). */
+  registeredResourceNames: string[];
+}
+
+/**
+ * Declarative definition of a single MCP resource (or resource family).
+ *
+ * Two flavours, distinguished by which fields are set:
+ *   - TEMPLATE resource: set `build` (returns a `ResourceTemplate` whose `list`
+ *     callback lazily enumerates the caller's matching resources) and a `read`
+ *     that yields a `ReadResourceTemplateCallback` (receives the filled-in URI
+ *     variables). Used for config files / fragments.
+ *   - STATIC resource: set `uri` (a fixed URI string) and a `read` that yields a
+ *     `ReadResourceCallback`. Used for the capabilities resource.
+ *
+ * The `read`/`build` functions take the per-session `McpResourceContext` and
+ * return the SDK callback closed over it — mirroring how `McpToolDef.handler`
+ * closes over `McpToolContext`. The registry (`resources.ts`) is an array of
+ * these; the server (`server.ts`) registers each with the SDK's
+ * `registerResource`.
+ */
+export interface McpResourceDef {
+  /** Stable resource name exposed to clients (kebab-case). */
+  name: string;
+  /** Human-friendly title shown in resource listings. */
+  title: string;
+  /** Description shown to the model/user. */
+  description: string;
+  /** MIME type of the resource content (e.g. "application/json"). */
+  mimeType: string;
+  /**
+   * Scope a caller must hold for this resource to be registered. `null` for the
+   * read resources every valid token can use (every role has `*:read`) and the
+   * locally-synthesized capabilities resource. Same semantics as
+   * `McpToolDef.requiredScope`.
+   */
+  requiredScope: string | null;
+  /**
+   * Whether this resource is usable by an ENVIRONMENT-SCOPED API token. Same
+   * semantics as `McpToolDef.envScoped`: the config-file / config-fragment
+   * resources READ through a GLOBAL per-id route (`/api/config-files/:id`,
+   * `/api/config-fragments/:id`) that enforceTokenScope rejects for an env-scoped
+   * token with FORBIDDEN_SCOPE — so although their LIST could enumerate via env
+   * routes, the READ would always 403. They are therefore withheld from
+   * env-scoped tokens (mirroring the `get_config_file` tool, which is also
+   * `envScoped:false`), keeping the advertised list TRUTHFUL. The capabilities
+   * resource needs no inject and is `true`.
+   */
+  envScoped: boolean;
+  /**
+   * For a STATIC resource: the fixed URI string. Mutually exclusive with
+   * `build` — exactly one of `uri` / `build` must be set.
+   */
+  uri?: string;
+  /**
+   * For a TEMPLATE resource: build the `ResourceTemplate` (with its lazy `list`
+   * callback) closed over the session context. Mutually exclusive with `uri`.
+   */
+  build?: (ctx: McpResourceContext) => ResourceTemplate;
+  /**
+   * Build the read callback closed over the session context. For a template
+   * resource this is a `ReadResourceTemplateCallback` (gets URI variables); for
+   * a static resource a `ReadResourceCallback`.
+   */
+  read: (ctx: McpResourceContext) => ReadResourceCallback | ReadResourceTemplateCallback;
 }

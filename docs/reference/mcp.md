@@ -16,6 +16,7 @@ The MCP server is **disabled by default** and is a **thin projection** of the RE
   - [Read Tools](#read-tools)
   - [Write Tools](#write-tools)
   - [Meta Tools](#meta-tools)
+- [Resources](#resources)
 - [Idempotency](#idempotency)
 - [Data Egress: What Leaves Your Server](#data-egress-what-leaves-your-server)
 - [Transport and Networking](#transport-and-networking)
@@ -30,8 +31,8 @@ The Model Context Protocol is an open standard that lets an AI model call extern
 Key properties:
 
 - **Bring-your-own-model.** BRIDGEPORT does **no inference on the host.** It never calls an LLM and never ships a model. The model runs wherever your MCP client runs (your laptop, Anthropic's API, etc.); BRIDGEPORT only answers tool calls.
-- **A projection of the API.** Each tool maps to one existing REST endpoint. The tool handler issues an internal request with your bearer token, so a tool can never do anything your token couldn't already do via the REST API.
-- **Tools only (v1).** The server exposes tools — no MCP *resources*, *prompts*, or *subscriptions*. The transport is stateless: each request is self-contained, with no server-side session.
+- **A projection of the API.** Each tool *and resource* maps to one existing REST endpoint. The handler issues an internal request with your bearer token, so it can never do anything your token couldn't already do via the REST API.
+- **Tools and resources (no prompts/subscriptions).** The server exposes **tools** (callable actions) and read-only **resources** (browseable content — see [Resources](#resources)) — but no MCP *prompts* or *subscriptions*. The transport is stateless: each request is self-contained, with no server-side session, so resource list-change notifications are not pushed (re-list on demand).
 
 ---
 
@@ -218,6 +219,37 @@ Require a write scope (`operator`/`admin`) and are hidden from environment-scope
 
 ---
 
+## Resources
+
+In addition to tools, the MCP server exposes a small set of read-only **resources** — content an MCP client can browse and attach to a conversation. Like tools, every resource is a **thin projection of the REST API**: its content is fetched by replaying a real internal request with your bearer token, so the same authentication, role/scope enforcement, and audit logging apply. Resources never mutate anything.
+
+> A note on data egress applies here too: resource content is sent to whatever model your MCP client uses. See [Data Egress](#data-egress-what-leaves-your-server).
+
+### URI scheme
+
+Resources are addressed by a custom `bridgeport:///…` URI scheme:
+
+| Resource | URI | Kind | Backing route (read) |
+|----------|-----|------|----------------------|
+| **Config files** | `bridgeport:///config-files/{id}` | template | `GET /api/config-files/:id` |
+| **Config fragments** | `bridgeport:///config-fragments/{id}` | template | `GET /api/config-fragments/:id` |
+| **Capabilities** | `bridgeport:///capabilities` | static | — (synthesized locally) |
+
+- **Config files** and **config fragments** are **resource templates**. The `resources/list` (and `resources/templates/list`) request enumerates them **lazily** — nothing heavy runs at connect. When a client lists, the server walks **your accessible environments** (via `GET /api/environments`, which is already filtered to your token's environment allowlist) and, for each, the env-scoped list route (`GET /api/environments/:envId/config-files` / `…/config-fragments`). Listed descriptors are labelled `"<environment>: <name>"`. Reading a specific URI replays the per-id `GET` route, which runs the full scope/role check.
+- **Capabilities** is a single **static resource** returning `{ version, scopes, tools, resources }` for the current session — the same shape as the `get_capabilities` tool, extended with the registered **resource** names. It is synthesized locally (no API call).
+
+### Content is the templated (non-secret) form
+
+The config-file and config-fragment read routes return the content **exactly as stored** — the **templated** form, with `${KEY}` placeholders left intact. They do **not** resolve placeholders or decrypt secrets. (Placeholder resolution only happens on the separate *preview* / *compose* routes, which additionally **redact** resolved secret values; those are not exposed as resources.) So a resource read can surface a config file that *references* `${DB_PASSWORD}`, but never the decrypted value of `DB_PASSWORD`. This is the same content the `get_config_file` tool already returns. (As with that tool, a literal secret you hard-coded inline into a config file's text *will* appear — use `${KEY}` placeholders + BRIDGEPORT secrets rather than inline literals.)
+
+### Scope and environment behavior
+
+- **Read scope.** Every valid token can list/read these resources (every role has `*:read`) — there is no write resource.
+- **Environment-scoped tokens.** An [environment-scoped token](#environment-scoped-tokens-see-only-environment-scoped-tools) does **not** see the config-file/fragment resources at all. Their *read* replays a **global** per-id route (`GET /api/config-files/:id`, `GET /api/config-fragments/:id`) that returns `FORBIDDEN_SCOPE` for an env-scoped token — so, exactly like the `get_config_file` tool, the resource is **withheld** to keep the advertised list truthful (it would only ever fail to read). The **capabilities** resource needs no API call and remains available. For browseable config resources, use an **all-environments** token.
+- **The `resources` capability is advertised automatically** when any resource is registered, so MCP-capable clients discover resource support on connect.
+
+---
+
 ## Idempotency
 
 Each **mutating** write call injects an `Idempotency-Key` header so BRIDGEPORT's idempotency middleware engages and a duplicated/retried identical call is **deduplicated** (the original result is replayed instead of running the mutation twice).
@@ -238,7 +270,7 @@ When you connect an MCP client, **tool outputs are sent to whatever model that c
 
 - **Logs (`get_service_logs`) and audit entries (`query_audit_log`) can contain sensitive application output** — request payloads, stack traces, tokens an app happened to log. They are returned verbatim. Only enable MCP, and only mint tokens, for operators you trust to route that data to their model.
 - **Secret, variable, and credential values are never returned.** `list_secrets` exposes keys and metadata only; `list_vars` strips the `value` field; `list_registries`/`get_registry` return `hasToken`/`hasPassword` flags (no credential); `list_databases`/`get_database` return a `hasCredentials` flag (no encrypted blob); `list_webhook_subscriptions` returns a `hasSecret` flag (no signing secret); `get_system_settings` masks the DO registry token; `list_api_tokens` returns only the non-secret token prefix; and the admin-only secret-reveal endpoint is **not exposed as a tool**.
-- **Config and compose content is returned.** `get_config_file` returns config-file content, and `get_service_compose` returns the rendered compose/env artifacts; both **redact resolved secret values** in their previews — but a config file you wrote with an inline literal will show that literal. `get_topology` / `list_connections` expose your infrastructure layout (hostnames, ports, service names).
+- **Config and compose content is returned.** `get_config_file` (and the equivalent `bridgeport:///config-files/{id}` / `bridgeport:///config-fragments/{id}` [resources](#resources)) return config content in its **templated** form (`${KEY}` placeholders intact, never resolved/decrypted secret values); `get_service_compose` returns the rendered compose/env artifacts with resolved secret values **redacted**. A config file you wrote with an inline literal will still show that literal. `get_topology` / `list_connections` expose your infrastructure layout (hostnames, ports, service names).
 - **`refresh_server_health` performs a live host query.** Unlike the cached `get_server_health` read, it opens an SSH connection to the target host. It's operator-gated and idempotency-keyed, but it is not a free/cached call.
 - **Scope your tokens.** Use an environment-scoped, role-capped API token so an MCP session can only read/act on the environments you intend.
 

@@ -27,6 +27,13 @@ import { createTestDatabase } from '../factories/database.js';
 import { createSecret } from '../../src/services/secrets.js';
 import { createApiToken } from '../../src/services/auth.js';
 import { createRegistryConnection } from '../../src/services/registries.js';
+import {
+  configFileUri,
+  configFragmentUri,
+  CONFIG_FILE_URI_TEMPLATE,
+  CONFIG_FRAGMENT_URI_TEMPLATE,
+  CAPABILITIES_URI,
+} from '../../src/mcp/resources.js';
 
 /** Shape of a tools/call result block we assert on. */
 interface ToolText {
@@ -52,6 +59,13 @@ describe('MCP server (integration, SDK client)', () => {
   let configFileId: string;
   let registryId: string;
   let databaseId: string;
+  /** A SECOND environment (and its own config file) the env-scoped token cannot reach. */
+  let otherEnvId: string;
+  let otherEnvConfigFileId: string;
+  /** A config file whose TEMPLATED content references the seeded secret via `${KEY}`. */
+  let templatedConfigFileId: string;
+  /** A config fragment (reusable text block) in the primary env. */
+  let configFragmentId: string;
 
   // Track clients/transports so we always close them (the SDK keeps a fetch
   // connection open per client).
@@ -139,6 +153,44 @@ describe('MCP server (integration, SDK client)', () => {
     // the read tools project `hasCredentials` only).
     const database = await createTestDatabase(app.prisma, { environmentId: envId, name: 'mcp-db' });
     databaseId = database.id;
+
+    // --- Resource fixtures (issue #208) -------------------------------------
+    // A config file whose stored content references the seeded secret via a
+    // `${KEY}` placeholder. The get-by-id route (which the config-files RESOURCE
+    // reads through) returns this TEMPLATED content verbatim — it must NOT
+    // resolve the placeholder to the decrypted secret value. We assert both:
+    // the placeholder survives, and the plaintext secret does not appear.
+    const templatedCf = await app.prisma.configFile.create({
+      data: {
+        name: 'mcp-templated-cf',
+        filename: 'app.env',
+        content: 'DATABASE_URL=${MCP_DB_URL}\nPORT=8080',
+        environmentId: envId,
+      },
+    });
+    templatedConfigFileId = templatedCf.id;
+
+    // A config fragment (reusable text block) in the primary env.
+    const fragment = await app.prisma.configFragment.create({
+      data: {
+        name: 'mcp-fragment',
+        description: 'shared headers',
+        content: 'X-Frame-Options: DENY\nX-Token=${MCP_DB_URL}',
+        environmentId: envId,
+      },
+    });
+    configFragmentId = fragment.id;
+
+    // A SECOND environment with its own config file. Used to prove the resource
+    // list enumerates ACROSS a caller's accessible environments (the all-envs
+    // admin sees both), and that the env-scoped token (scoped to envId only)
+    // cannot reach it.
+    const otherEnv = await createTestEnvironment(app.prisma, { name: 'mcp-other-env' });
+    otherEnvId = otherEnv.id;
+    const otherCf = await app.prisma.configFile.create({
+      data: { name: 'other-env-cf', filename: 'other.env', content: 'OTHER=1', environmentId: otherEnvId },
+    });
+    otherEnvConfigFileId = otherCf.id;
   });
 
   afterAll(async () => {
@@ -713,6 +765,137 @@ describe('MCP server (integration, SDK client)', () => {
       expect(body.scopes).toContain('services:write'); // operator
       expect(body.tools).toContain('sync_config_file');
       expect(body.tools).toContain('get_capabilities');
+    });
+  });
+
+  // 10. Resources (issue #208) ----------------------------------------------
+  describe('resources', () => {
+    /** Pull the first text content block from a readResource result. */
+    function firstResourceText(res: { contents: Array<Record<string, unknown>> }): string {
+      const block = res.contents.find((c) => typeof c.text === 'string');
+      return (block?.text as string) ?? '';
+    }
+
+    it('advertises the resources capability and the two templates + capabilities resource', async () => {
+      const client = await connect(adminToken);
+
+      // The SDK sets the `resources` capability automatically when a resource is
+      // registered; getServerCapabilities reflects what plugin.ts advertised.
+      const caps = client.getServerCapabilities();
+      expect(caps?.resources).toBeDefined();
+
+      // Two URI templates: config-files and config-fragments.
+      const { resourceTemplates } = await client.listResourceTemplates();
+      const templates = resourceTemplates.map((t) => t.uriTemplate);
+      expect(templates).toContain(CONFIG_FILE_URI_TEMPLATE);
+      expect(templates).toContain(CONFIG_FRAGMENT_URI_TEMPLATE);
+
+      // The static capabilities resource shows up in resources/list.
+      const { resources } = await client.listResources();
+      expect(resources.map((r) => r.uri)).toContain(CAPABILITIES_URI);
+    });
+
+    it('lists config files and fragments across the caller’s environments (template list callback)', async () => {
+      const client = await connect(adminToken);
+      const { resources } = await client.listResources();
+      const uris = resources.map((r) => r.uri);
+
+      // Primary-env config files (the plain one, the templated one) are listed.
+      expect(uris).toContain(configFileUri(configFileId));
+      expect(uris).toContain(configFileUri(templatedConfigFileId));
+      // The config fragment is listed.
+      expect(uris).toContain(configFragmentUri(configFragmentId));
+      // The SECOND environment's config file is ALSO listed (cross-env
+      // enumeration — an all-environments admin sees both envs).
+      expect(uris).toContain(configFileUri(otherEnvConfigFileId));
+    });
+
+    it('reads a config file’s content via GET /api/config-files/:id', async () => {
+      const client = await connect(adminToken);
+      const res = await client.readResource({ uri: configFileUri(configFileId) });
+      const text = firstResourceText(res);
+      const body = JSON.parse(text) as { configFile: { id: string; content: string } };
+      expect(body.configFile.id).toBe(configFileId);
+      expect(body.configFile.content).toBe('X=1');
+      // The content block echoes the requested URI.
+      expect(res.contents[0].uri).toBe(configFileUri(configFileId));
+    });
+
+    it('reads a config fragment’s content via GET /api/config-fragments/:id', async () => {
+      const client = await connect(adminToken);
+      const res = await client.readResource({ uri: configFragmentUri(configFragmentId) });
+      const body = JSON.parse(firstResourceText(res)) as {
+        fragment: { id: string; content: string };
+      };
+      expect(body.fragment.id).toBe(configFragmentId);
+      expect(body.fragment.content).toContain('X-Frame-Options: DENY');
+    });
+
+    it('NO-SECRET-LEAK: config-file/fragment reads return TEMPLATED content (placeholders intact, no decrypted secret)', async () => {
+      const client = await connect(adminToken);
+
+      const cf = await client.readResource({ uri: configFileUri(templatedConfigFileId) });
+      const cfText = firstResourceText(cf);
+      // The `${KEY}` placeholder survives verbatim...
+      expect(cfText).toContain('${MCP_DB_URL}');
+      // ...and the decrypted secret VALUE is nowhere in the output.
+      expect(cfText).not.toContain('super-secret-plaintext');
+
+      const frag = await client.readResource({ uri: configFragmentUri(configFragmentId) });
+      const fragText = firstResourceText(frag);
+      expect(fragText).toContain('${MCP_DB_URL}');
+      expect(fragText).not.toContain('super-secret-plaintext');
+    });
+
+    it('reading a non-existent config file surfaces a NOT_FOUND error', async () => {
+      const client = await connect(adminToken);
+      await expect(
+        client.readResource({ uri: configFileUri('does-not-exist-cuid') })
+      ).rejects.toThrow(/NOT_FOUND|404/);
+    });
+
+    it('the capabilities resource is readable and reports tools + resources', async () => {
+      const client = await connect(operatorToken);
+      const res = await client.readResource({ uri: CAPABILITIES_URI });
+      const body = JSON.parse(firstResourceText(res)) as {
+        version: string;
+        scopes: string[];
+        tools: string[];
+        resources: string[];
+      };
+      expect(typeof body.version).toBe('string');
+      expect(body.scopes).toContain('services:write'); // operator
+      expect(body.tools).toContain('sync_config_file');
+      // The resource names this session registered are reported.
+      expect(body.resources).toContain('config-files');
+      expect(body.resources).toContain('config-fragments');
+      expect(body.resources).toContain('capabilities');
+    });
+
+    it('env-scoped token: config-file/fragment resources are WITHHELD (their read route is global); only capabilities remains', async () => {
+      // An env-scoped token cannot read GET /api/config-files/:id (global route →
+      // FORBIDDEN_SCOPE), so the config resources are not advertised — exactly
+      // like the get_config_file tool is withheld. The advertised list stays
+      // truthful: only the locally-synthesized capabilities resource is present.
+      const client = await connect(envScopedOperatorToken);
+
+      const { resourceTemplates } = await client.listResourceTemplates();
+      const templates = resourceTemplates.map((t) => t.uriTemplate);
+      expect(templates).not.toContain(CONFIG_FILE_URI_TEMPLATE);
+      expect(templates).not.toContain(CONFIG_FRAGMENT_URI_TEMPLATE);
+
+      const { resources } = await client.listResources();
+      const uris = resources.map((r) => r.uri);
+      // No config-file/fragment resources of EITHER environment (its own or the other).
+      expect(uris).not.toContain(configFileUri(configFileId));
+      expect(uris).not.toContain(configFileUri(otherEnvConfigFileId));
+      // Capabilities is still present (no inject, env-scope-safe).
+      expect(uris).toContain(CAPABILITIES_URI);
+
+      // And the capabilities resource reflects the withholding.
+      const caps = await client.readResource({ uri: CAPABILITIES_URI });
+      const body = JSON.parse(firstResourceText(caps)) as { resources: string[] };
+      expect(body.resources).toEqual(['capabilities']);
     });
   });
 });
