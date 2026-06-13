@@ -343,9 +343,13 @@ When the token authenticates a request, BRIDGEPORT computes `effective role = mi
 | Read-only dashboards | Service account, viewer, all environments |
 | Personal CLI | User-owned, role matches the user, all environments |
 | Webhook integrations | Service account, role matches the action, env-scoped |
+| AI agent via MCP | Service account; viewer for read-only, operator to deploy/restart/backup; all environments for the full tool surface |
 
 > [!TIP]
 > Name tokens descriptively (`"github-actions-staging"`, `"grafana-readonly"`). `lastUsedAt` helps find stale tokens that can be revoked.
+
+> [!NOTE]
+> The [MCP server](../reference/mcp.md) authenticates AI agents with these same API tokens and derives an agent's available tools from the token's role and environment scope: a viewer token exposes read tools only, and an environment-scoped token sees only the tools it can actually call. Mint a dedicated, scoped token per MCP client.
 
 ---
 

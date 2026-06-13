@@ -91,6 +91,10 @@ ADMIN_PASSWORD=a-strong-password-here
 # Optional: Sentry error monitoring
 # SENTRY_BACKEND_DSN=https://key@sentry.io/12345
 # SENTRY_FRONTEND_DSN=https://key@sentry.io/67890
+
+# Optional: MCP (Model Context Protocol) server for AI agents (off by default)
+# MCP_ENABLED=true
+# MCP_ALLOWED_HOSTS=mcp.example.com
 EOF
 ```
 

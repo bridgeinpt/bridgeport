@@ -64,6 +64,7 @@ BRIDGEPORT gives you a single web UI to manage all your Docker infrastructure. C
 | **Registry** | Registry Integration | Docker Hub, GHCR, and private registries with auto-update |
 | **Topology** | Service Topology | Interactive diagram of services, databases, external entities (CDNs, clients), and server clusters |
 | **API** | REST API & Service Accounts | Environment-scoped API tokens and machine service accounts for CI/CD automation |
+| **Agents** | MCP Server | Expose the API to MCP-capable AI agents (Claude, Cursor, Claude Code) as scoped tools — opt-in, bring-your-own-model, no inference on the host |
 | **CLI** | CLI Tool | SSH, logs, exec, deploy, and manage from the terminal |
 | **Plugins** | Plugin System | JSON-defined service types and database types with monitoring queries |
 | **RBAC** | Access Control | Three roles: admin, operator, viewer |
