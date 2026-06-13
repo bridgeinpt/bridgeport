@@ -48,10 +48,10 @@ export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 const WEBHOOK_EVENT_SET = new Set<string>(WEBHOOK_EVENTS);
 
 /** Max delivery attempts before a delivery is marked failed (terminal). */
-const MAX_DELIVERY_ATTEMPTS = 5;
+const MAX_DELIVERY_ATTEMPTS = config.WEBHOOK_DELIVERY_MAX_ATTEMPTS;
 
 /** Per-request HTTP timeout for an outbound delivery POST. */
-const DELIVERY_TIMEOUT_MS = 10_000;
+const DELIVERY_TIMEOUT_MS = config.WEBHOOK_DELIVERY_TIMEOUT_MS;
 
 /** How many due deliveries to process per `deliverPending()` sweep. */
 const DELIVERY_BATCH_SIZE = config.WEBHOOK_DELIVERY_BATCH_SIZE;

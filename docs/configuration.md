@@ -112,6 +112,8 @@ Background job intervals. Interval values are in **seconds**. These set the glob
 |---|---|---|---|
 | `SQLITE_BUSY_TIMEOUT_MS` | number | `5000` | How long SQLite waits for a lock under WAL contention (milliseconds). |
 | `SQLITE_CACHE_SIZE_KB` | number | `64000` | SQLite page cache size in KiB. Lower it on memory-constrained / ARM hosts. |
+| `RESPONSE_CACHE_MAX_ENTRIES` | number | `500` | Max entries in the per-process short-TTL response cache before the oldest half is evicted. Minimum `1`. |
+| `SSH_EXEC_MAX_BUFFER_BYTES` | number | `10485760` | Max stdout/stderr buffer for local command execution, in bytes (default 10MB). Raise it if local exec output is being truncated. Minimum `1024`. |
 
 ### Webhook Subscription Delivery
 
@@ -122,6 +124,8 @@ Tunes the delivery sweep for **webhook subscriptions** (the `WebhookSubscription
 | `WEBHOOK_DELIVERY_INTERVAL_MS` | number | `3000` | How often the delivery sweep runs (milliseconds). |
 | `WEBHOOK_DELIVERY_CONCURRENCY` | number | `10` | Number of parallel deliveries per sweep. |
 | `WEBHOOK_DELIVERY_BATCH_SIZE` | number | `50` | Number of pending deliveries fetched per sweep. |
+| `WEBHOOK_DELIVERY_TIMEOUT_MS` | number | `10000` | Per-request HTTP timeout for an outbound delivery POST (milliseconds). Minimum `500`. |
+| `WEBHOOK_DELIVERY_MAX_ATTEMPTS` | number | `5` | Max delivery attempts before a delivery is marked failed (terminal). Minimum `1`, maximum `100`. |
 
 > Retention of delivered records is controlled by the `webhookDeliveryRetentionDays` [system setting](reference/system-settings.md#retention-policies), not an env var.
 
@@ -133,6 +137,15 @@ Timeouts for the main Postgres query path (used by the database query executor).
 |---|---|---|---|
 | `POSTGRES_CONNECTION_TIMEOUT_MS` | number | `10000` | Postgres connection timeout (milliseconds). Minimum `1` — `0` ("wait forever") is rejected so a stalled host can't wedge the metrics scheduler. |
 | `POSTGRES_STATEMENT_TIMEOUT_MS` | number | `30000` | Postgres statement timeout (milliseconds). Minimum `1`. |
+
+### Database Query Executor (MySQL)
+
+Timeouts for the MySQL query path (used by the database query executor).
+
+| Variable | Type | Default | Description |
+|---|---|---|---|
+| `MYSQL_CONNECTION_TIMEOUT_MS` | number | `10000` | MySQL connection timeout (milliseconds). Minimum `1`. |
+| `MYSQL_STATEMENT_TIMEOUT_MS` | number | `30000` | MySQL per-statement query timeout (milliseconds). Minimum `1`. |
 
 ### Idempotency
 

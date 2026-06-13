@@ -522,15 +522,23 @@ SESSION_TTL=7d                            # JWT/session lifetime (duration strin
 # Performance / SQLite
 SQLITE_BUSY_TIMEOUT_MS=5000               # Lock wait under WAL contention
 SQLITE_CACHE_SIZE_KB=64000                # Page cache size (KiB)
+RESPONSE_CACHE_MAX_ENTRIES=500            # Per-process response cache cap
+SSH_EXEC_MAX_BUFFER_BYTES=10485760        # Local exec stdout/stderr buffer (10MB)
 
 # Webhook subscription delivery (WebhookSubscription/WebhookDelivery path)
 WEBHOOK_DELIVERY_INTERVAL_MS=3000         # Delivery sweep cadence
 WEBHOOK_DELIVERY_CONCURRENCY=10           # Parallel deliveries per sweep
 WEBHOOK_DELIVERY_BATCH_SIZE=50            # Deliveries fetched per sweep
+WEBHOOK_DELIVERY_TIMEOUT_MS=10000         # Per-delivery POST timeout
+WEBHOOK_DELIVERY_MAX_ATTEMPTS=5           # Attempts before terminal failure
 
 # Database query executor (main Postgres query path)
 POSTGRES_CONNECTION_TIMEOUT_MS=10000      # Connection timeout
 POSTGRES_STATEMENT_TIMEOUT_MS=30000       # Statement timeout
+
+# Database query executor (MySQL query path)
+MYSQL_CONNECTION_TIMEOUT_MS=10000         # Connection timeout
+MYSQL_STATEMENT_TIMEOUT_MS=30000          # Per-statement query timeout
 
 # Idempotency-Key record lifecycle
 IDEMPOTENCY_RETENTION_MS=86400000         # Record retention (24h)
