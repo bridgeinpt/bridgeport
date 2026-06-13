@@ -49,18 +49,18 @@ const envSchema = z.object({
   SCHEDULER_DATABASE_METRICS_INTERVAL: z.coerce.number().int().min(1).default(60),
   SCHEDULER_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(5),
   RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(100),
-  RATE_LIMIT_WINDOW: z.string().default('1 minute'),
+  RATE_LIMIT_WINDOW: z.string().min(1).default('1 minute'),
   BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(12),
-  SESSION_TTL: z.string().default('7d'),
+  SESSION_TTL: z.string().min(1).default('7d'),
   SQLITE_BUSY_TIMEOUT_MS: z.coerce.number().int().min(0).default(5000),
   SQLITE_CACHE_SIZE_KB: z.coerce.number().int().min(1000).default(64000),
   WEBHOOK_DELIVERY_INTERVAL_MS: z.coerce.number().int().min(500).default(3000),
   WEBHOOK_DELIVERY_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(10),
   WEBHOOK_DELIVERY_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(50),
-  POSTGRES_CONNECTION_TIMEOUT_MS: z.coerce.number().int().min(0).default(10000),
-  POSTGRES_STATEMENT_TIMEOUT_MS: z.coerce.number().int().min(0).default(30000),
-  IDEMPOTENCY_RETENTION_MS: z.coerce.number().int().min(0).default(86400000),
-  IDEMPOTENCY_STALE_INPROGRESS_MS: z.coerce.number().int().min(0).default(300000),
+  POSTGRES_CONNECTION_TIMEOUT_MS: z.coerce.number().int().min(1).default(10000),
+  POSTGRES_STATEMENT_TIMEOUT_MS: z.coerce.number().int().min(1).default(30000),
+  IDEMPOTENCY_RETENTION_MS: z.coerce.number().int().min(1000).default(86400000),
+  IDEMPOTENCY_STALE_INPROGRESS_MS: z.coerce.number().int().min(1000).default(300000),
 });
 
 // Minimal valid env
@@ -486,6 +486,58 @@ describe('config', () => {
       it('accepts 1000 but rejects below 1000', () => {
         expect(envSchema.safeParse({ ...validEnv, SQLITE_CACHE_SIZE_KB: '1000' }).success).toBe(true);
         expect(envSchema.safeParse({ ...validEnv, SQLITE_CACHE_SIZE_KB: '999' }).success).toBe(false);
+      });
+    });
+
+    describe('SESSION_TTL / RATE_LIMIT_WINDOW (non-empty strings)', () => {
+      it('falls back to defaults when unset', () => {
+        const result = envSchema.safeParse(validEnv);
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data.SESSION_TTL).toBe('7d');
+          expect(result.data.RATE_LIMIT_WINDOW).toBe('1 minute');
+        }
+      });
+
+      it('rejects an empty SESSION_TTL (present-but-empty env var)', () => {
+        expect(envSchema.safeParse({ ...validEnv, SESSION_TTL: '' }).success).toBe(false);
+      });
+
+      it('rejects an empty RATE_LIMIT_WINDOW (present-but-empty env var)', () => {
+        expect(envSchema.safeParse({ ...validEnv, RATE_LIMIT_WINDOW: '' }).success).toBe(false);
+      });
+
+      it('accepts non-empty overrides', () => {
+        const result = envSchema.safeParse({ ...validEnv, SESSION_TTL: '30d', RATE_LIMIT_WINDOW: '5 minutes' });
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect(result.data.SESSION_TTL).toBe('30d');
+          expect(result.data.RATE_LIMIT_WINDOW).toBe('5 minutes');
+        }
+      });
+    });
+
+    describe('IDEMPOTENCY_STALE_INPROGRESS_MS / IDEMPOTENCY_RETENTION_MS (min 1000)', () => {
+      it('rejects 0 (would make in-progress records instantly stale → double-execute)', () => {
+        expect(envSchema.safeParse({ ...validEnv, IDEMPOTENCY_STALE_INPROGRESS_MS: '0' }).success).toBe(false);
+        expect(envSchema.safeParse({ ...validEnv, IDEMPOTENCY_RETENTION_MS: '0' }).success).toBe(false);
+      });
+
+      it('accepts the boundary value 1000', () => {
+        expect(envSchema.safeParse({ ...validEnv, IDEMPOTENCY_STALE_INPROGRESS_MS: '1000' }).success).toBe(true);
+        expect(envSchema.safeParse({ ...validEnv, IDEMPOTENCY_RETENTION_MS: '1000' }).success).toBe(true);
+      });
+    });
+
+    describe('POSTGRES_CONNECTION_TIMEOUT_MS / POSTGRES_STATEMENT_TIMEOUT_MS (min 1)', () => {
+      it('rejects 0 (would mean "wait forever" → wedges the DB-metrics tick)', () => {
+        expect(envSchema.safeParse({ ...validEnv, POSTGRES_CONNECTION_TIMEOUT_MS: '0' }).success).toBe(false);
+        expect(envSchema.safeParse({ ...validEnv, POSTGRES_STATEMENT_TIMEOUT_MS: '0' }).success).toBe(false);
+      });
+
+      it('accepts the boundary value 1', () => {
+        expect(envSchema.safeParse({ ...validEnv, POSTGRES_CONNECTION_TIMEOUT_MS: '1' }).success).toBe(true);
+        expect(envSchema.safeParse({ ...validEnv, POSTGRES_STATEMENT_TIMEOUT_MS: '1' }).success).toBe(true);
       });
     });
   });

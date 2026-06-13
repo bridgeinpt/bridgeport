@@ -486,14 +486,14 @@ export default function SystemSettings() {
               </label>
               <input
                 type="number"
-                min={10}
+                min={30}
                 max={3600}
                 value={formData.pgDumpTimeoutSec}
                 onChange={(e) => updateField('pgDumpTimeoutSec', parseInt(e.target.value) || 300)}
                 className="input w-full"
               />
               <p className="text-xs text-slate-500 mt-1">
-                Global default timeout for PostgreSQL backup dumps (default: {defaults ? msToSec(defaults.pgDumpTimeoutMs) : 300}s).
+                Global default timeout for PostgreSQL backup dumps (30–3600s, default: {defaults ? msToSec(defaults.pgDumpTimeoutMs) : 300}s).
                 Per-database settings override this value.
               </p>
             </div>

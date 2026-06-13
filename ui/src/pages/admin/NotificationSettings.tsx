@@ -55,32 +55,42 @@ function parseDelaysMs(delaysJson: string): string {
   return delays.map((d) => Math.round(d / 1000)).join(', ');
 }
 
+// Single source of truth for parsing a comma-separated list of retry delays
+// (seconds). Splits on comma, trims, and DROPS empty tokens (so a trailing
+// comma is ignored rather than turning into a phantom delay). Returns an error
+// string when the input can't be parsed into a non-empty list of positive
+// integers; otherwise returns the parsed second values.
+function parseDelaysSec(input: string): { values: number[]; error: string | null } {
+  const parts = input.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+  if (parts.length === 0) {
+    return { values: [], error: 'Enter at least one delay (in seconds).' };
+  }
+  const values: number[] = [];
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) {
+      return { values: [], error: `"${part}" is not a whole number of seconds.` };
+    }
+    const num = parseInt(part, 10);
+    if (num < 1) {
+      return { values: [], error: 'Delays must be at least 1 second.' };
+    }
+    values.push(num);
+  }
+  return { values, error: null };
+}
+
 function formatDelaysMs(delaysSec: string): string {
-  const delays = delaysSec.split(',').map((s) => {
-    const num = parseInt(s.trim(), 10);
-    return isNaN(num) ? 1000 : num * 1000;
-  });
-  return JSON.stringify(delays);
+  const { values } = parseDelaysSec(delaysSec);
+  return JSON.stringify(values.map((s) => s * 1000));
 }
 
 // Validate a comma-separated list of retry delays (seconds) and produce a
 // human-readable preview. Returns an error string when the input can't be
 // parsed into a non-empty list of positive integers, so save can be blocked.
 function validateDelaysSec(delaysSec: string): { error: string | null; preview: string } {
-  const parts = delaysSec.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
-  if (parts.length === 0) {
-    return { error: 'Enter at least one delay (in seconds).', preview: '' };
-  }
-  const values: number[] = [];
-  for (const part of parts) {
-    if (!/^\d+$/.test(part)) {
-      return { error: `"${part}" is not a whole number of seconds.`, preview: '' };
-    }
-    const num = parseInt(part, 10);
-    if (num < 1) {
-      return { error: 'Delays must be at least 1 second.', preview: '' };
-    }
-    values.push(num);
+  const { values, error } = parseDelaysSec(delaysSec);
+  if (error) {
+    return { error, preview: '' };
   }
   return { error: null, preview: values.map((v) => `${v}s`).join(', ') };
 }

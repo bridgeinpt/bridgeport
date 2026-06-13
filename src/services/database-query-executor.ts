@@ -358,7 +358,7 @@ export async function pingDatabase(
       user: credentials?.username || 'postgres',
       password: credentials?.password,
       ssl: database.useSsl ? { rejectUnauthorized: false } : false,
-      connectionTimeoutMillis: 10000,
+      connectionTimeoutMillis: appConfig.POSTGRES_CONNECTION_TIMEOUT_MS,
       statement_timeout: 5000,
     });
 

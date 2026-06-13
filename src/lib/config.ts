@@ -62,18 +62,18 @@ const envSchema = z.object({
   SCHEDULER_DATABASE_METRICS_INTERVAL: z.coerce.number().int().min(1).default(60), // seconds
   SCHEDULER_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(5),
   RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(100),
-  RATE_LIMIT_WINDOW: z.string().default('1 minute'),
+  RATE_LIMIT_WINDOW: z.string().min(1).default('1 minute'),
   BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(12),
-  SESSION_TTL: z.string().default('7d'),
+  SESSION_TTL: z.string().min(1).default('7d'),
   SQLITE_BUSY_TIMEOUT_MS: z.coerce.number().int().min(0).default(5000),
   SQLITE_CACHE_SIZE_KB: z.coerce.number().int().min(1000).default(64000),
   WEBHOOK_DELIVERY_INTERVAL_MS: z.coerce.number().int().min(500).default(3000),
   WEBHOOK_DELIVERY_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(10),
   WEBHOOK_DELIVERY_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(50),
-  POSTGRES_CONNECTION_TIMEOUT_MS: z.coerce.number().int().min(0).default(10000),
-  POSTGRES_STATEMENT_TIMEOUT_MS: z.coerce.number().int().min(0).default(30000),
-  IDEMPOTENCY_RETENTION_MS: z.coerce.number().int().min(0).default(86400000),
-  IDEMPOTENCY_STALE_INPROGRESS_MS: z.coerce.number().int().min(0).default(300000),
+  POSTGRES_CONNECTION_TIMEOUT_MS: z.coerce.number().int().min(1).default(10000),
+  POSTGRES_STATEMENT_TIMEOUT_MS: z.coerce.number().int().min(1).default(30000),
+  IDEMPOTENCY_RETENTION_MS: z.coerce.number().int().min(1000).default(86400000),
+  IDEMPOTENCY_STALE_INPROGRESS_MS: z.coerce.number().int().min(1000).default(300000),
 });
 
 export type Config = z.infer<typeof envSchema>;
