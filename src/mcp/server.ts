@@ -68,19 +68,12 @@ export interface BuildMcpServerOptions {
  * without the SDK or a transport.
  */
 export function selectToolsForScopes(scopes: string[], isEnvScoped = false): McpToolDef[] {
-  const scopeSet = new Set(scopes);
-  return ALL_TOOLS.filter((tool) => {
-    const scopeOk = tool.requiredScope === null || scopeSet.has(tool.requiredScope);
-    const reachable = !isEnvScoped || tool.envScoped;
-    return scopeOk && reachable;
-  });
+  return selectForScopes(ALL_TOOLS, scopes, isEnvScoped);
 }
 
 /**
  * Select the resources a caller holding `scopes` is entitled to. Identical
- * gating contract to `selectToolsForScopes`: a resource is included iff its
- * `requiredScope` is null (or held) AND it isn't withheld by env-scoping
- * (`!isEnvScoped || resource.envScoped`).
+ * gating contract to `selectToolsForScopes` (see `selectForScopes`).
  *
  * The config-file / config-fragment resources are `envScoped:false` because
  * their READ replays a GLOBAL per-id route (`/api/config-files/:id`,
@@ -93,10 +86,32 @@ export function selectResourcesForScopes(
   scopes: string[],
   isEnvScoped = false
 ): McpResourceDef[] {
+  return selectForScopes(ALL_RESOURCES, scopes, isEnvScoped);
+}
+
+/**
+ * Generic scope/env-scoping gate shared by tools AND resources (FIX 6). An item
+ * is included iff BOTH hold:
+ *   1. Scope: its `requiredScope` is null (meta/read — every valid token) or is
+ *      present in `scopes`.
+ *   2. Reachability: it isn't withheld by env-scoping — either the caller is not
+ *      env-scoped (`isEnvScoped === false`), or the item's backing route is
+ *      reachable by an env-scoped token (`item.envScoped === true`).
+ *
+ * Tools and resources share the exact same `{ requiredScope, envScoped }` gating
+ * contract, so a single generic implementation replaces the two byte-identical
+ * filters. Pure and side-effect-free so the contract can be unit-tested without
+ * the SDK or a transport.
+ */
+function selectForScopes<T extends { requiredScope: string | null; envScoped: boolean }>(
+  items: T[],
+  scopes: string[],
+  isEnvScoped: boolean
+): T[] {
   const scopeSet = new Set(scopes);
-  return ALL_RESOURCES.filter((resource) => {
-    const scopeOk = resource.requiredScope === null || scopeSet.has(resource.requiredScope);
-    const reachable = !isEnvScoped || resource.envScoped;
+  return items.filter((item) => {
+    const scopeOk = item.requiredScope === null || scopeSet.has(item.requiredScope);
+    const reachable = !isEnvScoped || item.envScoped;
     return scopeOk && reachable;
   });
 }

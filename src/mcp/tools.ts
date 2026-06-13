@@ -25,6 +25,7 @@ import { appVersion } from '../lib/version.js';
 import { computeScopes } from '../lib/scopes.js';
 import { canonicalizeJson, hashCanonicalBody } from '../lib/canonical-json.js';
 import { injectApi, type InjectApiResult } from './inject.js';
+import { redactSensitive } from './redact.js';
 import type { McpToolContext, McpToolDef, McpToolResult } from './types.js';
 
 /**
@@ -41,9 +42,16 @@ export const IDEMPOTENCY_DEDUP_WINDOW_MS = 60_000;
 // Result helpers
 // ---------------------------------------------------------------------------
 
-/** Wrap any JSON-serializable value as a passthrough MCP text result. */
-function jsonResult(value: unknown): McpToolResult {
-  return { content: [{ type: 'text', text: JSON.stringify(value, null, 2) }] };
+/**
+ * Wrap any JSON-serializable value as a passthrough MCP text result. The value is
+ * first run through `redactSensitive` (FIX 1) so NO secret-named field (encrypted
+ * ciphertext, nonces/IVs, token hashes, raw SSH/agent tokens) can ever leave the
+ * MCP boundary — a defense-in-depth net independent of route behavior. Shared by
+ * the tool factories AND the resource reads (resources.ts) so success formatting
+ * and redaction are identical everywhere.
+ */
+export function jsonResult(value: unknown): McpToolResult {
+  return { content: [{ type: 'text', text: JSON.stringify(redactSensitive(value), null, 2) }] };
 }
 
 /**
@@ -54,7 +62,7 @@ function jsonResult(value: unknown): McpToolResult {
  * back to the status and any string message. Used by BOTH the read and write
  * factories so the mapping is identical everywhere.
  */
-function mapResult(res: InjectApiResult): McpToolResult {
+export function mapResult(res: InjectApiResult): McpToolResult {
   const parts: string[] = [];
   if (res.error) {
     parts.push(`${res.error.code}: ${res.error.message}`);

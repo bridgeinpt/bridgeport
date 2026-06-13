@@ -123,6 +123,14 @@ export interface McpResourceContext {
   registeredToolNames: string[];
   /** Names of the resources registered for this session (for the capabilities resource). */
   registeredResourceNames: string[];
+  /**
+   * Per-request memo of the caller's accessible environments (FIX 4a). A single
+   * `resources/list` enumerates BOTH the config-files and config-fragments
+   * families, each of which would otherwise GET /api/environments independently;
+   * caching the first result on the shared context dedupes that to one call.
+   * Holds the in-flight Promise so two concurrent families share one round-trip.
+   */
+  accessibleEnvironments?: Promise<Array<{ id: string; name?: string }>>;
 }
 
 /**

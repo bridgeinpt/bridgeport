@@ -44,6 +44,9 @@ function resource(name: string): McpResourceDef {
  * Build a resource context whose `app.inject` is a programmable stub keyed by
  * the request URL. `routes` maps a URL to a JSON-stringified payload (status
  * 200); an unmatched URL returns 404. Only `inject` is used by the callbacks.
+ *
+ * The lookup matches on PATH only (query string stripped): the enumeration
+ * passes an explicit `?limit=` cap (FIX 3) which is not part of the route key.
  */
 function fakeCtx(
   routes: Record<string, unknown>,
@@ -55,8 +58,9 @@ function fakeCtx(
 ): McpResourceContext {
   const app = {
     inject: async ({ url }: { url: string }) => {
-      if (url in routes) {
-        return { statusCode: 200, payload: JSON.stringify(routes[url]) };
+      const path = url.split('?')[0];
+      if (path in routes) {
+        return { statusCode: 200, payload: JSON.stringify(routes[path]) };
       }
       return { statusCode: 404, payload: JSON.stringify({ code: 'NOT_FOUND', message: 'Not found' }) };
     },

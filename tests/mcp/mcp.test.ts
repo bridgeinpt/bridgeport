@@ -58,6 +58,7 @@ describe('MCP server (integration, SDK client)', () => {
   let serviceId: string;
   let configFileId: string;
   let registryId: string;
+  let containerImageId: string;
   let databaseId: string;
   /** A SECOND environment (and its own config file) the env-scoped token cannot reach. */
   let otherEnvId: string;
@@ -112,6 +113,17 @@ describe('MCP server (integration, SDK client)', () => {
     envScopedOperatorToken = scopedToken;
 
     const server = await createTestServer(app.prisma, { environmentId: envId, name: 'mcp-server' });
+    // Set secret-bearing columns so the FIX 1 redactor / FIX 2 sanitizer tests
+    // assert against REAL stored secret material: the env's encrypted SSH key and
+    // the server's agent token. Neither may surface through get_service.
+    await app.prisma.environment.update({
+      where: { id: envId },
+      data: { sshPrivateKey: 'mcp-ssh-nonce:mcp-ssh-ciphertext' },
+    });
+    await app.prisma.server.update({
+      where: { id: server.id },
+      data: { agentToken: 'super-secret-agent-token' },
+    });
     const image = await createTestContainerImage(app.prisma, { environmentId: envId });
     const service = await createTestService(app.prisma, {
       environmentId: envId,
@@ -148,6 +160,14 @@ describe('MCP server (integration, SDK client)', () => {
       password: 'super-secret-registry-password',
     });
     registryId = registry.id;
+    // Link the seeded image to this credential-bearing registry so the
+    // container-image read tools (FIX 1 + FIX 2b) exercise the registryConnection
+    // relation — its encrypted creds must never surface.
+    await app.prisma.containerImage.update({
+      where: { id: image.id },
+      data: { registryConnectionId: registry.id },
+    });
+    containerImageId = image.id;
 
     // A database (its connection credentials, if any, are encrypted at rest;
     // the read tools project `hasCredentials` only).
@@ -496,6 +516,91 @@ describe('MCP server (integration, SDK client)', () => {
       }
       // The full minted token value is nowhere in the serialized output.
       expect(text).not.toContain(fullToken);
+    });
+  });
+
+  // 4c-bis. FIX 1 redactor + FIX 2 route sanitizers -------------------------
+  describe('get_service / container-image reads never leak relation secrets (FIX 1 + FIX 2)', () => {
+    it('get_service strips environment.sshPrivateKey, server.agentToken, and registryConnection.encrypted*/nonce* — keeping non-secret fields', async () => {
+      const client = await connect(adminToken);
+      const res = (await client.callTool({
+        name: 'get_service',
+        arguments: { id: serviceId },
+      })) as ToolText;
+      expect(res.isError).toBeFalsy();
+      const text = firstText(res);
+      // Belt-and-suspenders: no stored secret value appears anywhere.
+      expect(text).not.toContain('mcp-ssh-ciphertext');
+      expect(text).not.toContain('super-secret-agent-token');
+      expect(text).not.toContain('super-secret-registry-token');
+      expect(text).not.toContain('super-secret-registry-password');
+
+      const body = JSON.parse(text) as {
+        service: {
+          environment: Record<string, unknown>;
+          containerImage?: { registryConnection?: Record<string, unknown> | null };
+          serviceDeployments: Array<{ server: Record<string, unknown> | null }>;
+        };
+      };
+      const svc = body.service;
+      // Environment: sshPrivateKey gone, non-secret id/name kept.
+      expect(svc.environment).not.toHaveProperty('sshPrivateKey');
+      expect(svc.environment).toHaveProperty('id');
+      expect(svc.environment).toHaveProperty('name');
+      // Server (per deployment): agentToken gone, non-secret fields kept.
+      for (const d of svc.serviceDeployments) {
+        expect(d.server).not.toBeNull();
+        expect(d.server).not.toHaveProperty('agentToken');
+        expect(d.server).toHaveProperty('id');
+        expect(d.server).toHaveProperty('hostname');
+      }
+      // registryConnection: no encrypted blobs or nonces; non-secret fields kept.
+      const rc = svc.containerImage?.registryConnection ?? undefined;
+      expect(rc).toBeDefined();
+      for (const f of ['encryptedToken', 'tokenNonce', 'encryptedPassword', 'passwordNonce']) {
+        expect(rc).not.toHaveProperty(f);
+      }
+      expect(rc).toHaveProperty('id');
+      expect(rc).toHaveProperty('registryUrl');
+    });
+
+    it('get_container_image / list_container_images expose no encrypted registry fields', async () => {
+      const client = await connect(adminToken);
+
+      const getRes = (await client.callTool({
+        name: 'get_container_image',
+        arguments: { id: containerImageId },
+      })) as ToolText;
+      expect(getRes.isError).toBeFalsy();
+      const getText = getRes.content.find((c) => c.type === 'text')?.text ?? '';
+      expect(getText).not.toContain('super-secret-registry-token');
+      expect(getText).not.toContain('super-secret-registry-password');
+      const getBody = JSON.parse(getText) as {
+        image: { registryConnection?: Record<string, unknown> | null };
+      };
+      const rc = getBody.image.registryConnection;
+      expect(rc).toBeTruthy();
+      for (const f of ['encryptedToken', 'tokenNonce', 'encryptedPassword', 'passwordNonce']) {
+        expect(rc).not.toHaveProperty(f);
+      }
+      expect(rc).toHaveProperty('registryUrl');
+
+      const listRes = (await client.callTool({
+        name: 'list_container_images',
+        arguments: { envId },
+      })) as ToolText;
+      expect(listRes.isError).toBeFalsy();
+      const listText = listRes.content.find((c) => c.type === 'text')?.text ?? '';
+      expect(listText).not.toContain('super-secret-registry-token');
+      expect(listText).not.toContain('super-secret-registry-password');
+      const listBody = JSON.parse(listText) as {
+        images: Array<{ registryConnection?: Record<string, unknown> | null }>;
+      };
+      const linked = listBody.images.find((i) => i.registryConnection);
+      expect(linked).toBeDefined();
+      for (const f of ['encryptedToken', 'tokenNonce', 'encryptedPassword', 'passwordNonce']) {
+        expect(linked!.registryConnection).not.toHaveProperty(f);
+      }
     });
   });
 

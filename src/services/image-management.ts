@@ -6,6 +6,25 @@ import { getRegistryCredentials } from './registries.js';
 import { HISTORY_STATUS } from '../lib/constants.js';
 import { safeJsonParse } from '../lib/helpers.js';
 
+/**
+ * Safe `select` for an image's RegistryConnection. The full row carries encrypted
+ * credential columns (encryptedToken/tokenNonce, encryptedPassword/passwordNonce);
+ * the container-image GET routes serialize `...rest` (which includes this relation)
+ * with no 200 response schema, so loading the full row would leak those blobs. We
+ * select ONLY the non-secret fields the UI needs (id, name, type, registryUrl,
+ * repositoryPrefix, username, isDefault) — never the credentials. Mirrors the
+ * registries endpoint's safe projection (src/services/registries.ts toOutput).
+ */
+const SAFE_REGISTRY_CONNECTION_SELECT = {
+  id: true,
+  name: true,
+  type: true,
+  registryUrl: true,
+  repositoryPrefix: true,
+  username: true,
+  isDefault: true,
+} as const;
+
 export interface CreateContainerImageInput {
   name: string;
   imageName: string;
@@ -90,7 +109,7 @@ export async function getContainerImage(id: string): Promise<ContainerImage & { 
           },
         },
       },
-      registryConnection: true,
+      registryConnection: { select: SAFE_REGISTRY_CONNECTION_SELECT },
       deployedDigest: true,
       digests: {
         orderBy: { pushedAt: 'desc' },
@@ -130,7 +149,7 @@ export async function listContainerImages(
   const [pageImages, total] = await Promise.all([
     prisma.containerImage.findMany({
       where,
-      include: { registryConnection: true },
+      include: { registryConnection: { select: SAFE_REGISTRY_CONNECTION_SELECT } },
       orderBy: { name: 'asc' },
       take: limit,
       skip: offset,

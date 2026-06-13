@@ -44,7 +44,17 @@ import { z } from 'zod';
 import { appVersion } from '../lib/version.js';
 import { computeScopes } from '../lib/scopes.js';
 import { injectApi } from './inject.js';
+import { mapResult, jsonResult } from './tools.js';
 import type { McpResourceContext, McpResourceDef } from './types.js';
+
+/**
+ * Cap on items fetched per env-prefixed list inject during resource enumeration
+ * (FIX 3). The list routes default to a page of 25; without an explicit limit any
+ * config file/fragment beyond the first 25 per env would be invisible as a
+ * resource. We pass `?limit=ENUM_LIST_LIMIT` so more items are discoverable; this
+ * also bounds the enumeration (a single oversized env can't fan out unboundedly).
+ */
+const ENUM_LIST_LIMIT = 200;
 
 // ---------------------------------------------------------------------------
 // URI scheme
@@ -95,21 +105,30 @@ const envRowSchema = z.object({ id: z.string(), name: z.string().optional() });
 async function listAccessibleEnvironments(
   ctx: McpResourceContext
 ): Promise<Array<{ id: string; name?: string }>> {
-  const res = await injectApi(ctx.app, {
-    method: 'GET',
-    url: '/api/environments',
-    bearer: ctx.bearer,
-    remoteAddress: ctx.callerIp,
-  });
-  if (!res.ok || !res.body || typeof res.body !== 'object') return [];
-  const envs = (res.body as { environments?: unknown }).environments;
-  if (!Array.isArray(envs)) return [];
-  const out: Array<{ id: string; name?: string }> = [];
-  for (const row of envs) {
-    const parsed = envRowSchema.safeParse(row);
-    if (parsed.success) out.push({ id: parsed.data.id, name: parsed.data.name });
-  }
-  return out;
+  // FIX 4a: memoize once per request on the shared context. The two template
+  // families (config-files, config-fragments) both enumerate during a single
+  // resources/list; without this each would hit GET /api/environments. Caching
+  // the Promise (not just the result) also collapses concurrent callers onto a
+  // single round-trip.
+  if (ctx.accessibleEnvironments) return ctx.accessibleEnvironments;
+  ctx.accessibleEnvironments = (async () => {
+    const res = await injectApi(ctx.app, {
+      method: 'GET',
+      url: '/api/environments',
+      bearer: ctx.bearer,
+      remoteAddress: ctx.callerIp,
+    });
+    if (!res.ok || !res.body || typeof res.body !== 'object') return [];
+    const envs = (res.body as { environments?: unknown }).environments;
+    if (!Array.isArray(envs)) return [];
+    const out: Array<{ id: string; name?: string }> = [];
+    for (const row of envs) {
+      const parsed = envRowSchema.safeParse(row);
+      if (parsed.success) out.push({ id: parsed.data.id, name: parsed.data.name });
+    }
+    return out;
+  })();
+  return ctx.accessibleEnvironments;
 }
 
 /**
@@ -125,21 +144,29 @@ async function enumerateEnvCollection(
   mapRow: (row: Record<string, unknown>, env: { id: string; name?: string }) => Resource | null
 ): Promise<Resource[]> {
   const envs = await listAccessibleEnvironments(ctx);
-  const resources: Resource[] = [];
-  for (const env of envs) {
-    const res = await injectApi(ctx.app, {
-      method: 'GET',
-      url: `/api/environments/${encodeURIComponent(env.id)}/${collection}`,
-      bearer: ctx.bearer,
-      remoteAddress: ctx.callerIp,
-    });
-    if (!res.ok) continue;
-    for (const row of pluck(res.body)) {
-      const resource = mapRow(row, env);
-      if (resource) resources.push(resource);
-    }
-  }
-  return resources;
+  // FIX 4b: the per-env list injects are independent read-only GETs, so fan them
+  // out with Promise.all instead of awaiting sequentially. FIX 3: pass an explicit
+  // ?limit so items beyond the route's default page (25) are discoverable as
+  // resources (and the enumeration stays bounded). A non-ok per-env response is
+  // still skipped best-effort rather than failing the whole list.
+  const perEnv = await Promise.all(
+    envs.map(async (env) => {
+      const res = await injectApi(ctx.app, {
+        method: 'GET',
+        url: `/api/environments/${encodeURIComponent(env.id)}/${collection}?limit=${ENUM_LIST_LIMIT}`,
+        bearer: ctx.bearer,
+        remoteAddress: ctx.callerIp,
+      });
+      if (!res.ok) return [] as Resource[];
+      const out: Resource[] = [];
+      for (const row of pluck(res.body)) {
+        const resource = mapRow(row, env);
+        if (resource) out.push(resource);
+      }
+      return out;
+    })
+  );
+  return perEnv.flat();
 }
 
 /** Extract a string field from a row, or undefined when absent/non-string. */
@@ -154,10 +181,14 @@ function str(row: Record<string, unknown>, key: string): string | undefined {
 
 /**
  * Fetch a single resource's content via a per-id GET route and wrap it as an
- * MCP `ReadResourceResult`. The fetched JSON envelope is pretty-printed as the
- * resource text (same passthrough style as the tools). On a non-ok response we
- * throw so the SDK surfaces a resource read error to the client (read callbacks
- * have no `isError` channel — a throw is the contract).
+ * MCP `ReadResourceResult`. Reuses the SAME helpers as the tools (FIX 5):
+ *   - SUCCESS: `jsonResult` formats the body — crucially it runs through the FIX 1
+ *     `redactSensitive` net, so a resource read can never leak a secret-named
+ *     field either, and its formatting matches the tools' exactly.
+ *   - ERROR: `mapResult` builds the same lossless message (code, message, and any
+ *     `field` / `hint`, plus the HTTP status, with the legacy `{error}` fallback).
+ *     Read callbacks have no `isError` channel, so we THROW that text (the SDK
+ *     surfaces it as a resource read error — a throw is the contract).
  */
 async function readViaInject(
   ctx: McpResourceContext,
@@ -172,16 +203,19 @@ async function readViaInject(
     remoteAddress: ctx.callerIp,
   });
   if (!res.ok) {
-    const code = res.error?.code ?? 'ERROR';
-    const message = res.error?.message ?? 'Request failed';
-    throw new Error(`${code}: ${message} | status: ${res.status}`);
+    // Reuse the tools' error mapping verbatim, then throw its text.
+    const errResult = mapResult(res);
+    throw new Error(errResult.content[0]?.text ?? 'Request failed');
   }
+  // Reuse the tools' success formatting (redacted JSON), then re-wrap its text as
+  // resource content.
+  const ok = jsonResult(res.body);
   return {
     contents: [
       {
         uri: uri.toString(),
         mimeType,
-        text: JSON.stringify(res.body, null, 2),
+        text: ok.content[0]?.text ?? '',
       },
     ],
   };

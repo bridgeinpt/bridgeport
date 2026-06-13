@@ -25,6 +25,57 @@ import { isDryRun } from '../lib/dry-run.js';
 import { computeServiceDrift } from '../services/drift.js';
 import { routeSchema } from '../lib/openapi-schema.js';
 
+// --- secret sanitizers for the service-detail relations ---
+//
+// GET /api/services/:id eager-loads `environment`, `containerImage.registryConnection`,
+// and `serviceDeployments[].server` as full Prisma rows. Those rows carry encrypted
+// credential columns (Environment.sshPrivateKey, RegistryConnection.encrypted*/nonce*,
+// Server.agentToken) which must NOT be serialized to clients. The route has no 200
+// response schema, so without explicit stripping the raw rows leak. These helpers
+// remove ONLY the secret columns and PRESERVE every non-secret field (id, name,
+// hostname, etc.) so the UI keeps working; for the registry connection we mirror the
+// registries endpoint's safe projection (hasToken/hasPassword booleans, never the
+// encrypted blob — see src/services/registries.ts toOutput).
+
+/** Strip Environment.sshPrivateKey (encrypted key material), keep all else. */
+function sanitizeEnvironment<T extends Record<string, unknown>>(env: T): Omit<T, 'sshPrivateKey'> {
+  const { sshPrivateKey: _sshPrivateKey, ...rest } = env;
+  void _sshPrivateKey;
+  return rest;
+}
+
+/** Strip Server.agentToken (per-server agent secret), keep all else. */
+function sanitizeServer<T extends Record<string, unknown> | null>(
+  server: T
+): T extends null ? null : Omit<NonNullable<T>, 'agentToken'> {
+  if (!server) return null as never;
+  const { agentToken: _agentToken, ...rest } = server as Record<string, unknown>;
+  void _agentToken;
+  return rest as never;
+}
+
+/**
+ * Strip RegistryConnection encrypted credential columns and surface presence
+ * booleans, mirroring the registries endpoint's safe projection. Keeps all
+ * non-secret metadata (id, name, type, registryUrl, repositoryPrefix, username,
+ * isDefault, autoLinkPattern, …).
+ */
+function sanitizeRegistryConnection<T extends Record<string, unknown> | null>(
+  conn: T
+): (Record<string, unknown> & { hasToken: boolean; hasPassword: boolean }) | null {
+  if (!conn) return null;
+  const {
+    encryptedToken,
+    tokenNonce: _tokenNonce,
+    encryptedPassword,
+    passwordNonce: _passwordNonce,
+    ...rest
+  } = conn as Record<string, unknown>;
+  void _tokenNonce;
+  void _passwordNonce;
+  return { ...rest, hasToken: !!encryptedToken, hasPassword: !!encryptedPassword };
+}
+
 // --- param schemas (documentation only) ---
 
 const idParamsSchema = z.object({ id: z.string() });
@@ -274,13 +325,32 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
       );
       if (!service) return;
 
+      // Strip encrypted credential columns from the eager-loaded relations before
+      // returning (this route has no 200 response schema, so raw rows would leak):
+      // Environment.sshPrivateKey, containerImage.registryConnection.encrypted*/nonce*,
+      // and every serviceDeployments[].server.agentToken. Non-secret fields are kept.
+      const safeService = {
+        ...service,
+        environment: sanitizeEnvironment(service.environment),
+        containerImage: service.containerImage
+          ? {
+              ...service.containerImage,
+              registryConnection: sanitizeRegistryConnection(service.containerImage.registryConnection),
+            }
+          : service.containerImage,
+        serviceDeployments: service.serviceDeployments.map((d) => ({
+          ...d,
+          server: sanitizeServer(d.server),
+        })),
+      };
+
       // Back-compat flatten: the legacy UI consumes top-level container/server fields.
       // Surface the first deployment's runtime state on the service object so existing
       // components keep working. New UI code reads `serviceDeployments` directly.
-      const first = service.serviceDeployments[0];
+      const first = safeService.serviceDeployments[0];
       const enriched = first
         ? {
-            ...service,
+            ...safeService,
             containerName: first.containerName,
             composePath: first.composePath,
             status: first.status,
@@ -301,7 +371,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
             agentCertCheckResults: first.agentCertCheckResults,
             agentCertCheckedAt: first.agentCertCheckedAt,
           }
-        : service;
+        : safeService;
 
       return { service: enriched };
     }
