@@ -24,7 +24,7 @@ sequenceDiagram
     participant DB as SQLite
 
     alt SSH Polling Mode
-        S->>BP: Timer fires (every metricsIntervalMs)
+        S->>BP: Timer fires (every SCHEDULER_METRICS_INTERVAL)
         BP->>SRV: SSH: top, free, df, /proc/loadavg, /proc/uptime
         SRV-->>BP: Raw output
         BP->>DB: Save ServerMetrics row
@@ -150,17 +150,17 @@ Set in your environment or `.env` file:
 | `SCHEDULER_METRICS_INTERVAL` | `300` (5 min) | SSH metrics collection interval (seconds) |
 | `SCHEDULER_SERVER_HEALTH_INTERVAL` | `60` (1 min) | Server health check interval (seconds) |
 
-### Per-Environment Settings
+### Collection Intervals (Global)
 
-Override intervals per environment in **Settings > Monitoring**:
+Collection cadence is **global**, set by env vars (not per-environment) — see [Configuration Reference → Scheduler](../configuration.md#scheduler):
 
-| Setting | Default | Description |
+| Env var | Default | Description |
 |---|---|---|
-| `metricsIntervalMs` | `300000` (5 min) | How often SSH metrics are collected |
-| `serverHealthIntervalMs` | `60000` (1 min) | How often server health is checked |
+| `SCHEDULER_METRICS_INTERVAL` | `300` (5 min) | How often SSH metrics are collected |
+| `SCHEDULER_SERVER_HEALTH_INTERVAL` | `60` (1 min) | How often server health is checked |
 
 > [!NOTE]
-> Agent-mode servers push at their own interval (typically ~15 seconds). The per-environment `metricsIntervalMs` only affects SSH polling.
+> Agent-mode servers push at their own interval (typically ~15 seconds). `SCHEDULER_METRICS_INTERVAL` only affects SSH polling.
 
 ## Metric Toggles
 
@@ -185,8 +185,8 @@ Metrics are automatically cleaned up based on retention settings:
 
 | Setting | Default | Scope |
 |---|---|---|
-| `metricsRetentionDays` | `7` | Per-environment (Settings > Monitoring) |
-| `SCHEDULER_METRICS_INTERVAL` cleanup | Hourly | Global (scheduler runs cleanup every hour) |
+| `METRICS_RETENTION_DAYS` | `7` | Global env var (see [Configuration Reference](../configuration.md#retention)) |
+| Cleanup cadence | Hourly | Global (scheduler runs cleanup every hour) |
 
 Old `ServerMetrics` and `ServiceMetrics` rows older than the retention period are deleted automatically.
 

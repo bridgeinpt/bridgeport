@@ -189,9 +189,9 @@ The global scheduler polls all enabled databases periodically (default: every 60
 
 | Setting | Default | Description |
 |---|---|---|
-| `metricsRetentionDays` | `7` | Per-environment (Settings > Monitoring) |
+| `databaseMetricsRetentionDays` | `30` | Global, in **Admin > System Settings > Retention** |
 
-Old `DatabaseMetrics` rows are cleaned up hourly by the scheduler.
+Old `DatabaseMetrics` rows are cleaned up hourly by the scheduler, which hot-reloads this setting each tick.
 
 ### Database Status
 

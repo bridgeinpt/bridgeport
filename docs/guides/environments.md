@@ -258,19 +258,13 @@ flowchart LR
 
 #### Monitoring Settings
 
+The Monitoring module now holds **only** the per-metric collection toggles below.
+
+> [!IMPORTANT]
+> Monitoring **cadence** (health/metrics/discovery/update/backup intervals) is **global**, set by the `SCHEDULER_*` env vars — see [Configuration Reference → Scheduler](../configuration.md#scheduler). **Retention** is global too (`METRICS_RETENTION_DAYS` env var plus the [System Settings retention knobs](../reference/system-settings.md#retention-policies)), and alert **bounce thresholds** live on Notification Types (Admin → Notifications). The old per-environment interval / retention / bounce / `enabled` fields were silently ignored by the scheduler and have been removed.
+
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `enabled` | boolean | `false` | Master toggle for all automated monitoring |
-| `serverHealthIntervalMs` | int | `60000` | Server health check interval |
-| `serviceHealthIntervalMs` | int | `60000` | Service health check interval |
-| `discoveryIntervalMs` | int | `300000` | Container discovery interval |
-| `metricsIntervalMs` | int | `300000` | SSH metrics collection interval |
-| `updateCheckIntervalMs` | int | `1800000` | Registry update check interval |
-| `backupCheckIntervalMs` | int | `60000` | Backup schedule check interval |
-| `metricsRetentionDays` | int | `7` | Days to keep server/service metrics |
-| `healthLogRetentionDays` | int | `30` | Days to keep health check logs |
-| `bounceThreshold` | int | `3` | Consecutive failures before bounce alert |
-| `bounceCooldownMs` | int | `900000` | Cooldown between bounce alerts |
 | `collectCpu` | boolean | `true` | Collect CPU metrics |
 | `collectMemory` | boolean | `true` | Collect memory metrics |
 | `collectSwap` | boolean | `true` | Collect swap metrics |
@@ -318,9 +312,8 @@ Authorization: Bearer <admin-token>
 Content-Type: application/json
 
 {
-  "enabled": true,
-  "serverHealthIntervalMs": 30000,
-  "metricsRetentionDays": 14
+  "collectCpu": true,
+  "collectTcpChecks": false
 }
 ```
 
@@ -390,13 +383,12 @@ Use clear, lowercase names that map to your deployment stages:
 
 | Setting | Staging | Production | Why |
 |---------|---------|------------|-----|
-| `monitoringEnabled` | `true` | `true` | Monitor both, but staging catches issues first |
-| `serverHealthIntervalMs` | `60000` | `30000` | Tighter checks in production |
-| `metricsRetentionDays` | `3` | `14` | Keep production data longer |
 | `allowSecretReveal` | `true` | `false` | Lock down production secrets |
 | `allowBackupDownload` | `true` | `false` | Restrict production backup access |
 | `defaultMetricsMode` | `disabled` | `agent` | Full monitoring in production |
-| `bounceThreshold` | `5` | `3` | Alert faster in production |
+
+> [!NOTE]
+> Monitoring cadence, retention, and bounce thresholds are **global** (not per-environment) — see the [Monitoring Settings](#monitoring-settings) note above. Tune them via the `SCHEDULER_*` / `METRICS_RETENTION_DAYS` env vars, the System Settings retention knobs, and Notification Types.
 
 ### SSH Key Rotation
 

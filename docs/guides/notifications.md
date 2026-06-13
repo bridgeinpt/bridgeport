@@ -180,9 +180,9 @@ Configure bounce behavior per notification type in **Admin > Notifications**:
 > [!TIP]
 > Set `bounceThreshold: 1` and `bounceCooldown: 0` if you want immediate alerts on every failure (not recommended for flaky checks). Set `bounceThreshold: 5` for noisy environments.
 
-### Per-Environment Overrides
+### Where Bounce Settings Live
 
-The `MonitoringSettings` table has per-environment `bounceThreshold` and `bounceCooldownMs` fields. These provide environment-level defaults that the notification type settings can override.
+Bounce settings (`bounceEnabled`, `bounceThreshold`, `bounceCooldown`) are configured **per notification type** in **Admin > Notifications** — they are global, not per-environment. Earlier releases had per-environment `bounceThreshold` / `bounceCooldownMs` fields on `MonitoringSettings`; those were silently ignored and have been removed.
 
 ## Slack Configuration
 

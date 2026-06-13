@@ -26,26 +26,13 @@ const updateSettingsSchema = z.object({
   agentCallbackUrl: z.string().url().nullable().optional().or(z.literal('')),
   agentStaleThresholdMs: z.number().int().min(60000).max(600000).optional(),
   agentOfflineThresholdMs: z.number().int().min(120000).max(900000).optional(),
-  doRegistryToken: z.string().nullable().optional().or(z.literal('')),
   auditLogRetentionDays: z.number().int().min(0).max(3650).optional(), // 0 = forever, max 10 years
   databaseMetricsRetentionDays: z.number().int().min(1).max(365).optional(),
+  notificationRetentionDays: z.number().int().min(1).max(365).optional(),
+  healthLogRetentionDays: z.number().int().min(1).max(365).optional(),
+  webhookDeliveryRetentionDays: z.number().int().min(1).max(365).optional(),
+  imageDigestRetentionDays: z.number().int().min(1).max(3650).optional(),
 });
-
-/**
- * Mask sensitive fields in settings response
- */
-function maskSensitiveFields(settings: {
-  doRegistryToken?: string | null;
-  [key: string]: unknown;
-}): typeof settings & { doRegistryTokenSet: boolean } {
-  const masked = { ...settings, doRegistryTokenSet: !!settings.doRegistryToken };
-  // Replace actual token with masked version
-  if (masked.doRegistryToken) {
-    const token = masked.doRegistryToken;
-    masked.doRegistryToken = token.length > 8 ? `****${token.slice(-4)}` : '****';
-  }
-  return masked;
-}
 
 export async function systemSettingsRoutes(fastify: FastifyInstance): Promise<void> {
   // Get current system settings (all authenticated users)
@@ -55,14 +42,14 @@ export async function systemSettingsRoutes(fastify: FastifyInstance): Promise<vo
       preHandler: [fastify.authenticate],
       schema: routeSchema({
         tags: ['admin'],
-        summary: 'Get current system settings (sensitive fields masked)',
+        summary: 'Get current system settings',
         errors: [401],
       }),
     },
     async () => {
       const settings = await getSystemSettings();
       return {
-        settings: maskSensitiveFields(settings),
+        settings,
         defaults: SYSTEM_SETTINGS_DEFAULTS,
       };
     }
@@ -100,7 +87,7 @@ export async function systemSettingsRoutes(fastify: FastifyInstance): Promise<vo
         }
       }
 
-      // Handle empty string as null for URL and token fields
+      // Handle empty string as null for URL fields
       const updateData = { ...body };
       if (updateData.publicUrl === '') {
         updateData.publicUrl = null;
@@ -108,28 +95,19 @@ export async function systemSettingsRoutes(fastify: FastifyInstance): Promise<vo
       if (updateData.agentCallbackUrl === '') {
         updateData.agentCallbackUrl = null;
       }
-      if (updateData.doRegistryToken === '') {
-        updateData.doRegistryToken = null;
-      }
 
       const settings = await updateSystemSettings(updateData);
-
-      // Don't log the actual token value in audit
-      const auditDetails = { ...body };
-      if (auditDetails.doRegistryToken) {
-        auditDetails.doRegistryToken = '(updated)';
-      }
 
       await logAudit({
         action: 'update',
         resourceType: 'system_settings',
         resourceId: 'singleton',
         resourceName: 'System Settings',
-        details: { changes: auditDetails },
+        details: { changes: body },
         ...actorFrom(request),
       });
 
-      return { settings: maskSensitiveFields(settings) };
+      return { settings };
     }
   );
 
@@ -156,7 +134,7 @@ export async function systemSettingsRoutes(fastify: FastifyInstance): Promise<vo
         ...actorFrom(request),
       });
 
-      return { settings: maskSensitiveFields(settings), message: 'Settings reset to defaults' };
+      return { settings, message: 'Settings reset to defaults' };
     }
   );
 }

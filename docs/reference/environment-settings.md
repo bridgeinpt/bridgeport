@@ -74,34 +74,19 @@ SSH and connectivity configuration.
 
 ## Monitoring Settings
 
-Health checks, metrics collection, retention, and alert configuration.
+Per-metric collection toggles. The Monitoring tab now exposes **only** the `collect*` toggles below.
 
-### General
-
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `enabled` | `boolean` | `false` | Master toggle for all monitoring in this environment. When disabled, no health checks, metrics, or discovery runs. |
-
-### Health Check Intervals
-
-| Setting | Type | Default | Range | Description |
-|---------|------|---------|-------|-------------|
-| `serverHealthIntervalMs` | `integer` | `60000` (1 min) | 10,000 -- 86,400,000 | How often to check server health |
-| `serviceHealthIntervalMs` | `integer` | `60000` (1 min) | 10,000 -- 86,400,000 | How often to check service health |
-
-### Other Schedules
-
-| Setting | Type | Default | Range | Description |
-|---------|------|---------|-------|-------------|
-| `discoveryIntervalMs` | `integer` | `300000` (5 min) | 10,000 -- 86,400,000 | How often to discover new containers |
-| `updateCheckIntervalMs` | `integer` | `1800000` (30 min) | 10,000 -- 86,400,000 | How often to check registries for image updates |
-| `backupCheckIntervalMs` | `integer` | `60000` (1 min) | 10,000 -- 86,400,000 | How often to check for scheduled backups |
+> [!IMPORTANT]
+> **Monitoring cadence and retention are global, not per-environment.** Earlier releases had per-environment monitoring fields (`enabled`, `serverHealthIntervalMs`, `serviceHealthIntervalMs`, `discoveryIntervalMs`, `metricsIntervalMs`, `updateCheckIntervalMs`, `backupCheckIntervalMs`, `metricsRetentionDays`, `healthLogRetentionDays`, `bounceThreshold`, `bounceCooldownMs`). These were **silently ignored** by the SSH scheduler and have been **removed**:
+>
+> - **Collection cadence** is set globally by the `SCHEDULER_*` environment variables — see [Configuration Reference → Scheduler](../configuration.md#scheduler).
+> - **Retention** (server/service metrics, health logs) is global — `METRICS_RETENTION_DAYS` (env var) and the [System Settings retention knobs](system-settings.md#retention-policies).
+> - **Alert bounce thresholds** now live on **Notification Types** (Admin → Notifications), not per environment.
 
 ### Metrics Collection
 
 | Setting | Type | Default | Range | Description |
 |---------|------|---------|-------|-------------|
-| `metricsIntervalMs` | `integer` | `300000` (5 min) | 10,000 -- 86,400,000 | How often to collect server and service metrics via SSH |
 | `collectCpu` | `boolean` | `true` | -- | Collect CPU usage metrics |
 | `collectMemory` | `boolean` | `true` | -- | Collect memory usage metrics |
 | `collectSwap` | `boolean` | `true` | -- | Collect swap usage metrics |
@@ -115,23 +100,6 @@ Health checks, metrics collection, retention, and alert configuration.
 
 > [!NOTE]
 > The `collect*` toggles affect both SSH-based collection and agent-based collection. When using the agent, these settings are fetched by the agent every 60 seconds via the `/api/agent/config` endpoint.
-
-### Retention
-
-| Setting | Type | Default | Range | Description |
-|---------|------|---------|-------|-------------|
-| `metricsRetentionDays` | `integer` | `7` | 1 -- 365 | Days to retain server and service metrics data |
-| `healthLogRetentionDays` | `integer` | `30` | 1 -- 365 | Days to retain health check log entries |
-
-### Alert Configuration
-
-| Setting | Type | Default | Range | Description |
-|---------|------|---------|-------|-------------|
-| `bounceThreshold` | `integer` | `3` | 1 -- 10 | Consecutive failures before triggering an alert notification |
-| `bounceCooldownMs` | `integer` | `900000` (15 min) | 10,000 -- 86,400,000 | Cooldown period after an alert before re-alerting for the same resource |
-
-> [!TIP]
-> Bounce logic prevents alert storms. If a server goes down, BRIDGEPORT sends one alert after `bounceThreshold` consecutive failures, then waits `bounceCooldownMs` before sending another -- even if the server stays down. When the resource recovers, the bounce counter resets.
 
 ---
 

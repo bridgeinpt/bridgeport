@@ -63,6 +63,28 @@ function formatDelaysMs(delaysSec: string): string {
   return JSON.stringify(delays);
 }
 
+// Validate a comma-separated list of retry delays (seconds) and produce a
+// human-readable preview. Returns an error string when the input can't be
+// parsed into a non-empty list of positive integers, so save can be blocked.
+function validateDelaysSec(delaysSec: string): { error: string | null; preview: string } {
+  const parts = delaysSec.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+  if (parts.length === 0) {
+    return { error: 'Enter at least one delay (in seconds).', preview: '' };
+  }
+  const values: number[] = [];
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) {
+      return { error: `"${part}" is not a whole number of seconds.`, preview: '' };
+    }
+    const num = parseInt(part, 10);
+    if (num < 1) {
+      return { error: 'Delays must be at least 1 second.', preview: '' };
+    }
+    values.push(num);
+  }
+  return { error: null, preview: values.map((v) => `${v}s`).join(', ') };
+}
+
 export default function NotificationSettings() {
   const { user } = useAuthStore();
   const toast = useToast();
@@ -437,6 +459,11 @@ export default function NotificationSettings() {
 
   // Webhook delivery settings handlers
   const handleSaveDeliverySettings = async () => {
+    const { error: delaysError } = validateDelaysSec(deliverySettings.webhookRetryDelaysSec);
+    if (delaysError) {
+      toast.error(`Retry delays: ${delaysError}`);
+      return;
+    }
     setDeliverySaving(true);
     try {
       await updateSystemSettings({
@@ -475,6 +502,9 @@ export default function NotificationSettings() {
 
   // Group notification types by category for Slack routing
   const systemTypes = notificationTypes.filter((t) => t.category === 'system');
+
+  // Live validation + preview for the webhook retry-delays input
+  const delaysValidation = validateDelaysSec(deliverySettings.webhookRetryDelaysSec);
 
   return (
     <div className="p-6">
@@ -757,8 +787,16 @@ export default function NotificationSettings() {
                     })
                   }
                   placeholder="1, 5, 15"
-                  className="input w-full"
+                  className={`input w-full ${delaysValidation.error ? 'border-red-500/50' : ''}`}
+                  aria-invalid={delaysValidation.error ? true : undefined}
                 />
+                {delaysValidation.error ? (
+                  <p className="text-xs text-red-400 mt-1">{delaysValidation.error}</p>
+                ) : (
+                  <p className="text-xs text-slate-500 mt-1">
+                    Parsed: {delaysValidation.preview}
+                  </p>
+                )}
                 <p className="text-xs text-slate-500 mt-1">
                   Backoff delays between retries (default:{' '}
                   {deliverySettingsDefaults ? parseDelaysMs(deliverySettingsDefaults.webhookRetryDelaysMs) : '1, 5, 15'})
@@ -768,7 +806,7 @@ export default function NotificationSettings() {
             <div className="mt-4 pt-4 border-t border-slate-700">
               <button
                 onClick={handleSaveDeliverySettings}
-                disabled={deliverySaving}
+                disabled={deliverySaving || !!delaysValidation.error}
                 className="btn btn-primary"
               >
                 {deliverySaving ? 'Saving...' : 'Save Delivery Settings'}

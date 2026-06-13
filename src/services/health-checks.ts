@@ -77,18 +77,10 @@ export async function cleanupHealthCheckLogs(retentionDays: number): Promise<num
   return result.count;
 }
 
-// Default scheduler config values (per-environment)
+// Default scheduler config values (per-environment).
+// Only the agent-facing metrics-collection toggles live here; the sole consumer
+// (src/routes/metrics.ts, the Go-agent config payload) reads just these fields.
 export const DEFAULT_SCHEDULER_CONFIG = {
-  serverHealthIntervalMs: 60000,
-  serviceHealthIntervalMs: 60000,
-  discoveryIntervalMs: 300000,
-  metricsIntervalMs: 300000,
-  updateCheckIntervalMs: 1800000,
-  backupCheckIntervalMs: 60000,
-  metricsRetentionDays: 7,
-  healthLogRetentionDays: 30,
-  bounceThreshold: 3,
-  bounceCooldownMs: 900000,
   // Metrics collection toggles - all enabled by default
   collectCpu: true,
   collectMemory: true,
@@ -117,16 +109,6 @@ export async function getSchedulerConfig(environmentId: string): Promise<Environ
   }
 
   return {
-    serverHealthIntervalMs: settings.serverHealthIntervalMs,
-    serviceHealthIntervalMs: settings.serviceHealthIntervalMs,
-    discoveryIntervalMs: settings.discoveryIntervalMs,
-    metricsIntervalMs: settings.metricsIntervalMs,
-    updateCheckIntervalMs: settings.updateCheckIntervalMs,
-    backupCheckIntervalMs: settings.backupCheckIntervalMs,
-    metricsRetentionDays: settings.metricsRetentionDays,
-    healthLogRetentionDays: settings.healthLogRetentionDays,
-    bounceThreshold: settings.bounceThreshold,
-    bounceCooldownMs: settings.bounceCooldownMs,
     collectCpu: settings.collectCpu,
     collectMemory: settings.collectMemory,
     collectSwap: settings.collectSwap,

@@ -3,9 +3,10 @@ import { prisma } from '../lib/db.js';
 import { generateApiToken, hashToken } from '../lib/crypto.js';
 import { hasMinimumRole } from '../plugins/authorize.js';
 import { apiTokenLastUsedThrottle } from '../lib/last-active-throttle.js';
+import { config } from '../lib/config.js';
 import type { User, ApiToken } from '@prisma/client';
 
-const SALT_ROUNDS = 12;
+const SALT_ROUNDS = config.BCRYPT_ROUNDS;
 
 export type UserRole = 'admin' | 'operator' | 'viewer';
 

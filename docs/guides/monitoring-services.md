@@ -126,7 +126,7 @@ Service metrics follow the same retention settings as server metrics:
 
 | Setting | Default | Where |
 |---|---|---|
-| `metricsRetentionDays` | `7` days | Per-environment in **Settings > Monitoring** |
+| `METRICS_RETENTION_DAYS` | `7` days | Global env var (see [Configuration Reference](../configuration.md#retention)) |
 
 The scheduler cleans up old `ServiceMetrics` rows hourly.
 

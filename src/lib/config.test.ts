@@ -45,6 +45,22 @@ const envSchema = z.object({
   SENTRY_ENVIRONMENT: z.string().optional(),
   SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).default(0),
   SENTRY_ENABLED: z.coerce.boolean().default(true),
+  // Part E (issue #240) operational tunables — kept in sync with src/lib/config.ts.
+  SCHEDULER_DATABASE_METRICS_INTERVAL: z.coerce.number().int().min(1).default(60),
+  SCHEDULER_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(5),
+  RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(100),
+  RATE_LIMIT_WINDOW: z.string().default('1 minute'),
+  BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(12),
+  SESSION_TTL: z.string().default('7d'),
+  SQLITE_BUSY_TIMEOUT_MS: z.coerce.number().int().min(0).default(5000),
+  SQLITE_CACHE_SIZE_KB: z.coerce.number().int().min(1000).default(64000),
+  WEBHOOK_DELIVERY_INTERVAL_MS: z.coerce.number().int().min(500).default(3000),
+  WEBHOOK_DELIVERY_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(10),
+  WEBHOOK_DELIVERY_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(50),
+  POSTGRES_CONNECTION_TIMEOUT_MS: z.coerce.number().int().min(0).default(10000),
+  POSTGRES_STATEMENT_TIMEOUT_MS: z.coerce.number().int().min(0).default(30000),
+  IDEMPOTENCY_RETENTION_MS: z.coerce.number().int().min(0).default(86400000),
+  IDEMPOTENCY_STALE_INPROGRESS_MS: z.coerce.number().int().min(0).default(300000),
 });
 
 // Minimal valid env
@@ -373,6 +389,104 @@ describe('config', () => {
         expect(result.data.SCHEDULER_SERVER_HEALTH_INTERVAL).toBe(120);
         expect(result.data.SCHEDULER_METRICS_INTERVAL).toBe(600);
       }
+    });
+  });
+
+  describe('Part E operational tunables (issue #240)', () => {
+    it('applies defaults matching the previously hardcoded literals when unset', () => {
+      const result = envSchema.safeParse(validEnv);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.SCHEDULER_DATABASE_METRICS_INTERVAL).toBe(60);
+        expect(result.data.SCHEDULER_CONCURRENCY).toBe(5);
+        expect(result.data.RATE_LIMIT_MAX).toBe(100);
+        expect(result.data.RATE_LIMIT_WINDOW).toBe('1 minute');
+        expect(result.data.BCRYPT_ROUNDS).toBe(12);
+        expect(result.data.SESSION_TTL).toBe('7d');
+        expect(result.data.SQLITE_BUSY_TIMEOUT_MS).toBe(5000);
+        expect(result.data.SQLITE_CACHE_SIZE_KB).toBe(64000);
+        expect(result.data.WEBHOOK_DELIVERY_INTERVAL_MS).toBe(3000);
+        expect(result.data.WEBHOOK_DELIVERY_CONCURRENCY).toBe(10);
+        expect(result.data.WEBHOOK_DELIVERY_BATCH_SIZE).toBe(50);
+        expect(result.data.POSTGRES_CONNECTION_TIMEOUT_MS).toBe(10000);
+        expect(result.data.POSTGRES_STATEMENT_TIMEOUT_MS).toBe(30000);
+        expect(result.data.IDEMPOTENCY_RETENTION_MS).toBe(86400000);
+        expect(result.data.IDEMPOTENCY_STALE_INPROGRESS_MS).toBe(300000);
+      }
+    });
+
+    it('coerces string env values to numbers', () => {
+      const result = envSchema.safeParse({
+        ...validEnv,
+        SCHEDULER_CONCURRENCY: '20',
+        BCRYPT_ROUNDS: '10',
+        WEBHOOK_DELIVERY_BATCH_SIZE: '200',
+      });
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.SCHEDULER_CONCURRENCY).toBe(20);
+        expect(result.data.BCRYPT_ROUNDS).toBe(10);
+        expect(result.data.WEBHOOK_DELIVERY_BATCH_SIZE).toBe(200);
+      }
+    });
+
+    describe('BCRYPT_ROUNDS (min 4, max 15)', () => {
+      it('accepts the boundary values 4 and 15', () => {
+        expect(envSchema.safeParse({ ...validEnv, BCRYPT_ROUNDS: '4' }).success).toBe(true);
+        expect(envSchema.safeParse({ ...validEnv, BCRYPT_ROUNDS: '15' }).success).toBe(true);
+      });
+
+      it('rejects values below 4', () => {
+        expect(envSchema.safeParse({ ...validEnv, BCRYPT_ROUNDS: '2' }).success).toBe(false);
+        expect(envSchema.safeParse({ ...validEnv, BCRYPT_ROUNDS: '3' }).success).toBe(false);
+      });
+
+      it('rejects values above 15', () => {
+        expect(envSchema.safeParse({ ...validEnv, BCRYPT_ROUNDS: '99' }).success).toBe(false);
+        expect(envSchema.safeParse({ ...validEnv, BCRYPT_ROUNDS: '16' }).success).toBe(false);
+      });
+
+      it('rejects non-integer values', () => {
+        expect(envSchema.safeParse({ ...validEnv, BCRYPT_ROUNDS: '10.5' }).success).toBe(false);
+      });
+    });
+
+    describe('SCHEDULER_CONCURRENCY (min 1, max 100)', () => {
+      it('accepts the boundary values 1 and 100', () => {
+        expect(envSchema.safeParse({ ...validEnv, SCHEDULER_CONCURRENCY: '1' }).success).toBe(true);
+        expect(envSchema.safeParse({ ...validEnv, SCHEDULER_CONCURRENCY: '100' }).success).toBe(true);
+      });
+
+      it('rejects 0 and values above 100', () => {
+        expect(envSchema.safeParse({ ...validEnv, SCHEDULER_CONCURRENCY: '0' }).success).toBe(false);
+        expect(envSchema.safeParse({ ...validEnv, SCHEDULER_CONCURRENCY: '101' }).success).toBe(false);
+      });
+    });
+
+    describe('WEBHOOK_DELIVERY_BATCH_SIZE (min 1, max 500)', () => {
+      it('accepts the boundary values 1 and 500', () => {
+        expect(envSchema.safeParse({ ...validEnv, WEBHOOK_DELIVERY_BATCH_SIZE: '1' }).success).toBe(true);
+        expect(envSchema.safeParse({ ...validEnv, WEBHOOK_DELIVERY_BATCH_SIZE: '500' }).success).toBe(true);
+      });
+
+      it('rejects 0 and values above 500', () => {
+        expect(envSchema.safeParse({ ...validEnv, WEBHOOK_DELIVERY_BATCH_SIZE: '0' }).success).toBe(false);
+        expect(envSchema.safeParse({ ...validEnv, WEBHOOK_DELIVERY_BATCH_SIZE: '501' }).success).toBe(false);
+      });
+    });
+
+    describe('WEBHOOK_DELIVERY_INTERVAL_MS (min 500)', () => {
+      it('accepts 500 but rejects below 500', () => {
+        expect(envSchema.safeParse({ ...validEnv, WEBHOOK_DELIVERY_INTERVAL_MS: '500' }).success).toBe(true);
+        expect(envSchema.safeParse({ ...validEnv, WEBHOOK_DELIVERY_INTERVAL_MS: '499' }).success).toBe(false);
+      });
+    });
+
+    describe('SQLITE_CACHE_SIZE_KB (min 1000)', () => {
+      it('accepts 1000 but rejects below 1000', () => {
+        expect(envSchema.safeParse({ ...validEnv, SQLITE_CACHE_SIZE_KB: '1000' }).success).toBe(true);
+        expect(envSchema.safeParse({ ...validEnv, SQLITE_CACHE_SIZE_KB: '999' }).success).toBe(false);
+      });
     });
   });
 

@@ -5,6 +5,7 @@ interface FormData {
   sshCommandTimeoutSec: number;
   sshReadyTimeoutSec: number;
   maxUploadSizeMb: number;
+  pgDumpTimeoutSec: number;
   activeUserWindowMin: number;
   registryMaxTags: number;
   defaultLogLines: number;
@@ -14,18 +15,28 @@ interface FormData {
   agentOfflineThresholdSec: number;
   auditLogRetentionDays: number;
   databaseMetricsRetentionDays: number;
+  notificationRetentionDays: number;
+  healthLogRetentionDays: number;
+  webhookDeliveryRetentionDays: number;
+  imageDigestRetentionDays: number;
 }
 
 interface Defaults {
   sshCommandTimeoutMs: number;
   sshReadyTimeoutMs: number;
   maxUploadSizeMb: number;
+  pgDumpTimeoutMs: number;
   activeUserWindowMin: number;
   registryMaxTags: number;
   defaultLogLines: number;
   agentStaleThresholdMs: number;
   agentOfflineThresholdMs: number;
   auditLogRetentionDays: number;
+  databaseMetricsRetentionDays: number;
+  notificationRetentionDays: number;
+  healthLogRetentionDays: number;
+  webhookDeliveryRetentionDays: number;
+  imageDigestRetentionDays: number;
 }
 
 function msToSec(ms: number): number {
@@ -98,6 +109,14 @@ function LinkIcon({ className }: { className?: string }) {
   );
 }
 
+function DatabaseIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className || "w-5 h-5"} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
+    </svg>
+  );
+}
+
 export default function SystemSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -109,6 +128,7 @@ export default function SystemSettings() {
     sshCommandTimeoutSec: 60,
     sshReadyTimeoutSec: 10,
     maxUploadSizeMb: 50,
+    pgDumpTimeoutSec: 300,
     activeUserWindowMin: 15,
     registryMaxTags: 50,
     defaultLogLines: 50,
@@ -118,6 +138,10 @@ export default function SystemSettings() {
     agentOfflineThresholdSec: 300,
     auditLogRetentionDays: 90,
     databaseMetricsRetentionDays: 30,
+    notificationRetentionDays: 30,
+    healthLogRetentionDays: 30,
+    webhookDeliveryRetentionDays: 30,
+    imageDigestRetentionDays: 90,
   });
 
   useEffect(() => {
@@ -134,6 +158,7 @@ export default function SystemSettings() {
         sshCommandTimeoutSec: msToSec(settings.sshCommandTimeoutMs),
         sshReadyTimeoutSec: msToSec(settings.sshReadyTimeoutMs),
         maxUploadSizeMb: settings.maxUploadSizeMb,
+        pgDumpTimeoutSec: msToSec(settings.pgDumpTimeoutMs),
         activeUserWindowMin: settings.activeUserWindowMin,
         registryMaxTags: settings.registryMaxTags,
         defaultLogLines: settings.defaultLogLines,
@@ -143,6 +168,10 @@ export default function SystemSettings() {
         agentOfflineThresholdSec: msToSec(settings.agentOfflineThresholdMs),
         auditLogRetentionDays: settings.auditLogRetentionDays,
         databaseMetricsRetentionDays: settings.databaseMetricsRetentionDays ?? 30,
+        notificationRetentionDays: settings.notificationRetentionDays ?? 30,
+        healthLogRetentionDays: settings.healthLogRetentionDays ?? 30,
+        webhookDeliveryRetentionDays: settings.webhookDeliveryRetentionDays ?? 30,
+        imageDigestRetentionDays: settings.imageDigestRetentionDays ?? 90,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load settings');
@@ -162,6 +191,7 @@ export default function SystemSettings() {
         sshCommandTimeoutMs: secToMs(formData.sshCommandTimeoutSec),
         sshReadyTimeoutMs: secToMs(formData.sshReadyTimeoutSec),
         maxUploadSizeMb: formData.maxUploadSizeMb,
+        pgDumpTimeoutMs: secToMs(formData.pgDumpTimeoutSec),
         activeUserWindowMin: formData.activeUserWindowMin,
         registryMaxTags: formData.registryMaxTags,
         defaultLogLines: formData.defaultLogLines,
@@ -171,6 +201,10 @@ export default function SystemSettings() {
         agentOfflineThresholdMs: secToMs(formData.agentOfflineThresholdSec),
         auditLogRetentionDays: formData.auditLogRetentionDays,
         databaseMetricsRetentionDays: formData.databaseMetricsRetentionDays,
+        notificationRetentionDays: formData.notificationRetentionDays,
+        healthLogRetentionDays: formData.healthLogRetentionDays,
+        webhookDeliveryRetentionDays: formData.webhookDeliveryRetentionDays,
+        imageDigestRetentionDays: formData.imageDigestRetentionDays,
       };
       await updateSystemSettings(updateData);
 
@@ -197,6 +231,7 @@ export default function SystemSettings() {
         sshCommandTimeoutSec: msToSec(settings.sshCommandTimeoutMs),
         sshReadyTimeoutSec: msToSec(settings.sshReadyTimeoutMs),
         maxUploadSizeMb: settings.maxUploadSizeMb,
+        pgDumpTimeoutSec: msToSec(settings.pgDumpTimeoutMs),
         activeUserWindowMin: settings.activeUserWindowMin,
         registryMaxTags: settings.registryMaxTags,
         defaultLogLines: settings.defaultLogLines,
@@ -206,6 +241,10 @@ export default function SystemSettings() {
         agentOfflineThresholdSec: msToSec(settings.agentOfflineThresholdMs),
         auditLogRetentionDays: settings.auditLogRetentionDays,
         databaseMetricsRetentionDays: settings.databaseMetricsRetentionDays ?? 30,
+        notificationRetentionDays: settings.notificationRetentionDays ?? 30,
+        healthLogRetentionDays: settings.healthLogRetentionDays ?? 30,
+        webhookDeliveryRetentionDays: settings.webhookDeliveryRetentionDays ?? 30,
+        imageDigestRetentionDays: settings.imageDigestRetentionDays ?? 90,
       });
 
       setSuccess('Settings reset to defaults');
@@ -437,8 +476,32 @@ export default function SystemSettings() {
           </div>
         </SettingsSection>
 
-        {/* Retention Policies */}
-        <SettingsSection title="Retention Policies" icon={<RetentionIcon />}>
+        {/* Database & Backup */}
+        <SettingsSection title="Database & Backup" icon={<DatabaseIcon />}>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">
+                pg_dump Timeout
+                <span className="text-slate-500 ml-1">(seconds)</span>
+              </label>
+              <input
+                type="number"
+                min={10}
+                max={3600}
+                value={formData.pgDumpTimeoutSec}
+                onChange={(e) => updateField('pgDumpTimeoutSec', parseInt(e.target.value) || 300)}
+                className="input w-full"
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                Global default timeout for PostgreSQL backup dumps (default: {defaults ? msToSec(defaults.pgDumpTimeoutMs) : 300}s).
+                Per-database settings override this value.
+              </p>
+            </div>
+          </div>
+        </SettingsSection>
+
+        {/* Retention */}
+        <SettingsSection title="Retention" icon={<RetentionIcon />}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm text-slate-400 mb-1">
@@ -471,7 +534,75 @@ export default function SystemSettings() {
                 className="input w-full"
               />
               <p className="text-xs text-slate-500 mt-1">
-                Days to keep database monitoring metrics (default: 30 days)
+                Days to keep database monitoring metrics (default: {defaults?.databaseMetricsRetentionDays || 30} days)
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">
+                Notification Retention
+                <span className="text-slate-500 ml-1">(days)</span>
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={365}
+                value={formData.notificationRetentionDays}
+                onChange={(e) => updateField('notificationRetentionDays', parseInt(e.target.value) || 30)}
+                className="input w-full"
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                Days to keep delivered in-app notifications (default: {defaults?.notificationRetentionDays || 30} days)
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">
+                Health Check Log Retention
+                <span className="text-slate-500 ml-1">(days)</span>
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={365}
+                value={formData.healthLogRetentionDays}
+                onChange={(e) => updateField('healthLogRetentionDays', parseInt(e.target.value) || 30)}
+                className="input w-full"
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                Days to keep server and service health check logs (default: {defaults?.healthLogRetentionDays || 30} days)
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">
+                Webhook Delivery Retention
+                <span className="text-slate-500 ml-1">(days)</span>
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={365}
+                value={formData.webhookDeliveryRetentionDays}
+                onChange={(e) => updateField('webhookDeliveryRetentionDays', parseInt(e.target.value) || 30)}
+                className="input w-full"
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                Days to keep webhook delivery attempt history (default: {defaults?.webhookDeliveryRetentionDays || 30} days)
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm text-slate-400 mb-1">
+                Image Digest Retention
+                <span className="text-slate-500 ml-1">(days)</span>
+              </label>
+              <input
+                type="number"
+                min={1}
+                max={3650}
+                value={formData.imageDigestRetentionDays}
+                onChange={(e) => updateField('imageDigestRetentionDays', parseInt(e.target.value) || 90)}
+                className="input w-full"
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                Days to keep container image digest history (default: {defaults?.imageDigestRetentionDays || 90} days)
               </p>
             </div>
           </div>

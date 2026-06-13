@@ -29,6 +29,7 @@ import { runDatabaseMetricsCollection, cleanupOldDatabaseMetrics } from '../serv
 import { deliverPending, cleanupOldDeliveries } from '../services/webhook-subscriptions.js';
 import { cleanupExpiredIdempotencyKeys } from './idempotency.js';
 import { eventBus } from './event-bus.js';
+import { config } from './config.js';
 
 interface GlobalSchedulerConfig {
   serverHealthIntervalMs: number;
@@ -39,9 +40,6 @@ interface GlobalSchedulerConfig {
   backupCheckIntervalMs: number;
   databaseMetricsIntervalMs: number;
   metricsRetentionDays: number;
-  notificationRetentionDays: number;
-  healthLogRetentionDays: number;
-  webhookDeliveryRetentionDays: number;
 }
 
 const DEFAULT_CONFIG: GlobalSchedulerConfig = {
@@ -51,22 +49,18 @@ const DEFAULT_CONFIG: GlobalSchedulerConfig = {
   updateCheckIntervalMs: 30 * 60 * 1000, // 30 minutes
   metricsIntervalMs: 5 * 60 * 1000, // 5 minutes
   backupCheckIntervalMs: 60 * 1000, // 1 minute
-  databaseMetricsIntervalMs: 60 * 1000, // 1 minute (individual intervals are per-database)
+  // 1 minute (individual intervals are per-database). Default matches
+  // config.SCHEDULER_DATABASE_METRICS_INTERVAL (60s); server.ts threads the
+  // env-driven value through on startup.
+  databaseMetricsIntervalMs: config.SCHEDULER_DATABASE_METRICS_INTERVAL * 1000,
   metricsRetentionDays: 7,
-  notificationRetentionDays: 30,
-  healthLogRetentionDays: 30,
-  webhookDeliveryRetentionDays: 30,
 };
-
-// Webhook delivery sweep interval (issue #126). Short enough that deliveries
-// land within ~5s of an emit; the setImmediate kick on enqueue usually beats it.
-const WEBHOOK_DELIVERY_INTERVAL_MS = 3 * 1000;
 
 const timers = new Map<string, NodeJS.Timeout>();
 let isRunning = false;
 
 // Concurrency limit for parallel operations (SSH connections, health checks)
-const concurrencyLimit = pLimit(5);
+const concurrencyLimit = pLimit(config.SCHEDULER_CONCURRENCY);
 
 /**
  * Fire-and-forget notification delivery — logs errors but doesn't block the caller.
@@ -836,11 +830,12 @@ async function runMetricsCleanup(retentionDays: number): Promise<void> {
 }
 
 /**
- * Clean up old notifications
+ * Clean up old notifications based on system settings retention
  */
-async function runNotificationCleanup(retentionDays: number): Promise<void> {
+async function runNotificationCleanup(): Promise<void> {
   try {
-    const deleted = await cleanupOldNotifications(retentionDays);
+    const settings = await getSystemSettings();
+    const deleted = await cleanupOldNotifications(settings.notificationRetentionDays);
     if (deleted > 0) {
       console.log(`[Scheduler] Cleaned up ${deleted} old notification records`);
     }
@@ -851,11 +846,12 @@ async function runNotificationCleanup(retentionDays: number): Promise<void> {
 }
 
 /**
- * Clean up old health check logs
+ * Clean up old health check logs based on system settings retention
  */
-async function runHealthLogCleanup(retentionDays: number): Promise<void> {
+async function runHealthLogCleanup(): Promise<void> {
   try {
-    const deleted = await cleanupHealthCheckLogs(retentionDays);
+    const settings = await getSystemSettings();
+    const deleted = await cleanupHealthCheckLogs(settings.healthLogRetentionDays);
     if (deleted > 0) {
       console.log(`[Scheduler] Cleaned up ${deleted} old health check log records`);
     }
@@ -886,7 +882,8 @@ async function runAuditLogCleanup(): Promise<void> {
  */
 async function runDigestCleanup(): Promise<void> {
   try {
-    const deleted = await cleanupOldImageDigests(90);
+    const settings = await getSystemSettings();
+    const deleted = await cleanupOldImageDigests(settings.imageDigestRetentionDays);
     if (deleted > 0) {
       console.log(`[Scheduler] Cleaned up ${deleted} old image digest records`);
     }
@@ -911,11 +908,13 @@ async function runWebhookDeliveries(): Promise<void> {
 }
 
 /**
- * Clean up old webhook deliveries (delivered/failed beyond retention).
+ * Clean up old webhook deliveries (delivered/failed beyond retention) based on
+ * system settings retention.
  */
-async function runWebhookDeliveryCleanup(retentionDays: number): Promise<void> {
+async function runWebhookDeliveryCleanup(): Promise<void> {
   try {
-    const deleted = await cleanupOldDeliveries(retentionDays);
+    const settings = await getSystemSettings();
+    const deleted = await cleanupOldDeliveries(settings.webhookDeliveryRetentionDays);
     if (deleted > 0) {
       console.log(`[Scheduler] Cleaned up ${deleted} old webhook delivery records`);
     }
@@ -974,13 +973,13 @@ async function runImagePrune(): Promise<void> {
 /**
  * Start the scheduler with periodic health checks and discovery
  */
-export function startScheduler(config: Partial<GlobalSchedulerConfig> = {}): void {
+export function startScheduler(overrides: Partial<GlobalSchedulerConfig> = {}): void {
   if (isRunning) {
     console.log('[Scheduler] Already running');
     return;
   }
 
-  const cfg = { ...DEFAULT_CONFIG, ...config };
+  const cfg = { ...DEFAULT_CONFIG, ...overrides };
   isRunning = true;
 
   console.log('[Scheduler] Starting with intervals:');
@@ -992,7 +991,6 @@ export function startScheduler(config: Partial<GlobalSchedulerConfig> = {}): voi
   console.log(`  - Database metrics: ${cfg.databaseMetricsIntervalMs / 1000}s`);
   console.log(`  - Backup checks: ${cfg.backupCheckIntervalMs / 1000}s`);
   console.log(`  - Metrics retention: ${cfg.metricsRetentionDays} days`);
-  console.log(`  - Health log retention: ${cfg.healthLogRetentionDays} days`);
 
   // Run initial checks after a short delay
   setTimeout(() => {
@@ -1009,16 +1007,18 @@ export function startScheduler(config: Partial<GlobalSchedulerConfig> = {}): voi
   timers.set('backupCheck', setInterval(runBackupChecks, cfg.backupCheckIntervalMs));
   timers.set('agentStaleness', setInterval(runAgentStalenessCheck, 30000)); // Every 30 seconds
   timers.set('cleanup', setInterval(() => runMetricsCleanup(cfg.metricsRetentionDays), 60 * 60 * 1000));
-  timers.set('notificationCleanup', setInterval(() => runNotificationCleanup(cfg.notificationRetentionDays), 24 * 60 * 60 * 1000)); // Daily
-  timers.set('healthLogCleanup', setInterval(() => runHealthLogCleanup(cfg.healthLogRetentionDays), 24 * 60 * 60 * 1000)); // Daily
+  timers.set('notificationCleanup', setInterval(runNotificationCleanup, 24 * 60 * 60 * 1000)); // Daily
+  timers.set('healthLogCleanup', setInterval(runHealthLogCleanup, 24 * 60 * 60 * 1000)); // Daily
   timers.set('auditLogCleanup', setInterval(runAuditLogCleanup, 24 * 60 * 60 * 1000)); // Daily
   timers.set('digestCleanup', setInterval(runDigestCleanup, 24 * 60 * 60 * 1000)); // Daily
   timers.set('imagePrune', setInterval(runImagePrune, 7 * 24 * 60 * 60 * 1000)); // Weekly
 
   // Webhook deliveries (issue #126): a short-interval sweep + daily cleanups for
-  // delivery history and expired idempotency keys.
-  timers.set('webhookDeliveries', setInterval(runWebhookDeliveries, WEBHOOK_DELIVERY_INTERVAL_MS));
-  timers.set('webhookDeliveryCleanup', setInterval(() => runWebhookDeliveryCleanup(cfg.webhookDeliveryRetentionDays), 24 * 60 * 60 * 1000)); // Daily
+  // delivery history and expired idempotency keys. The sweep interval is short
+  // enough that deliveries land within a few seconds of an emit; the
+  // setImmediate kick on enqueue usually beats it.
+  timers.set('webhookDeliveries', setInterval(runWebhookDeliveries, config.WEBHOOK_DELIVERY_INTERVAL_MS));
+  timers.set('webhookDeliveryCleanup', setInterval(runWebhookDeliveryCleanup, 24 * 60 * 60 * 1000)); // Daily
   timers.set('idempotencyKeyCleanup', setInterval(runIdempotencyKeyCleanup, 24 * 60 * 60 * 1000)); // Daily
 
   // Notification queue drain — safety net in case the setImmediate kick on

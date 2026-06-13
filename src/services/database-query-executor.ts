@@ -4,6 +4,7 @@ import Redis from 'ioredis';
 import { SSHClient, LocalClient, isLocalhost, shellEscape, type CommandClient } from '../lib/ssh.js';
 import { coerceNumeric } from '../lib/helpers.js';
 import { decrypt } from '../lib/crypto.js';
+import { config as appConfig } from '../lib/config.js';
 import { getEnvironmentSshKey } from '../routes/environments.js';
 
 export interface MonitoringQuery {
@@ -81,8 +82,8 @@ async function executeSQLQueries(
       user: conn.user,
       password: conn.password,
       ssl: conn.useSsl ? { rejectUnauthorized: false } : false,
-      connectionTimeoutMillis: 10000,
-      statement_timeout: 30000,
+      connectionTimeoutMillis: appConfig.POSTGRES_CONNECTION_TIMEOUT_MS,
+      statement_timeout: appConfig.POSTGRES_STATEMENT_TIMEOUT_MS,
     });
 
     try {

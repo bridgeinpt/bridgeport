@@ -21,9 +21,12 @@ export const SYSTEM_SETTINGS_DEFAULTS = {
   defaultLogLines: 50,
   agentStaleThresholdMs: 180000,
   agentOfflineThresholdMs: 300000,
-  doRegistryToken: null as string | null,
   auditLogRetentionDays: 90,
   databaseMetricsRetentionDays: 30,
+  notificationRetentionDays: 30,
+  healthLogRetentionDays: 30,
+  webhookDeliveryRetentionDays: 30,
+  imageDigestRetentionDays: 90,
 };
 
 /**
@@ -82,9 +85,12 @@ export async function resetSystemSettings(): Promise<SystemSettings> {
       agentCallbackUrl: null,
       agentStaleThresholdMs: SYSTEM_SETTINGS_DEFAULTS.agentStaleThresholdMs,
       agentOfflineThresholdMs: SYSTEM_SETTINGS_DEFAULTS.agentOfflineThresholdMs,
-      doRegistryToken: null,
       auditLogRetentionDays: SYSTEM_SETTINGS_DEFAULTS.auditLogRetentionDays,
       databaseMetricsRetentionDays: SYSTEM_SETTINGS_DEFAULTS.databaseMetricsRetentionDays,
+      notificationRetentionDays: SYSTEM_SETTINGS_DEFAULTS.notificationRetentionDays,
+      healthLogRetentionDays: SYSTEM_SETTINGS_DEFAULTS.healthLogRetentionDays,
+      webhookDeliveryRetentionDays: SYSTEM_SETTINGS_DEFAULTS.webhookDeliveryRetentionDays,
+      imageDigestRetentionDays: SYSTEM_SETTINGS_DEFAULTS.imageDigestRetentionDays,
     },
   });
   return cachedSettings;

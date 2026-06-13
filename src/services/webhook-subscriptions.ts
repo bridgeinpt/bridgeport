@@ -24,6 +24,7 @@ import { isIP } from 'node:net';
 import { prisma } from '../lib/db.js';
 import { encrypt, decrypt } from '../lib/crypto.js';
 import { safeJsonParse, getErrorMessage } from '../lib/helpers.js';
+import { config } from '../lib/config.js';
 import type { WebhookSubscription, WebhookDelivery } from '@prisma/client';
 
 /**
@@ -53,7 +54,7 @@ const MAX_DELIVERY_ATTEMPTS = 5;
 const DELIVERY_TIMEOUT_MS = 10_000;
 
 /** How many due deliveries to process per `deliverPending()` sweep. */
-const DELIVERY_BATCH_SIZE = 50;
+const DELIVERY_BATCH_SIZE = config.WEBHOOK_DELIVERY_BATCH_SIZE;
 
 /** Signature header sent with every delivery (HMAC-SHA256, hex). */
 export const SIGNATURE_HEADER = 'X-BridgePort-Signature';
@@ -63,7 +64,7 @@ export const SIGNATURE_HEADER = 'X-BridgePort-Signature';
 let delivering = false;
 
 /** Max concurrent deliveries per sweep — bounds a sweep to ~one timeout, not N. */
-const DELIVERY_CONCURRENCY = 10;
+const DELIVERY_CONCURRENCY = config.WEBHOOK_DELIVERY_CONCURRENCY;
 
 /**
  * SSRF guard: is `ip` (a literal IPv4/IPv6 address) in a loopback, private,
