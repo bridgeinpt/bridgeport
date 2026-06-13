@@ -91,6 +91,7 @@
   },
   "overrides": {
     "@hono/node-server": "^1.19.13",
+    "esbuild": "^0.28.1",
     "uuid": "^11"
   }
 }
