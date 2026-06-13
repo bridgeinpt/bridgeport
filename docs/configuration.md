@@ -102,9 +102,9 @@ Background job intervals. Interval values are in **seconds**. These set the glob
 | Variable | Type | Default | Description |
 |---|---|---|---|
 | `RATE_LIMIT_MAX` | number | `100` | Maximum API requests per IP per window. |
-| `RATE_LIMIT_WINDOW` | string | `1 minute` | Rate-limit window as a duration string (e.g., `1 minute`, `30 seconds`). |
+| `RATE_LIMIT_WINDOW` | string | `1 minute` | Rate-limit window as a duration string (e.g., `1 minute`, `30 seconds`). Must be non-empty — a blank value is rejected at startup rather than silently falling back to the default. |
 | `BCRYPT_ROUNDS` | number | `12` | Password hashing cost factor. Clamped to the range `4`–`15`. Higher is slower but stronger. |
-| `SESSION_TTL` | string | `7d` | JWT / session lifetime as a duration string (e.g., `7d`, `24h`, `30m`). |
+| `SESSION_TTL` | string | `7d` | JWT / session lifetime as a duration string (e.g., `7d`, `24h`, `30m`). Must be non-empty — a blank value is rejected at startup. |
 
 ### Performance / SQLite
 
@@ -131,8 +131,8 @@ Timeouts for the main Postgres query path (used by the database query executor).
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
-| `POSTGRES_CONNECTION_TIMEOUT_MS` | number | `10000` | Postgres connection timeout (milliseconds). |
-| `POSTGRES_STATEMENT_TIMEOUT_MS` | number | `30000` | Postgres statement timeout (milliseconds). |
+| `POSTGRES_CONNECTION_TIMEOUT_MS` | number | `10000` | Postgres connection timeout (milliseconds). Minimum `1` — `0` ("wait forever") is rejected so a stalled host can't wedge the metrics scheduler. |
+| `POSTGRES_STATEMENT_TIMEOUT_MS` | number | `30000` | Postgres statement timeout (milliseconds). Minimum `1`. |
 
 ### Idempotency
 
@@ -140,8 +140,8 @@ Controls retention of `Idempotency-Key` records used for safe request retries.
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
-| `IDEMPOTENCY_RETENTION_MS` | number | `86400000` | How long idempotency records are retained (milliseconds; default 24h). |
-| `IDEMPOTENCY_STALE_INPROGRESS_MS` | number | `300000` | When an in-progress idempotency record is considered stale (milliseconds; default 5m). |
+| `IDEMPOTENCY_RETENTION_MS` | number | `86400000` | How long idempotency records are retained (milliseconds; default 24h). Minimum `1000`. |
+| `IDEMPOTENCY_STALE_INPROGRESS_MS` | number | `300000` | When an in-progress idempotency record is considered stale (milliseconds; default 5m). Minimum `1000` — `0` would make every in-flight record instantly stale and defeat the idempotency guarantee. |
 
 ### Retention
 

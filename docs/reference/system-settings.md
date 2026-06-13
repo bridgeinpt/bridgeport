@@ -172,6 +172,9 @@ Automatic cleanup of old data. These are the global, admin-editable retention kn
 | `imageDigestRetentionDays` | `integer` | `90` | Pruning age (in days) for unreferenced image digests. |
 
 > [!NOTE]
+> **Validation:** `notificationRetentionDays`, `healthLogRetentionDays`, and `webhookDeliveryRetentionDays` accept `1`–`365`; `imageDigestRetentionDays` accepts `1`–`3650`. Unlike `auditLogRetentionDays`, these cannot be set to `0` — there is no "keep forever" option for these record types.
+
+> [!NOTE]
 > These retention settings are **hot-reloaded** — the scheduler reads them on each cleanup tick, so changes take effect without restarting the container.
 
 > [!NOTE]
