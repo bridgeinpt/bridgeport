@@ -20,10 +20,11 @@
  * curated subset of each route's params/query anyway.
  */
 
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { appVersion } from '../lib/version.js';
 import { computeScopes } from '../lib/scopes.js';
-import { canonicalizeJson, hashCanonicalBody } from '../lib/canonical-json.js';
+import { canonicalizeJson } from '../lib/canonical-json.js';
 import { injectApi, type InjectApiResult } from './inject.js';
 import { redactSensitive } from './redact.js';
 import type { McpToolContext, McpToolDef, McpToolResult } from './types.js';
@@ -97,12 +98,20 @@ export function mapResult(res: InjectApiResult): McpToolResult {
  *
  * Canonical JSON sorts object keys so semantically-identical args (different key
  * order) hash to the same key.
+ *
+ * We assemble the canonical input string (toolName + bucket + canonicalJSON(args))
+ * and hash it DIRECTLY in one pass — `canonicalizeJson` already produces a stable
+ * string, so re-canonicalizing it (e.g. via `hashCanonicalBody`, which would wrap
+ * the whole string in JSON quotes) would only add a redundant transform. The key
+ * stays fully deterministic and sensitive to tool/args/window exactly as before.
  */
 export function deriveIdempotencyKey(toolName: string, args: Record<string, unknown>): string {
   const { idempotencyKey: _omit, ...rest } = args;
   void _omit;
   const timeBucket = Math.floor(Date.now() / IDEMPOTENCY_DEDUP_WINDOW_MS);
-  return hashCanonicalBody(`${toolName}:${timeBucket}:${canonicalizeJson(rest)}`);
+  return createHash('sha256')
+    .update(`${toolName}:${timeBucket}:${canonicalizeJson(rest)}`)
+    .digest('hex');
 }
 
 /**
@@ -111,7 +120,28 @@ export function deriveIdempotencyKey(toolName: string, args: Record<string, unkn
  * syntax. Used by every `buildUrl` so safe encoding is the default and a future
  * tool can't accidentally drop it.
  */
-const seg = (v: unknown): string => encodeURIComponent(String(v));
+export const seg = (v: unknown): string => encodeURIComponent(String(v));
+
+/**
+ * Append an optional query string to `base`. For each key in `keys`, if the arg
+ * is neither `undefined` nor `null` it is String()-coerced and added as a query
+ * param; otherwise it is skipped. Returns `base` unchanged when no param is set,
+ * else `base?<qs>`. Shared by every `buildUrl` with optional query filters so the
+ * "skip null/undefined, coerce, join" idiom lives in one place.
+ */
+export function appendQuery(
+  base: string,
+  args: Record<string, unknown>,
+  keys: readonly string[]
+): string {
+  const params = new URLSearchParams();
+  for (const key of keys) {
+    const v = args[key];
+    if (v !== undefined && v !== null) params.set(key, String(v));
+  }
+  const qs = params.toString();
+  return qs ? `${base}?${qs}` : base;
+}
 
 // ---------------------------------------------------------------------------
 // Tool factories
@@ -151,7 +181,6 @@ function readTool(opts: {
     requiredScope: opts.requiredScope ?? null, // default: every valid token has *:read
     destructive: false,
     readOnly: true,
-    isWrite: false,
     envScoped: opts.envScoped,
     handler: async (args, ctx) => {
       const url = opts.buildUrl(args);
@@ -204,7 +233,6 @@ function writeTool(opts: {
     requiredScope: opts.requiredScope,
     destructive: true,
     readOnly: false,
-    isWrite: true,
     // Every write tool targets a GLOBAL route (no `:envId` in the path), so it
     // always FORBIDDEN_SCOPEs for an env-scoped token — never env-scoped.
     envScoped: false,
@@ -452,14 +480,15 @@ const readTools: McpToolDef[] = [
       limit: z.number().int().min(1).max(500).optional().describe('Max rows (default 50).'),
       offset: z.number().int().min(0).optional().describe('Pagination offset (default 0).'),
     },
-    buildUrl: (a) => {
-      const params = new URLSearchParams();
-      for (const key of ['environmentId', 'resourceType', 'resourceId', 'action', 'limit', 'offset'] as const) {
-        if (a[key] !== undefined && a[key] !== null) params.set(key, String(a[key]));
-      }
-      const qs = params.toString();
-      return qs ? `/api/audit-logs?${qs}` : '/api/audit-logs';
-    },
+    buildUrl: (a) =>
+      appendQuery('/api/audit-logs', a, [
+        'environmentId',
+        'resourceType',
+        'resourceId',
+        'action',
+        'limit',
+        'offset',
+      ]),
     envScoped: false, // /api/audit-logs — global route (FORBIDDEN_SCOPE for env-scoped tokens, even with an environmentId filter)
   }),
   readTool({
@@ -502,14 +531,7 @@ const readTools: McpToolDef[] = [
       limit: z.number().int().min(1).max(500).optional().describe('Max rows (default 50).'),
       offset: z.number().int().min(0).optional().describe('Pagination offset (default 0).'),
     },
-    buildUrl: (a) => {
-      const base = `/api/databases/${seg(a.id)}/backups`;
-      const params = new URLSearchParams();
-      if (a.limit !== undefined) params.set('limit', String(a.limit));
-      if (a.offset !== undefined) params.set('offset', String(a.offset));
-      const qs = params.toString();
-      return qs ? `${base}?${qs}` : base;
-    },
+    buildUrl: (a) => appendQuery(`/api/databases/${seg(a.id)}/backups`, a, ['limit', 'offset']),
     envScoped: false, // /api/databases/:id/backups — global route
   }),
 
@@ -525,14 +547,14 @@ const readTools: McpToolDef[] = [
       environmentId: z.string().min(1).optional().describe('Filter by environment id.'),
       category: z.enum(['user', 'system']).optional().describe('Filter by category.'),
     },
-    buildUrl: (a) => {
-      const params = new URLSearchParams();
-      for (const key of ['limit', 'offset', 'unreadOnly', 'environmentId', 'category'] as const) {
-        if (a[key] !== undefined && a[key] !== null) params.set(key, String(a[key]));
-      }
-      const qs = params.toString();
-      return qs ? `/api/notifications?${qs}` : '/api/notifications';
-    },
+    buildUrl: (a) =>
+      appendQuery('/api/notifications', a, [
+        'limit',
+        'offset',
+        'unreadOnly',
+        'environmentId',
+        'category',
+      ]),
     envScoped: false, // /api/notifications — global route (FORBIDDEN_SCOPE for env-scoped tokens)
   }),
 
@@ -622,14 +644,8 @@ const readTools: McpToolDef[] = [
       limit: z.number().int().min(1).max(500).optional().describe('Max rows.'),
       offset: z.number().int().min(0).optional().describe('Pagination offset.'),
     },
-    buildUrl: (a) => {
-      const base = `/api/environments/${seg(a.envId)}/container-images`;
-      const params = new URLSearchParams();
-      if (a.limit !== undefined) params.set('limit', String(a.limit));
-      if (a.offset !== undefined) params.set('offset', String(a.offset));
-      const qs = params.toString();
-      return qs ? `${base}?${qs}` : base;
-    },
+    buildUrl: (a) =>
+      appendQuery(`/api/environments/${seg(a.envId)}/container-images`, a, ['limit', 'offset']),
     envScoped: true, // /api/environments/:envId/container-images — env route
   }),
   readTool({
@@ -649,14 +665,8 @@ const readTools: McpToolDef[] = [
       limit: z.number().int().min(1).max(500).optional().describe('Max rows (default 20).'),
       offset: z.number().int().min(0).optional().describe('Pagination offset (default 0).'),
     },
-    buildUrl: (a) => {
-      const base = `/api/container-images/${seg(a.id)}/digests`;
-      const params = new URLSearchParams();
-      if (a.limit !== undefined) params.set('limit', String(a.limit));
-      if (a.offset !== undefined) params.set('offset', String(a.offset));
-      const qs = params.toString();
-      return qs ? `${base}?${qs}` : base;
-    },
+    buildUrl: (a) =>
+      appendQuery(`/api/container-images/${seg(a.id)}/digests`, a, ['limit', 'offset']),
     envScoped: false, // /api/container-images/:id/digests — global route
   }),
 
@@ -752,14 +762,7 @@ const readTools: McpToolDef[] = [
       ownerUserId: z.string().min(1).optional().describe('Filter by owning user id.'),
       ownerServiceAccountId: z.string().min(1).optional().describe('Filter by owning service-account id.'),
     },
-    buildUrl: (a) => {
-      const params = new URLSearchParams();
-      for (const key of ['ownerUserId', 'ownerServiceAccountId'] as const) {
-        if (a[key] !== undefined && a[key] !== null) params.set(key, String(a[key]));
-      }
-      const qs = params.toString();
-      return qs ? `/api/admin/tokens?${qs}` : '/api/admin/tokens';
-    },
+    buildUrl: (a) => appendQuery('/api/admin/tokens', a, ['ownerUserId', 'ownerServiceAccountId']),
     envScoped: false, // /api/admin/tokens — global admin route
     requiredScope: 'tokens:manage',
   }),
@@ -768,6 +771,24 @@ const readTools: McpToolDef[] = [
 // ---------------------------------------------------------------------------
 // META TOOL — get_capabilities (synthesized, no inject)
 // ---------------------------------------------------------------------------
+
+/**
+ * The common capabilities payload synthesized locally (no inject) from the
+ * caller's session: the BridgePort version, the caller's derived scopes, and the
+ * names of the tools registered for this session. Shared by the `get_capabilities`
+ * tool AND the `capabilities` resource (resources.ts), which spreads it and adds
+ * the registered resource names — so the two stay identical.
+ */
+export function buildCapabilities(ctx: {
+  authUser: McpToolContext['authUser'];
+  registeredToolNames: string[];
+}): { version: string; scopes: string[]; tools: string[] } {
+  return {
+    version: appVersion,
+    scopes: computeScopes(ctx.authUser),
+    tools: ctx.registeredToolNames,
+  };
+}
 
 const getCapabilitiesTool: McpToolDef = {
   name: 'get_capabilities',
@@ -778,16 +799,11 @@ const getCapabilitiesTool: McpToolDef = {
   requiredScope: null,
   destructive: false,
   readOnly: true,
-  isWrite: false,
   // Synthesized locally (no inject), so no route to scope-check — usable by any
   // token, including an env-scoped one.
   envScoped: true,
   handler: async (_args: Record<string, unknown>, ctx: McpToolContext): Promise<McpToolResult> => {
-    return jsonResult({
-      version: appVersion,
-      scopes: computeScopes(ctx.authUser),
-      tools: ctx.registeredToolNames,
-    });
+    return jsonResult(buildCapabilities(ctx));
   },
 };
 

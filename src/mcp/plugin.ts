@@ -39,13 +39,24 @@ import { buildMcpServer } from './server.js';
  * bearer-authenticated, and an empty allowlist would break every client.
  * Documented in docs/reference/mcp.md.
  */
-function buildAllowedHosts(): string[] | undefined {
-  const raw = config.MCP_ALLOWED_HOSTS;
-  if (!raw) return undefined;
-  const hosts = raw
+
+/**
+ * Parse the comma-separated `MCP_ALLOWED_HOSTS` raw string into a trimmed,
+ * non-empty list of hostnames. Shared by the transport's `buildAllowedHosts`
+ * (here) AND the admin status page (`src/routes/admin/mcp.ts`) so the page reports
+ * exactly the hosts the transport's DNS-rebinding protection enforces — a single
+ * parser, so the two can't drift. Returns `[]` when unset/empty.
+ */
+export function parseMcpAllowedHosts(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
     .split(',')
     .map((h) => h.trim())
     .filter((h) => h.length > 0);
+}
+
+function buildAllowedHosts(): string[] | undefined {
+  const hosts = parseMcpAllowedHosts(config.MCP_ALLOWED_HOSTS);
   return hosts.length > 0 ? hosts : undefined;
 }
 

@@ -21,6 +21,7 @@ import { describe, it, expect } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { ALL_TOOLS } from './tools.js';
 import { ALL_RESOURCES, configFileUri, configFragmentUri } from './resources.js';
+import { scopesForRole } from '../lib/scopes.js';
 import type { McpToolContext, McpResourceContext } from './types.js';
 import type { ReadResourceTemplateCallback } from '@modelcontextprotocol/sdk/server/mcp.js';
 
@@ -124,6 +125,44 @@ describe('envScoped reflects route reachability (FIX 7 drift guard)', () => {
       expect(captured.url, `${resource.name} should have injected a URL`).toBeDefined();
       const path = captured.url!.split('?')[0];
       expect(resource.envScoped).toBe(deriveEnvScopedFromPath(path));
+    });
+  }
+});
+
+/**
+ * requiredScope vocabulary drift guard.
+ *
+ * Every non-null `requiredScope` an entry declares is the scope the server's
+ * scope gate (`selectForScopes`) checks for membership in the caller's computed
+ * scopes. If a literal here drifts from the actual scope vocabulary (a typo, or a
+ * scope that scopesForRole never emits), the gate would silently hide that tool
+ * from EVERY role — a no-fail, no-warning footgun. This asserts each declared
+ * requiredScope is a member of the union of all role scopes, so such a drift
+ * fails loudly. Parallel to the envScoped drift guard above.
+ */
+describe('requiredScope is a member of the scope vocabulary (drift guard)', () => {
+  const VOCABULARY = new Set([
+    ...scopesForRole('admin'),
+    ...scopesForRole('operator'),
+    ...scopesForRole('viewer'),
+  ]);
+
+  const entries: Array<{ kind: string; name: string; requiredScope: string | null }> = [
+    ...ALL_TOOLS.map((t) => ({ kind: 'tool', name: t.name, requiredScope: t.requiredScope })),
+    ...ALL_RESOURCES.map((r) => ({
+      kind: 'resource',
+      name: r.name,
+      requiredScope: r.requiredScope,
+    })),
+  ];
+
+  for (const entry of entries) {
+    it(`${entry.kind} ${entry.name}`, () => {
+      if (entry.requiredScope === null) return; // meta/read — no scope to validate
+      expect(
+        VOCABULARY.has(entry.requiredScope),
+        `${entry.name} declares requiredScope "${entry.requiredScope}" which no role emits — it would be hidden from everyone`
+      ).toBe(true);
     });
   }
 });

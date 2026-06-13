@@ -30,7 +30,7 @@ import type { AuthUser, UserRole } from '../services/auth.js';
 
 const RESOURCES = ['services', 'secrets', 'servers', 'environments'] as const;
 
-function scopesForRole(role: UserRole): string[] {
+export function scopesForRole(role: UserRole): string[] {
   const out: string[] = [];
 
   // Everyone authenticated gets read access to operational resources.

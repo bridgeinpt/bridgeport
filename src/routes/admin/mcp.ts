@@ -4,21 +4,7 @@ import { routeSchema } from '../../lib/openapi-schema.js';
 import { config } from '../../lib/config.js';
 import { listToolMetadata } from '../../mcp/tools.js';
 import { listResourceMetadata } from '../../mcp/resources.js';
-
-/**
- * Parse the comma-separated `MCP_ALLOWED_HOSTS` config into a trimmed,
- * non-empty list. Mirrors `buildAllowedHosts` in src/mcp/plugin.ts so the status
- * page reports the SAME hosts the transport's DNS-rebinding protection actually
- * enforces. Returns `[]` when unset/empty (protection off).
- */
-function parseAllowedHosts(): string[] {
-  const raw = config.MCP_ALLOWED_HOSTS;
-  if (!raw) return [];
-  return raw
-    .split(',')
-    .map((h) => h.trim())
-    .filter((h) => h.length > 0);
-}
+import { parseMcpAllowedHosts } from '../../mcp/plugin.js';
 
 export async function mcpAdminRoutes(fastify: FastifyInstance): Promise<void> {
   // Admin-only. Returns STATIC MCP inventory + the env-derived enabled/security
@@ -39,7 +25,7 @@ export async function mcpAdminRoutes(fastify: FastifyInstance): Promise<void> {
     async () => {
       const tools = listToolMetadata();
       const resources = listResourceMetadata();
-      const allowedHosts = parseAllowedHosts();
+      const allowedHosts = parseMcpAllowedHosts(config.MCP_ALLOWED_HOSTS);
 
       const readTools = tools.filter((t) => t.readOnly).length;
       const writeTools = tools.length - readTools;

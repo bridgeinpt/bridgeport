@@ -261,15 +261,17 @@ const ADMIN_GATED_READ_TOOLS: Record<string, string> = {
 describe('tool registry shape', () => {
   it('has exactly one meta tool, 46 read tools, and 8 write tools', () => {
     const meta = ALL_TOOLS.filter((t) => t.name === 'get_capabilities');
-    const writes = ALL_TOOLS.filter((t) => t.isWrite);
-    const reads = ALL_TOOLS.filter((t) => !t.isWrite && t.name !== 'get_capabilities');
+    // Writes are the non-read-only tools; reads are the read-only tools excluding
+    // the meta tool (which is also read-only).
+    const writes = ALL_TOOLS.filter((t) => !t.readOnly);
+    const reads = ALL_TOOLS.filter((t) => t.readOnly && t.name !== 'get_capabilities');
     expect(meta).toHaveLength(1);
     expect(writes).toHaveLength(8);
     expect(reads).toHaveLength(46);
   });
 
   it('every write tool is destructive, requires services:write, and is not read-only', () => {
-    for (const t of ALL_TOOLS.filter((t) => t.isWrite)) {
+    for (const t of ALL_TOOLS.filter((t) => !t.readOnly)) {
       expect(t.requiredScope).toBe('services:write');
       expect(t.destructive).toBe(true);
       expect(t.readOnly).toBe(false);
@@ -277,14 +279,14 @@ describe('tool registry shape', () => {
   });
 
   it('every read/meta tool is read-only and not destructive', () => {
-    for (const t of ALL_TOOLS.filter((t) => !t.isWrite)) {
+    for (const t of ALL_TOOLS.filter((t) => t.readOnly)) {
       expect(t.readOnly).toBe(true);
       expect(t.destructive).toBe(false);
     }
   });
 
   it('ordinary read/meta tools have a null requiredScope; admin-gated reads carry their admin scope', () => {
-    for (const t of ALL_TOOLS.filter((t) => !t.isWrite)) {
+    for (const t of ALL_TOOLS.filter((t) => t.readOnly)) {
       const expected = ADMIN_GATED_READ_TOOLS[t.name] ?? null;
       expect(t.requiredScope).toBe(expected);
     }
@@ -311,7 +313,7 @@ describe('tool registry shape', () => {
   it('the two new write tools (refresh_server_health, execute_sync_batch) are global/destructive', () => {
     for (const name of ['refresh_server_health', 'execute_sync_batch']) {
       const t = tool(name);
-      expect(t.isWrite).toBe(true);
+      expect(t.readOnly).toBe(false);
       expect(t.destructive).toBe(true);
       expect(t.requiredScope).toBe('services:write');
       // Both target a GLOBAL route → withheld from env-scoped tokens.

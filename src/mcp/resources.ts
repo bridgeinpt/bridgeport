@@ -41,10 +41,8 @@ import type {
 } from '@modelcontextprotocol/sdk/types.js';
 import type { Variables } from '@modelcontextprotocol/sdk/shared/uriTemplate.js';
 import { z } from 'zod';
-import { appVersion } from '../lib/version.js';
-import { computeScopes } from '../lib/scopes.js';
 import { injectApi } from './inject.js';
-import { mapResult, jsonResult } from './tools.js';
+import { mapResult, jsonResult, seg, buildCapabilities } from './tools.js';
 import type { McpResourceContext, McpResourceDef } from './types.js';
 
 /**
@@ -80,12 +78,12 @@ export const CAPABILITIES_URI = 'bridgeport:///capabilities';
  * path segment.
  */
 export function configFileUri(id: string): string {
-  return `${RESOURCE_URI_SCHEME}:///config-files/${encodeURIComponent(id)}`;
+  return `${RESOURCE_URI_SCHEME}:///config-files/${seg(id)}`;
 }
 
 /** Build a concrete config-fragment resource URI for a given id. */
 export function configFragmentUri(id: string): string {
-  return `${RESOURCE_URI_SCHEME}:///config-fragments/${encodeURIComponent(id)}`;
+  return `${RESOURCE_URI_SCHEME}:///config-fragments/${seg(id)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -153,7 +151,7 @@ async function enumerateEnvCollection(
     envs.map(async (env) => {
       const res = await injectApi(ctx.app, {
         method: 'GET',
-        url: `/api/environments/${encodeURIComponent(env.id)}/${collection}?limit=${ENUM_LIST_LIMIT}`,
+        url: `/api/environments/${seg(env.id)}/${collection}?limit=${ENUM_LIST_LIMIT}`,
         bearer: ctx.bearer,
         remoteAddress: ctx.callerIp,
       });
@@ -226,117 +224,115 @@ async function readViaInject(
 // ---------------------------------------------------------------------------
 
 /**
- * Config files as readable resources. URI: `bridgeport:///config-files/{id}`.
- *
- * - list: enumerate the caller's accessible config files (across their envs)
- *   via the env-prefixed list route. The list route returns metadata only (no
- *   content), which is exactly what a resource descriptor needs.
- * - read: GET `/api/config-files/:id` — the same secret-safe route the
- *   `get_config_file` tool uses (templated content, placeholders intact).
+ * Factory for a config-collection TEMPLATE resource (config files / fragments).
+ * Both families are byte-identical apart from a handful of knobs, so the
+ * ResourceTemplate (with its lazy `list`) and the per-id `read` closure are built
+ * once here — paralleling `readTool`/`writeTool` in tools.ts. The `list` route is
+ * an env-prefixed metadata listing (env-scoping falls out of `injectApi`); the
+ * `read` route is the GLOBAL secret-safe per-id GET the matching tool already uses
+ * (templated content, placeholders intact).
  */
-const configFilesResource: McpResourceDef = {
+function templateResource(opts: {
+  name: string;
+  title: string;
+  description: string;
+  uriTemplate: string;
+  /** Env-prefixed list collection (e.g. 'config-files'). */
+  collection: 'config-files' | 'config-fragments';
+  /** Key the list route nests the rows under (e.g. 'configFiles', 'fragments'). */
+  pluckKey: string;
+  /** Build the concrete per-id resource URI for a list descriptor. */
+  buildUri: (id: string) => string;
+  /** Build the per-id read API path. */
+  buildReadPath: (id: string) => string;
+  /** Compose the descriptor title from the row's name + the row itself. */
+  rowTitle: (name: string, row: Record<string, unknown>) => string;
+}): McpResourceDef {
+  return {
+    name: opts.name,
+    title: opts.title,
+    description: opts.description,
+    mimeType: 'application/json',
+    requiredScope: null, // every valid token has *:read
+    // READ hits the global per-id route → FORBIDDEN_SCOPE for an env-scoped token
+    // (mirrors the matching get_config_* tool, also envScoped:false).
+    envScoped: false,
+    uri: undefined,
+    uriTemplate: opts.uriTemplate,
+    build: (ctx) =>
+      new ResourceTemplate(opts.uriTemplate, {
+        list: async (): Promise<ListResourcesResult> => {
+          const resources = await enumerateEnvCollection(
+            ctx,
+            opts.collection,
+            (body) => {
+              const rows = (body as Record<string, unknown> | null)?.[opts.pluckKey];
+              return Array.isArray(rows) ? (rows as Array<Record<string, unknown>>) : [];
+            },
+            (row, env) => {
+              const id = str(row, 'id');
+              if (!id) return null;
+              const name = str(row, 'name') ?? id;
+              const envLabel = env.name ?? env.id;
+              return {
+                uri: opts.buildUri(id),
+                name: `${envLabel}: ${name}`,
+                title: opts.rowTitle(name, row),
+                description: str(row, 'description') ?? undefined,
+                mimeType: 'application/json',
+              };
+            }
+          );
+          return { resources };
+        },
+      }),
+    read: (ctx) => async (uri: URL, variables: Variables) => {
+      // A single-`{id}` template never yields an array of values for `id`.
+      return readViaInject(ctx, uri, opts.buildReadPath(String(variables.id)), 'application/json');
+    },
+  };
+}
+
+/**
+ * Config files as readable resources. URI: `bridgeport:///config-files/{id}`.
+ *   - list: enumerate the caller's accessible config files via the env-prefixed
+ *     list route (metadata only, exactly what a resource descriptor needs).
+ *   - read: GET `/api/config-files/:id` — the same secret-safe route the
+ *     `get_config_file` tool uses (templated content, placeholders intact).
+ */
+const configFilesResource: McpResourceDef = templateResource({
   name: 'config-files',
   title: 'Config files',
   description:
     'Browse and read config files across your accessible environments. Content is the stored, TEMPLATED form (with `${KEY}` placeholders intact) — resolved/decrypted secret values are never included. URI: bridgeport:///config-files/{id}.',
-  mimeType: 'application/json',
-  requiredScope: null, // every valid token has *:read
-  // READ hits the global GET /api/config-files/:id route → FORBIDDEN_SCOPE for
-  // an env-scoped token (mirrors the get_config_file tool, also envScoped:false).
-  envScoped: false,
-  build: (ctx) =>
-    new ResourceTemplate(CONFIG_FILE_URI_TEMPLATE, {
-      list: async (): Promise<ListResourcesResult> => {
-        const resources = await enumerateEnvCollection(
-          ctx,
-          'config-files',
-          (body) => {
-            const files = (body as { configFiles?: unknown })?.configFiles;
-            return Array.isArray(files) ? (files as Array<Record<string, unknown>>) : [];
-          },
-          (row, env) => {
-            const id = str(row, 'id');
-            if (!id) return null;
-            const name = str(row, 'name') ?? id;
-            const filename = str(row, 'filename');
-            const envLabel = env.name ?? env.id;
-            return {
-              uri: configFileUri(id),
-              name: `${envLabel}: ${name}`,
-              title: filename ? `${name} (${filename})` : name,
-              description: str(row, 'description') ?? undefined,
-              mimeType: 'application/json',
-            };
-          }
-        );
-        return { resources };
-      },
-    }),
-  read: (ctx) => async (uri: URL, variables: Variables) => {
-    const id = Array.isArray(variables.id) ? variables.id[0] : variables.id;
-    return readViaInject(
-      ctx,
-      uri,
-      `/api/config-files/${encodeURIComponent(String(id))}`,
-      'application/json'
-    );
+  uriTemplate: CONFIG_FILE_URI_TEMPLATE,
+  collection: 'config-files',
+  pluckKey: 'configFiles',
+  buildUri: configFileUri,
+  buildReadPath: (id) => `/api/config-files/${seg(id)}`,
+  rowTitle: (name, row) => {
+    const filename = str(row, 'filename');
+    return filename ? `${name} (${filename})` : name;
   },
-};
+});
 
 /**
  * Config fragments as readable resources. URI:
- * `bridgeport:///config-fragments/{id}`. Same pattern as config files.
- *
- * - read: GET `/api/config-fragments/:id` — returns the fragment's templated
- *   content straight from the DB (no secret resolution).
+ * `bridgeport:///config-fragments/{id}`. Same pattern as config files; read hits
+ * GET `/api/config-fragments/:id` (templated content, no secret resolution).
  */
-const configFragmentsResource: McpResourceDef = {
+const configFragmentsResource: McpResourceDef = templateResource({
   name: 'config-fragments',
   title: 'Config fragments',
   description:
     'Browse and read reusable config fragments across your accessible environments. Content is the stored, TEMPLATED text — resolved/decrypted secret values are never included. URI: bridgeport:///config-fragments/{id}.',
-  mimeType: 'application/json',
-  requiredScope: null, // every valid token has *:read
-  // READ hits the global GET /api/config-fragments/:id route → FORBIDDEN_SCOPE
-  // for an env-scoped token, so withheld from env-scoped tokens.
-  envScoped: false,
-  build: (ctx) =>
-    new ResourceTemplate(CONFIG_FRAGMENT_URI_TEMPLATE, {
-      list: async (): Promise<ListResourcesResult> => {
-        const resources = await enumerateEnvCollection(
-          ctx,
-          'config-fragments',
-          (body) => {
-            const frags = (body as { fragments?: unknown })?.fragments;
-            return Array.isArray(frags) ? (frags as Array<Record<string, unknown>>) : [];
-          },
-          (row, env) => {
-            const id = str(row, 'id');
-            if (!id) return null;
-            const name = str(row, 'name') ?? id;
-            const envLabel = env.name ?? env.id;
-            return {
-              uri: configFragmentUri(id),
-              name: `${envLabel}: ${name}`,
-              title: name,
-              description: str(row, 'description') ?? undefined,
-              mimeType: 'application/json',
-            };
-          }
-        );
-        return { resources };
-      },
-    }),
-  read: (ctx) => async (uri: URL, variables: Variables) => {
-    const id = Array.isArray(variables.id) ? variables.id[0] : variables.id;
-    return readViaInject(
-      ctx,
-      uri,
-      `/api/config-fragments/${encodeURIComponent(String(id))}`,
-      'application/json'
-    );
-  },
-};
+  uriTemplate: CONFIG_FRAGMENT_URI_TEMPLATE,
+  collection: 'config-fragments',
+  pluckKey: 'fragments',
+  buildUri: configFragmentUri,
+  buildReadPath: (id) => `/api/config-fragments/${seg(id)}`,
+  rowTitle: (name) => name,
+});
 
 /**
  * Capabilities / server-info as a single STATIC resource. URI:
@@ -356,10 +352,10 @@ const capabilitiesResource: McpResourceDef = {
   envScoped: true,
   uri: CAPABILITIES_URI,
   read: (ctx) => async (uri: URL) => {
+    // Same base shape as the get_capabilities tool (buildCapabilities), extended
+    // with the registered resource names — so the two stay identical.
     const payload = {
-      version: appVersion,
-      scopes: computeScopes(ctx.authUser),
-      tools: ctx.registeredToolNames,
+      ...buildCapabilities(ctx),
       resources: ctx.registeredResourceNames,
     };
     return {
@@ -385,19 +381,6 @@ export const ALL_RESOURCES: McpResourceDef[] = [
 ];
 
 /**
- * The URI (static resources) or URI template (template resources) each resource
- * is reachable at, keyed by resource `name`. Surfaced as `uriTemplate` in the
- * admin status projection so an operator can see the exact addresses. Kept here
- * (rather than on `McpResourceDef`) because the live `build`/`uri` wiring lives
- * in the def while the registry only needs to advertise the address.
- */
-const RESOURCE_URI_BY_NAME: Record<string, string> = {
-  'config-files': CONFIG_FILE_URI_TEMPLATE,
-  'config-fragments': CONFIG_FRAGMENT_URI_TEMPLATE,
-  capabilities: CAPABILITIES_URI,
-};
-
-/**
  * Public, non-sensitive metadata for a single resource — the safe projection used
  * by the admin MCP status page (`GET /api/admin/mcp`). Drops the `build`/`read`
  * closures; exposes only the declarative annotations plus the URI/template.
@@ -419,7 +402,9 @@ export function toResourceMetadata(resource: McpResourceDef): McpResourceMetadat
     description: resource.description,
     requiredScope: resource.requiredScope,
     envScoped: resource.envScoped,
-    uriTemplate: resource.uri ?? RESOURCE_URI_BY_NAME[resource.name],
+    // A static resource carries its address in `uri`; a template resource in
+    // `uriTemplate` (set by templateResource). The address lives on the def now.
+    uriTemplate: resource.uri ?? resource.uriTemplate,
   };
 }
 

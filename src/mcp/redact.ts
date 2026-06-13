@@ -51,7 +51,12 @@ const SECRET_KEYS: ReadonlySet<string> = new Set([
   // SpacesConfig
   'encryptedSecretKey',
   'secretKeyNonce',
-  // SlackChannel
+  // SlackChannel — `webhookUrl` holds the ENCRYPTED Slack incoming-webhook URL
+  // (not a plaintext destination; webhook *subscriptions* use the `url` key, which
+  // we intentionally keep). No current tool reaches SlackChannel, but stripping it
+  // here keeps the "every encrypted column" guarantee complete if a Slack tool is
+  // ever added.
+  'webhookUrl',
   'webhookUrlNonce',
 ]);
 

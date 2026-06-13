@@ -78,8 +78,6 @@ export interface McpToolDef {
   destructive: boolean;
   /** MCP annotation: the tool only reads (no side effects beyond the API call). */
   readOnly: boolean;
-  /** Whether this tool issues a write (POST) and must carry an Idempotency-Key. */
-  isWrite: boolean;
   /**
    * Whether this tool is usable by an ENVIRONMENT-SCOPED API token
    * (`scope.allEnvironments === false`). Such a token can only reach routes that
@@ -183,6 +181,13 @@ export interface McpResourceDef {
    * `build` — exactly one of `uri` / `build` must be set.
    */
   uri?: string;
+  /**
+   * For a TEMPLATE resource: the URI template pattern (e.g.
+   * `bridgeport:///config-files/{id}`). Set by `templateResource` so the address
+   * lives on the def — surfaced as `uriTemplate` in the admin status projection.
+   * Static resources leave this unset (they carry their address in `uri`).
+   */
+  uriTemplate?: string;
   /**
    * For a TEMPLATE resource: build the `ResourceTemplate` (with its lazy `list`
    * callback) closed over the session context. Mutually exclusive with `uri`.
