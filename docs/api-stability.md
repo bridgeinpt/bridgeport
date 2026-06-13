@@ -11,6 +11,7 @@ This document is the compatibility contract for BRIDGEPORT's HTTP API. It tells 
 - [Changelog discipline](#changelog-discipline)
 - [Version discovery](#version-discovery)
 - [Current deprecations](#current-deprecations)
+- [Removed in 3.0](#removed-in-30)
 - [Reporting issues & questions](#reporting-issues--questions)
 
 ---
