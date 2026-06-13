@@ -139,6 +139,16 @@ All Sentry configuration is optional. BRIDGEPORT works fine without it.
 
 After setting either DSN and restarting the container, admins can verify delivery from **Admin → Notifications → Sentry**: each side (Backend / Frontend) shows a "Configured" badge and a **Send test error** button. The button captures a synthetic exception via the SDK; the issue should appear in your Sentry project's Issues tab within ~30 seconds. If neither DSN is set, the tab inlines the env-var setup instructions.
 
+### MCP (Model Context Protocol) Server
+
+Optional. Exposes a curated subset of the API as agent tools at `POST /mcp`. Disabled by default.
+
+| Variable | Type | Default | Description |
+|---|---|---|---|
+| `MCP_ENABLED` | boolean | `false` | Master switch. When `false` the `/mcp` route is not registered (returns `404`). When `true`, MCP clients can connect with a bearer token and call read tools (any role) plus write tools (operator/admin). |
+
+> See the [MCP Server Reference](reference/mcp.md) for client setup, the full tool list, the scope→tool mapping, and the data-egress note (tool outputs may be sent to the operator's model; secret/var values are never returned).
+
 ---
 
 ## Configuration Recipes

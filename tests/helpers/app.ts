@@ -25,6 +25,8 @@ import openapiPlugin from '../../src/plugins/openapi.js';
 // SINGLE SOURCE OF TRUTH for the route set — shared with src/server.ts and the
 // spec dumper, so the test app exercises exactly the routes that ship.
 import { registerApiRoutes } from '../../src/register-routes.js';
+import { config } from '../../src/lib/config.js';
+import mcpPlugin from '../../src/mcp/plugin.js';
 
 export interface TestApp extends FastifyInstance {
   prisma: PrismaClient;
@@ -33,6 +35,12 @@ export interface TestApp extends FastifyInstance {
 export interface BuildTestAppOptions {
   /** Skip database setup (useful if you manage it separately) */
   skipDbSetup?: boolean;
+  /**
+   * Register the MCP plugin (POST /mcp) even when MCP_ENABLED is not set in the
+   * env. Mirrors the production gating in src/server.ts so MCP integration tests
+   * can opt in without mutating process.env. Defaults to following config.MCP_ENABLED.
+   */
+  mcpEnabled?: boolean;
 }
 
 /**
@@ -100,6 +108,12 @@ export async function buildTestApp(options: BuildTestAppOptions = {}): Promise<T
   // and the spec dumper (this now includes configScanRoutes, which the old
   // hand-copied list omitted).
   await registerApiRoutes(fastify);
+
+  // MCP server (issue #208) — mirror src/server.ts's opt-in gating. Tests pass
+  // `mcpEnabled: true` to exercise POST /mcp without setting the env var.
+  if (options.mcpEnabled ?? config.MCP_ENABLED) {
+    await fastify.register(mcpPlugin);
+  }
 
   // Health check endpoint
   fastify.get('/health', async () => ({

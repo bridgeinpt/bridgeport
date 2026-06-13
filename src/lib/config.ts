@@ -14,6 +14,10 @@ const envSchema = z.object({
   // Initial admin user (created on first boot if no users exist)
   ADMIN_EMAIL: z.string().email().optional(),
   ADMIN_PASSWORD: z.string().min(8).optional(),
+  // MCP (Model Context Protocol) server — exposes a curated subset of the API
+  // as agent tools at POST /mcp. Disabled by default; when off the route is not
+  // registered at all (so /mcp → 404). See docs/reference/mcp.md.
+  MCP_ENABLED: z.coerce.boolean().default(false),
   // Scheduler intervals (in seconds)
   SCHEDULER_ENABLED: z.coerce.boolean().default(true),
   SCHEDULER_SERVER_HEALTH_INTERVAL: z.coerce.number().default(60), // 1 minute

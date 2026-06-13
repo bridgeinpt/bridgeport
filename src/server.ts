@@ -18,6 +18,7 @@ import idempotencyPlugin from './lib/idempotency.js';
 import errorHandlerPlugin from './plugins/error-handler.js';
 import openapiPlugin from './plugins/openapi.js';
 import { registerApiRoutes } from './register-routes.js';
+import mcpPlugin from './mcp/plugin.js';
 import { bootstrapAdminUser } from './services/auth.js';
 import { bootstrapManagementEnvironment } from './services/host-detection.js';
 import { startScheduler, stopScheduler } from './lib/scheduler.js';
@@ -174,6 +175,18 @@ async function buildServer() {
       cliVersion,
     };
   });
+
+  // MCP (Model Context Protocol) server — exposes a curated subset of the API
+  // as agent tools at POST /mcp. Opt-in via MCP_ENABLED (default false); when
+  // off the route is never registered, so /mcp returns 404. The plugin mounts
+  // on the ROOT instance because its tool handlers replay calls through
+  // `app.inject()`. NOTE: injected calls intentionally stay subject to the
+  // normal per-IP rate limit — we do NOT add /mcp (or a bypass header) to the
+  // rate-limit allowList, since a static bypass would be spoofable on every
+  // route and defeat login rate-limiting.
+  if (config.MCP_ENABLED) {
+    await fastify.register(mcpPlugin);
+  }
 
   // Client config (public endpoint for frontend Sentry init)
   fastify.get('/api/client-config', async () => {

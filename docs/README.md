@@ -83,6 +83,7 @@ Detailed technical reference for APIs, CLI, agent, plugins, and settings.
 | [API Stability Policy](api-stability.md) | Compatibility contract, semver rules, deprecation window, and current deprecations |
 | [CLI Reference](reference/cli.md) | Full command reference with examples and expected output |
 | [Agent Reference](reference/agent.md) | Monitoring agent installation, configuration, and troubleshooting |
+| [MCP Server](reference/mcp.md) | Expose the API as Model Context Protocol tools for AI agents (opt-in) |
 | [Real-Time Events (SSE)](reference/events.md) | Server-Sent Events endpoint, event types, and client integration |
 | [Plugin Authoring](reference/plugins.md) | Create custom service types and database types with monitoring queries |
 | [Environment Settings](reference/environment-settings.md) | All per-environment settings (General, Monitoring, Operations, Data, Configuration) |
