@@ -249,14 +249,23 @@ describe('get_capabilities synthesis', () => {
   });
 });
 
+// Read tools whose backing route is requireAdmin-gated (or tokens:manage):
+// these intentionally carry a non-null requiredScope so the advertised list is
+// truthful — a non-admin token can't call the route, so the tool is withheld.
+const ADMIN_GATED_READ_TOOLS: Record<string, string> = {
+  get_environment_settings: 'admin:*',
+  list_service_accounts: 'admin:*',
+  list_api_tokens: 'tokens:manage',
+};
+
 describe('tool registry shape', () => {
-  it('has exactly one meta tool, 23 read tools, and 6 write tools', () => {
+  it('has exactly one meta tool, 46 read tools, and 8 write tools', () => {
     const meta = ALL_TOOLS.filter((t) => t.name === 'get_capabilities');
     const writes = ALL_TOOLS.filter((t) => t.isWrite);
     const reads = ALL_TOOLS.filter((t) => !t.isWrite && t.name !== 'get_capabilities');
     expect(meta).toHaveLength(1);
-    expect(writes).toHaveLength(6);
-    expect(reads).toHaveLength(23);
+    expect(writes).toHaveLength(8);
+    expect(reads).toHaveLength(46);
   });
 
   it('every write tool is destructive, requires services:write, and is not read-only', () => {
@@ -267,11 +276,17 @@ describe('tool registry shape', () => {
     }
   });
 
-  it('every read/meta tool has a null requiredScope, is read-only, and not destructive', () => {
+  it('every read/meta tool is read-only and not destructive', () => {
     for (const t of ALL_TOOLS.filter((t) => !t.isWrite)) {
-      expect(t.requiredScope).toBeNull();
       expect(t.readOnly).toBe(true);
       expect(t.destructive).toBe(false);
+    }
+  });
+
+  it('ordinary read/meta tools have a null requiredScope; admin-gated reads carry their admin scope', () => {
+    for (const t of ALL_TOOLS.filter((t) => !t.isWrite)) {
+      const expected = ADMIN_GATED_READ_TOOLS[t.name] ?? null;
+      expect(t.requiredScope).toBe(expected);
     }
   });
 
@@ -291,5 +306,74 @@ describe('tool registry shape', () => {
     expect(strategy.safeParse(undefined).success).toBe(true); // optional
     expect(strategy.safeParse('rolling').success).toBe(false); // not in the enum
     expect(strategy.safeParse('').success).toBe(false);
+  });
+
+  it('the two new write tools (refresh_server_health, execute_sync_batch) are global/destructive', () => {
+    for (const name of ['refresh_server_health', 'execute_sync_batch']) {
+      const t = tool(name);
+      expect(t.isWrite).toBe(true);
+      expect(t.destructive).toBe(true);
+      expect(t.requiredScope).toBe('services:write');
+      // Both target a GLOBAL route → withheld from env-scoped tokens.
+      expect(t.envScoped).toBe(false);
+    }
+  });
+
+  it('admin-gated read tools advertise the scope their route enforces (so non-admins do not see them)', () => {
+    expect(tool('get_environment_settings').requiredScope).toBe('admin:*');
+    expect(tool('list_service_accounts').requiredScope).toBe('admin:*');
+    // Token routes gate on tokens:manage (admin-only in computeScopes).
+    expect(tool('list_api_tokens').requiredScope).toBe('tokens:manage');
+  });
+});
+
+describe('execute_sync_batch body builder', () => {
+  // The route's body uses a discriminated union keyed on `type`; the tool input
+  // takes a bare list of { configFileId } and must inject the literal tag.
+  it('maps { configFileId } operations to { type: "config-file-sync", configFileId }', async () => {
+    let capturedPayload: unknown;
+    const app = {
+      inject: async (opts: { payload?: unknown }) => {
+        capturedPayload = opts.payload;
+        return { statusCode: 200, payload: JSON.stringify({ batchId: 'b1', status: 'ok', operations: [] }) };
+      },
+    } as unknown as FastifyInstance;
+    const ctx: McpToolContext = {
+      app,
+      bearer: 'b',
+      callerIp: '203.0.113.9',
+      authUser: { id: 'u1', email: 'a@test', name: null, role: 'operator' },
+      registeredToolNames: [],
+    };
+
+    const res = await tool('execute_sync_batch').handler(
+      { operations: [{ configFileId: 'cf1' }, { configFileId: 'cf2' }], rollbackOnFailure: false },
+      ctx
+    );
+    expect(res.isError).toBeFalsy();
+    expect(capturedPayload).toEqual({
+      operations: [
+        { type: 'config-file-sync', configFileId: 'cf1' },
+        { type: 'config-file-sync', configFileId: 'cf2' },
+      ],
+      rollbackOnFailure: false,
+    });
+  });
+});
+
+describe('credential-bearing read tools never expose raw secret material in their schema/description', () => {
+  // Defensive doc-contract guard: the registry/webhook/token tools must advertise
+  // they return metadata only. We assert their descriptions disclaim secrets and
+  // that their input schemas don't accept a credential field.
+  it('list_registries / get_registry describe credential-free output', () => {
+    for (const name of ['list_registries', 'get_registry']) {
+      expect(tool(name).description.toLowerCase()).toContain('never returned');
+    }
+  });
+  it('list_webhook_subscriptions describes the signing secret is never returned', () => {
+    expect(tool('list_webhook_subscriptions').description.toLowerCase()).toContain('never returned');
+  });
+  it('list_api_tokens describes the token value/hash is never returned', () => {
+    expect(tool('list_api_tokens').description.toLowerCase()).toContain('never returned');
   });
 });

@@ -112,13 +112,18 @@ const seg = (v: unknown): string => encodeURIComponent(String(v));
 /**
  * Build a read tool: GETs the URL produced by `buildUrl(args)` and returns the
  * API body verbatim (or an MCP error result on non-2xx). `transform` optionally
- * post-processes the parsed body (used to strip var values).
+ * post-processes the parsed body (used to strip var values / credential fields).
  *
  * `envScoped` declares whether the backing route is reachable by an
  * environment-scoped API token: `true` for env routes (`/api/environments/:envId/...`,
  * `GET /api/environments`, `GET /api/environments/:id`) and no-scope routes
  * (`/health`); `false` for global routes (`/api/servers/:id`, `/api/audit-logs`,
  * …), which always FORBIDDEN_SCOPE for such a token. See `McpToolDef.envScoped`.
+ *
+ * `requiredScope` defaults to `null` (every valid token has `*:read`). Set it to
+ * an admin scope (`admin:*`, `tokens:manage`) for a read whose backing route is
+ * `requireAdmin`-gated, so the advertised list stays TRUTHFUL: a non-admin token
+ * wouldn't be able to call the route, so the tool is withheld from it.
  */
 function readTool(opts: {
   name: string;
@@ -127,6 +132,7 @@ function readTool(opts: {
   inputSchema: Record<string, z.ZodType>;
   buildUrl: (args: Record<string, unknown>) => string;
   envScoped: boolean;
+  requiredScope?: string | null;
   transform?: (body: unknown) => unknown;
 }): McpToolDef {
   return {
@@ -134,7 +140,7 @@ function readTool(opts: {
     title: opts.title,
     description: opts.description,
     inputSchema: opts.inputSchema,
-    requiredScope: null, // every valid token has *:read
+    requiredScope: opts.requiredScope ?? null, // default: every valid token has *:read
     destructive: false,
     readOnly: true,
     isWrite: false,
@@ -458,6 +464,297 @@ const readTools: McpToolDef[] = [
     buildUrl: () => '/health',
     envScoped: true, // /health — unauthenticated/no-scope route (always reachable)
   }),
+
+  // ---- Databases (metadata only; credentials are never returned by the route:
+  // the service projects `hasCredentials` and omits encryptedCredentials) ----
+  readTool({
+    name: 'list_databases',
+    title: 'List databases',
+    description:
+      'List databases in an environment (metadata, backup config, monitoring state). Connection credentials are never returned — only a hasCredentials flag.',
+    inputSchema: { envId },
+    buildUrl: (a) => `/api/environments/${seg(a.envId)}/databases`,
+    envScoped: true, // /api/environments/:envId/databases — env route
+  }),
+  readTool({
+    name: 'get_database',
+    title: 'Get database',
+    description:
+      'Get a single database by id (metadata, backup config, monitoring state). Connection credentials are never returned — only a hasCredentials flag.',
+    inputSchema: { id },
+    buildUrl: (a) => `/api/databases/${seg(a.id)}`,
+    envScoped: false, // /api/databases/:id — global route (FORBIDDEN_SCOPE for env-scoped tokens)
+  }),
+  readTool({
+    name: 'list_database_backups',
+    title: 'List database backups',
+    description: 'List backup history for a database (status, size, timestamps).',
+    inputSchema: {
+      id,
+      limit: z.number().int().min(1).max(500).optional().describe('Max rows (default 50).'),
+      offset: z.number().int().min(0).optional().describe('Pagination offset (default 0).'),
+    },
+    buildUrl: (a) => {
+      const base = `/api/databases/${seg(a.id)}/backups`;
+      const params = new URLSearchParams();
+      if (a.limit !== undefined) params.set('limit', String(a.limit));
+      if (a.offset !== undefined) params.set('offset', String(a.offset));
+      const qs = params.toString();
+      return qs ? `${base}?${qs}` : base;
+    },
+    envScoped: false, // /api/databases/:id/backups — global route
+  }),
+
+  // ---- Notifications ----
+  readTool({
+    name: 'list_notifications',
+    title: 'List notifications',
+    description: 'List in-app notifications for the calling principal.',
+    inputSchema: {
+      limit: z.number().int().min(1).max(100).optional().describe('Max rows (default 50).'),
+      offset: z.number().int().min(0).optional().describe('Pagination offset (default 0).'),
+      unreadOnly: z.boolean().optional().describe('Only return unread notifications.'),
+      environmentId: z.string().min(1).optional().describe('Filter by environment id.'),
+      category: z.enum(['user', 'system']).optional().describe('Filter by category.'),
+    },
+    buildUrl: (a) => {
+      const params = new URLSearchParams();
+      for (const key of ['limit', 'offset', 'unreadOnly', 'environmentId', 'category'] as const) {
+        if (a[key] !== undefined && a[key] !== null) params.set(key, String(a[key]));
+      }
+      const qs = params.toString();
+      return qs ? `/api/notifications?${qs}` : '/api/notifications';
+    },
+    envScoped: false, // /api/notifications — global route (FORBIDDEN_SCOPE for env-scoped tokens)
+  }),
+
+  // ---- Registries (metadata only; the route projects hasToken/hasPassword and
+  // NEVER returns encrypted blobs or decrypted credentials) ----
+  readTool({
+    name: 'list_registries',
+    title: 'List registry connections',
+    description:
+      'List container-registry connections in an environment (type, URL, prefix, defaults). Credentials are NEVER returned — only hasToken/hasPassword booleans and the (non-secret) username.',
+    inputSchema: { envId },
+    buildUrl: (a) => `/api/environments/${seg(a.envId)}/registries`,
+    envScoped: true, // /api/environments/:envId/registries — env route
+  }),
+  readTool({
+    name: 'get_registry',
+    title: 'Get registry connection',
+    description:
+      'Get a single registry connection by id (type, URL, prefix, defaults). Credentials are NEVER returned — only hasToken/hasPassword booleans and the (non-secret) username.',
+    inputSchema: { id },
+    buildUrl: (a) => `/api/registries/${seg(a.id)}`,
+    envScoped: false, // /api/registries/:id — global route (FORBIDDEN_SCOPE for env-scoped tokens)
+  }),
+
+  // ---- Topology ----
+  readTool({
+    name: 'get_topology',
+    title: 'Get topology diagram',
+    description:
+      'Export the environment topology (servers, services, databases, external entities, and their connections) as a Mermaid graph.',
+    inputSchema: { environmentId: z.string().min(1).describe('Environment id (cuid).') },
+    buildUrl: (a) => `/api/diagram-export?environmentId=${seg(a.environmentId)}&format=mermaid`,
+    envScoped: false, // /api/diagram-export — global route (FORBIDDEN_SCOPE for env-scoped tokens)
+  }),
+  readTool({
+    name: 'list_connections',
+    title: 'List topology connections',
+    description: 'List the topology connections (edges) between nodes in an environment.',
+    inputSchema: { environmentId: z.string().min(1).describe('Environment id (cuid).') },
+    buildUrl: (a) => `/api/connections?environmentId=${seg(a.environmentId)}`,
+    envScoped: false, // /api/connections — global route (FORBIDDEN_SCOPE for env-scoped tokens)
+  }),
+  readTool({
+    name: 'list_external_entities',
+    title: 'List external entities',
+    description:
+      'List external topology entities (CDNs, clients, third-party deps) placed on an environment’s diagram.',
+    inputSchema: { envId },
+    buildUrl: (a) => `/api/environments/${seg(a.envId)}/external-entities`,
+    envScoped: true, // /api/environments/:envId/external-entities — env route
+  }),
+  readTool({
+    name: 'list_server_clusters',
+    title: 'List server clusters',
+    description: 'List server clusters (logical server groupings) in an environment.',
+    inputSchema: { envId },
+    buildUrl: (a) => `/api/environments/${seg(a.envId)}/server-clusters`,
+    envScoped: true, // /api/environments/:envId/server-clusters — env route
+  }),
+
+  // ---- Service dependencies ----
+  readTool({
+    name: 'get_service_dependencies',
+    title: 'Get service dependencies',
+    description: 'Get a service’s dependencies and dependents (the services it relies on / that rely on it).',
+    inputSchema: { id },
+    buildUrl: (a) => `/api/services/${seg(a.id)}/dependencies`,
+    envScoped: false, // /api/services/:id/dependencies — global route (FORBIDDEN_SCOPE for env-scoped tokens)
+  }),
+  readTool({
+    name: 'get_dependency_graph',
+    title: 'Get dependency graph',
+    description:
+      'Get the full service dependency graph (nodes, edges) and the computed deployment order for an environment.',
+    inputSchema: { envId },
+    buildUrl: (a) => `/api/environments/${seg(a.envId)}/dependency-graph`,
+    envScoped: true, // /api/environments/:envId/dependency-graph — env route
+  }),
+
+  // ---- Container images ----
+  readTool({
+    name: 'list_container_images',
+    title: 'List container images',
+    description: 'List container images tracked in an environment (latest digest, best tag, update availability).',
+    inputSchema: {
+      envId,
+      limit: z.number().int().min(1).max(500).optional().describe('Max rows.'),
+      offset: z.number().int().min(0).optional().describe('Pagination offset.'),
+    },
+    buildUrl: (a) => {
+      const base = `/api/environments/${seg(a.envId)}/container-images`;
+      const params = new URLSearchParams();
+      if (a.limit !== undefined) params.set('limit', String(a.limit));
+      if (a.offset !== undefined) params.set('offset', String(a.offset));
+      const qs = params.toString();
+      return qs ? `${base}?${qs}` : base;
+    },
+    envScoped: true, // /api/environments/:envId/container-images — env route
+  }),
+  readTool({
+    name: 'get_container_image',
+    title: 'Get container image',
+    description: 'Get a single container image by id, including its digests and linked services.',
+    inputSchema: { id },
+    buildUrl: (a) => `/api/container-images/${seg(a.id)}`,
+    envScoped: false, // /api/container-images/:id — global route (FORBIDDEN_SCOPE for env-scoped tokens)
+  }),
+  readTool({
+    name: 'list_image_digests',
+    title: 'List image digests',
+    description: 'List the discovered manifest digests for a container image (paginated).',
+    inputSchema: {
+      id,
+      limit: z.number().int().min(1).max(500).optional().describe('Max rows (default 20).'),
+      offset: z.number().int().min(0).optional().describe('Pagination offset (default 0).'),
+    },
+    buildUrl: (a) => {
+      const base = `/api/container-images/${seg(a.id)}/digests`;
+      const params = new URLSearchParams();
+      if (a.limit !== undefined) params.set('limit', String(a.limit));
+      if (a.offset !== undefined) params.set('offset', String(a.offset));
+      const qs = params.toString();
+      return qs ? `${base}?${qs}` : base;
+    },
+    envScoped: false, // /api/container-images/:id/digests — global route
+  }),
+
+  // ---- Compose ----
+  readTool({
+    name: 'get_service_compose',
+    title: 'Get service compose preview',
+    description:
+      'Preview the generated deployment artifacts (rendered docker-compose + env files) for a service WITHOUT deploying. Resolved secret values are redacted in the preview.',
+    inputSchema: { id },
+    buildUrl: (a) => `/api/services/${seg(a.id)}/compose/preview`,
+    envScoped: false, // /api/services/:id/compose/preview — global route (FORBIDDEN_SCOPE for env-scoped tokens)
+  }),
+
+  // ---- Plugin types (any authenticated role; tagged admin in OpenAPI but the
+  // GET routes only require `authenticate`) ----
+  readTool({
+    name: 'list_service_types',
+    title: 'List service types',
+    description: 'List plugin-defined service types and their predefined commands (shell, migrate, etc.).',
+    inputSchema: {},
+    buildUrl: () => '/api/settings/service-types',
+    envScoped: false, // /api/settings/service-types — global route (FORBIDDEN_SCOPE for env-scoped tokens)
+  }),
+  readTool({
+    name: 'list_database_types',
+    title: 'List database types',
+    description:
+      'List plugin-defined database types and their predefined commands. Connection-field definitions describe shape only (no credential values).',
+    inputSchema: {},
+    buildUrl: () => '/api/settings/database-types',
+    envScoped: false, // /api/settings/database-types — global route (FORBIDDEN_SCOPE for env-scoped tokens)
+  }),
+
+  // ---- Settings ----
+  readTool({
+    name: 'get_system_settings',
+    title: 'Get system settings',
+    description:
+      'Get the global system settings (timeouts, retention, agent thresholds, public URL). The route masks the only secret field (the DO registry token → ****-suffixed), so no credential is returned.',
+    inputSchema: {},
+    buildUrl: () => '/api/settings/system',
+    envScoped: false, // /api/settings/system — global route (FORBIDDEN_SCOPE for env-scoped tokens)
+  }),
+  readTool({
+    name: 'get_environment_settings',
+    title: 'Get environment settings',
+    description:
+      'Get an environment settings module (general | monitoring | operations | data | configuration) and its field definitions. ADMIN-ONLY (the route is requireAdmin-gated).',
+    inputSchema: {
+      id: z.string().min(1).describe('Environment id (cuid).'),
+      module: z
+        .enum(['general', 'monitoring', 'operations', 'data', 'configuration'])
+        .describe('Which settings module to read.'),
+    },
+    buildUrl: (a) => `/api/environments/${seg(a.id)}/settings/${seg(a.module)}`,
+    // /api/environments/:id/settings/:module — env-path route, but requireAdmin.
+    // Reachable by an env-scoped ADMIN token for its own env, so envScoped:true.
+    envScoped: true,
+    requiredScope: 'admin:*',
+  }),
+
+  // ---- Webhook subscriptions (the service projects `hasSecret` and NEVER
+  // returns the signing secret) ----
+  readTool({
+    name: 'list_webhook_subscriptions',
+    title: 'List webhook subscriptions',
+    description:
+      'List env-scoped webhook subscriptions (URL, events, enabled state). The signing secret is NEVER returned — only a hasSecret boolean.',
+    inputSchema: { envId },
+    buildUrl: (a) => `/api/environments/${seg(a.envId)}/webhooks`,
+    envScoped: true, // /api/environments/:envId/webhooks — env route
+  }),
+
+  // ---- Service accounts & API tokens (ADMIN / tokens:manage; metadata only,
+  // NEVER token values or hashes) ----
+  readTool({
+    name: 'list_service_accounts',
+    title: 'List service accounts',
+    description:
+      'List machine-identity service accounts (name, role, disabled flag, token count). ADMIN-ONLY. No token values or hashes are returned.',
+    inputSchema: {},
+    buildUrl: () => '/api/admin/service-accounts',
+    envScoped: false, // /api/admin/service-accounts — global admin route
+    requiredScope: 'admin:*',
+  }),
+  readTool({
+    name: 'list_api_tokens',
+    title: 'List API tokens',
+    description:
+      'List API tokens (name, non-secret prefix, role, scope, owner, expiry, last-used). Requires tokens:manage (admin). The token VALUE/HASH is NEVER returned — only the short prefix.',
+    inputSchema: {
+      ownerUserId: z.string().min(1).optional().describe('Filter by owning user id.'),
+      ownerServiceAccountId: z.string().min(1).optional().describe('Filter by owning service-account id.'),
+    },
+    buildUrl: (a) => {
+      const params = new URLSearchParams();
+      for (const key of ['ownerUserId', 'ownerServiceAccountId'] as const) {
+        if (a[key] !== undefined && a[key] !== null) params.set(key, String(a[key]));
+      }
+      const qs = params.toString();
+      return qs ? `/api/admin/tokens?${qs}` : '/api/admin/tokens';
+    },
+    envScoped: false, // /api/admin/tokens — global admin route
+    requiredScope: 'tokens:manage',
+  }),
 ];
 
 // ---------------------------------------------------------------------------
@@ -578,6 +875,47 @@ const writeTools: McpToolDef[] = [
     },
     buildUrl: (a) =>
       `/api/config-files/${seg(a.id)}/sync-all${a.dryRun ? '?dryRun=true' : ''}`,
+  }),
+  writeTool({
+    name: 'refresh_server_health',
+    title: 'Refresh server health',
+    description:
+      'Trigger a LIVE health check against a server (requires operator role). COST: performs a live query to the target host over SSH (not a cached read) and updates the stored health columns. Identical calls within ~60s dedupe as retries (the original result replays); a later repeat runs a NEW live check. Pass a unique idempotencyKey to force or extend that safety.',
+    requiredScope: 'services:write',
+    inputSchema: { id },
+    buildUrl: (a) => `/api/servers/${seg(a.id)}/health`,
+  }),
+  writeTool({
+    name: 'execute_sync_batch',
+    title: 'Execute sync batch',
+    description:
+      'Atomically sync MULTIPLE config files in one all-or-nothing (or best-effort) batch (requires operator role). DESTRUCTIVE: each op pushes config content to its attached hosts. With rollbackOnFailure=true (default) a mid-batch failure rolls back the already-applied ops. There is NO dry-run for batches — preview individual files with sync_config_file(dryRun=true) first. The route consumes the injected Idempotency-Key itself: identical calls within ~60s dedupe (the original batch result replays); a later repeat runs a NEW batch. Same key + a different body → conflict. Pass a unique idempotencyKey to force or extend that safety.',
+    requiredScope: 'services:write',
+    inputSchema: {
+      operations: z
+        .array(
+          z.object({
+            configFileId: z.string().min(1).describe('ConfigFile id to sync.'),
+          })
+        )
+        .min(1)
+        .max(50)
+        .describe('1–50 config-file-sync operations. All files must live in the SAME environment.'),
+      rollbackOnFailure: z
+        .boolean()
+        .optional()
+        .describe('Roll back already-applied ops if a later op fails (default true).'),
+    },
+    buildUrl: () => '/api/sync/batch',
+    buildBody: (a) => {
+      const ops = Array.isArray(a.operations) ? (a.operations as Array<{ configFileId: string }>) : [];
+      const body: Record<string, unknown> = {
+        // The route's discriminated union requires the literal `type` tag.
+        operations: ops.map((op) => ({ type: 'config-file-sync', configFileId: op.configFileId })),
+      };
+      if (a.rollbackOnFailure !== undefined) body.rollbackOnFailure = a.rollbackOnFailure;
+      return body;
+    },
   }),
 ];
 

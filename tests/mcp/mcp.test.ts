@@ -23,8 +23,10 @@ import { createTestEnvironment } from '../factories/environment.js';
 import { createTestServer } from '../factories/server.js';
 import { createTestContainerImage } from '../factories/container-image.js';
 import { createTestService, createTestServiceDeployment } from '../factories/service.js';
+import { createTestDatabase } from '../factories/database.js';
 import { createSecret } from '../../src/services/secrets.js';
 import { createApiToken } from '../../src/services/auth.js';
+import { createRegistryConnection } from '../../src/services/registries.js';
 
 /** Shape of a tools/call result block we assert on. */
 interface ToolText {
@@ -48,6 +50,8 @@ describe('MCP server (integration, SDK client)', () => {
   let envId: string;
   let serviceId: string;
   let configFileId: string;
+  let registryId: string;
+  let databaseId: string;
 
   // Track clients/transports so we always close them (the SDK keeps a fetch
   // connection open per client).
@@ -117,6 +121,24 @@ describe('MCP server (integration, SDK client)', () => {
       data: { name: 'mcp-cf', filename: 'mcp.env', content: 'X=1', environmentId: envId },
     });
     configFileId = cf.id;
+
+    // A registry connection WITH credentials (token + password are encrypted at
+    // rest by the service). The list/get tools must surface metadata only —
+    // never the encrypted blobs or the plaintext credential.
+    const registry = await createRegistryConnection(envId, {
+      name: 'mcp-registry',
+      type: 'generic',
+      registryUrl: 'registry.mcp.test',
+      token: 'super-secret-registry-token',
+      username: 'mcp-user',
+      password: 'super-secret-registry-password',
+    });
+    registryId = registry.id;
+
+    // A database (its connection credentials, if any, are encrypted at rest;
+    // the read tools project `hasCredentials` only).
+    const database = await createTestDatabase(app.prisma, { environmentId: envId, name: 'mcp-db' });
+    databaseId = database.id;
   });
 
   afterAll(async () => {
@@ -289,6 +311,181 @@ describe('MCP server (integration, SDK client)', () => {
     });
   });
 
+  // 4b. New read tools: listed + callable -----------------------------------
+  describe('new read tools are registered and callable', () => {
+    it('admin sees the broadened read surface in tools/list', async () => {
+      const client = await connect(adminToken);
+      const { tools } = await client.listTools();
+      const names = tools.map((t) => t.name);
+      // A representative sample across the new resource families.
+      for (const t of [
+        'list_databases',
+        'get_database',
+        'list_database_backups',
+        'list_notifications',
+        'list_registries',
+        'get_registry',
+        'get_topology',
+        'list_external_entities',
+        'list_server_clusters',
+        'get_dependency_graph',
+        'list_container_images',
+        'get_service_compose',
+        'list_service_types',
+        'list_database_types',
+        'get_system_settings',
+        'list_webhook_subscriptions',
+      ]) {
+        expect(names).toContain(t);
+      }
+    });
+
+    it('list_databases returns the seeded database (env-scoped read)', async () => {
+      const client = await connect(viewerToken);
+      const res = (await client.callTool({
+        name: 'list_databases',
+        arguments: { envId },
+      })) as ToolText;
+      expect(res.isError).toBeFalsy();
+      const body = JSON.parse(firstText(res)) as { databases: Array<Record<string, unknown>> };
+      expect(body.databases.some((d) => d.id === databaseId)).toBe(true);
+      // The DB read shape exposes a hasCredentials flag, never the encrypted blob.
+      for (const d of body.databases) {
+        expect(d).not.toHaveProperty('encryptedCredentials');
+        expect(d).not.toHaveProperty('credentialsNonce');
+      }
+    });
+
+    it('get_topology returns a Mermaid graph for the environment', async () => {
+      const client = await connect(adminToken);
+      const res = (await client.callTool({
+        name: 'get_topology',
+        arguments: { environmentId: envId },
+      })) as ToolText;
+      expect(res.isError).toBeFalsy();
+      const body = JSON.parse(firstText(res)) as { mermaid: string };
+      expect(typeof body.mermaid).toBe('string');
+      expect(body.mermaid).toContain('graph TD');
+    });
+
+    it('list_service_types returns the plugin-seeded types', async () => {
+      const client = await connect(viewerToken);
+      const res = (await client.callTool({
+        name: 'list_service_types',
+        arguments: {},
+      })) as ToolText;
+      expect(res.isError).toBeFalsy();
+      const body = JSON.parse(firstText(res)) as { serviceTypes: unknown[] };
+      expect(Array.isArray(body.serviceTypes)).toBe(true);
+    });
+  });
+
+  // 4c. Credential-bearing read tools NEVER leak secrets ---------------------
+  describe('credential-bearing read tools return no secret material', () => {
+    it('list_registries / get_registry expose metadata only (hasToken/hasPassword), never the credential', async () => {
+      const client = await connect(adminToken);
+
+      const listRes = (await client.callTool({
+        name: 'list_registries',
+        arguments: { envId },
+      })) as ToolText;
+      expect(listRes.isError).toBeFalsy();
+      const listText = firstText(listRes);
+      const listBody = JSON.parse(listText) as { registries: Array<Record<string, unknown>> };
+      const reg = listBody.registries.find((r) => r.id === registryId);
+      expect(reg).toBeDefined();
+      // Metadata booleans are present...
+      expect(reg).toMatchObject({ hasToken: true, hasPassword: true, username: 'mcp-user' });
+      // ...but NO credential field of any form.
+      for (const field of ['token', 'password', 'encryptedToken', 'tokenNonce', 'encryptedPassword', 'passwordNonce']) {
+        expect(reg).not.toHaveProperty(field);
+      }
+      // Belt and suspenders: neither plaintext secret appears anywhere in output.
+      expect(listText).not.toContain('super-secret-registry-token');
+      expect(listText).not.toContain('super-secret-registry-password');
+
+      const getRes = (await client.callTool({
+        name: 'get_registry',
+        arguments: { id: registryId },
+      })) as ToolText;
+      const getText = firstText(getRes);
+      expect(getText).not.toContain('super-secret-registry-token');
+      expect(getText).not.toContain('super-secret-registry-password');
+      const getBody = JSON.parse(getText) as { registry: Record<string, unknown> };
+      for (const field of ['token', 'password', 'encryptedToken', 'encryptedPassword']) {
+        expect(getBody.registry).not.toHaveProperty(field);
+      }
+    });
+
+    it('list_api_tokens (admin) returns the non-secret prefix only — never a token value or hash', async () => {
+      // Mint a token so the list is non-empty. createApiToken returns the full
+      // value ONCE; it must NOT be retrievable via the list tool.
+      const { token: fullToken } = await createApiToken({
+        name: 'mcp-listed-token',
+        role: 'viewer',
+        allEnvironments: true,
+        ownerUserId: (await app.prisma.user.findFirstOrThrow({ where: { email: 'admin@mcp.test' } })).id,
+      });
+
+      const client = await connect(adminToken);
+      const res = (await client.callTool({
+        name: 'list_api_tokens',
+        arguments: {},
+      })) as ToolText;
+      expect(res.isError).toBeFalsy();
+      const text = firstText(res);
+      const body = JSON.parse(text) as { tokens: Array<Record<string, unknown>> };
+      expect(body.tokens.length).toBeGreaterThan(0);
+      for (const t of body.tokens) {
+        // Only the short, non-secret prefix is exposed — never the value or hash.
+        expect(t).not.toHaveProperty('tokenHash');
+        expect(t).not.toHaveProperty('token');
+        expect(t).toHaveProperty('tokenPrefix');
+      }
+      // The full minted token value is nowhere in the serialized output.
+      expect(text).not.toContain(fullToken);
+    });
+  });
+
+  // 4d. Admin-gated read tools are scope-gated -------------------------------
+  describe('admin-gated read tools (list_service_accounts, list_api_tokens, get_environment_settings)', () => {
+    const ADMIN_READ_TOOLS = ['list_service_accounts', 'list_api_tokens', 'get_environment_settings'];
+
+    it('an admin sees them in tools/list; a viewer does not', async () => {
+      const adminClient = await connect(adminToken);
+      const adminNames = (await adminClient.listTools()).tools.map((t) => t.name);
+      for (const t of ADMIN_READ_TOOLS) {
+        expect(adminNames).toContain(t);
+      }
+
+      const viewerClient = await connect(viewerToken);
+      const viewerNames = (await viewerClient.listTools()).tools.map((t) => t.name);
+      for (const t of ADMIN_READ_TOOLS) {
+        expect(viewerNames).not.toContain(t);
+      }
+    });
+
+    it('an operator does not see them either (no admin:* / tokens:manage scope)', async () => {
+      const client = await connect(operatorToken);
+      const names = (await client.listTools()).tools.map((t) => t.name);
+      for (const t of ADMIN_READ_TOOLS) {
+        expect(names).not.toContain(t);
+      }
+    });
+
+    it('get_environment_settings (admin) returns a settings module', async () => {
+      const client = await connect(adminToken);
+      const res = (await client.callTool({
+        name: 'get_environment_settings',
+        arguments: { id: envId, module: 'general' },
+      })) as ToolText;
+      expect(res.isError).toBeFalsy();
+      const body = JSON.parse(firstText(res)) as { settings: unknown; definitions: unknown };
+      expect(body).toHaveProperty('settings');
+      expect(body).toHaveProperty('definitions');
+    });
+  });
+
   // 5. Write tool: gated + idempotent + audited -----------------------------
   describe('write tool sync_config_file', () => {
     it('is NOT listed for a viewer and errors with FORBIDDEN_ROLE if called by name', async () => {
@@ -396,6 +593,51 @@ describe('MCP server (integration, SDK client)', () => {
         where: { action: 'sync_files', resourceId: dryCf.id },
       });
       expect(dryAudits).toBe(2);
+    });
+  });
+
+  // 5b. New write tool: execute_sync_batch ----------------------------------
+  describe('write tool execute_sync_batch', () => {
+    it('is listed for an operator but NOT a viewer', async () => {
+      const op = await connect(operatorToken);
+      expect((await op.listTools()).tools.map((t) => t.name)).toContain('execute_sync_batch');
+      const viewer = await connect(viewerToken);
+      expect((await viewer.listTools()).tools.map((t) => t.name)).not.toContain('execute_sync_batch');
+    });
+
+    it('operator: runs a batch and persists a SyncBatch row (its own header-based idempotency)', async () => {
+      // A fresh zero-attachment config file → the op resolves to `no_targets`
+      // (batch status failed/partial), but a SyncBatch row is persisted and the
+      // tool returns a structured result rather than erroring at the transport.
+      const batchCf = await app.prisma.configFile.create({
+        data: { name: 'batch-cf', filename: 'batch.env', content: 'B=1', environmentId: envId },
+      });
+      const client = await connect(operatorToken);
+      const res = (await client.callTool({
+        name: 'execute_sync_batch',
+        arguments: { operations: [{ configFileId: batchCf.id }] },
+      })) as ToolText;
+      expect(res.isError).toBeFalsy();
+      const body = JSON.parse(firstText(res)) as {
+        batchId: string;
+        status: string;
+        operations: Array<{ index: number; status: string }>;
+      };
+      expect(body.batchId).toBeTruthy();
+      expect(body.operations).toHaveLength(1);
+      // A SyncBatch row was persisted for the batch.
+      const row = await app.prisma.syncBatch.findUnique({ where: { id: body.batchId } });
+      expect(row).toBeTruthy();
+    });
+  });
+
+  // 5c. New write tool: refresh_server_health is gated ----------------------
+  describe('write tool refresh_server_health', () => {
+    it('is listed for an operator but NOT a viewer', async () => {
+      const op = await connect(operatorToken);
+      expect((await op.listTools()).tools.map((t) => t.name)).toContain('refresh_server_health');
+      const viewer = await connect(viewerToken);
+      expect((await viewer.listTools()).tools.map((t) => t.name)).not.toContain('refresh_server_health');
     });
   });
 

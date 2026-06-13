@@ -17,10 +17,14 @@ const WRITE_TOOL_NAMES = [
   'rollback_deployment_plan',
   'run_database_backup',
   'sync_config_file',
+  'refresh_server_health',
+  'execute_sync_batch',
 ];
 
 // Read tools backed by a GLOBAL route (no `:envId`): always FORBIDDEN_SCOPE for
-// an env-scoped token, so they must be hidden when isEnvScoped=true.
+// an env-scoped token, so they must be hidden when isEnvScoped=true. These are
+// the ones available to EVERY role (requiredScope null); admin-gated global
+// reads are tracked separately in ADMIN_GLOBAL_READ_TOOL_NAMES below.
 const GLOBAL_READ_TOOL_NAMES = [
   'get_server',
   'get_service',
@@ -32,10 +36,29 @@ const GLOBAL_READ_TOOL_NAMES = [
   'get_deployment_plan',
   'get_drift',
   'query_audit_log',
+  // New global reads (every role).
+  'get_database',
+  'list_database_backups',
+  'list_notifications',
+  'get_registry',
+  'get_topology',
+  'list_connections',
+  'get_service_dependencies',
+  'get_container_image',
+  'list_image_digests',
+  'get_service_compose',
+  'list_service_types',
+  'list_database_types',
+  'get_system_settings',
 ];
 
-// Read tools (plus meta) backed by an env route / scope-exempt / no-scope route:
-// usable by an env-scoped token, so they stay listed when isEnvScoped=true.
+// Admin-only reads backed by a GLOBAL route. Hidden from non-admins by scope and
+// from env-scoped tokens by reachability. (Listed for an all-environments admin.)
+const ADMIN_GLOBAL_READ_TOOL_NAMES = ['list_service_accounts', 'list_api_tokens'];
+
+// Read tools (plus meta) backed by an env route / scope-exempt / no-scope route
+// AND available to every role (requiredScope null): usable by an env-scoped
+// token, so they stay listed when isEnvScoped=true.
 const ENV_SCOPED_TOOL_NAMES = [
   'list_environments',
   'get_environment',
@@ -51,7 +74,20 @@ const ENV_SCOPED_TOOL_NAMES = [
   'list_deployment_plans',
   'get_version',
   'get_capabilities', // meta (synthesized locally, no route)
+  // New env-scoped reads (every role).
+  'list_databases',
+  'list_registries',
+  'list_external_entities',
+  'list_server_clusters',
+  'get_dependency_graph',
+  'list_container_images',
+  'list_webhook_subscriptions',
 ];
+
+// Admin-only read backed by an ENV route (/api/environments/:id/settings/:module,
+// requireAdmin). Reachable by an env-scoped ADMIN token, so it joins the
+// env-scoped set for an admin — but NOT for operator/viewer (no admin:* scope).
+const ADMIN_ENV_SCOPED_READ_TOOL_NAMES = ['get_environment_settings'];
 
 function names(scopes: string[]): string[] {
   return selectToolsForScopes(scopes).map((t) => t.name);
@@ -165,6 +201,57 @@ describe('selectToolsForScopes', () => {
       const selected = names(computeScopes(user('admin')));
       expect(selected).toEqual(expect.arrayContaining(WRITE_TOOL_NAMES));
       expect(selected).toEqual(expect.arrayContaining(GLOBAL_READ_TOOL_NAMES));
+    });
+
+    it('an env-scoped ADMIN additionally sees the admin env-scoped read (get_environment_settings), but no global tools', () => {
+      // An env-scoped admin: admin:* IS in scope (so admin-gated tools pass the
+      // scope gate), but global routes are still unreachable → only env tools.
+      const adminScopes = computeScopes(user('admin'));
+      const selected = selectToolsForScopes(adminScopes, true).map((t) => t.name);
+      const expected = [...ENV_SCOPED_TOOL_NAMES, ...ADMIN_ENV_SCOPED_READ_TOOL_NAMES];
+      expect([...selected].sort()).toEqual([...expected].sort());
+      // Admin GLOBAL reads remain hidden (global route, env-scoped token).
+      for (const g of ADMIN_GLOBAL_READ_TOOL_NAMES) {
+        expect(selected).not.toContain(g);
+      }
+    });
+  });
+
+  describe('admin-gated read tools are scope-gated (truthful list)', () => {
+    const ADMIN_READ_TOOLS = [
+      ...ADMIN_GLOBAL_READ_TOOL_NAMES,
+      ...ADMIN_ENV_SCOPED_READ_TOOL_NAMES,
+    ];
+
+    it('an all-environments admin sees every admin-gated read', () => {
+      const selected = names(computeScopes(user('admin')));
+      for (const t of ADMIN_READ_TOOLS) {
+        expect(selected).toContain(t);
+      }
+    });
+
+    it('an operator does NOT see admin-gated reads (no admin:* / tokens:manage)', () => {
+      const operatorScopes = computeScopes(user('operator'));
+      expect(operatorScopes).not.toContain('admin:*');
+      expect(operatorScopes).not.toContain('tokens:manage');
+      const selected = names(operatorScopes);
+      for (const t of ADMIN_READ_TOOLS) {
+        expect(selected).not.toContain(t);
+      }
+    });
+
+    it('a viewer does NOT see admin-gated reads', () => {
+      const selected = names(computeScopes(user('viewer')));
+      for (const t of ADMIN_READ_TOOLS) {
+        expect(selected).not.toContain(t);
+      }
+    });
+
+    it('list_api_tokens is gated on tokens:manage specifically', () => {
+      // Holding tokens:manage (but not, say, services:write) unlocks the token
+      // read tool — and nothing accidentally unlocks it without that scope.
+      expect(names(['tokens:manage'])).toContain('list_api_tokens');
+      expect(names(['services:read', 'services:write'])).not.toContain('list_api_tokens');
     });
   });
 });

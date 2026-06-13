@@ -115,10 +115,10 @@ Call `get_capabilities` to see the exact scope set and tool list your token reso
 
 An **environment-scoped** API token (one whose scope is *not* "all environments") gets a deliberately narrower — and **truthful** — MCP surface: `tools/list` (and `get_capabilities`) advertise **only the tools it can actually use**. A tool is listed for an env-scoped token only when its backing route is reachable by such a token:
 
-- ✅ **Listed** — environment-scoped routes (`/api/environments/:envId/...`), the scope-exempt environment list/get (`GET /api/environments`, `GET /api/environments/:id`), and no-scope routes (`/health`), plus the locally-synthesized `get_capabilities`. These are the per-environment **read tools** — `list_servers`, `list_services`, `list_secrets`, `list_vars`, `get_server_health`, `list_config_files`, `list_config_fragments`, `get_metrics_history`, `list_health_checks`, `list_deployment_plans`, `list_environments`, `get_environment` — plus `get_version` and `get_capabilities`.
+- ✅ **Listed** — environment-scoped routes (`/api/environments/:envId/...`), the scope-exempt environment list/get (`GET /api/environments`, `GET /api/environments/:id`), and no-scope routes (`/health`), plus the locally-synthesized `get_capabilities`. These are the per-environment **read tools** — `list_servers`, `list_services`, `list_secrets`, `list_vars`, `get_server_health`, `list_config_files`, `list_config_fragments`, `get_metrics_history`, `list_health_checks`, `list_deployment_plans`, `list_environments`, `get_environment`, `list_databases`, `list_registries`, `list_external_entities`, `list_server_clusters`, `get_dependency_graph`, `list_container_images`, `list_webhook_subscriptions` — plus `get_version` and `get_capabilities`. (An env-scoped **admin** token additionally sees the admin-gated env read `get_environment_settings`, whose route is also under `/api/environments/:id/...`.)
 - ❌ **Hidden** — every tool backed by a **global** route (no environment in the path), because BRIDGEPORT's token-scope check rejects an env-scoped token on those routes with `FORBIDDEN_SCOPE`, so listing them would only advertise guaranteed failures. This covers:
-  - **All write tools** (`deploy_service`, `execute_deployment_plan`, `restart_deployment`, `rollback_deployment_plan`, `run_database_backup`, `sync_config_file`) — e.g. `POST /api/services/:id/deploy`, `POST /api/databases/:id/backups`.
-  - **The global read tools** `get_server`, `get_service`, `get_service_logs`, `get_config_file`, `get_server_metrics`, `get_service_metrics`, `get_deployments`, `get_deployment_plan`, `get_drift`, and `query_audit_log` — each hits a global `/api/<resource>/:id|...` route.
+  - **All write tools** (`deploy_service`, `execute_deployment_plan`, `restart_deployment`, `rollback_deployment_plan`, `run_database_backup`, `sync_config_file`, `refresh_server_health`, `execute_sync_batch`) — e.g. `POST /api/services/:id/deploy`, `POST /api/servers/:id/health`, `POST /api/sync/batch`.
+  - **The global read tools** `get_server`, `get_service`, `get_service_logs`, `get_service_compose`, `get_service_dependencies`, `get_config_file`, `get_server_metrics`, `get_service_metrics`, `get_deployments`, `get_deployment_plan`, `get_drift`, `query_audit_log`, `get_database`, `list_database_backups`, `list_notifications`, `get_registry`, `get_container_image`, `list_image_digests`, `get_topology`, `list_connections`, `list_service_types`, `list_database_types`, `get_system_settings`, and the admin-only `list_service_accounts` / `list_api_tokens` — each hits a global `/api/<resource>/...` route.
 
 > Per-resource scope enforcement still runs on every call regardless; this just stops the env-scoped tool list from advertising tools that could never succeed.
 
@@ -128,11 +128,11 @@ An **environment-scoped** API token (one whose scope is *not* "all environments"
 
 ## Tools
 
-Tool **outputs are passthrough JSON** of the API response, with two deliberate exceptions noted below (`list_vars` strips values; `get_capabilities` is synthesized locally). IDs are BRIDGEPORT cuids — get them from the corresponding `list_*` / `get_*` tools.
+Tool **outputs are passthrough JSON** of the API response, with deliberate exceptions for safety: `get_capabilities` is synthesized locally, and tools touching secret material expose **metadata only** (see the [secret-stripping summary](#read-tools) below and [Data Egress](#data-egress-what-leaves-your-server)). IDs are BRIDGEPORT cuids — get them from the corresponding `list_*` / `get_*` tools.
 
 ### Read Tools
 
-Backed by side-effect-free `GET` routes. Available to every role.
+Backed by side-effect-free `GET` routes. Available to every role **unless marked admin-only** (the last three rows mirror their `requireAdmin` / `tokens:manage` routes, so a non-admin token simply doesn't see them in `tools/list`).
 
 | Tool | Arguments | Backing route |
 |------|-----------|---------------|
@@ -144,11 +144,30 @@ Backed by side-effect-free `GET` routes. Available to every role.
 | `list_services` | `envId` | `GET /api/environments/:envId/services` |
 | `get_service` | `id` | `GET /api/services/:id` |
 | `get_service_logs` | `id`, `depId`, `tail?` | `GET /api/services/:id/deployments/:depId/logs` |
+| `get_service_compose` | `id` | `GET /api/services/:id/compose/preview` (rendered compose + env artifacts; resolved secret values are redacted) |
+| `get_service_dependencies` | `id` | `GET /api/services/:id/dependencies` |
+| `get_dependency_graph` | `envId` | `GET /api/environments/:envId/dependency-graph` (nodes, edges, computed deployment order) |
 | `list_config_files` | `envId` | `GET /api/environments/:envId/config-files` |
 | `get_config_file` | `id` | `GET /api/config-files/:id` |
 | `list_config_fragments` | `envId` | `GET /api/environments/:envId/config-fragments` |
 | `list_secrets` | `envId` | `GET /api/environments/:envId/secrets` (keys + metadata + usage only) |
 | `list_vars` | `envId` | `GET /api/environments/:envId/vars` — **the plaintext `value` field is stripped** from the tool output (keys, descriptions, usage, timestamps only) |
+| `list_databases` | `envId` | `GET /api/environments/:envId/databases` (metadata + backup/monitoring state; **credentials never returned** — only a `hasCredentials` flag) |
+| `get_database` | `id` | `GET /api/databases/:id` (same credential-free shape as `list_databases`) |
+| `list_database_backups` | `id`, `limit?`, `offset?` | `GET /api/databases/:id/backups` |
+| `list_container_images` | `envId`, `limit?`, `offset?` | `GET /api/environments/:envId/container-images` |
+| `get_container_image` | `id` | `GET /api/container-images/:id` (digests + linked services) |
+| `list_image_digests` | `id`, `limit?`, `offset?` | `GET /api/container-images/:id/digests` |
+| `list_registries` | `envId` | `GET /api/environments/:envId/registries` — **metadata only**: type/URL/prefix/defaults + `hasToken`/`hasPassword` booleans + the (non-secret) `username`. **Credentials are never returned.** |
+| `get_registry` | `id` | `GET /api/registries/:id` (same credential-free shape as `list_registries`) |
+| `get_topology` | `environmentId` | `GET /api/diagram-export?format=mermaid` (servers/services/databases/external entities + connections as a Mermaid graph) |
+| `list_connections` | `environmentId` | `GET /api/connections` (topology edges) |
+| `list_external_entities` | `envId` | `GET /api/environments/:envId/external-entities` |
+| `list_server_clusters` | `envId` | `GET /api/environments/:envId/server-clusters` |
+| `list_service_types` | — | `GET /api/settings/service-types` (plugin-defined types + commands) |
+| `list_database_types` | — | `GET /api/settings/database-types` (connection-field definitions describe shape only — no credential values) |
+| `list_notifications` | `limit?`, `offset?`, `unreadOnly?`, `environmentId?`, `category?` | `GET /api/notifications` |
+| `list_webhook_subscriptions` | `envId` | `GET /api/environments/:envId/webhooks` — **the signing secret is never returned**, only a `hasSecret` boolean |
 | `get_server_metrics` | `id` | `GET /api/servers/:id/metrics` |
 | `get_service_metrics` | `id` | `GET /api/services/:id/metrics` |
 | `get_metrics_history` | `envId` | `GET /api/environments/:envId/metrics/history` |
@@ -157,10 +176,18 @@ Backed by side-effect-free `GET` routes. Available to every role.
 | `list_deployment_plans` | `envId` | `GET /api/environments/:envId/deployment-plans` |
 | `get_deployment_plan` | `id` | `GET /api/deployment-plans/:id` |
 | `get_drift` | `id` (server) | `GET /api/servers/:id/drift` |
+| `get_system_settings` | — | `GET /api/settings/system` — the only secret field (the DO registry token) is **masked** by the route (`****`-suffixed) |
 | `query_audit_log` | `environmentId?`, `resourceType?`, `resourceId?`, `action?`, `limit?`, `offset?` | `GET /api/audit-logs` |
 | `get_version` | — | `GET /health` (app / bundled agent / CLI versions) |
+| `get_environment_settings` 🔒 | `id`, `module` | `GET /api/environments/:id/settings/:module` — **admin-only** (`requireAdmin`). `module` ∈ `general` \| `monitoring` \| `operations` \| `data` \| `configuration` |
+| `list_service_accounts` 🔒 | — | `GET /api/admin/service-accounts` — **admin-only**. Metadata only (name, role, disabled, token count); **no token values or hashes** |
+| `list_api_tokens` 🔒 | `ownerUserId?`, `ownerServiceAccountId?` | `GET /api/admin/tokens` — requires **`tokens:manage`** (admin). Returns the non-secret `tokenPrefix` only; **the token value/hash is never returned** |
+
+🔒 = admin-gated (the tool is only registered for a token whose scopes include `admin:*` / `tokens:manage`).
 
 > `get_service_logs` and `get_deployments` operate at the **deployment** level (per-server runtime). Get the `depId` from `get_service`, which lists the service's deployments.
+>
+> **Secret-stripping summary.** Several read tools touch resources with secret material; in every case the tool exposes **metadata only** and the secret never leaves the host: `list_secrets`/`list_vars` (no values), `list_registries`/`get_registry` (`hasToken`/`hasPassword` booleans, no credential), `list_databases`/`get_database` (`hasCredentials` flag, no encrypted blob), `list_webhook_subscriptions` (`hasSecret` boolean, no signing secret), `get_system_settings` (DO registry token masked), and `list_api_tokens` (non-secret prefix, no value/hash). These are properties of the **backing routes' service-layer projections** — the MCP tools add no new exposure.
 
 ### Write Tools
 
@@ -174,8 +201,14 @@ Require a write scope (`operator`/`admin`) and are hidden from environment-scope
 | `rollback_deployment_plan` | `id`, `idempotencyKey?` | `POST /api/deployment-plans/:id/rollback` |
 | `run_database_backup` | `id`, `idempotencyKey?` | `POST /api/databases/:id/backups` (operator) |
 | `sync_config_file` | `id`, `dryRun?`, `idempotencyKey?` | `POST /api/config-files/:id/sync-all` (operator; `dryRun=true` → diff preview) |
+| `refresh_server_health` | `id`, `idempotencyKey?` | `POST /api/servers/:id/health` (operator) — **performs a LIVE SSH health check** against the host and updates the stored health columns |
+| `execute_sync_batch` | `operations[]` (`{ configFileId }`), `rollbackOnFailure?`, `idempotencyKey?` | `POST /api/sync/batch` (operator) — atomic multi-file sync; **no dry-run** (preview individual files with `sync_config_file(dryRun=true)`) |
 
 > For `execute_deployment_plan` and `sync_config_file`, prefer a `dryRun=true` call first to preview the effect before running the real mutation.
+>
+> `refresh_server_health` is the only read-adjacent write: it triggers a **live host query** rather than reading cached health (use `get_server_health` for the cached view). `execute_sync_batch` is all-or-nothing by default (`rollbackOnFailure=true` rolls back already-applied ops if a later one fails); all files in a batch must live in the **same environment**.
+>
+> **Conservative by design.** The write surface is deliberately limited to **operational** actions (deploy / restart / rollback / backup / config-sync / live health-check). MCP does **not** expose create/update/delete for servers, services, secrets, vars, config files, databases, environments, registries, etc. — declarative resource management is the Terraform provider's domain. MCP is **observe + safe-operate** only.
 
 ### Meta Tools
 
@@ -204,7 +237,9 @@ See the [API Reference](api.md) and issue #126 for the underlying idempotency co
 When you connect an MCP client, **tool outputs are sent to whatever model that client uses.** Treat anything a tool can return as data that may leave your infrastructure:
 
 - **Logs (`get_service_logs`) and audit entries (`query_audit_log`) can contain sensitive application output** — request payloads, stack traces, tokens an app happened to log. They are returned verbatim. Only enable MCP, and only mint tokens, for operators you trust to route that data to their model.
-- **Secret and variable values are never returned.** `list_secrets` exposes keys and metadata only; `list_vars` strips the `value` field; the admin-only secret-reveal endpoint is not exposed as a tool. Config-file *content* (`get_config_file`) is returned, and the dry-run previews redact resolved secret values — but a config file you wrote with an inline literal will show that literal.
+- **Secret, variable, and credential values are never returned.** `list_secrets` exposes keys and metadata only; `list_vars` strips the `value` field; `list_registries`/`get_registry` return `hasToken`/`hasPassword` flags (no credential); `list_databases`/`get_database` return a `hasCredentials` flag (no encrypted blob); `list_webhook_subscriptions` returns a `hasSecret` flag (no signing secret); `get_system_settings` masks the DO registry token; `list_api_tokens` returns only the non-secret token prefix; and the admin-only secret-reveal endpoint is **not exposed as a tool**.
+- **Config and compose content is returned.** `get_config_file` returns config-file content, and `get_service_compose` returns the rendered compose/env artifacts; both **redact resolved secret values** in their previews — but a config file you wrote with an inline literal will show that literal. `get_topology` / `list_connections` expose your infrastructure layout (hostnames, ports, service names).
+- **`refresh_server_health` performs a live host query.** Unlike the cached `get_server_health` read, it opens an SSH connection to the target host. It's operator-gated and idempotency-keyed, but it is not a free/cached call.
 - **Scope your tokens.** Use an environment-scoped, role-capped API token so an MCP session can only read/act on the environments you intend.
 
 ---
