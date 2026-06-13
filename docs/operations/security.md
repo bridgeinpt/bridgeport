@@ -12,6 +12,7 @@ BRIDGEPORT secures your infrastructure with JWT authentication, role-based acces
 - [Encryption at Rest](#encryption-at-rest)
 - [SSH Key Management](#ssh-key-management)
 - [Agent Token Security](#agent-token-security)
+- [MCP Server (Opt-In)](#mcp-server-opt-in)
 - [Production Hardening Checklist](#production-hardening-checklist)
 - [Audit Logging](#audit-logging)
 - [Vulnerability Reporting](#vulnerability-reporting)
@@ -150,6 +151,20 @@ The agent includes the token in every metrics push to authenticate itself. BRIDG
 
 ---
 
+## MCP Server (Opt-In)
+
+BRIDGEPORT can expose a curated subset of its API to AI agents via the [Model Context Protocol](../reference/mcp.md). It is **disabled by default** and is a network-exposed surface, so treat enabling it as a deliberate security decision.
+
+- **Off unless explicitly enabled.** The `/mcp` route is registered only when `MCP_ENABLED` is `true`/`1`. The flag is strict-parsed and **fails closed** -- a literal `MCP_ENABLED=false` (or `0`, empty, or unset) keeps it off, and requests return `404`. It is a deployment-level kill switch (an env var, not a runtime setting): flipping it off and restarting removes the endpoint entirely.
+- **Same auth, same scopes.** Every tool replays a real internal API request carrying the caller's bearer token, so role/scope enforcement, validation, idempotency, and audit logging behave exactly as for a REST call -- there is no separate MCP permission model. Mint a **dedicated, environment-scoped, role-capped API token** per client rather than reusing an admin credential; an env-scoped token is shown only the tools it can actually call.
+- **Secrets never leave the host.** A boundary redactor strips every secret-named field from all tool and resource output; `list_secrets`/`list_vars` return no values, and the admin-only secret-reveal endpoint is **not** exposed as a tool. Decrypted secrets cannot be read through MCP.
+- **Mind data egress.** Tool outputs -- including container logs and audit entries, which can contain sensitive application output -- are sent to whatever model the connected client uses. Only enable MCP, and only mint tokens, for operators you trust to route that data to their model.
+- **Harden remote exposure.** When reaching MCP through a reverse proxy, set `MCP_ALLOWED_HOSTS` to the public hostname(s) to enable DNS-rebinding protection, and terminate TLS exactly as for the REST API. `MCP_ALLOWED_HOSTS` is the public hostname, **not** the bind address (`HOST`).
+
+Status, the live endpoint URL, and the full exposed tool/resource inventory are visible to admins at **Admin > MCP Server** (`/admin/mcp`). See the [MCP Server Reference](../reference/mcp.md) for client setup, the scope-to-tool mapping, and the full data-egress detail.
+
+---
+
 ## Production Hardening Checklist
 
 Use this checklist to secure your BRIDGEPORT deployment:
@@ -165,6 +180,8 @@ Use this checklist to secure your BRIDGEPORT deployment:
 - [ ] **Run as non-root** -- The Docker image already runs as the `node` user (UID 1000). The `docker-compose.yml` sets `user: "1000:1000"`.
 
 - [ ] **Restrict network access** -- Limit access to port 3000 (or your reverse proxy port) to trusted networks. BRIDGEPORT is an internal tool, not a public-facing service.
+
+- [ ] **Lock down the MCP server (only if enabled)** -- The [MCP server](../reference/mcp.md) is off by default. If you set `MCP_ENABLED=true`, mint a dedicated env-scoped, role-capped API token per client (never reuse an admin credential), set `MCP_ALLOWED_HOSTS` when exposing it through a reverse proxy, and remember that tool outputs -- including logs -- are sent to the connected client's model. Leave it disabled if you don't use it.
 
 - [ ] **Set up firewall rules for SSH** -- BRIDGEPORT connects to your servers via SSH. Ensure only BRIDGEPORT's IP (or network) can reach port 22 on managed servers.
 

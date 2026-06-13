@@ -200,6 +200,7 @@ You've got BRIDGEPORT running and managing your first server. Here's where to go
 | Schedule database backups | [Databases Guide](guides/databases.md) |
 | Manage secrets and config files | [Secrets Guide](guides/secrets.md) / [Config Files Guide](guides/config-files.md) |
 | Use the CLI for terminal workflows | [CLI Reference](reference/cli.md) |
+| Drive BRIDGEPORT from an AI agent (Claude, Cursor) | [MCP Server](reference/mcp.md) |
 | Deploy BRIDGEPORT for production | [Installation Guide](installation.md) |
 | Understand how BRIDGEPORT is structured | [Core Concepts](concepts.md) |
 

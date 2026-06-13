@@ -477,6 +477,9 @@ BRIDGEPORT's API is organized into the following categories. Each category corre
 > [!TIP]
 > BRIDGEPORT uses three RBAC roles: **admin** > **operator** > **viewer**. Most read endpoints require any authenticated user. Write operations generally require operator or admin. User management and system settings require admin. See [Users & Roles](../guides/users.md) for the full permission matrix.
 
+> [!NOTE]
+> Beyond the REST API documented here, BRIDGEPORT can project a curated **observe + safe-operate** subset of these same endpoints to AI agents over the **Model Context Protocol (MCP)** at `POST /mcp` (opt-in, off by default). Each MCP tool replays a real internal API request with your bearer token, so authentication, scopes, idempotency, and audit logging behave identically. See the [MCP Server Reference](mcp.md).
+
 ---
 
 ## CI/CD Integration Examples
@@ -551,6 +554,7 @@ curl -X POST "$BRIDGEPORT_URL/api/webhooks/deploy" \
 ## Related Docs
 
 - [API Stability Policy](../api-stability.md) -- Compatibility contract, semver rules, deprecation window, and current deprecations
+- [MCP Server](mcp.md) -- Expose the API to AI agents as Model Context Protocol tools (opt-in, scoped to your tokens)
 - [Real-Time Events (SSE)](events.md) -- Live event stream for health, deployments, and notifications
 - [CLI Reference](cli.md) -- Command-line interface for terminal workflows
 - [Environment Settings](environment-settings.md) -- Per-environment configuration reference

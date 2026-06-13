@@ -6,7 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+
+- **MCP (Model Context Protocol) server** -- an opt-in server at `POST /mcp` that exposes a curated subset of the REST API as agent tools and resources, so MCP-capable clients (Claude Desktop, Claude Code, Cursor, etc.) can observe and safely operate BRIDGEPORT. Disabled by default (`MCP_ENABLED`); each tool replays a real internal API request with the caller's bearer token, so authentication, role/scope enforcement, idempotency, and audit logging behave identically to the REST API, and secret values never leave the host. Includes an admin status page at **Admin > MCP Server**. See the [MCP Server Reference](docs/reference/mcp.md).
 
 ## [1.0.0] - 2026-02-25
 

@@ -19,6 +19,7 @@ A practical guide to diagnosing and fixing common BRIDGEPORT issues, with a quic
 - [Notification Delivery Issues](#notification-delivery-issues)
 - [Performance Issues](#performance-issues)
 - [Database Migration Issues](#database-migration-issues)
+- [MCP Server Issues](#mcp-server-issues)
 - [Lost MASTER_KEY](#lost-master_key)
 
 ---
@@ -148,6 +149,8 @@ safe to hand to automated tooling.
 | Backup fails with timeout | Large database exceeds default timeout | Increase `pgDumpTimeoutMs` in System Settings |
 | UI shows old version | Browser cache | Hard refresh (`Ctrl+Shift+R` or `Cmd+Shift+R`) |
 | Metrics page is slow | Large metrics history | Reduce retention in environment monitoring settings |
+| MCP client gets 404 on `/mcp` | MCP server disabled | Set `MCP_ENABLED=true` and restart the container |
+| MCP client sees no/few tools | Token role or env scope too narrow | Use an operator/all-environments token; call `get_capabilities` |
 
 ---
 
@@ -443,6 +446,36 @@ BRIDGEPORT runs `prisma migrate deploy` automatically on every startup. If a mig
 4. **Pin the previous version** until the issue is fixed upstream
 
 For legacy databases (created before migration tracking was added), BRIDGEPORT automatically creates a migration baseline on first startup. This is a one-time operation and should not require intervention.
+
+---
+
+## MCP Server Issues
+
+The [MCP server](../reference/mcp.md) is opt-in and off by default. Common issues when connecting an AI agent:
+
+### `/mcp` returns 404
+
+The route is only registered when MCP is enabled. Verify:
+
+1. `MCP_ENABLED` is set to `true` or `1` -- it is **strict-parsed**, so `false`, `0`, an empty string, or any other value keeps it disabled.
+2. The container was **restarted** after setting it (it's a deployment-level env var, not a runtime toggle).
+3. Check the boot logs: `docker logs bridgeport 2>&1 | grep -i mcp`.
+
+You can confirm status without a client at **Admin > MCP Server** (`/admin/mcp`), which shows the live enabled/disabled badge and the endpoint URL.
+
+### Client connects but sees no tools (or fewer than expected)
+
+The tools advertised to a session are derived from the **token's role and environment scope**:
+
+- A **viewer** token sees read tools only. Write tools (`deploy_service`, `restart_deployment`, ...) require an operator/admin token (`services:write`).
+- An **environment-scoped** token sees only the tools backed by environment routes -- every global-route tool (all write tools, plus global reads like `get_server`) is hidden because it would always return `FORBIDDEN_SCOPE`. For the full surface, use an **all-environments** token.
+- Call the `get_capabilities` tool to see the exact scopes and tool list your token resolved to.
+
+### Client can't reach `/mcp` through a reverse proxy
+
+If the transport rejects the request, check `MCP_ALLOWED_HOSTS`: when set, the request `Host` header must match one of the listed public hostnames (DNS-rebinding protection). It is **distinct from `HOST`** (the socket bind address). Ensure TLS terminates at the proxy and the bearer token travels only over HTTPS.
+
+See the [MCP Server Reference](../reference/mcp.md) for client setup and the full tool/scope reference.
 
 ---
 

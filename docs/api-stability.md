@@ -38,6 +38,9 @@ This policy covers the **HTTP API** — every endpoint under `/api`, plus the un
 > [!NOTE]
 > If a behavior is observable through the API but not described in the [API Reference](reference/api.md) or the OpenAPI spec, treat it as undocumented and subject to change. When in doubt, ask (see [Reporting issues & questions](#reporting-issues--questions)).
 
+> [!NOTE]
+> The **[MCP server](reference/mcp.md)** (`POST /mcp`, opt-in) is a *projection* of this HTTP API: each tool replays one of the `/api` routes covered above, so the underlying request/response shapes and scope rules inherit these same guarantees. The MCP-specific layer — the tool **names**, their curated input arguments, and the Streamable-HTTP transport framing — is **not** part of this contract and may change in any release; the transport itself tracks the external [MCP specification](https://modelcontextprotocol.io). Pin against `/openapi.json` for the wire contract, and treat the tool surface as evolving.
+
 ---
 
 ## Versioning & semver
