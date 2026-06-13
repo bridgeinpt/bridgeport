@@ -16,20 +16,42 @@ declare module 'fastify' {
 
 // Routes that env-scoped tokens are always allowed to call (introspection).
 // /api/environments/:envId/... is handled separately by per-env membership check.
+//
+// The /mcp routes are exempt because /mcp is a GLOBAL (non-/api/environments)
+// route, so an env-scoped token would otherwise be rejected by enforceTokenScope
+// right at the door. Exempting /mcp lets env-scoped tokens *connect*; the REAL
+// per-resource scope enforcement still runs on each injected API call — an
+// env-scoped token hitting a global route like /api/servers/:id correctly gets
+// FORBIDDEN_SCOPE at call time, and an env-scoped token hitting
+// /api/environments/:envId/... is checked against its env allowlist as usual.
 const SCOPE_EXEMPT_ROUTES = new Set<string>([
   'GET /api/auth/me',
   'GET /api/environments',
+  'POST /mcp',
+  'GET /mcp',
+  'DELETE /mcp',
 ]);
 
 // Mutating routes a viewer is allowed to call (self-service). All other
 // non-GET/HEAD/OPTIONS routes require operator or admin. Self-vs-others
 // checks for the user-scoped routes still live in requireAdminOrSelf.
+//
+// `POST /mcp` (and DELETE /mcp) are listed because the MCP endpoint is a POST
+// transport that any authenticated principal — including a viewer — must be
+// able to OPEN. The connection itself performs no mutation; it only registers
+// the tools the caller's role/scope allow. The REAL write enforcement happens
+// on each injected API call: a viewer's injected GET passes, while a viewer's
+// injected POST (e.g. deploy_service) correctly hits FORBIDDEN_ROLE at call
+// time. Without this, enforceRoleForMethod would 403 a viewer at the door and
+// deny them even the read tools.
 const VIEWER_ALLOWED_MUTATIONS = new Set<string>([
   'POST /api/notifications/:id/read',
   'POST /api/notifications/read-all',
   'PUT /api/notifications/preferences/:typeId',
   'PATCH /api/users/:id',
   'POST /api/users/:id/change-password',
+  'POST /mcp',
+  'DELETE /mcp',
 ]);
 
 const READONLY_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);

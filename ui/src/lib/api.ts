@@ -2115,6 +2115,45 @@ export const getSentryStatus = () =>
 export const testBackendSentry = () =>
   api.post<{ ok: boolean; message: string }>('/admin/sentry/test/backend');
 
+// MCP server status + exposed surface (admin-only)
+export interface McpToolMetadata {
+  name: string;
+  title: string;
+  description: string;
+  requiredScope: string | null;
+  destructive: boolean;
+  readOnly: boolean;
+  envScoped: boolean;
+}
+
+export interface McpResourceMetadata {
+  name: string;
+  title: string;
+  description: string;
+  requiredScope: string | null;
+  envScoped: boolean;
+  uriTemplate?: string;
+}
+
+export interface McpStatus {
+  enabled: boolean;
+  endpointPath: string;
+  dnsRebindingProtection: {
+    configured: boolean;
+    allowedHosts: string[];
+  };
+  tools: McpToolMetadata[];
+  resources: McpResourceMetadata[];
+  counts: {
+    tools: number;
+    readTools: number;
+    writeTools: number;
+    resources: number;
+  };
+}
+
+export const getMcpStatus = () => api.get<McpStatus>('/admin/mcp');
+
 // Outgoing Webhooks
 export interface WebhookConfig {
   id: string;

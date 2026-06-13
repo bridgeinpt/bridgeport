@@ -23,9 +23,13 @@
  *    fact explicitly so an operator can intervene.
  */
 
-import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/db.js';
+// Canonical JSON + body hashing live in lib/ so the MCP write-tool path (issue
+// #208) can reuse them without importing this whole service. Re-exported here
+// for the existing importers (the route + tests) that reference them via this
+// module.
+export { canonicalizeJson, hashCanonicalBody } from '../lib/canonical-json.js';
 import {
   syncConfigFileToAttachedServices,
   type SyncOutcome,
@@ -89,29 +93,6 @@ export class IdempotencyKeyConflictError extends Error {
     super(message);
     this.name = 'IdempotencyKeyConflictError';
   }
-}
-
-/**
- * Stable JSON canonicalization: recursively sort object keys, leave arrays in
- * order (array order is semantically meaningful for batches). This is the
- * input to SHA-256 for the idempotency body hash. Same logical body → same
- * hash regardless of key ordering or whitespace.
- */
-export function canonicalizeJson(value: unknown): string {
-  if (value === null || typeof value !== 'object') {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return '[' + value.map(canonicalizeJson).join(',') + ']';
-  }
-  const obj = value as Record<string, unknown>;
-  const keys = Object.keys(obj).sort();
-  const entries = keys.map((k) => JSON.stringify(k) + ':' + canonicalizeJson(obj[k]));
-  return '{' + entries.join(',') + '}';
-}
-
-export function hashCanonicalBody(value: unknown): string {
-  return createHash('sha256').update(canonicalizeJson(value)).digest('hex');
 }
 
 /**

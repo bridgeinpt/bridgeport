@@ -21,6 +21,7 @@ export default defineConfig({
       'src/services/**/*.test.ts',
       'src/lib/**/*.test.ts',
       'src/plugins/**/*.test.ts',
+      'src/mcp/**/*.test.ts',
     ],
     exclude: [
       'node_modules',

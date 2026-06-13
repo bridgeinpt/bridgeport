@@ -10326,6 +10326,36 @@
         }
       }
     },
+    "/api/admin/mcp": {
+      "get": {
+        "summary": "Get MCP server status and exposed tool/resource inventory",
+        "tags": [
+          "admin"
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized — missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — token scope or role does not permit this operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/environments/{envId}/container-images": {
       "get": {
         "summary": "List container images for an environment",
