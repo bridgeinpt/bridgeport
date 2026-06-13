@@ -60,17 +60,19 @@ import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { prisma } from './db.js';
 import { ApiError } from './errors.js';
+import { config } from './config.js';
 
-/** How long a stored idempotency result is honored before it expires. */
-export const IDEMPOTENCY_RETENTION_MS = 24 * 60 * 60 * 1000; // 24h
+/** How long a stored idempotency result is honored before it expires (default 24h). */
+export const IDEMPOTENCY_RETENTION_MS = config.IDEMPOTENCY_RETENTION_MS;
 
 /**
- * How long an `inProgress` row is trusted before it is treated as dead. The row
- * is created inProgress=true BEFORE the handler runs; if the process crashes or
- * the connection drops, onResponse never fires and the row would otherwise wedge
- * the key until the 24h expiry. After this threshold a retry takes the row over.
+ * How long an `inProgress` row is trusted before it is treated as dead (default
+ * 5 min). The row is created inProgress=true BEFORE the handler runs; if the
+ * process crashes or the connection drops, onResponse never fires and the row
+ * would otherwise wedge the key until the retention window expires. After this
+ * threshold a retry takes the row over.
  */
-export const STALE_INPROGRESS_MS = 5 * 60 * 1000; // 5 min
+export const STALE_INPROGRESS_MS = config.IDEMPOTENCY_STALE_INPROGRESS_MS;
 
 /**
  * Routes that must NOT be handled by this global hook.

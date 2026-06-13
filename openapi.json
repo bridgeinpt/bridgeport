@@ -14407,7 +14407,7 @@
     },
     "/api/settings/system": {
       "get": {
-        "summary": "Get current system settings (sensitive fields masked)",
+        "summary": "Get current system settings",
         "tags": [
           "admin"
         ],
@@ -14524,20 +14524,6 @@
                     "minimum": 120000,
                     "maximum": 900000
                   },
-                  "doRegistryToken": {
-                    "anyOf": [
-                      {
-                        "nullable": true,
-                        "type": "string"
-                      },
-                      {
-                        "type": "string",
-                        "enum": [
-                          ""
-                        ]
-                      }
-                    ]
-                  },
                   "auditLogRetentionDays": {
                     "type": "integer",
                     "minimum": 0,
@@ -14547,6 +14533,26 @@
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 365
+                  },
+                  "notificationRetentionDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 365
+                  },
+                  "healthLogRetentionDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 365
+                  },
+                  "webhookDeliveryRetentionDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 365
+                  },
+                  "imageDigestRetentionDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3650
                   }
                 }
               }

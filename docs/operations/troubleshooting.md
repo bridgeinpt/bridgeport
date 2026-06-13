@@ -412,8 +412,8 @@ If auto-rollback activated during an orchestrated deployment:
 
 ### High CPU or Memory Usage
 
-1. **Reduce metrics collection frequency**: Increase intervals in **Settings > Monitoring** (e.g., change from 60s to 300s)
-2. **Reduce retention**: Lower `metricsRetentionDays` to reduce database size
+1. **Reduce metrics collection frequency**: Raise the `SCHEDULER_*` interval env vars (e.g., change `SCHEDULER_METRICS_INTERVAL` from 60s to 300s — see [Configuration Reference → Scheduler](../configuration.md#scheduler))
+2. **Reduce retention**: Lower `METRICS_RETENTION_DAYS` (env var) to reduce database size
 3. **Check database size**:
    ```bash
    ls -lh ./data/bridgeport.db
@@ -428,7 +428,7 @@ If auto-rollback activated during an orchestrated deployment:
 ### Slow Page Loads
 
 - **Monitoring pages**: Reduce the selected time range or the number of monitored resources
-- **Health check logs**: Reduce `healthLogRetentionDays` in environment settings
+- **Health check logs**: Reduce `healthLogRetentionDays` in **Admin > System Settings > Retention**
 - **Audit logs**: Reduce `auditLogRetentionDays` in System Settings
 
 ---

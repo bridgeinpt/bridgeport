@@ -55,12 +55,44 @@ function parseDelaysMs(delaysJson: string): string {
   return delays.map((d) => Math.round(d / 1000)).join(', ');
 }
 
+// Single source of truth for parsing a comma-separated list of retry delays
+// (seconds). Splits on comma, trims, and DROPS empty tokens (so a trailing
+// comma is ignored rather than turning into a phantom delay). Returns an error
+// string when the input can't be parsed into a non-empty list of positive
+// integers; otherwise returns the parsed second values.
+function parseDelaysSec(input: string): { values: number[]; error: string | null } {
+  const parts = input.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+  if (parts.length === 0) {
+    return { values: [], error: 'Enter at least one delay (in seconds).' };
+  }
+  const values: number[] = [];
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) {
+      return { values: [], error: `"${part}" is not a whole number of seconds.` };
+    }
+    const num = parseInt(part, 10);
+    if (num < 1) {
+      return { values: [], error: 'Delays must be at least 1 second.' };
+    }
+    values.push(num);
+  }
+  return { values, error: null };
+}
+
 function formatDelaysMs(delaysSec: string): string {
-  const delays = delaysSec.split(',').map((s) => {
-    const num = parseInt(s.trim(), 10);
-    return isNaN(num) ? 1000 : num * 1000;
-  });
-  return JSON.stringify(delays);
+  const { values } = parseDelaysSec(delaysSec);
+  return JSON.stringify(values.map((s) => s * 1000));
+}
+
+// Validate a comma-separated list of retry delays (seconds) and produce a
+// human-readable preview. Returns an error string when the input can't be
+// parsed into a non-empty list of positive integers, so save can be blocked.
+function validateDelaysSec(delaysSec: string): { error: string | null; preview: string } {
+  const { values, error } = parseDelaysSec(delaysSec);
+  if (error) {
+    return { error, preview: '' };
+  }
+  return { error: null, preview: values.map((v) => `${v}s`).join(', ') };
 }
 
 export default function NotificationSettings() {
@@ -437,6 +469,11 @@ export default function NotificationSettings() {
 
   // Webhook delivery settings handlers
   const handleSaveDeliverySettings = async () => {
+    const { error: delaysError } = validateDelaysSec(deliverySettings.webhookRetryDelaysSec);
+    if (delaysError) {
+      toast.error(`Retry delays: ${delaysError}`);
+      return;
+    }
     setDeliverySaving(true);
     try {
       await updateSystemSettings({
@@ -475,6 +512,9 @@ export default function NotificationSettings() {
 
   // Group notification types by category for Slack routing
   const systemTypes = notificationTypes.filter((t) => t.category === 'system');
+
+  // Live validation + preview for the webhook retry-delays input
+  const delaysValidation = validateDelaysSec(deliverySettings.webhookRetryDelaysSec);
 
   return (
     <div className="p-6">
@@ -757,8 +797,16 @@ export default function NotificationSettings() {
                     })
                   }
                   placeholder="1, 5, 15"
-                  className="input w-full"
+                  className={`input w-full ${delaysValidation.error ? 'border-red-500/50' : ''}`}
+                  aria-invalid={delaysValidation.error ? true : undefined}
                 />
+                {delaysValidation.error ? (
+                  <p className="text-xs text-red-400 mt-1">{delaysValidation.error}</p>
+                ) : (
+                  <p className="text-xs text-slate-500 mt-1">
+                    Parsed: {delaysValidation.preview}
+                  </p>
+                )}
                 <p className="text-xs text-slate-500 mt-1">
                   Backoff delays between retries (default:{' '}
                   {deliverySettingsDefaults ? parseDelaysMs(deliverySettingsDefaults.webhookRetryDelaysMs) : '1, 5, 15'})
@@ -768,7 +816,7 @@ export default function NotificationSettings() {
             <div className="mt-4 pt-4 border-t border-slate-700">
               <button
                 onClick={handleSaveDeliverySettings}
-                disabled={deliverySaving}
+                disabled={deliverySaving || !!delaysValidation.error}
                 className="btn btn-primary"
               >
                 {deliverySaving ? 'Saving...' : 'Save Delivery Settings'}

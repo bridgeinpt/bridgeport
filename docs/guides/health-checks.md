@@ -18,7 +18,7 @@ For TCP and certificate checks:
 
 ```mermaid
 flowchart TD
-    SCHED[Scheduler Timer] -->|Every serviceHealthIntervalMs| HC_RUN[Run Health Checks]
+    SCHED[Scheduler Timer] -->|Every SCHEDULER_SERVICE_HEALTH_INTERVAL| HC_RUN[Run Health Checks]
     MANUAL[UI: Run Health Check] --> HC_RUN
 
     HC_RUN --> CONTAINER[Container Health<br/>Docker inspect]
@@ -147,22 +147,24 @@ Go to **Monitoring > Agents & SSH** and click **Test SSH** for a server, or **Te
 
 The scheduler runs health checks automatically based on configurable intervals.
 
+Intervals are **global** (not per-environment), set by the `SCHEDULER_*` env vars — see [Configuration Reference → Scheduler](../configuration.md#scheduler).
+
 ### Server Health Checks
 
 - **What**: SSH connectivity test (or agent push for agent-mode servers).
-- **Interval**: `serverHealthIntervalMs` (default: 60 seconds).
+- **Interval**: `SCHEDULER_SERVER_HEALTH_INTERVAL` (default: 60 seconds).
 - **Skips**: Agent-mode servers are skipped because the agent reports health directly.
 
 ### Service Health Checks
 
 - **What**: Container health + URL health check.
-- **Interval**: `serviceHealthIntervalMs` (default: 60 seconds).
+- **Interval**: `SCHEDULER_SERVICE_HEALTH_INTERVAL` (default: 60 seconds).
 - **Skips**: Services on agent-mode servers are skipped because the agent performs URL checks.
 
 ### Container Discovery
 
 - **What**: Discovers running Docker containers and updates service statuses.
-- **Interval**: `discoveryIntervalMs` (default: 5 minutes).
+- **Interval**: `SCHEDULER_DISCOVERY_INTERVAL` (default: 5 minutes).
 - **Runs on**: Healthy servers only.
 
 ## Per-Service Health Check Configuration
@@ -223,9 +225,9 @@ Health check logs are automatically cleaned up based on:
 
 | Setting | Default | Where |
 |---|---|---|
-| `healthLogRetentionDays` | `30` | Per-environment in **Settings > Monitoring** |
+| `healthLogRetentionDays` | `30` | Global, in **Admin > System Settings > Retention** |
 
-The scheduler runs daily cleanup.
+The scheduler runs daily cleanup and hot-reloads this setting each tick (no restart needed).
 
 ## Bounce Logic
 

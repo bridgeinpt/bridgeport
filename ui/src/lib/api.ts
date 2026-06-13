@@ -2677,10 +2677,12 @@ export interface SystemSettings {
   agentCallbackUrl: string | null;
   agentStaleThresholdMs: number;
   agentOfflineThresholdMs: number;
-  doRegistryToken: string | null; // Masked value (last 4 chars) or null
-  doRegistryTokenSet: boolean;
   auditLogRetentionDays: number;
   databaseMetricsRetentionDays: number;
+  notificationRetentionDays: number;
+  healthLogRetentionDays: number;
+  webhookDeliveryRetentionDays: number;
+  imageDigestRetentionDays: number;
   updatedAt: string;
 }
 
@@ -2699,6 +2701,10 @@ export interface SystemSettingsDefaults {
   agentOfflineThresholdMs: number;
   auditLogRetentionDays: number;
   databaseMetricsRetentionDays: number;
+  notificationRetentionDays: number;
+  healthLogRetentionDays: number;
+  webhookDeliveryRetentionDays: number;
+  imageDigestRetentionDays: number;
 }
 
 export interface SystemSettingsInput {
@@ -2716,9 +2722,12 @@ export interface SystemSettingsInput {
   agentCallbackUrl?: string | null;
   agentStaleThresholdMs?: number;
   agentOfflineThresholdMs?: number;
-  doRegistryToken?: string | null;
   auditLogRetentionDays?: number;
   databaseMetricsRetentionDays?: number;
+  notificationRetentionDays?: number;
+  healthLogRetentionDays?: number;
+  webhookDeliveryRetentionDays?: number;
+  imageDigestRetentionDays?: number;
 }
 
 // Cached for 5 minutes - system settings rarely change

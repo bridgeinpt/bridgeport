@@ -257,33 +257,26 @@ describe('health-checks', () => {
 
     it('returns environment-specific settings when configured', async () => {
       mockPrisma.monitoringSettings.findUnique.mockResolvedValue({
-        serverHealthIntervalMs: 30000,
-        serviceHealthIntervalMs: 45000,
-        discoveryIntervalMs: 300000,
-        metricsIntervalMs: 300000,
-        updateCheckIntervalMs: 1800000,
-        backupCheckIntervalMs: 60000,
-        metricsRetentionDays: 14,
-        healthLogRetentionDays: 30,
-        bounceThreshold: 3,
-        bounceCooldownMs: 900000,
+        id: 'ms-1',
+        environmentId: 'env-1',
         collectCpu: true,
-        collectMemory: true,
+        collectMemory: false,
         collectSwap: true,
-        collectDisk: true,
+        collectDisk: false,
         collectLoad: true,
-        collectFds: true,
+        collectFds: false,
         collectTcp: true,
-        collectProcesses: true,
+        collectProcesses: false,
         collectTcpChecks: true,
-        collectCertChecks: true,
+        collectCertChecks: false,
       });
 
       const config = await getSchedulerConfig('env-1');
 
-      expect(config.serverHealthIntervalMs).toBe(30000);
-      expect(config.serviceHealthIntervalMs).toBe(45000);
-      expect(config.metricsRetentionDays).toBe(14);
+      // Only the collect* toggles survive on EnvironmentSchedulerConfig now.
+      expect(config.collectMemory).toBe(false);
+      expect(config.collectDisk).toBe(false);
+      expect(config.collectCpu).toBe(true);
     });
 
     it('includes all metric collection toggles', async () => {
@@ -305,22 +298,26 @@ describe('health-checks', () => {
   });
 
   describe('DEFAULT_SCHEDULER_CONFIG', () => {
-    it('has sensible default intervals', () => {
-      expect(DEFAULT_SCHEDULER_CONFIG.serverHealthIntervalMs).toBe(60000);
-      expect(DEFAULT_SCHEDULER_CONFIG.serviceHealthIntervalMs).toBe(60000);
-      expect(DEFAULT_SCHEDULER_CONFIG.discoveryIntervalMs).toBe(300000);
-      expect(DEFAULT_SCHEDULER_CONFIG.metricsIntervalMs).toBe(300000);
-    });
-
     it('enables all metric collection by default', () => {
       expect(DEFAULT_SCHEDULER_CONFIG.collectCpu).toBe(true);
       expect(DEFAULT_SCHEDULER_CONFIG.collectMemory).toBe(true);
+      expect(DEFAULT_SCHEDULER_CONFIG.collectSwap).toBe(true);
       expect(DEFAULT_SCHEDULER_CONFIG.collectDisk).toBe(true);
+      expect(DEFAULT_SCHEDULER_CONFIG.collectLoad).toBe(true);
+      expect(DEFAULT_SCHEDULER_CONFIG.collectFds).toBe(true);
+      expect(DEFAULT_SCHEDULER_CONFIG.collectTcp).toBe(true);
+      expect(DEFAULT_SCHEDULER_CONFIG.collectProcesses).toBe(true);
+      expect(DEFAULT_SCHEDULER_CONFIG.collectTcpChecks).toBe(true);
+      expect(DEFAULT_SCHEDULER_CONFIG.collectCertChecks).toBe(true);
     });
 
-    it('has default bounce settings', () => {
-      expect(DEFAULT_SCHEDULER_CONFIG.bounceThreshold).toBe(3);
-      expect(DEFAULT_SCHEDULER_CONFIG.bounceCooldownMs).toBe(900000);
+    it('contains only collect* toggles (no interval/retention/bounce fields)', () => {
+      const keys = Object.keys(DEFAULT_SCHEDULER_CONFIG);
+      expect(keys.every((k) => k.startsWith('collect'))).toBe(true);
+      expect(DEFAULT_SCHEDULER_CONFIG).not.toHaveProperty('serverHealthIntervalMs');
+      expect(DEFAULT_SCHEDULER_CONFIG).not.toHaveProperty('metricsRetentionDays');
+      expect(DEFAULT_SCHEDULER_CONFIG).not.toHaveProperty('bounceThreshold');
+      expect(DEFAULT_SCHEDULER_CONFIG).not.toHaveProperty('bounceCooldownMs');
     });
   });
 });

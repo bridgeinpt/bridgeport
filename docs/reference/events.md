@@ -219,7 +219,7 @@ Fired after a fresh set of server metrics has been collected and stored. Clients
 **When it fires**
 
 On each metrics collection cycle for the server. The interval depends on the metrics mode:
-- **SSH polling**: controlled by `metricsIntervalMs` in environment monitoring settings (default: 300,000 ms)
+- **SSH polling**: controlled globally by the `SCHEDULER_METRICS_INTERVAL` env var (default: 300 s)
 - **Agent push**: controlled by the agent's `-interval` flag (default: 30s)
 
 ---
@@ -246,7 +246,7 @@ Fired after BRIDGEPORT's scheduled container discovery scan completes for a serv
 
 **When it fires**
 
-On each container discovery cycle (interval controlled by `discoveryIntervalMs` in environment monitoring settings, default: 300,000 ms).
+On each container discovery cycle (interval controlled globally by the `SCHEDULER_DISCOVERY_INTERVAL` env var, default: 300 s).
 
 ---
 

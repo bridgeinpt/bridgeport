@@ -8,6 +8,7 @@ import { validateBody } from '../lib/helpers.js';
 import { routeSchema } from '../lib/openapi-schema.js';
 import { computeScopes } from '../lib/scopes.js';
 import { prisma } from '../lib/db.js';
+import { config } from '../lib/config.js';
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -40,7 +41,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
 
     const token = fastify.jwt.sign(
       { id: user.id, email: user.email },
-      { expiresIn: '7d' }
+      { expiresIn: config.SESSION_TTL }
     );
 
     return { token, user };
@@ -70,7 +71,7 @@ export async function authRoutes(fastify: FastifyInstance): Promise<void> {
 
     const token = fastify.jwt.sign(
       { id: user.id, email: user.email },
-      { expiresIn: '7d' }
+      { expiresIn: config.SESSION_TTL }
     );
 
     return { token, user };

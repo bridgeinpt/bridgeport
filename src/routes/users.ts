@@ -9,8 +9,9 @@ import { send, NOTIFICATION_TYPES } from '../services/notifications.js';
 import { getSystemSettings } from '../services/system-settings.js';
 import { validateBody, validateUpdateBody, findOrNotFound } from '../lib/helpers.js';
 import { routeSchema } from '../lib/openapi-schema.js';
+import { config } from '../lib/config.js';
 
-const SALT_ROUNDS = 12;
+const SALT_ROUNDS = config.BCRYPT_ROUNDS;
 
 const userIdParams = z.object({ id: z.string() });
 

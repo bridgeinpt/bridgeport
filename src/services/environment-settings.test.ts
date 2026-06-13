@@ -114,8 +114,12 @@ describe('environment-settings', () => {
       mockMonitoringSettings.findUnique.mockResolvedValue(null);
 
       const settings = await getModuleSettings('env-1', 'monitoring');
-      expect(settings.serverHealthIntervalMs).toBe(60000);
+      // Monitoring is now limited to the collect* toggles; interval/retention
+      // fields were moved off MonitoringSettings.
       expect(settings.collectCpu).toBe(true);
+      expect(settings.collectCertChecks).toBe(true);
+      expect(settings).not.toHaveProperty('serverHealthIntervalMs');
+      expect(settings).not.toHaveProperty('metricsRetentionDays');
     });
   });
 
@@ -138,18 +142,18 @@ describe('environment-settings', () => {
 
     it('validates integer range constraints', async () => {
       await expect(
-        updateModuleSettings('env-1', 'monitoring', {
-          serverHealthIntervalMs: 100,
+        updateModuleSettings('env-1', 'data', {
+          defaultCollectionIntervalSec: 10,
         })
-      ).rejects.toThrow('serverHealthIntervalMs must be at least 10000');
+      ).rejects.toThrow('defaultCollectionIntervalSec must be at least 60');
     });
 
     it('validates integer type', async () => {
       await expect(
-        updateModuleSettings('env-1', 'monitoring', {
-          serverHealthIntervalMs: 'not-a-number',
+        updateModuleSettings('env-1', 'data', {
+          defaultCollectionIntervalSec: 'not-a-number',
         })
-      ).rejects.toThrow('serverHealthIntervalMs must be an integer');
+      ).rejects.toThrow('defaultCollectionIntervalSec must be an integer');
     });
 
     it('validates boolean type', async () => {
@@ -190,12 +194,12 @@ describe('environment-settings', () => {
 
     it('creates settings row on first update (upsert)', async () => {
       mockMonitoringSettings.findUnique
-        .mockResolvedValueOnce(null) // current: no row
-        .mockResolvedValueOnce({ id: 'ms-1', environmentId: 'env-1', serverHealthIntervalMs: 30000 });
+        .mockResolvedValueOnce(null) // current: no row (defaults, collectCpu = true)
+        .mockResolvedValueOnce({ id: 'ms-1', environmentId: 'env-1', collectCpu: false });
       mockMonitoringSettings.upsert.mockResolvedValue({});
 
       await updateModuleSettings('env-1', 'monitoring', {
-        serverHealthIntervalMs: 30000,
+        collectCpu: false,
       });
 
       expect(mockMonitoringSettings.upsert).toHaveBeenCalled();

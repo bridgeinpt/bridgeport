@@ -13,7 +13,6 @@ System settings are global, admin-only configuration values that apply across al
 - [URLs](#urls)
 - [Agent Configuration](#agent-configuration)
 - [Retention Policies](#retention-policies)
-- [Registry Configuration](#registry-configuration)
 - [Related Docs](#related-docs)
 
 ---
@@ -72,13 +71,16 @@ Control how long BRIDGEPORT waits when executing commands over SSH.
 
 ## Webhook Settings
 
-Control outgoing webhook delivery behavior (for notifications sent to external webhook endpoints).
+Control **legacy outgoing webhook** delivery behavior (the `WebhookConfig` path — notifications sent to external webhook endpoints).
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `webhookMaxRetries` | `integer` | `3` | Maximum number of retry attempts for failed webhook deliveries |
 | `webhookTimeoutMs` | `integer` | `30000` (30s) | Timeout for each webhook HTTP request |
 | `webhookRetryDelaysMs` | `string` (JSON) | `"[1000,5000,15000]"` | JSON array of delays (in milliseconds) between retry attempts. The array length should match `webhookMaxRetries`. |
+
+> [!IMPORTANT]
+> **Two webhook delivery paths.** These three settings tune only **legacy outgoing webhooks** (`WebhookConfig`). The newer **webhook subscriptions** path (`WebhookSubscription` / `WebhookDelivery`) is a separate subsystem tuned by the `WEBHOOK_DELIVERY_INTERVAL_MS` / `WEBHOOK_DELIVERY_CONCURRENCY` / `WEBHOOK_DELIVERY_BATCH_SIZE` environment variables, with delivery-record retention controlled by [`webhookDeliveryRetentionDays`](#retention-policies). See the [Configuration Reference](../configuration.md#two-webhook-delivery-paths).
 
 **How retries work:**
 
@@ -101,7 +103,7 @@ Timeout for database backup operations.
 | `pgDumpTimeoutMs` | `integer` | `300000` (5 min) | Maximum time for a database backup command (e.g., `pg_dump`) to complete. Increase for large databases. |
 
 > [!NOTE]
-> Individual databases can also override this timeout via their own `pgDumpTimeoutMs` setting. The system setting acts as the default.
+> `pgDumpTimeoutMs` is the **global default**, editable on the System Settings page. Individual databases can override it via their own per-database `pgDumpTimeoutMs` setting; when a database has no override, this system value applies.
 
 ---
 
@@ -158,29 +160,32 @@ active  -->  stale  -->  offline
 
 ## Retention Policies
 
-Automatic cleanup of old data.
+Automatic cleanup of old data. These are the global, admin-editable retention knobs (in the **Retention** section of the System Settings page).
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `auditLogRetentionDays` | `integer` | `90` | Days to keep audit log entries. Set to `0` to keep audit logs forever. |
 | `databaseMetricsRetentionDays` | `integer` | `30` | Days to keep database monitoring metrics (the time-series data collected by monitoring queries). |
+| `notificationRetentionDays` | `integer` | `30` | Days to keep `Notification` rows. |
+| `healthLogRetentionDays` | `integer` | `30` | Days to keep `HealthCheckLog` entries. |
+| `webhookDeliveryRetentionDays` | `integer` | `30` | Days to keep `WebhookDelivery` records (the webhook-subscription delivery path). |
+| `imageDigestRetentionDays` | `integer` | `90` | Pruning age (in days) for unreferenced image digests. |
 
 > [!NOTE]
-> Server/service metrics retention is controlled per-environment via `metricsRetentionDays` in [Monitoring Settings](environment-settings.md#retention). The system-level `databaseMetricsRetentionDays` specifically controls the retention of database-specific monitoring data collected by plugin monitoring queries.
+> **Validation:** `notificationRetentionDays`, `healthLogRetentionDays`, and `webhookDeliveryRetentionDays` accept `1`–`365`; `imageDigestRetentionDays` accepts `1`–`3650`. Unlike `auditLogRetentionDays`, these cannot be set to `0` — there is no "keep forever" option for these record types.
 
----
+> [!NOTE]
+> These retention settings are **hot-reloaded** — the scheduler reads them on each cleanup tick, so changes take effect without restarting the container.
 
-## Registry Configuration
-
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `doRegistryToken` | `string \| null` | `null` | DigitalOcean container registry API token. Used for DigitalOcean-specific registry features like digest-based update detection. |
+> [!NOTE]
+> Server/service metrics retention is **not** here — it is controlled globally by the `METRICS_RETENTION_DAYS` environment variable (see [Configuration Reference → Retention](../configuration.md#retention)). The system-level `databaseMetricsRetentionDays` specifically controls the retention of database-specific monitoring data collected by plugin monitoring queries.
 
 ---
 
 ## Related Docs
 
-- [Environment Settings](environment-settings.md) -- Per-environment settings (monitoring intervals, metrics toggles, etc.)
+- [Configuration Reference](../configuration.md) -- Environment variables, including the `SCHEDULER_*`, rate-limit, SQLite, webhook-delivery, Postgres, and idempotency knobs
+- [Environment Settings](environment-settings.md) -- Per-environment settings (metrics-collection toggles)
 - [Agent Reference](agent.md) -- How agents use callback URLs and thresholds
 - [Plugin Reference](plugins.md) -- Database type monitoring queries affected by retention settings
 - [API Reference](api.md) -- Full API endpoint documentation

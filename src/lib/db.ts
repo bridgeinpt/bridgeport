@@ -1,5 +1,6 @@
 import { PrismaClient, Prisma } from '@prisma/client';
 import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
+import { config } from './config.js';
 
 const adapter = new PrismaBetterSqlite3({
   url: process.env.DATABASE_URL ?? 'file:./bridgeport.db',
@@ -32,15 +33,18 @@ export async function initializeDatabase(): Promise<void> {
     // Note: PRAGMAs return results in SQLite, so use $queryRawUnsafe
     // WAL mode allows concurrent readers + single writer without blocking
     await prisma.$queryRawUnsafe('PRAGMA journal_mode = WAL');
-    // Wait up to 5 seconds when database is locked instead of failing immediately
-    await prisma.$queryRawUnsafe('PRAGMA busy_timeout = 5000');
+    // Wait up to busy_timeout ms (default 5s) when database is locked instead of
+    // failing immediately. config values are Zod-validated integers, safe to
+    // interpolate into the PRAGMA string.
+    await prisma.$queryRawUnsafe(`PRAGMA busy_timeout = ${config.SQLITE_BUSY_TIMEOUT_MS}`);
     // NORMAL is safe with WAL and avoids extra fsync on every commit
     await prisma.$queryRawUnsafe('PRAGMA synchronous = NORMAL');
     // Store temp tables in memory for faster operations
     await prisma.$queryRawUnsafe('PRAGMA temp_store = MEMORY');
-    // Increase cache size to 64MB (negative = KiB)
-    await prisma.$queryRawUnsafe('PRAGMA cache_size = -64000');
-    console.log('Database connected (WAL mode, busy_timeout=5000ms)');
+    // Increase cache size (default 64MB). SQLite reads a negative cache_size as
+    // a size in KiB, so the pragma value is the negated KiB setting.
+    await prisma.$queryRawUnsafe(`PRAGMA cache_size = -${config.SQLITE_CACHE_SIZE_KB}`);
+    console.log(`Database connected (WAL mode, busy_timeout=${config.SQLITE_BUSY_TIMEOUT_MS}ms)`);
 
     // Initialize management environment with localhost server
     await initializeManagementEnvironment();

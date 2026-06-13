@@ -35,7 +35,7 @@ describe('system-settings routes', () => {
       expect(res.json()).toHaveProperty('defaults');
     });
 
-    it('should mask sensitive fields', async () => {
+    it('should expose retention settings and no longer expose doRegistryToken', async () => {
       const res = await app.inject({
         method: 'GET',
         url: '/api/settings/system',
@@ -43,7 +43,13 @@ describe('system-settings routes', () => {
       });
 
       expect(res.statusCode).toBe(200);
-      expect(res.json().settings).toHaveProperty('doRegistryTokenSet');
+      const { settings } = res.json();
+      expect(settings).toHaveProperty('notificationRetentionDays');
+      expect(settings).toHaveProperty('healthLogRetentionDays');
+      expect(settings).toHaveProperty('webhookDeliveryRetentionDays');
+      expect(settings).toHaveProperty('imageDigestRetentionDays');
+      expect(settings).not.toHaveProperty('doRegistryToken');
+      expect(settings).not.toHaveProperty('doRegistryTokenSet');
     });
 
     it('should require authentication', async () => {
@@ -91,6 +97,90 @@ describe('system-settings routes', () => {
       });
 
       expect(res.statusCode).toBe(400);
+    });
+
+    it('should persist a valid notificationRetentionDays', async () => {
+      const res = await app.inject({
+        method: 'PUT',
+        url: '/api/settings/system',
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { notificationRetentionDays: 45 },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json().settings.notificationRetentionDays).toBe(45);
+
+      const persisted = await app.prisma.systemSettings.findUnique({
+        where: { id: 'singleton' },
+      });
+      expect(persisted?.notificationRetentionDays).toBe(45);
+    });
+
+    it('should reject notificationRetentionDays of 0 with 400', async () => {
+      const res = await app.inject({
+        method: 'PUT',
+        url: '/api/settings/system',
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { notificationRetentionDays: 0 }, // min is 1
+      });
+
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('should reject notificationRetentionDays of 400 with 400', async () => {
+      const res = await app.inject({
+        method: 'PUT',
+        url: '/api/settings/system',
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { notificationRetentionDays: 400 }, // max is 365
+      });
+
+      expect(res.statusCode).toBe(400);
+    });
+
+    it('should reject healthLogRetentionDays and webhookDeliveryRetentionDays out of 1-365', async () => {
+      const tooLow = await app.inject({
+        method: 'PUT',
+        url: '/api/settings/system',
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { healthLogRetentionDays: 0 },
+      });
+      expect(tooLow.statusCode).toBe(400);
+
+      const tooHigh = await app.inject({
+        method: 'PUT',
+        url: '/api/settings/system',
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { webhookDeliveryRetentionDays: 366 },
+      });
+      expect(tooHigh.statusCode).toBe(400);
+    });
+
+    it('should accept imageDigestRetentionDays up to 3650 but reject 0 and 3651', async () => {
+      const ok = await app.inject({
+        method: 'PUT',
+        url: '/api/settings/system',
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { imageDigestRetentionDays: 3650 },
+      });
+      expect(ok.statusCode).toBe(200);
+      expect(ok.json().settings.imageDigestRetentionDays).toBe(3650);
+
+      const zero = await app.inject({
+        method: 'PUT',
+        url: '/api/settings/system',
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { imageDigestRetentionDays: 0 },
+      });
+      expect(zero.statusCode).toBe(400);
+
+      const tooHigh = await app.inject({
+        method: 'PUT',
+        url: '/api/settings/system',
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { imageDigestRetentionDays: 3651 },
+      });
+      expect(tooHigh.statusCode).toBe(400);
     });
 
     it('should create audit log entry', async () => {

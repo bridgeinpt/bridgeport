@@ -379,20 +379,22 @@ The background scheduler (`src/lib/scheduler.ts`) uses `setInterval` timers to r
 
 ### Concurrency Control
 
-The scheduler uses `p-limit` with a concurrency of 5 to limit parallel SSH connections and API calls. This prevents overwhelming servers when many health checks or metrics collections run simultaneously.
+The scheduler uses `p-limit` to limit parallel SSH connections and API calls (default concurrency `5`, configurable via `SCHEDULER_CONCURRENCY`). This prevents overwhelming servers when many health checks or metrics collections run simultaneously.
 
 ### Configuration
 
 Scheduler intervals are configured via environment variables (see `src/lib/config.ts`):
 
 ```bash
-SCHEDULER_ENABLED=true           # Master toggle
-SCHEDULER_SERVER_HEALTH_INTERVAL=60   # Seconds
+SCHEDULER_ENABLED=true                  # Master toggle
+SCHEDULER_SERVER_HEALTH_INTERVAL=60     # Seconds
 SCHEDULER_SERVICE_HEALTH_INTERVAL=60
 SCHEDULER_DISCOVERY_INTERVAL=300
 SCHEDULER_UPDATE_CHECK_INTERVAL=1800
 SCHEDULER_METRICS_INTERVAL=300
 SCHEDULER_BACKUP_CHECK_INTERVAL=60
+SCHEDULER_DATABASE_METRICS_INTERVAL=60  # DB monitoring metrics cadence
+SCHEDULER_CONCURRENCY=5                 # Parallel SSH fan-out (p-limit)
 METRICS_RETENTION_DAYS=7
 ```
 
@@ -500,14 +502,39 @@ PLUGINS_DIR=./plugins                    # Plugin JSON directory
 ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=your-secure-password
 
-# Scheduler intervals (all in seconds)
+# Scheduler intervals (all in seconds) — monitoring cadence is global
 SCHEDULER_ENABLED=true
-SCHEDULER_SERVER_HEALTH_INTERVAL=60     # Server health checks
-SCHEDULER_SERVICE_HEALTH_INTERVAL=60    # Service health checks
-SCHEDULER_DISCOVERY_INTERVAL=300        # Container discovery
-SCHEDULER_UPDATE_CHECK_INTERVAL=1800    # Registry update checks
-SCHEDULER_METRICS_INTERVAL=300          # SSH metrics collection
-SCHEDULER_BACKUP_CHECK_INTERVAL=60      # Backup schedule check
+SCHEDULER_SERVER_HEALTH_INTERVAL=60       # Server health checks
+SCHEDULER_SERVICE_HEALTH_INTERVAL=60      # Service health checks
+SCHEDULER_DISCOVERY_INTERVAL=300          # Container discovery
+SCHEDULER_UPDATE_CHECK_INTERVAL=1800      # Registry update checks
+SCHEDULER_METRICS_INTERVAL=300            # SSH metrics collection
+SCHEDULER_BACKUP_CHECK_INTERVAL=60        # Backup schedule check
+SCHEDULER_DATABASE_METRICS_INTERVAL=60    # DB monitoring metrics cadence
+SCHEDULER_CONCURRENCY=5                    # Parallel SSH fan-out (p-limit)
+
+# Security
+RATE_LIMIT_MAX=100                        # API requests per IP per window
+RATE_LIMIT_WINDOW="1 minute"              # Rate-limit window (duration string)
+BCRYPT_ROUNDS=12                          # Password hash cost (clamped 4-15)
+SESSION_TTL=7d                            # JWT/session lifetime (duration string)
+
+# Performance / SQLite
+SQLITE_BUSY_TIMEOUT_MS=5000               # Lock wait under WAL contention
+SQLITE_CACHE_SIZE_KB=64000                # Page cache size (KiB)
+
+# Webhook subscription delivery (WebhookSubscription/WebhookDelivery path)
+WEBHOOK_DELIVERY_INTERVAL_MS=3000         # Delivery sweep cadence
+WEBHOOK_DELIVERY_CONCURRENCY=10           # Parallel deliveries per sweep
+WEBHOOK_DELIVERY_BATCH_SIZE=50            # Deliveries fetched per sweep
+
+# Database query executor (main Postgres query path)
+POSTGRES_CONNECTION_TIMEOUT_MS=10000      # Connection timeout
+POSTGRES_STATEMENT_TIMEOUT_MS=30000       # Statement timeout
+
+# Idempotency-Key record lifecycle
+IDEMPOTENCY_RETENTION_MS=86400000         # Record retention (24h)
+IDEMPOTENCY_STALE_INPROGRESS_MS=300000    # In-progress staleness (5m)
 
 # Sentry error monitoring (opt-in)
 SENTRY_BACKEND_DSN=https://key@sentry.io/12345
@@ -586,11 +613,11 @@ DatabaseType       - Database engine types (PostgreSQL, MySQL, SQLite) with moni
 DatabaseTypeCommand - Commands for a database type (shell, vacuum, etc.)
 SpacesConfig       - Global DO Spaces credentials
 SpacesEnvironment  - Per-environment Spaces enable/disable
-SystemSettings     - System-wide operational settings (timeouts, limits, retries, URLs)
+SystemSettings     - System-wide operational settings (timeouts, limits, retries, URLs, retention policies)
 
 # Per-Environment Settings (one row each per environment)
 GeneralSettings       - sshUser
-MonitoringSettings    - Intervals, retention, metric toggles, bounce thresholds
+MonitoringSettings    - Per-metric collection toggles (collect*). Cadence/retention/bounce are global, not per-env.
 OperationsSettings    - Default docker/metrics modes
 DataSettings          - Backup download, default monitoring settings
 ConfigurationSettings - Secret reveal permissions

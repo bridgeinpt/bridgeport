@@ -25,6 +25,7 @@ import { startScheduler, stopScheduler } from './lib/scheduler.js';
 import { initializeNotificationTypes } from './services/notifications.js';
 import { flushNotificationQueue } from './services/notification-queue.js';
 import { syncPlugins } from './services/plugin-loader.js';
+import { getSystemSettings } from './services/system-settings.js';
 import { sshPool } from './lib/ssh.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -96,15 +97,16 @@ async function buildServer() {
     secret: config.JWT_SECRET,
   });
 
-  // Global rate limiting — 100 requests/minute per client IP.
-  // Self-hosted admin tools rarely see legitimate bursts above this, and the
-  // cap protects against credential-stuffing, webhook floods, and accidental
-  // client-side polling loops.  `/health` and `/api/client-config` are
-  // allow-listed so external monitors don't get throttled.
+  // Global rate limiting — defaults to 100 requests/minute per client IP
+  // (RATE_LIMIT_MAX / RATE_LIMIT_WINDOW). Self-hosted admin tools rarely see
+  // legitimate bursts above this, and the cap protects against
+  // credential-stuffing, webhook floods, and accidental client-side polling
+  // loops.  `/health` and `/api/client-config` are allow-listed so external
+  // monitors don't get throttled.
   await fastify.register(rateLimit, {
     global: true,
-    max: 100,
-    timeWindow: '1 minute',
+    max: config.RATE_LIMIT_MAX,
+    timeWindow: config.RATE_LIMIT_WINDOW,
     allowList: (req) => req.url === '/health' || req.url === '/api/client-config',
     errorResponseBuilder: (_req, context) => {
       const retryAfter = Math.ceil(context.ttl / 1000);
@@ -139,9 +141,12 @@ async function buildServer() {
   // header is present, so it's a no-op for every other request.
   await fastify.register(idempotencyPlugin);
 
+  // Max upload size is read once at boot from system settings (default 50MB);
+  // changing it requires a restart (Pass 5 surfaces a "requires restart" badge).
+  const systemSettings = await getSystemSettings();
   await fastify.register(multipart, {
     limits: {
-      fileSize: 50 * 1024 * 1024, // 50MB for asset files
+      fileSize: systemSettings.maxUploadSizeMb * 1024 * 1024,
     },
   });
 
@@ -229,6 +234,7 @@ async function buildServer() {
       updateCheckIntervalMs: config.SCHEDULER_UPDATE_CHECK_INTERVAL * 1000,
       metricsIntervalMs: config.SCHEDULER_METRICS_INTERVAL * 1000,
       backupCheckIntervalMs: config.SCHEDULER_BACKUP_CHECK_INTERVAL * 1000,
+      databaseMetricsIntervalMs: config.SCHEDULER_DATABASE_METRICS_INTERVAL * 1000,
       metricsRetentionDays: config.METRICS_RETENTION_DAYS,
     });
   }

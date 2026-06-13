@@ -83,7 +83,7 @@ All environment variables BRIDGEPORT accepts, grouped by concern.
 
 ### Scheduler
 
-Background job intervals. All values are in **seconds**. These set the global cadence; per-environment settings in the UI can further customize intervals.
+Background job intervals. Interval values are in **seconds**. These set the global cadence for all environments — monitoring cadence is global, not per-environment.
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
@@ -94,6 +94,54 @@ Background job intervals. All values are in **seconds**. These set the global ca
 | `SCHEDULER_UPDATE_CHECK_INTERVAL` | number | `1800` | How often to check registries for new image tags (seconds). |
 | `SCHEDULER_METRICS_INTERVAL` | number | `300` | How often to collect server/service metrics via SSH (seconds). |
 | `SCHEDULER_BACKUP_CHECK_INTERVAL` | number | `60` | How often to check for scheduled backups that are due (seconds). |
+| `SCHEDULER_DATABASE_METRICS_INTERVAL` | number | `60` | How often to collect database monitoring metrics (seconds). |
+| `SCHEDULER_CONCURRENCY` | number | `5` | Maximum parallel SSH health/metrics fan-out (`p-limit`). Raise it for fleets of 100+ servers; lower it on tiny/constrained hosts. |
+
+### Security
+
+| Variable | Type | Default | Description |
+|---|---|---|---|
+| `RATE_LIMIT_MAX` | number | `100` | Maximum API requests per IP per window. |
+| `RATE_LIMIT_WINDOW` | string | `1 minute` | Rate-limit window as a duration string (e.g., `1 minute`, `30 seconds`). Must be non-empty — a blank value is rejected at startup rather than silently falling back to the default. |
+| `BCRYPT_ROUNDS` | number | `12` | Password hashing cost factor. Clamped to the range `4`–`15`. Higher is slower but stronger. |
+| `SESSION_TTL` | string | `7d` | JWT / session lifetime as a duration string (e.g., `7d`, `24h`, `30m`). Must be non-empty — a blank value is rejected at startup. |
+
+### Performance / SQLite
+
+| Variable | Type | Default | Description |
+|---|---|---|---|
+| `SQLITE_BUSY_TIMEOUT_MS` | number | `5000` | How long SQLite waits for a lock under WAL contention (milliseconds). |
+| `SQLITE_CACHE_SIZE_KB` | number | `64000` | SQLite page cache size in KiB. Lower it on memory-constrained / ARM hosts. |
+
+### Webhook Subscription Delivery
+
+Tunes the delivery sweep for **webhook subscriptions** (the `WebhookSubscription` / `WebhookDelivery` path). These do **not** affect legacy outgoing webhooks (`WebhookConfig`), which are tuned via [System Settings](reference/system-settings.md#webhook-settings) in the UI. See [Two webhook delivery paths](#two-webhook-delivery-paths) below.
+
+| Variable | Type | Default | Description |
+|---|---|---|---|
+| `WEBHOOK_DELIVERY_INTERVAL_MS` | number | `3000` | How often the delivery sweep runs (milliseconds). |
+| `WEBHOOK_DELIVERY_CONCURRENCY` | number | `10` | Number of parallel deliveries per sweep. |
+| `WEBHOOK_DELIVERY_BATCH_SIZE` | number | `50` | Number of pending deliveries fetched per sweep. |
+
+> Retention of delivered records is controlled by the `webhookDeliveryRetentionDays` [system setting](reference/system-settings.md#retention-policies), not an env var.
+
+### Database Query Executor (Postgres)
+
+Timeouts for the main Postgres query path (used by the database query executor).
+
+| Variable | Type | Default | Description |
+|---|---|---|---|
+| `POSTGRES_CONNECTION_TIMEOUT_MS` | number | `10000` | Postgres connection timeout (milliseconds). Minimum `1` — `0` ("wait forever") is rejected so a stalled host can't wedge the metrics scheduler. |
+| `POSTGRES_STATEMENT_TIMEOUT_MS` | number | `30000` | Postgres statement timeout (milliseconds). Minimum `1`. |
+
+### Idempotency
+
+Controls retention of `Idempotency-Key` records used for safe request retries.
+
+| Variable | Type | Default | Description |
+|---|---|---|---|
+| `IDEMPOTENCY_RETENTION_MS` | number | `86400000` | How long idempotency records are retained (milliseconds; default 24h). Minimum `1000`. |
+| `IDEMPOTENCY_STALE_INPROGRESS_MS` | number | `300000` | When an in-progress idempotency record is considered stale (milliseconds; default 5m). Minimum `1000` — `0` would make every in-flight record instantly stale and defeat the idempotency guarantee. |
 
 ### Retention
 
@@ -243,12 +291,13 @@ Beyond environment variables, each environment has its own settings configured t
 | Module | What It Controls |
 |---|---|
 | **General** | SSH user for server connections |
-| **Monitoring** | Health check intervals, metrics collection, retention, alert bounce thresholds, per-metric toggles |
+| **Monitoring** | Per-metric collection toggles (`collect*`) |
 | **Operations** | Default Docker mode, default metrics mode for new servers |
 | **Data** | Backup download permissions, default database monitoring settings |
 | **Configuration** | Secret reveal permissions (disable for production environments) |
 
-Per-environment settings override the global scheduler intervals for that specific environment. For example, you might run health checks every 30 seconds in production but every 5 minutes in staging.
+> [!IMPORTANT]
+> Monitoring cadence is **global**, not per-environment — it is driven by the `SCHEDULER_*` env vars (see [Scheduler](#scheduler)). Health-log retention is global via the System Settings [Retention](#retention-system-settings) knobs, server/service metrics retention is the `METRICS_RETENTION_DAYS` env var, and alert bounce thresholds live on **Notification Types** (Admin → Notifications). The per-environment Monitoring tab now only exposes the metric-collection toggles. The earlier per-environment interval/retention/bounce fields were silently ignored by the scheduler and have been removed.
 
 For the full reference of every setting, see [Environment Settings Reference](reference/environment-settings.md).
 
@@ -261,9 +310,33 @@ Global operational parameters configured by admins at **Admin > System**. These 
 | Category | Settings |
 |---|---|
 | **SSH** | Command execution timeout, connection timeout |
-| **Webhooks** | Max retries, timeout, retry delay |
-| **Backups** | pg_dump/mysqldump timeout |
+| **Webhooks** | Max retries, timeout, retry delay (legacy outgoing webhooks) |
+| **Backups** | pg_dump/mysqldump timeout (global default; per-database settings override it) |
 | **Limits** | Max upload size, active user tracking window, max registry tags to fetch, default log lines |
 | **URLs** | Agent callback URL, public URL for notification links |
+| **Retention** | Audit log, database metrics, notification, health check log, webhook delivery, and image digest retention |
+
+### Retention (System Settings)
+
+The **Retention** section of System Settings holds the global, hot-reloaded cleanup knobs read by the scheduler on each cleanup tick (no restart needed):
+
+| Setting | Default | Controls |
+|---|---|---|
+| `auditLogRetentionDays` | `90` | How long audit log entries are kept (`0` = forever). |
+| `databaseMetricsRetentionDays` | `30` | How long database monitoring metrics are kept. |
+| `notificationRetentionDays` | `30` | How long `Notification` rows are kept. |
+| `healthLogRetentionDays` | `30` | How long `HealthCheckLog` entries are kept. |
+| `webhookDeliveryRetentionDays` | `30` | How long `WebhookDelivery` records (webhook subscriptions) are kept. |
+| `imageDigestRetentionDays` | `90` | Pruning age for unreferenced image digests. |
+
+> [!NOTE]
+> Server/service metrics retention is controlled by the `METRICS_RETENTION_DAYS` env var (see [Retention](#retention) under the env-var reference). The System Settings retention knobs above cover audit logs, database metrics, notifications, health check logs, webhook deliveries, and image digests.
+
+### Two webhook delivery paths
+
+BRIDGEPORT has two independent webhook delivery subsystems. Make sure you tune the one that applies:
+
+- **Legacy outgoing webhooks** (`WebhookConfig`) — fire-and-retry notifications to a configured endpoint. Tuned via System Settings: `webhookMaxRetries`, `webhookTimeoutMs`, `webhookRetryDelaysMs`.
+- **Webhook subscriptions** (`WebhookSubscription` / `WebhookDelivery`) — the newer event-subscription delivery path. Tuned via the `WEBHOOK_DELIVERY_INTERVAL_MS` / `_CONCURRENCY` / `_BATCH_SIZE` env vars, with record retention via the `webhookDeliveryRetentionDays` system setting.
 
 For the full reference, see [System Settings Reference](reference/system-settings.md).

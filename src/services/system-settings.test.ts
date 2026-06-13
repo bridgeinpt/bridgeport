@@ -38,9 +38,12 @@ const defaultSettings = {
   agentCallbackUrl: null,
   agentStaleThresholdMs: SYSTEM_SETTINGS_DEFAULTS.agentStaleThresholdMs,
   agentOfflineThresholdMs: SYSTEM_SETTINGS_DEFAULTS.agentOfflineThresholdMs,
-  doRegistryToken: null,
   auditLogRetentionDays: SYSTEM_SETTINGS_DEFAULTS.auditLogRetentionDays,
   databaseMetricsRetentionDays: SYSTEM_SETTINGS_DEFAULTS.databaseMetricsRetentionDays,
+  notificationRetentionDays: SYSTEM_SETTINGS_DEFAULTS.notificationRetentionDays,
+  healthLogRetentionDays: SYSTEM_SETTINGS_DEFAULTS.healthLogRetentionDays,
+  webhookDeliveryRetentionDays: SYSTEM_SETTINGS_DEFAULTS.webhookDeliveryRetentionDays,
+  imageDigestRetentionDays: SYSTEM_SETTINGS_DEFAULTS.imageDigestRetentionDays,
   updatedAt: new Date(),
 };
 
