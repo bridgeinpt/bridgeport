@@ -113,6 +113,12 @@ const seg = (v: unknown): string => encodeURIComponent(String(v));
  * Build a read tool: GETs the URL produced by `buildUrl(args)` and returns the
  * API body verbatim (or an MCP error result on non-2xx). `transform` optionally
  * post-processes the parsed body (used to strip var values).
+ *
+ * `envScoped` declares whether the backing route is reachable by an
+ * environment-scoped API token: `true` for env routes (`/api/environments/:envId/...`,
+ * `GET /api/environments`, `GET /api/environments/:id`) and no-scope routes
+ * (`/health`); `false` for global routes (`/api/servers/:id`, `/api/audit-logs`,
+ * …), which always FORBIDDEN_SCOPE for such a token. See `McpToolDef.envScoped`.
  */
 function readTool(opts: {
   name: string;
@@ -120,6 +126,7 @@ function readTool(opts: {
   description: string;
   inputSchema: Record<string, z.ZodType>;
   buildUrl: (args: Record<string, unknown>) => string;
+  envScoped: boolean;
   transform?: (body: unknown) => unknown;
 }): McpToolDef {
   return {
@@ -131,6 +138,7 @@ function readTool(opts: {
     destructive: false,
     readOnly: true,
     isWrite: false,
+    envScoped: opts.envScoped,
     handler: async (args, ctx) => {
       const url = opts.buildUrl(args);
       const res = await injectApi(ctx.app, {
@@ -183,6 +191,9 @@ function writeTool(opts: {
     destructive: true,
     readOnly: false,
     isWrite: true,
+    // Every write tool targets a GLOBAL route (no `:envId` in the path), so it
+    // always FORBIDDEN_SCOPEs for an env-scoped token — never env-scoped.
+    envScoped: false,
     handler: async (args, ctx) => {
       const url = opts.buildUrl(args);
       const body = opts.buildBody ? opts.buildBody(args) : undefined;
@@ -226,6 +237,7 @@ const readTools: McpToolDef[] = [
     description: 'List all environments the caller can access.',
     inputSchema: {},
     buildUrl: () => '/api/environments',
+    envScoped: true, // GET /api/environments — scope-exempt (returns the token's allowlist)
   }),
   readTool({
     name: 'get_environment',
@@ -233,6 +245,7 @@ const readTools: McpToolDef[] = [
     description: 'Get a single environment by id.',
     inputSchema: { id },
     buildUrl: (a) => `/api/environments/${seg(a.id)}`,
+    envScoped: true, // GET /api/environments/:id — enforceTokenScope resolves :id as the envId
   }),
   readTool({
     name: 'list_servers',
@@ -240,6 +253,7 @@ const readTools: McpToolDef[] = [
     description: 'List servers in an environment.',
     inputSchema: { envId },
     buildUrl: (a) => `/api/environments/${seg(a.envId)}/servers`,
+    envScoped: true, // /api/environments/:envId/servers — env route
   }),
   readTool({
     name: 'get_server',
@@ -249,6 +263,7 @@ const readTools: McpToolDef[] = [
     inputSchema: { id, includeServices: z.boolean().optional().describe('Include the flattened services array.') },
     buildUrl: (a) =>
       `/api/servers/${seg(a.id)}${a.includeServices ? '?include=services' : ''}`,
+    envScoped: false, // /api/servers/:id — global route (FORBIDDEN_SCOPE for env-scoped tokens)
   }),
   readTool({
     name: 'get_server_health',
@@ -257,6 +272,7 @@ const readTools: McpToolDef[] = [
       'Get the current cached health status of all servers, services, and databases in an environment (read-only; reads denormalized columns, never triggers a live SSH check).',
     inputSchema: { envId },
     buildUrl: (a) => `/api/environments/${seg(a.envId)}/health-status`,
+    envScoped: true, // /api/environments/:envId/health-status — env route
   }),
   readTool({
     name: 'list_services',
@@ -264,6 +280,7 @@ const readTools: McpToolDef[] = [
     description: 'List service templates in an environment.',
     inputSchema: { envId },
     buildUrl: (a) => `/api/environments/${seg(a.envId)}/services`,
+    envScoped: true, // /api/environments/:envId/services — env route
   }),
   readTool({
     name: 'get_service',
@@ -271,6 +288,7 @@ const readTools: McpToolDef[] = [
     description: 'Get a single service template by id, including its deployments.',
     inputSchema: { id },
     buildUrl: (a) => `/api/services/${seg(a.id)}`,
+    envScoped: false, // /api/services/:id — global route (FORBIDDEN_SCOPE for env-scoped tokens)
   }),
   readTool({
     name: 'get_service_logs',
@@ -286,6 +304,7 @@ const readTools: McpToolDef[] = [
       const base = `/api/services/${seg(a.id)}/deployments/${seg(a.depId)}/logs`;
       return a.tail !== undefined ? `${base}?tail=${seg(a.tail)}` : base;
     },
+    envScoped: false, // /api/services/:id/deployments/:depId/logs — global route
   }),
   readTool({
     name: 'list_config_files',
@@ -293,6 +312,7 @@ const readTools: McpToolDef[] = [
     description: 'List config files in an environment.',
     inputSchema: { envId },
     buildUrl: (a) => `/api/environments/${seg(a.envId)}/config-files`,
+    envScoped: true, // /api/environments/:envId/config-files — env route
   }),
   readTool({
     name: 'get_config_file',
@@ -300,6 +320,7 @@ const readTools: McpToolDef[] = [
     description: 'Get a single config file by id (includes its content).',
     inputSchema: { id },
     buildUrl: (a) => `/api/config-files/${seg(a.id)}`,
+    envScoped: false, // /api/config-files/:id — global route (FORBIDDEN_SCOPE for env-scoped tokens)
   }),
   readTool({
     name: 'list_config_fragments',
@@ -307,6 +328,7 @@ const readTools: McpToolDef[] = [
     description: 'List reusable config fragments in an environment.',
     inputSchema: { envId },
     buildUrl: (a) => `/api/environments/${seg(a.envId)}/config-fragments`,
+    envScoped: true, // /api/environments/:envId/config-fragments — env route
   }),
   readTool({
     name: 'list_secrets',
@@ -315,6 +337,7 @@ const readTools: McpToolDef[] = [
       'List secret keys and metadata (usage info) in an environment. Decrypted secret VALUES are never returned by this tool.',
     inputSchema: { envId },
     buildUrl: (a) => `/api/environments/${seg(a.envId)}/secrets`,
+    envScoped: true, // /api/environments/:envId/secrets — env route
   }),
   readTool({
     name: 'list_vars',
@@ -323,6 +346,7 @@ const readTools: McpToolDef[] = [
       'List variable keys, descriptions, and usage info in an environment. Variable VALUES are intentionally stripped from this tool’s output.',
     inputSchema: { envId },
     buildUrl: (a) => `/api/environments/${seg(a.envId)}/vars`,
+    envScoped: true, // /api/environments/:envId/vars — env route
     // The underlying route returns plaintext `value` for every role. Strip it
     // so the tool exposes key/description/usage/timestamps only (issue #208).
     transform: (body) => {
@@ -343,6 +367,7 @@ const readTools: McpToolDef[] = [
     description: 'Get recent metrics samples for a server.',
     inputSchema: { id },
     buildUrl: (a) => `/api/servers/${seg(a.id)}/metrics`,
+    envScoped: false, // /api/servers/:id/metrics — global route (FORBIDDEN_SCOPE for env-scoped tokens)
   }),
   readTool({
     name: 'get_service_metrics',
@@ -350,6 +375,7 @@ const readTools: McpToolDef[] = [
     description: 'Get recent metrics samples for a service.',
     inputSchema: { id },
     buildUrl: (a) => `/api/services/${seg(a.id)}/metrics`,
+    envScoped: false, // /api/services/:id/metrics — global route (FORBIDDEN_SCOPE for env-scoped tokens)
   }),
   readTool({
     name: 'get_metrics_history',
@@ -357,6 +383,7 @@ const readTools: McpToolDef[] = [
     description: 'Get aggregated server metrics history for an environment.',
     inputSchema: { envId },
     buildUrl: (a) => `/api/environments/${seg(a.envId)}/metrics/history`,
+    envScoped: true, // /api/environments/:envId/metrics/history — env route
   }),
   readTool({
     name: 'list_health_checks',
@@ -364,6 +391,7 @@ const readTools: McpToolDef[] = [
     description: 'List recent health-check log entries for an environment.',
     inputSchema: { envId },
     buildUrl: (a) => `/api/environments/${seg(a.envId)}/health-logs`,
+    envScoped: true, // /api/environments/:envId/health-logs — env route
   }),
   readTool({
     name: 'get_deployments',
@@ -371,6 +399,7 @@ const readTools: McpToolDef[] = [
     description: 'Get the deployment history for a service template.',
     inputSchema: { id },
     buildUrl: (a) => `/api/services/${seg(a.id)}/deployments-history`,
+    envScoped: false, // /api/services/:id/deployments-history — global route (FORBIDDEN_SCOPE for env-scoped tokens)
   }),
   readTool({
     name: 'list_deployment_plans',
@@ -378,6 +407,7 @@ const readTools: McpToolDef[] = [
     description: 'List deployment plans for an environment.',
     inputSchema: { envId },
     buildUrl: (a) => `/api/environments/${seg(a.envId)}/deployment-plans`,
+    envScoped: true, // /api/environments/:envId/deployment-plans — env route
   }),
   readTool({
     name: 'get_deployment_plan',
@@ -385,6 +415,7 @@ const readTools: McpToolDef[] = [
     description: 'Get a single deployment plan by id.',
     inputSchema: { id },
     buildUrl: (a) => `/api/deployment-plans/${seg(a.id)}`,
+    envScoped: false, // /api/deployment-plans/:id — global route (FORBIDDEN_SCOPE for env-scoped tokens)
   }),
   readTool({
     name: 'get_drift',
@@ -393,6 +424,7 @@ const readTools: McpToolDef[] = [
       'Compute configuration drift between BridgePort’s stored view and actual host state for every deployment on a server (read-only — does not change anything). COST: performs a LIVE query to the target host over SSH/Docker (not a cached read) — slower and not free, so avoid tight polling.',
     inputSchema: { id },
     buildUrl: (a) => `/api/servers/${seg(a.id)}/drift`,
+    envScoped: false, // /api/servers/:id/drift — global per-server route (FORBIDDEN_SCOPE for env-scoped tokens)
   }),
   readTool({
     name: 'query_audit_log',
@@ -414,6 +446,7 @@ const readTools: McpToolDef[] = [
       const qs = params.toString();
       return qs ? `/api/audit-logs?${qs}` : '/api/audit-logs';
     },
+    envScoped: false, // /api/audit-logs — global route (FORBIDDEN_SCOPE for env-scoped tokens, even with an environmentId filter)
   }),
   readTool({
     name: 'get_version',
@@ -423,6 +456,7 @@ const readTools: McpToolDef[] = [
     // There is no /api/version route (#199 shipped as policy docs, not an
     // endpoint); /health returns version/bundledAgentVersion/cliVersion.
     buildUrl: () => '/health',
+    envScoped: true, // /health — unauthenticated/no-scope route (always reachable)
   }),
 ];
 
@@ -440,6 +474,9 @@ const getCapabilitiesTool: McpToolDef = {
   destructive: false,
   readOnly: true,
   isWrite: false,
+  // Synthesized locally (no inject), so no route to scope-check — usable by any
+  // token, including an env-scoped one.
+  envScoped: true,
   handler: async (_args: Record<string, unknown>, ctx: McpToolContext): Promise<McpToolResult> => {
     return jsonResult({
       version: appVersion,

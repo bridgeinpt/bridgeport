@@ -5,13 +5,17 @@
  * The transport is stateless (one McpServer per incoming POST), so this is
  * called fresh for every request. It computes the caller's scopes via
  * `computeScopes` and registers ONLY the tools whose `requiredScope` is null
- * or present in those scopes — so an env-scoped viewer token sees the read +
- * meta tools, while an operator/admin token additionally sees the write tools.
+ * or present in those scopes — so a viewer token sees the read + meta tools,
+ * while an operator/admin token additionally sees the write tools.
  *
  * Env-scoped API tokens (`scope.allEnvironments === false`) additionally have
- * write tools withheld: every write tool targets a GLOBAL route (no `:envId`),
- * which enforceTokenScope rejects with FORBIDDEN_SCOPE for any env-scoped token,
- * so advertising them would only ever produce guaranteed failures.
+ * every GLOBAL-route tool withheld (`tool.envScoped === false`): such a token
+ * can only reach `/api/environments/:envId/...` routes, the scope-exempt
+ * environment list/get, and no-scope routes — enforceTokenScope rejects any
+ * other (global) route with FORBIDDEN_SCOPE, so advertising those tools (every
+ * write tool AND the global read tools like get_server / query_audit_log) would
+ * only ever produce guaranteed failures. The result is a TRUTHFUL list: only
+ * tools an env-scoped token can actually use.
  *
  * Each tool's handler runs `injectApi` under the hood (see tools.ts) and maps
  * the API envelope to an MCP result; on a non-2xx / ApiError envelope it returns
@@ -38,23 +42,32 @@ export interface BuildMcpServerOptions {
 }
 
 /**
- * Select the tools a caller holding `scopes` is entitled to: every meta/read
- * tool (`requiredScope === null`, available to any valid token) plus any write
- * tool whose required scope is present. Pure and side-effect-free so the
- * scope-gating contract can be unit-tested without the SDK or a transport.
+ * Select the tools a caller holding `scopes` is entitled to. A tool is included
+ * iff BOTH hold:
+ *   1. Scope: its `requiredScope` is null (meta/read — every valid token) or is
+ *      present in `scopes` (write tools need `services:write`).
+ *   2. Reachability: it isn't withheld by env-scoping — either the caller is not
+ *      env-scoped, or the tool's backing route is reachable by an env-scoped
+ *      token (`tool.envScoped === true`).
  *
- * When `isEnvScoped` is true (an env-scoped API token), write tools are excluded
- * even if the role-derived scope is present: their global routes always fail
- * enforceTokenScope for an env-scoped token, so they'd be dead weight.
+ * When `isEnvScoped` is true (an env-scoped API token), every tool whose route
+ * is GLOBAL (`tool.envScoped === false`) is excluded — it would only ever return
+ * FORBIDDEN_SCOPE for such a token, so listing it would be a misleading
+ * advertisement. This `envScoped` gate SUBSUMES the prior write-tool exclusion:
+ * all write tools are `envScoped:false`, so they're dropped for env-scoped tokens
+ * by the same condition (no separate `:write` special-case needed). It also drops
+ * the global READ tools (e.g. get_server, query_audit_log) that the old logic
+ * left misleadingly listed.
+ *
+ * Pure and side-effect-free so the scope-gating contract can be unit-tested
+ * without the SDK or a transport.
  */
 export function selectToolsForScopes(scopes: string[], isEnvScoped = false): McpToolDef[] {
   const scopeSet = new Set(scopes);
   return ALL_TOOLS.filter((tool) => {
-    if (tool.requiredScope === null) return true; // meta/read — always available
-    if (!scopeSet.has(tool.requiredScope)) return false;
-    // Env-scoped tokens can't reach the global write routes — hide write tools.
-    if (isEnvScoped && tool.requiredScope.endsWith(':write')) return false;
-    return true;
+    const scopeOk = tool.requiredScope === null || scopeSet.has(tool.requiredScope);
+    const reachable = !isEnvScoped || tool.envScoped;
+    return scopeOk && reachable;
   });
 }
 
@@ -72,13 +85,13 @@ export function buildMcpServer(options: BuildMcpServerOptions): McpServer {
 
   // An env-scoped API token has `scope.allEnvironments === false`. JWT sessions
   // (scope === undefined) and all-environment tokens are NOT env-scoped, so they
-  // keep full write access. Env-scoped tokens get write tools withheld (their
-  // global routes always FORBIDDEN_SCOPE — see selectToolsForScopes).
+  // keep the full surface. Env-scoped tokens get every global-route tool withheld
+  // (their routes always FORBIDDEN_SCOPE — see selectToolsForScopes).
   const isEnvScoped = authUser.scope?.allEnvironments === false;
 
   // Tools available to this session: meta/read (requiredScope null) plus any
-  // write tool whose required scope the caller holds (and, for env-scoped
-  // tokens, that isn't a write tool).
+  // write tool whose required scope the caller holds — and, for env-scoped
+  // tokens, only the ones whose backing route is reachable (tool.envScoped).
   const availableTools = selectToolsForScopes(computeScopes(authUser), isEnvScoped);
   const registeredToolNames = availableTools.map((t) => t.name);
 

@@ -106,19 +106,23 @@ The `/mcp` route is protected by the same authentication layer as the REST API. 
 
 - **Read tools** are available to any valid token (every role has `*:read`).
 - **Write tools** are registered only when the token's scopes include `services:write` — which BRIDGEPORT grants to **operator** and **admin** only. A viewer simply doesn't see the write tools in `tools/list`.
-- **Environment scoping still applies.** An env-scoped token can connect, but each tool call is enforced per-resource on the underlying API request. Calling a tool against an environment the token isn't scoped to returns a `FORBIDDEN_SCOPE` error result; global routes that an env-scoped token can't reach return `FORBIDDEN_SCOPE` at call time.
+- **Environment scoping narrows the tool list.** An env-scoped token can connect, but it sees **only the tools it can actually use** — every tool backed by a global route (all write tools *and* global read tools like `get_server` or `query_audit_log`) is hidden, because such routes always return `FORBIDDEN_SCOPE` for an env-scoped token. See [Environment-scoped tokens see only environment-scoped tools](#environment-scoped-tokens-see-only-environment-scoped-tools).
 - **The admin-only secret-reveal endpoint is not exposed as any tool.** There is no way to decrypt a secret value through MCP.
 
 Call `get_capabilities` to see the exact scope set and tool list your token resolved to.
 
-### Environment-scoped tokens have reduced MCP utility
+### Environment-scoped tokens see only environment-scoped tools
 
-An **environment-scoped** API token (one whose scope is *not* "all environments") gets a deliberately narrower MCP surface:
+An **environment-scoped** API token (one whose scope is *not* "all environments") gets a deliberately narrower — and **truthful** — MCP surface: `tools/list` (and `get_capabilities`) advertise **only the tools it can actually use**. A tool is listed for an env-scoped token only when its backing route is reachable by such a token:
 
-- **Write tools are hidden entirely.** Every write tool (`deploy_service`, `run_database_backup`, `sync_config_file`, etc.) targets a **global** route (e.g. `POST /api/services/:id/deploy`, `POST /api/databases/:id/backups`) with no environment in the path. BRIDGEPORT's token-scope check rejects *any* env-scoped token on those routes with `FORBIDDEN_SCOPE`, so advertising them would only produce guaranteed failures. They therefore don't appear in `tools/list` for an env-scoped token (and `get_capabilities` won't list them).
-- **Some global read tools will still return `FORBIDDEN_SCOPE`.** Read tools that take an `envId` and hit an environment-scoped route work for the environments the token covers; read tools backed by a global route may return a `FORBIDDEN_SCOPE` error result at call time.
+- ✅ **Listed** — environment-scoped routes (`/api/environments/:envId/...`), the scope-exempt environment list/get (`GET /api/environments`, `GET /api/environments/:id`), and no-scope routes (`/health`), plus the locally-synthesized `get_capabilities`. These are the per-environment **read tools** — `list_servers`, `list_services`, `list_secrets`, `list_vars`, `get_server_health`, `list_config_files`, `list_config_fragments`, `get_metrics_history`, `list_health_checks`, `list_deployment_plans`, `list_environments`, `get_environment` — plus `get_version` and `get_capabilities`.
+- ❌ **Hidden** — every tool backed by a **global** route (no environment in the path), because BRIDGEPORT's token-scope check rejects an env-scoped token on those routes with `FORBIDDEN_SCOPE`, so listing them would only advertise guaranteed failures. This covers:
+  - **All write tools** (`deploy_service`, `execute_deployment_plan`, `restart_deployment`, `rollback_deployment_plan`, `run_database_backup`, `sync_config_file`) — e.g. `POST /api/services/:id/deploy`, `POST /api/databases/:id/backups`.
+  - **The global read tools** `get_server`, `get_service`, `get_service_logs`, `get_config_file`, `get_server_metrics`, `get_service_metrics`, `get_deployments`, `get_deployment_plan`, `get_drift`, and `query_audit_log` — each hits a global `/api/<resource>/:id|...` route.
 
-**Recommendation:** for full MCP functionality (all write tools + every read tool), use an **all-environments** API token with the role you intend. Use env-scoped tokens when you specifically want to limit a session to read access within particular environments.
+> Per-resource scope enforcement still runs on every call regardless; this just stops the env-scoped tool list from advertising tools that could never succeed.
+
+**Recommendation:** for the full MCP surface (all write tools + every read tool), use an **all-environments** API token with the role you intend — or a user session. Use env-scoped tokens when you specifically want to limit a session to read access within particular environments.
 
 ---
 
@@ -160,7 +164,7 @@ Backed by side-effect-free `GET` routes. Available to every role.
 
 ### Write Tools
 
-Require a write scope (`operator`/`admin`) and are hidden from environment-scoped tokens (see [above](#environment-scoped-tokens-have-reduced-mcp-utility)). Each carries the MCP `destructiveHint: true` annotation. Each **mutating** call injects a time-bucketed `Idempotency-Key`; `dryRun=true` previews are not cached (see [Idempotency](#idempotency)).
+Require a write scope (`operator`/`admin`) and are hidden from environment-scoped tokens (see [above](#environment-scoped-tokens-see-only-environment-scoped-tools)). Each carries the MCP `destructiveHint: true` annotation. Each **mutating** call injects a time-bucketed `Idempotency-Key`; `dryRun=true` previews are not cached (see [Idempotency](#idempotency)).
 
 | Tool | Arguments | Backing route |
 |------|-----------|---------------|

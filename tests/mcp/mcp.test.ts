@@ -177,15 +177,22 @@ describe('MCP server (integration, SDK client)', () => {
       }
     });
 
-    it('env-scoped OPERATOR token sees read tools but NO write tools (write tools target global routes)', async () => {
+    it('env-scoped OPERATOR token sees ONLY env-scoped tools: no write tools AND no global read tools, but env reads + meta remain', async () => {
       // An operator's role grants services:write, BUT this token is env-scoped,
-      // so the write tools (all global routes) are withheld — they'd only ever
-      // FORBIDDEN_SCOPE. Read + meta tools remain.
+      // so EVERY global-route tool is withheld — they'd only ever FORBIDDEN_SCOPE.
+      // That's both the write tools (all global) and the global READ tools
+      // (get_server, query_audit_log, …). Env reads + meta remain.
       const client = await connect(envScopedOperatorToken);
       const { tools } = await client.listTools();
       const names = tools.map((t) => t.name);
+
+      // Env-scoped reads (+ meta) ARE listed.
       expect(names).toContain('list_services');
+      expect(names).toContain('list_secrets');
       expect(names).toContain('get_capabilities');
+      expect(names).toContain('get_version');
+
+      // Write tools (all global) are NOT listed.
       const writeNames = [
         'deploy_service',
         'execute_deployment_plan',
@@ -198,14 +205,26 @@ describe('MCP server (integration, SDK client)', () => {
         expect(names).not.toContain(w);
       }
 
-      // get_capabilities reflects the same reduced set (no write tools listed).
+      // Global READ tools are ALSO NOT listed (the fidelity fix): they target
+      // global routes and would always FORBIDDEN_SCOPE for an env-scoped token.
+      const globalReadNames = ['get_server', 'get_service', 'get_drift', 'query_audit_log'];
+      for (const g of globalReadNames) {
+        expect(names).not.toContain(g);
+      }
+
+      // get_capabilities reflects EXACTLY the registered set (no write tools, no
+      // global read tools — same list tools/list returned).
       const caps = (await client.callTool({
         name: 'get_capabilities',
         arguments: {},
       })) as ToolText;
       const body = JSON.parse(firstText(caps)) as { tools: string[] };
+      expect([...body.tools].sort()).toEqual([...names].sort());
       for (const w of writeNames) {
         expect(body.tools).not.toContain(w);
+      }
+      for (const g of globalReadNames) {
+        expect(body.tools).not.toContain(g);
       }
     });
   });

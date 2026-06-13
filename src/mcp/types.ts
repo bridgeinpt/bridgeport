@@ -76,6 +76,22 @@ export interface McpToolDef {
   /** Whether this tool issues a write (POST) and must carry an Idempotency-Key. */
   isWrite: boolean;
   /**
+   * Whether this tool is usable by an ENVIRONMENT-SCOPED API token
+   * (`scope.allEnvironments === false`). Such a token can only reach routes that
+   * enforceTokenScope permits: `/api/environments/:envId/...` (for its envs), the
+   * scope-exempt `GET /api/environments`, `GET /api/environments/:id`, and
+   * unauthenticated/no-scope routes (e.g. `/health`); plus local/no-inject meta
+   * tools. It gets FORBIDDEN_SCOPE on any GLOBAL route (`/api/servers/:id`,
+   * `/api/services/:id`, `/api/audit-logs`, `/api/deployment-plans/:id`, etc.).
+   *
+   * `true`  → the tool's backing route is reachable by an env-scoped token, so
+   *           it's listed for one (every env read, env meta, `/health`).
+   * `false` → the tool targets a global route, so it would only ever return
+   *           FORBIDDEN_SCOPE for an env-scoped token; it's hidden from one
+   *           (all write tools — global by definition — and the global reads).
+   */
+  envScoped: boolean;
+  /**
    * The handler. Inject-backed tools call `injectApi` with a request built from
    * `args`; meta tools (get_capabilities) synthesize a result without injecting.
    */
