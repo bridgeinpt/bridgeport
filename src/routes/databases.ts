@@ -33,11 +33,17 @@ import {
   coerceNumeric,
 } from '../lib/helpers.js';
 import { downsampleColumnar } from '../lib/metrics-downsample.js';
-import { routeSchema } from '../lib/openapi-schema.js';
+import { routeSchema, paginationQuerySchema } from '../lib/openapi-schema.js';
 
 const idParamSchema = z.object({ id: z.string() });
 const envIdParamSchema = z.object({ envId: z.string() });
 const envIdIdParamSchema = z.object({ envId: z.string(), id: z.string() });
+
+// Query schema (documentation only). Runtime read stays unchanged
+// (parseInt with fallbacks), so this never rejects.
+const databaseMetricsQuerySchema = z.object({
+  hours: z.coerce.number().min(1).optional(),
+});
 
 const storageTypeSchema = z.enum(['local', 'spaces']);
 const backupFormatSchema = z.enum(['plain', 'custom', 'tar']);
@@ -103,6 +109,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['monitoring'],
         summary: 'List databases for an environment',
         params: envIdParamSchema,
+        querystring: paginationQuerySchema,
         errors: [401],
       }),
     },
@@ -316,6 +323,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['monitoring'],
         summary: 'List backups for a database',
         params: idParamSchema,
+        querystring: paginationQuerySchema,
         errors: [401, 404],
       }),
     },
@@ -1010,6 +1018,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['monitoring'],
         summary: 'Get metrics history for a specific database',
         params: envIdIdParamSchema,
+        querystring: databaseMetricsQuerySchema,
         errors: [401, 404],
       }),
     },

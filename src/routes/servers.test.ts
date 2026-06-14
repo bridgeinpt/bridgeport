@@ -135,6 +135,62 @@ describe('server routes', () => {
       // Unknown include value -> no _count is attached (treated as default).
       expect(res.json().servers[0]).not.toHaveProperty('_count');
     });
+
+    // Issue #239: the list route gained a typed `querystring` schema
+    // (limit/offset/include), attached for OpenAPI docs ONLY. These cases lock
+    // in that runtime query handling is UNCHANGED — the doc schema never causes
+    // Fastify to reject (400) query input the route previously accepted.
+    describe('query schema is documentation-only (issue #239)', () => {
+      it('honors limit/offset pagination without rejecting', async () => {
+        const env = await createTestEnvironment(app.prisma, { name: 'pg-env' });
+        for (let i = 0; i < 3; i++) {
+          await createTestServer(app.prisma, { environmentId: env.id, name: `pg-s-${i}` });
+        }
+
+        const page = await app.inject({
+          method: 'GET',
+          url: `/api/environments/${env.id}/servers?limit=2&offset=0`,
+          headers: { authorization: `Bearer ${viewerToken}` },
+        });
+        expect(page.statusCode).toBe(200);
+        expect(page.json().servers).toHaveLength(2);
+        expect(page.json().total).toBe(3);
+
+        const rest = await app.inject({
+          method: 'GET',
+          url: `/api/environments/${env.id}/servers?limit=2&offset=2`,
+          headers: { authorization: `Bearer ${viewerToken}` },
+        });
+        expect(rest.statusCode).toBe(200);
+        expect(rest.json().servers).toHaveLength(1);
+        expect(rest.json().total).toBe(3);
+      });
+
+      it('does NOT 400 on a non-numeric limit (behavior unchanged from before)', async () => {
+        // Pre-existing behavior (unchanged by #239): parsePaginationQuery yields
+        // NaN, listServers passes `take: NaN` to Prisma which throws -> 500. The
+        // contract we protect is that it must NOT newly become a 400 from the
+        // doc-only schema.
+        const res = await app.inject({
+          method: 'GET',
+          url: `/api/environments/${envId}/servers?limit=abc&offset=xyz`,
+          headers: { authorization: `Bearer ${viewerToken}` },
+        });
+
+        expect(res.statusCode).not.toBe(400);
+      });
+
+      it('does NOT 400 on unknown query params', async () => {
+        const res = await app.inject({
+          method: 'GET',
+          url: `/api/environments/${envId}/servers?bogus=1&include=services-count&page=2`,
+          headers: { authorization: `Bearer ${viewerToken}` },
+        });
+
+        expect(res.statusCode).toBe(200);
+        expect(res.json()).toHaveProperty('servers');
+      });
+    });
   });
 
   // ==================== GET /api/servers/:id ====================
@@ -253,6 +309,21 @@ describe('server routes', () => {
       });
 
       expect(res.statusCode).toBe(404);
+    });
+
+    // Issue #239: detail route gained a doc-only `?include` querystring schema.
+    it('does NOT 400 on unknown ?include value (treated as default, behavior unchanged)', async () => {
+      const server = await createTestServer(app.prisma, { environmentId: envId, name: 'inc-unknown-server' });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/servers/${server.id}?include=not-a-real-include`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+
+      expect(res.statusCode).toBe(200);
+      // Unrecognized include -> bare row, no nested services.
+      expect(res.json().server).not.toHaveProperty('services');
     });
   });
 

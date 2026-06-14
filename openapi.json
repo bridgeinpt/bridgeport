@@ -774,6 +774,32 @@
         "parameters": [
           {
             "schema": {
+              "type": "number",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "offset",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "include",
+            "required": false
+          },
+          {
+            "schema": {
               "type": "string"
             },
             "in": "path",
@@ -883,6 +909,14 @@
           "servers"
         ],
         "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "include",
+            "required": false
+          },
           {
             "schema": {
               "type": "string"
@@ -2084,6 +2118,24 @@
         "parameters": [
           {
             "schema": {
+              "type": "number",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "offset",
+            "required": false
+          },
+          {
+            "schema": {
               "type": "string"
             },
             "in": "path",
@@ -2911,6 +2963,15 @@
         "parameters": [
           {
             "schema": {
+              "type": "number",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          },
+          {
+            "schema": {
               "type": "string"
             },
             "in": "path",
@@ -2979,6 +3040,23 @@
           "services"
         ],
         "parameters": [
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 1
+            },
+            "in": "query",
+            "name": "tail",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "before",
+            "required": false
+          },
           {
             "schema": {
               "type": "string"
@@ -3261,6 +3339,15 @@
           "services"
         ],
         "parameters": [
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          },
           {
             "schema": {
               "type": "string"
@@ -4393,9 +4480,72 @@
     },
     "/api/audit-logs": {
       "get": {
+        "summary": "List audit logs with optional filters and pagination",
+        "tags": [
+          "admin"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "environmentId",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "resourceType",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "resourceId",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "action",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "offset",
+            "required": false
+          }
+        ],
         "responses": {
-          "200": {
-            "description": "Default Response"
+          "401": {
+            "description": "Unauthorized — missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -4407,6 +4557,24 @@
           "services"
         ],
         "parameters": [
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "offset",
+            "required": false
+          },
           {
             "schema": {
               "type": "string"
@@ -5533,6 +5701,24 @@
           "services"
         ],
         "parameters": [
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "offset",
+            "required": false
+          },
           {
             "schema": {
               "type": "string"
@@ -7665,6 +7851,24 @@
         "parameters": [
           {
             "schema": {
+              "type": "number",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "offset",
+            "required": false
+          },
+          {
+            "schema": {
               "type": "string"
             },
             "in": "path",
@@ -8195,6 +8399,24 @@
           "monitoring"
         ],
         "parameters": [
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "offset",
+            "required": false
+          },
           {
             "schema": {
               "type": "string"
@@ -8729,6 +8951,15 @@
           "monitoring"
         ],
         "parameters": [
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 1
+            },
+            "in": "query",
+            "name": "hours",
+            "required": false
+          },
           {
             "schema": {
               "type": "string"
@@ -10365,6 +10596,24 @@
         "parameters": [
           {
             "schema": {
+              "type": "number",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "offset",
+            "required": false
+          },
+          {
+            "schema": {
               "type": "string"
             },
             "in": "path",
@@ -10732,6 +10981,15 @@
         "parameters": [
           {
             "schema": {
+              "type": "number",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          },
+          {
+            "schema": {
               "type": "string"
             },
             "in": "path",
@@ -10890,6 +11148,24 @@
           "services"
         ],
         "parameters": [
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "offset",
+            "required": false
+          },
           {
             "schema": {
               "type": "string"
@@ -11313,6 +11589,15 @@
         "parameters": [
           {
             "schema": {
+              "type": "number",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          },
+          {
+            "schema": {
               "type": "string"
             },
             "in": "path",
@@ -11370,6 +11655,14 @@
           }
         },
         "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "execute",
+            "required": false
+          },
           {
             "schema": {
               "type": "string"
@@ -14625,6 +14918,10 @@
     },
     "/api/downloads/cli": {
       "get": {
+        "summary": "List available CLI binary downloads",
+        "tags": [
+          "system"
+        ],
         "responses": {
           "200": {
             "description": "Default Response"
@@ -14634,6 +14931,10 @@
     },
     "/api/downloads/cli/{os}/{arch}": {
       "get": {
+        "summary": "Download a CLI binary for an OS/arch",
+        "tags": [
+          "system"
+        ],
         "parameters": [
           {
             "schema": {
@@ -14653,8 +14954,15 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Default Response"
+          "404": {
+            "description": "Not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -14664,6 +14972,16 @@
         "summary": "List topology connections for an environment",
         "tags": [
           "services"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "environmentId",
+            "required": false
+          }
         ],
         "responses": {
           "400": {
@@ -14879,6 +15197,16 @@
         "summary": "Get the saved diagram layout for an environment",
         "tags": [
           "services"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "environmentId",
+            "required": false
+          }
         ],
         "responses": {
           "400": {
@@ -15605,6 +15933,24 @@
         "tags": [
           "services"
         ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "environmentId",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "format",
+            "required": false
+          }
+        ],
         "responses": {
           "400": {
             "description": "Bad request — malformed input or failed validation.",
@@ -16057,9 +16403,48 @@
     },
     "/api/events": {
       "get": {
+        "summary": "Subscribe to the server-sent events stream",
+        "tags": [
+          "monitoring"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "token",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "environmentId",
+            "required": false
+          }
+        ],
         "responses": {
-          "200": {
-            "description": "Default Response"
+          "401": {
+            "description": "Unauthorized — missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — token scope or role does not permit this operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
           }
         }
       }
@@ -16589,6 +16974,24 @@
         "summary": "List API tokens (optionally filtered by owner)",
         "tags": [
           "admin"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "ownerUserId",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "ownerServiceAccountId",
+            "required": false
+          }
         ],
         "responses": {
           "401": {
@@ -17133,6 +17536,24 @@
           "webhooks"
         ],
         "parameters": [
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "number",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "offset",
+            "required": false
+          },
           {
             "schema": {
               "type": "string"

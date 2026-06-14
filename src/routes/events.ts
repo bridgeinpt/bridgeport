@@ -1,10 +1,29 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { z } from 'zod';
 import { eventBus, type BRIDGEPORTEvent } from '../lib/event-bus.js';
 import { validateApiToken, getUserById, type AuthUser } from '../services/auth.js';
+import { routeSchema } from '../lib/openapi-schema.js';
+
+// Documents the SSE query params. `token` carries the bearer (EventSource can't
+// send headers) and `environmentId` optionally pins the stream to one env. Both
+// are optional in the spec — the handler keeps its own 401/403 checks, so the
+// runtime contract is unchanged.
+const eventsQuerySchema = z.object({
+  token: z.string().optional(),
+  environmentId: z.string().optional(),
+});
 
 export async function eventRoutes(fastify: FastifyInstance): Promise<void> {
   fastify.get(
     '/api/events',
+    {
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Subscribe to the server-sent events stream',
+        querystring: eventsQuerySchema,
+        errors: [401, 403],
+      }),
+    },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { token, environmentId } = request.query as { token?: string; environmentId?: string };
 

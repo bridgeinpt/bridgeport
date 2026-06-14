@@ -11,7 +11,7 @@ import {
   parsePaginationQuery,
 } from '../lib/helpers.js';
 import { triggerAutoResyncForFragment } from '../services/config-file-auto-resync.js';
-import { routeSchema } from '../lib/openapi-schema.js';
+import { routeSchema, paginationQuerySchema } from '../lib/openapi-schema.js';
 
 const createFragmentSchema = z.object({
   name: z.string().min(1),
@@ -27,6 +27,7 @@ const updateFragmentSchema = z.object({
 
 const idParamsSchema = z.object({ id: z.string() });
 const envIdParamsSchema = z.object({ envId: z.string() });
+
 
 /**
  * Env-scoped CRUD for ConfigFragment — named, reusable text blocks that
@@ -52,6 +53,7 @@ export async function configFragmentRoutes(fastify: FastifyInstance): Promise<vo
         tags: ['services'],
         summary: 'List config fragments for an environment',
         params: envIdParamsSchema,
+        querystring: paginationQuerySchema,
         errors: [401],
       }),
     },

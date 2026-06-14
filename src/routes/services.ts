@@ -23,7 +23,7 @@ import { HEALTH_STATUS, CONTAINER_STATUS, DISCOVERY_STATUS, HEALTH_CHECK_STATUS 
 import { validateBody, validateUpdateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery, flattenDeploymentOntoService } from '../lib/helpers.js';
 import { isDryRun } from '../lib/dry-run.js';
 import { computeServiceDrift } from '../services/drift.js';
-import { routeSchema } from '../lib/openapi-schema.js';
+import { routeSchema, paginationQuerySchema, limitQuerySchema } from '../lib/openapi-schema.js';
 
 // --- secret sanitizers for the service-detail relations ---
 //
@@ -82,6 +82,16 @@ const idParamsSchema = z.object({ id: z.string() });
 const envIdParamsSchema = z.object({ envId: z.string() });
 const serverIdParamsSchema = z.object({ serverId: z.string() });
 const depParamsSchema = z.object({ id: z.string(), depId: z.string() });
+
+// --- query schemas (documentation only) ---
+//
+// These document the query contract for the OpenAPI spec. Runtime reads stay
+// exactly as before (parsePaginationQuery / parseInt with fallbacks) so unknown
+// or missing params behave identically — these schemas never reject.
+const logsQuerySchema = z.object({
+  tail: z.coerce.number().min(1).optional(),
+  before: z.string().optional(),
+});
 
 // --- schemas ---
 
@@ -184,6 +194,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['services'],
         summary: 'List service templates in an environment',
         params: envIdParamsSchema,
+        querystring: paginationQuerySchema,
         errors: [401],
       }),
     },
@@ -1032,6 +1043,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['services'],
         summary: 'Get deployment history for a service template',
         params: idParamsSchema,
+        querystring: limitQuerySchema,
         errors: [401],
       }),
     },
@@ -1074,6 +1086,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['services'],
         summary: 'Fetch recent container logs for a deployment',
         params: depParamsSchema,
+        querystring: logsQuerySchema,
         errors: [401, 500],
       }),
     },
@@ -1499,6 +1512,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['services'],
         summary: 'Get audit and deployment history for a service template',
         params: idParamsSchema,
+        querystring: limitQuerySchema,
         errors: [401, 404],
       }),
     },

@@ -31,7 +31,7 @@ import {
 import { logAudit, actorFrom } from '../services/audit.js';
 import { requireOperator } from '../plugins/authorize.js';
 import { validateBody, parsePaginationQuery, getErrorMessage } from '../lib/helpers.js';
-import { routeSchema } from '../lib/openapi-schema.js';
+import { routeSchema, paginationQuerySchema } from '../lib/openapi-schema.js';
 
 const envIdParamsSchema = z.object({ envId: z.string() });
 const webhookParamsSchema = z.object({ envId: z.string(), id: z.string() });
@@ -172,6 +172,7 @@ export async function webhookSubscriptionRoutes(fastify: FastifyInstance): Promi
         tags: ['webhooks'],
         summary: 'List delivery history for a webhook subscription',
         params: webhookParamsSchema,
+        querystring: paginationQuerySchema,
         errors: [401, 404],
       }),
     },

@@ -20,7 +20,7 @@ import { RegistryFactory } from '../lib/registry.js';
 import { getRegistryCredentials } from '../services/registries.js';
 import { extractRepoName, stripRegistryPrefix, parseTagFilter, getBestTag, getDefaultTag } from '../lib/image-utils.js';
 import { safeJsonParse, validateBody, validateUpdateBody, findOrNotFound, getErrorMessage, handleUniqueConstraint, parsePaginationQuery } from '../lib/helpers.js';
-import { routeSchema } from '../lib/openapi-schema.js';
+import { routeSchema, paginationQuerySchema, limitQuerySchema } from '../lib/openapi-schema.js';
 
 const createContainerImageSchema = z.object({
   name: z.string().min(1),
@@ -57,6 +57,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
         tags: ['services'],
         summary: 'List container images for an environment',
         params: envIdParamsSchema,
+        querystring: paginationQuerySchema,
         errors: [401],
       }),
     },
@@ -364,6 +365,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
         tags: ['services'],
         summary: 'Get tag/deploy history for a container image',
         params: idParamsSchema,
+        querystring: limitQuerySchema,
         errors: [401, 404],
       }),
     },
@@ -500,6 +502,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
         tags: ['services'],
         summary: 'List digests for a container image (paginated)',
         params: idParamsSchema,
+        querystring: paginationQuerySchema,
         errors: [401, 404],
       }),
     },

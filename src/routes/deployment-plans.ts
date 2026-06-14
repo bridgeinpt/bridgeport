@@ -14,10 +14,16 @@ import { logAudit, actorFrom } from '../services/audit.js';
 import { PLAN_STATUS, STEP_STATUS } from '../lib/constants.js';
 import { validateBody, findOrNotFound, getErrorMessage } from '../lib/helpers.js';
 import { isDryRun } from '../lib/dry-run.js';
-import { routeSchema } from '../lib/openapi-schema.js';
+import { routeSchema, limitQuerySchema } from '../lib/openapi-schema.js';
 
 const idParamSchema = z.object({ id: z.string() });
 const envIdParamSchema = z.object({ envId: z.string() });
+
+// Query schema (documentation only). Runtime read stays unchanged
+// (raw `execute === 'true'` check), so this never rejects.
+const createPlanQuerySchema = z.object({
+  execute: z.string().optional(),
+});
 
 const createPlanSchema = z.object({
   serviceIds: z.array(z.string()).min(1),
@@ -35,6 +41,7 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
         tags: ['services'],
         summary: 'List deployment plans for an environment',
         params: envIdParamSchema,
+        querystring: limitQuerySchema,
         errors: [401],
       }),
     },
@@ -56,6 +63,7 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
         tags: ['services'],
         summary: 'Create (and optionally execute) a deployment plan',
         params: envIdParamSchema,
+        querystring: createPlanQuerySchema,
         body: createPlanSchema,
         errors: [400, 401],
       }),

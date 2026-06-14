@@ -113,11 +113,11 @@ describe('OpenAPI plugin', () => {
       const coverage = withRequest / ops.length;
 
       // The Zod-derived request schemas are wired in via src/lib/openapi-schema.ts.
-      // Actual coverage is ~87% (240/275). The threshold is intentionally set a
+      // Actual coverage is ~89% (251/281). The threshold is intentionally set a
       // few points below that so it isn't flaky, and MUST RATCHET UPWARD as more
       // routes gain typed schemas — never lower it to make a change pass.
       expect(ops.length).toBeGreaterThan(50);
-      expect(coverage).toBeGreaterThanOrEqual(0.85);
+      expect(coverage).toBeGreaterThanOrEqual(0.89);
     });
 
     it('documents a request body on most WRITE operations (POST/PATCH/PUT)', async () => {
@@ -134,11 +134,11 @@ describe('OpenAPI plugin', () => {
       const writeWithBody = writeOps.filter((e) => Boolean(e.op.requestBody)).length;
       const coverage = writeWithBody / writeOps.length;
 
-      // Actual coverage is ~62% (79/127). Floor set a few points below so it
+      // Actual coverage is ~62% (80/128). Floor set a couple points below so it
       // isn't flaky, and MUST RATCHET UPWARD as more write routes gain typed
       // bodies — never lower it to make a change pass.
       expect(writeOps.length).toBeGreaterThan(50);
-      expect(coverage).toBeGreaterThanOrEqual(0.58);
+      expect(coverage).toBeGreaterThanOrEqual(0.62);
     });
 
     it('never marks a defaulted parameter as required (input semantics)', async () => {

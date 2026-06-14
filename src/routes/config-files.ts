@@ -24,7 +24,7 @@ import {
   type ConfigSyncTarget,
 } from '../lib/dry-run.js';
 import { getSecretsForEnv } from '../services/secrets.js';
-import { routeSchema } from '../lib/openapi-schema.js';
+import { routeSchema, paginationQuerySchema } from '../lib/openapi-schema.js';
 
 const createConfigFileSchema = z.object({
   name: z.string().min(1),
@@ -68,6 +68,7 @@ const envIdParamsSchema = z.object({ envId: z.string() });
 const serverIdParamsSchema = z.object({ serverId: z.string() });
 const restoreParamsSchema = z.object({ id: z.string(), historyId: z.string() });
 const serviceFileParamsSchema = z.object({ serviceId: z.string(), fileId: z.string() });
+
 
 /**
  * Validate `fragmentIds` payload before any write. Three failure modes the
@@ -124,6 +125,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         tags: ['services'],
         summary: 'List config files for an environment with sync status',
         params: envIdParamsSchema,
+        querystring: paginationQuerySchema,
         errors: [401],
       }),
     },

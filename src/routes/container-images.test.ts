@@ -54,6 +54,61 @@ describe('container-images routes', () => {
 
       expect(res.statusCode).toBe(401);
     });
+
+    // Issue #239: the route gained a typed `querystring` (limit/offset) schema
+    // attached for OpenAPI docs ONLY. These cases lock in that the doc schema
+    // does not change runtime query handling — it must never newly reject (400)
+    // query input the route previously accepted.
+    describe('query schema is documentation-only (issue #239)', () => {
+      it('honors limit/offset pagination without rejecting', async () => {
+        const env = await createTestEnvironment(app.prisma, { name: 'img-pg-env' });
+        for (let i = 0; i < 3; i++) {
+          await createTestContainerImage(app.prisma, { environmentId: env.id, name: `img-pg-${i}` });
+        }
+
+        const page = await app.inject({
+          method: 'GET',
+          url: `/api/environments/${env.id}/container-images?limit=2&offset=0`,
+          headers: { authorization: `Bearer ${viewerToken}` },
+        });
+        expect(page.statusCode).toBe(200);
+        expect(page.json().images).toHaveLength(2);
+        expect(page.json().total).toBe(3);
+
+        const rest = await app.inject({
+          method: 'GET',
+          url: `/api/environments/${env.id}/container-images?limit=2&offset=2`,
+          headers: { authorization: `Bearer ${viewerToken}` },
+        });
+        expect(rest.statusCode).toBe(200);
+        expect(rest.json().images).toHaveLength(1);
+        expect(rest.json().total).toBe(3);
+      });
+
+      it('does NOT 400 on a non-numeric limit (behavior unchanged from before)', async () => {
+        // Pre-existing behavior unchanged by #239: NaN -> Prisma `take: NaN`
+        // throws -> 500. The contract we protect is that the doc-only schema
+        // must NOT turn this into a 400.
+        const res = await app.inject({
+          method: 'GET',
+          url: `/api/environments/${envId}/container-images?limit=abc`,
+          headers: { authorization: `Bearer ${viewerToken}` },
+        });
+
+        expect(res.statusCode).not.toBe(400);
+      });
+
+      it('does NOT 400 on unknown query params', async () => {
+        const res = await app.inject({
+          method: 'GET',
+          url: `/api/environments/${envId}/container-images?bogus=1&page=2`,
+          headers: { authorization: `Bearer ${viewerToken}` },
+        });
+
+        expect(res.statusCode).toBe(200);
+        expect(res.json()).toHaveProperty('images');
+      });
+    });
   });
 
   // ==================== GET /api/container-images/:id ====================

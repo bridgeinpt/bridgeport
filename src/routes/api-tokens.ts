@@ -13,6 +13,13 @@ const MAX_TOKEN_LIFETIME_DAYS = 365;
 
 const tokenIdParams = z.object({ tokenId: z.string() });
 
+// Query schema (documentation only). Both filters are optional; the runtime
+// read is unchanged, so this never rejects.
+const listTokensQuerySchema = z.object({
+  ownerUserId: z.string().optional(),
+  ownerServiceAccountId: z.string().optional(),
+});
+
 const createTokenSchema = z
   .object({
     name: z.string().min(1).max(100),
@@ -41,6 +48,7 @@ export async function apiTokenRoutes(fastify: FastifyInstance): Promise<void> {
       schema: routeSchema({
         tags: ['admin'],
         summary: 'List API tokens (optionally filtered by owner)',
+        querystring: listTokensQuerySchema,
         errors: [401, 403],
       }),
     },
