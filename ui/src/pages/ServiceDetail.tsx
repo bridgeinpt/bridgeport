@@ -779,10 +779,10 @@ export default function ServiceDetail() {
     <div className="p-6">
       {/* Missing Service Warning */}
       {service.discoveryStatus === 'missing' && (
-        <Alert className="mb-5 border-orange-500/30 bg-orange-500/10 text-orange-300">
-          <AlertTriangle className="size-5 text-orange-400" />
-          <AlertTitle className="text-orange-400">Container Not Found</AlertTitle>
-          <AlertDescription className="text-orange-300/80">
+        <Alert className="mb-5 border-warning/30 bg-warning/10 text-warning">
+          <AlertTriangle className="size-5 text-warning" />
+          <AlertTitle className="text-warning">Container Not Found</AlertTitle>
+          <AlertDescription className="text-warning/80">
             This container was not found during the last discovery. It may have been stopped, removed, or crashed.
             {service.lastDiscoveredAt && (
               <> Last seen {formatDistanceToNow(new Date(service.lastDiscoveredAt), { addSuffix: true })}.</>
@@ -877,11 +877,11 @@ export default function ServiceDetail() {
 
       {/* Update Available Banner */}
       {service.latestAvailableTag && service.latestAvailableTag !== service.imageTag && (
-        <Alert className="mb-5 border-blue-500/30 bg-blue-500/10 text-blue-300">
-          <ArrowUpCircle className="size-5 text-blue-400" />
-          <AlertTitle className="text-blue-400">Update Available</AlertTitle>
-          <AlertDescription className="text-blue-300/80">
-            New version <code className="bg-blue-500/20 px-1 rounded">{service.latestAvailableTag}</code> is available
+        <Alert className="mb-5 border-info/30 bg-info/10 text-info">
+          <ArrowUpCircle className="size-5 text-info" />
+          <AlertTitle className="text-info">Update Available</AlertTitle>
+          <AlertDescription className="text-info/80">
+            New version <code className="bg-info/20 px-1 rounded">{service.latestAvailableTag}</code> is available
             (current: {service.imageTag})
           </AlertDescription>
           <div className="col-start-2 mt-2">
@@ -980,7 +980,7 @@ export default function ServiceDetail() {
 
             {/* Update check result */}
             {updateCheckResult && (
-              <div className={cn('text-sm', updateCheckResult.hasUpdate ? 'text-blue-400' : 'text-green-400')}>
+              <div className={cn('text-sm', updateCheckResult.hasUpdate ? 'text-info' : 'text-success')}>
                 {updateCheckResult.hasUpdate
                   ? `Update available: ${updateCheckResult.bestTag || 'new digest'}`
                   : 'No updates available'}
@@ -1153,7 +1153,7 @@ export default function ServiceDetail() {
               className={cn(
                 'mb-4 p-3 rounded-lg border',
                 syncStatus === 'no_targets'
-                  ? 'bg-yellow-500/10 border-yellow-500/30'
+                  ? 'bg-warning/10 border-warning/30'
                   : 'bg-muted/50 border-border'
               )}
             >
@@ -1161,7 +1161,7 @@ export default function ServiceDetail() {
                 // 200 OK + no_targets → yellow warning, NOT a green success.
                 // Sync ran but found nothing to write — surface the gap to the
                 // operator (issue #127).
-                <p className="text-sm text-yellow-400">
+                <p className="text-sm text-warning">
                   This service has no files attached, or no deployments to sync to — sync did nothing.
                 </p>
               ) : (
@@ -1171,15 +1171,15 @@ export default function ServiceDetail() {
                     {syncResults.map((result, i) => (
                       <div key={i} className="flex items-center gap-2 text-sm">
                         {result.success ? (
-                          <CheckCircle2 className="size-4 text-green-400" />
+                          <CheckCircle2 className="size-4 text-success" />
                         ) : (
-                          <X className="size-4 text-red-400" />
+                          <X className="size-4 text-destructive" />
                         )}
                         <span className="text-foreground">{result.file}</span>
                         <span className="text-muted-foreground">→</span>
                         <code className="text-muted-foreground text-xs">{result.targetPath}</code>
                         {result.error && (
-                          <span className="text-red-400 text-xs">({result.error})</span>
+                          <span className="text-destructive text-xs">({result.error})</span>
                         )}
                       </div>
                     ))}
@@ -1226,7 +1226,7 @@ export default function ServiceDetail() {
                           onBlur={() => saveMountPath(file.configFileId)}
                           disabled={savingMountPath}
                           autoFocus
-                          className="flex-1 h-7 text-green-400 font-mono text-xs"
+                          className="flex-1 h-7 text-success font-mono text-xs"
                         />
                       </div>
                     ) : (
@@ -1235,7 +1235,7 @@ export default function ServiceDetail() {
                         onClick={() => startEditMountPath(file.configFileId, file.targetPath)}
                         title="Click to edit path"
                       >
-                        <code className="text-xs text-green-400 group-hover:text-green-300">
+                        <code className="text-xs text-success group-hover:text-success">
                           {file.targetPath}
                         </code>
                         <Pencil className="size-3 text-muted-foreground group-hover:text-foreground" />
@@ -1321,7 +1321,7 @@ export default function ServiceDetail() {
                   </div>
                   <div>
                     <dt className="text-muted-foreground">Running</dt>
-                    <dd className={healthCheckResult.container.running ? 'text-green-400' : 'text-red-400'}>
+                    <dd className={healthCheckResult.container.running ? 'text-success' : 'text-destructive'}>
                       {healthCheckResult.container.running ? 'Yes' : 'No'}
                     </dd>
                   </div>
@@ -1343,7 +1343,7 @@ export default function ServiceDetail() {
                   <dl className="grid grid-cols-2 gap-2 text-sm">
                     <div>
                       <dt className="text-muted-foreground">Status</dt>
-                      <dd className={healthCheckResult.url.success ? 'text-green-400' : 'text-red-400'}>
+                      <dd className={healthCheckResult.url.success ? 'text-success' : 'text-destructive'}>
                         {healthCheckResult.url.success ? 'Success' : 'Failed'}
                       </dd>
                     </div>
@@ -1356,7 +1356,7 @@ export default function ServiceDetail() {
                     {healthCheckResult.url.error && (
                       <div className="col-span-2">
                         <dt className="text-muted-foreground">Error</dt>
-                        <dd className="text-red-400 text-xs">{healthCheckResult.url.error}</dd>
+                        <dd className="text-destructive text-xs">{healthCheckResult.url.error}</dd>
                       </div>
                     )}
                   </dl>
@@ -1390,11 +1390,11 @@ export default function ServiceDetail() {
                     key={i}
                     className={cn(
                       'flex items-center justify-between p-2 rounded-lg',
-                      result.success ? 'bg-green-500/10' : 'bg-red-500/10'
+                      result.success ? 'bg-success/10' : 'bg-destructive/10'
                     )}
                   >
                     <div className="flex items-center gap-2">
-                      <span className={cn('size-2 rounded-full', result.success ? 'bg-green-400' : 'bg-red-400')} />
+                      <span className={cn('size-2 rounded-full', result.success ? 'bg-success' : 'bg-destructive')} />
                       <span className="text-foreground font-mono text-sm">
                         {result.host}:{result.port}
                       </span>
@@ -1405,7 +1405,7 @@ export default function ServiceDetail() {
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-muted-foreground">{result.durationMs}ms</span>
                       {result.error && (
-                        <span className="text-xs text-red-400" title={result.error}>error</span>
+                        <span className="text-xs text-destructive" title={result.error}>error</span>
                       )}
                     </div>
                   </div>
@@ -1433,9 +1433,9 @@ export default function ServiceDetail() {
                       'p-3 rounded-lg',
                       result.success
                         ? result.daysUntilExpiry !== undefined && result.daysUntilExpiry < 30
-                          ? 'bg-yellow-500/10'
-                          : 'bg-green-500/10'
-                        : 'bg-red-500/10'
+                          ? 'bg-warning/10'
+                          : 'bg-success/10'
+                        : 'bg-destructive/10'
                     )}
                   >
                     <div className="flex items-center justify-between mb-2">
@@ -1444,9 +1444,9 @@ export default function ServiceDetail() {
                           'size-2 rounded-full',
                           result.success
                             ? result.daysUntilExpiry !== undefined && result.daysUntilExpiry < 30
-                              ? 'bg-yellow-400'
-                              : 'bg-green-400'
-                            : 'bg-red-400'
+                              ? 'bg-warning'
+                              : 'bg-success'
+                            : 'bg-destructive'
                         )} />
                         <span className="text-foreground font-mono text-sm">
                           {result.host}:{result.port}
@@ -1459,10 +1459,10 @@ export default function ServiceDetail() {
                         <span className={cn(
                           'text-sm font-medium',
                           result.daysUntilExpiry < 0
-                            ? 'text-red-400'
+                            ? 'text-destructive'
                             : result.daysUntilExpiry < 30
-                            ? 'text-yellow-400'
-                            : 'text-green-400'
+                            ? 'text-warning'
+                            : 'text-success'
                         )}>
                           {result.daysUntilExpiry < 0
                             ? 'Expired'
@@ -1480,7 +1480,7 @@ export default function ServiceDetail() {
                       </div>
                     )}
                     {result.error && (
-                      <div className="text-xs text-red-400 mt-1">{result.error}</div>
+                      <div className="text-xs text-destructive mt-1">{result.error}</div>
                     )}
                   </div>
                 ))}
@@ -1574,7 +1574,7 @@ export default function ServiceDetail() {
                               className={cn(
                                 'h-auto p-0',
                                 deployment.status === 'failed'
-                                  ? 'text-red-400 hover:text-red-300'
+                                  ? 'text-destructive hover:text-destructive'
                                   : 'text-muted-foreground hover:text-foreground'
                               )}
                             >
@@ -1658,7 +1658,7 @@ export default function ServiceDetail() {
                           {details?.containerHealth ? (
                             <span
                               className={
-                                details.containerHealth.running ? 'text-green-400' : 'text-red-400'
+                                details.containerHealth.running ? 'text-success' : 'text-destructive'
                               }
                             >
                               {details.containerHealth.state}
@@ -1671,7 +1671,7 @@ export default function ServiceDetail() {
                         <TableCell className="text-sm">
                           {details?.urlHealth ? (
                             <span
-                              className={details.urlHealth.success ? 'text-green-400' : 'text-red-400'}
+                              className={details.urlHealth.success ? 'text-success' : 'text-destructive'}
                             >
                               {details.urlHealth.success ? 'OK' : 'Failed'}
                               {details.urlHealth.statusCode && ` (${details.urlHealth.statusCode})`}
@@ -1733,16 +1733,16 @@ export default function ServiceDetail() {
                   key={log.id}
                   className={cn(
                     'flex items-center justify-between p-3 rounded-lg',
-                    log.success ? 'bg-muted/50' : 'bg-red-500/10'
+                    log.success ? 'bg-muted/50' : 'bg-destructive/10'
                   )}
                 >
                   <div className="flex items-center gap-3">
                     {/* Action icon */}
                     <div className={cn(
                       'size-8 rounded-full flex items-center justify-center',
-                      log.action === 'deploy' ? 'bg-blue-500/20 text-blue-400' :
-                      log.action === 'restart' ? 'bg-yellow-500/20 text-yellow-400' :
-                      log.action === 'health_check' ? 'bg-green-500/20 text-green-400' :
+                      log.action === 'deploy' ? 'bg-info/20 text-info' :
+                      log.action === 'restart' ? 'bg-warning/20 text-warning' :
+                      log.action === 'health_check' ? 'bg-success/20 text-success' :
                       log.action === 'update' ? 'bg-purple-500/20 text-purple-400' :
                       'bg-muted text-muted-foreground'
                     )}>
@@ -1775,7 +1775,7 @@ export default function ServiceDetail() {
                     </div>
                   </div>
                   {log.error && (
-                    <div className="text-xs text-red-400 max-w-xs truncate" title={log.error}>
+                    <div className="text-xs text-destructive max-w-xs truncate" title={log.error}>
                       {log.error}
                     </div>
                   )}
@@ -2023,7 +2023,7 @@ export default function ServiceDetail() {
                 <Label className="text-muted-foreground">
                   TCP Port Checks (Agent)
                   {schedulerConfig && !schedulerConfig.collectTcpChecks && (
-                    <span className="text-yellow-500 text-xs ml-2">(disabled in environment settings)</span>
+                    <span className="text-warning text-xs ml-2">(disabled in environment settings)</span>
                   )}
                 </Label>
                 <Button
@@ -2079,7 +2079,7 @@ export default function ServiceDetail() {
                         variant="ghost"
                         size="icon-sm"
                         onClick={() => setEditTcpChecks(editTcpChecks.filter((_, j) => j !== i))}
-                        className="text-red-400 hover:text-red-300"
+                        className="text-destructive hover:text-destructive"
                       >
                         <X className="size-4" />
                       </Button>
@@ -2097,7 +2097,7 @@ export default function ServiceDetail() {
                 <Label className="text-muted-foreground">
                   Certificate Expiry Checks (Agent)
                   {schedulerConfig && !schedulerConfig.collectCertChecks && (
-                    <span className="text-yellow-500 text-xs ml-2">(disabled in environment settings)</span>
+                    <span className="text-warning text-xs ml-2">(disabled in environment settings)</span>
                   )}
                 </Label>
                 <Button
@@ -2153,7 +2153,7 @@ export default function ServiceDetail() {
                         variant="ghost"
                         size="icon-sm"
                         onClick={() => setEditCertChecks(editCertChecks.filter((_, j) => j !== i))}
-                        className="text-red-400 hover:text-red-300"
+                        className="text-destructive hover:text-destructive"
                       >
                         <X className="size-4" />
                       </Button>

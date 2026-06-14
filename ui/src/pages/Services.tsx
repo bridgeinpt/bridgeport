@@ -421,11 +421,11 @@ export default function Services() {
               const hasContainerImage = depNode?.containerImage;
               const containerStatus = service.containerStatus ?? service.status ?? 'unknown';
               return (
-                <Card key={service.id} className={cn('p-4', hasUpdate && 'border-green-500/30')}>
+                <Card key={service.id} className={cn('p-4', hasUpdate && 'border-success/30')}>
                   <div className="flex items-start justify-between">
                     <div className="flex items-start gap-4">
-                      <div className="p-3 bg-green-500/10 rounded-lg">
-                        <Box className="size-6 text-green-400" />
+                      <div className="p-3 bg-success/10 rounded-lg">
+                        <Box className="size-6 text-success" />
                       </div>
                       <div>
                         {/* Row 1: Name + badges */}
@@ -453,13 +453,13 @@ export default function Services() {
                               title={`${depNode.dependencyCount} dependencies, ${depNode.dependentCount} dependents`}
                             >
                               {depNode.dependencyCount > 0 && (
-                                <span className="flex items-center text-green-400">
+                                <span className="flex items-center text-success">
                                   <ArrowUp className="size-3" />
                                   {depNode.dependencyCount}
                                 </span>
                               )}
                               {depNode.dependentCount > 0 && (
-                                <span className="flex items-center text-blue-400">
+                                <span className="flex items-center text-info">
                                   <ArrowDown className="size-3" />
                                   {depNode.dependentCount}
                                 </span>
@@ -497,7 +497,7 @@ export default function Services() {
                           {hasUpdate && (
                             <>
                               <span className="text-muted-foreground/70"> → </span>
-                              <span className="font-mono text-green-400">{targetTag}</span>
+                              <span className="font-mono text-success">{targetTag}</span>
                             </>
                           )}
                         </p>

@@ -307,14 +307,14 @@ export default function SystemSettings() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>
-                      Agent Callback URL <span className="text-amber-500">*</span>
+                      Agent Callback URL <span className="text-warning">*</span>
                     </FormLabel>
                     <FormControl>
                       <Input type="text" placeholder="http://10.30.10.5:3000" {...field} />
                     </FormControl>
                     <FormDescription>
                       Internal URL for agents to reach BRIDGEPORT (VPC IP).
-                      <span className="font-medium text-amber-500"> Required for agent deployment.</span>
+                      <span className="font-medium text-warning"> Required for agent deployment.</span>
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -394,7 +394,7 @@ export default function SystemSettings() {
                     <FormDescription>
                       Maximum file upload size (default: {defaults?.maxUploadSizeMb || 50} MB)
                     </FormDescription>
-                    <p className="mt-1 flex items-center gap-1 text-xs text-amber-500">
+                    <p className="mt-1 flex items-center gap-1 text-xs text-warning">
                       <AlertTriangle className="size-3" />
                       Requires server restart to take effect
                     </p>

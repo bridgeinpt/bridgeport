@@ -1254,7 +1254,7 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
 
   if (isEmpty) {
     return (
-      <div className="panel">
+      <div className="rounded-lg border bg-card p-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-semibold text-foreground">Environment Diagram</h2>
         </div>
@@ -1392,7 +1392,7 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
   return (
     <>
       <style>{reactFlowDarkStyles}</style>
-      <div className="panel">
+      <div className="rounded-lg border bg-card p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
             <h2 className="text-lg font-semibold text-foreground">Environment Diagram</h2>

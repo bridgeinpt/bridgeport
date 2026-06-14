@@ -90,7 +90,7 @@ export function ConfigFileEditor({
 
   return (
     <div
-      className={`overflow-hidden rounded-lg border border-slate-700 bg-slate-950 ${className ?? ''}`}
+      className={`overflow-hidden rounded-lg border border-border ${className ?? ''}`}
     >
       <CodeMirror
         value={value}

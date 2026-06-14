@@ -272,17 +272,17 @@ export default function Storage() {
                 <div
                   className={`mt-4 rounded-lg border p-3 ${
                     testResult.success
-                      ? 'border-green-500/30 bg-green-500/10'
+                      ? 'border-success/30 bg-success/10'
                       : 'border-destructive/30 bg-destructive/10'
                   }`}
                 >
                   <div className="mb-1 flex items-center gap-2">
                     {testResult.success ? (
-                      <Check className="size-4 text-green-500" />
+                      <Check className="size-4 text-success" />
                     ) : (
                       <X className="size-4 text-destructive" />
                     )}
-                    <span className={testResult.success ? 'text-green-500' : 'text-destructive'}>
+                    <span className={testResult.success ? 'text-success' : 'text-destructive'}>
                       {testResult.message}
                     </span>
                   </div>
