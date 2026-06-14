@@ -1,5 +1,7 @@
-import { useState, useMemo } from 'react';
-import { Modal } from '../Modal';
+import { useEffect, useMemo, useState } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import {
   createConnection,
   type ServerWithServices,
@@ -7,6 +9,35 @@ import {
   type ServiceConnection,
   type ExternalEntity,
 } from '../../lib/api';
+import { getErrorMessage } from '@/lib/helpers';
+import { toast } from '../Toast';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form';
 
 interface AddConnectionModalProps {
   isOpen: boolean;
@@ -27,6 +58,43 @@ interface NodeOption {
 
 const PROTOCOLS = ['tcp', 'http', 'grpc', 'custom'] as const;
 
+// Radix Select disallows empty-string item values, so "None" protocol is
+// represented by this sentinel and mapped back to `null` on submit.
+const PROTOCOL_NONE = 'none';
+
+const connectionSchema = z.object({
+  sourceKey: z.string().min(1, 'Source is required'),
+  targetKey: z.string().min(1, 'Target is required'),
+  // Kept as a string (matches the number <input>); validated/parsed on submit.
+  port: z
+    .string()
+    .refine(
+      (val) => {
+        if (!val) return true;
+        const n = parseInt(val, 10);
+        return Number.isFinite(n) && n > 0 && n <= 65535;
+      },
+      { message: 'Port must be a number between 1 and 65535' }
+    ),
+  protocol: z.string(),
+  label: z.string(),
+  direction: z.enum(['forward', 'none']),
+});
+
+type ConnectionValues = z.infer<typeof connectionSchema>;
+
+const DEFAULT_VALUES: ConnectionValues = {
+  sourceKey: '',
+  targetKey: '',
+  port: '',
+  protocol: PROTOCOL_NONE,
+  label: '',
+  direction: 'forward',
+};
+
+const typeLabel = (type: NodeOption['type']) =>
+  type === 'service' ? 'Service' : type === 'database' ? 'Database' : 'External';
+
 export function AddConnectionModal({
   isOpen,
   onClose,
@@ -36,16 +104,25 @@ export function AddConnectionModal({
   externalEntities = [],
   onConnectionCreated,
 }: AddConnectionModalProps) {
-  const [sourceKey, setSourceKey] = useState('');
-  const [targetKey, setTargetKey] = useState('');
-  const [port, setPort] = useState('');
-  const [protocol, setProtocol] = useState('');
-  const [label, setLabel] = useState('');
-  const [direction, setDirection] = useState<'forward' | 'none'>('forward');
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
 
-  // Build flat node list grouped by server
+  const form = useForm<ConnectionValues>({
+    resolver: zodResolver(connectionSchema),
+    defaultValues: DEFAULT_VALUES,
+  });
+
+  const sourceKey = form.watch('sourceKey');
+
+  // Reset form + error whenever the modal opens.
+  useEffect(() => {
+    if (isOpen) {
+      form.reset(DEFAULT_VALUES);
+      setServerError(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
+  // Build flat node list grouped by server.
   const nodeOptions = useMemo<NodeOption[]>(() => {
     const options: NodeOption[] = [];
     for (const server of servers) {
@@ -82,42 +159,25 @@ export function AddConnectionModal({
     return nodeOptions.filter((n) => `${n.type}:${n.id}` !== sourceKey);
   }, [nodeOptions, sourceKey]);
 
-  const resetForm = () => {
-    setSourceKey('');
-    setTargetKey('');
-    setPort('');
-    setProtocol('');
-    setLabel('');
-    setDirection('forward');
-    setError(null);
-  };
-
   const handleClose = () => {
-    resetForm();
     onClose();
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!sourceKey || !targetKey) return;
+  const onSubmit = async (values: ConnectionValues) => {
+    const [sourceType, sourceId] = values.sourceKey.split(':') as [
+      'service' | 'database' | 'external',
+      string,
+    ];
+    const [targetType, targetId] = values.targetKey.split(':') as [
+      'service' | 'database' | 'external',
+      string,
+    ];
 
-    const [sourceType, sourceId] = sourceKey.split(':') as ['service' | 'database' | 'external', string];
-    const [targetType, targetId] = targetKey.split(':') as ['service' | 'database' | 'external', string];
+    // Parse port; schema already rejected out-of-range/NaN values.
+    // JSON.stringify(NaN) is "null", which would silently drop user input.
+    const parsedPort: number | null = values.port ? parseInt(values.port, 10) : null;
 
-    // Parse port and reject NaN explicitly — JSON.stringify(NaN) is "null",
-    // which would silently drop the user's input.
-    let parsedPort: number | null = null;
-    if (port) {
-      const n = parseInt(port, 10);
-      if (!Number.isFinite(n) || n <= 0 || n > 65535) {
-        setError('Port must be a number between 1 and 65535');
-        return;
-      }
-      parsedPort = n;
-    }
-
-    setSubmitting(true);
-    setError(null);
+    setServerError(null);
 
     try {
       const created = await createConnection({
@@ -127,152 +187,215 @@ export function AddConnectionModal({
         targetType,
         targetId,
         port: parsedPort,
-        protocol: protocol || null,
-        label: label || null,
-        direction,
+        protocol: values.protocol === PROTOCOL_NONE ? null : values.protocol,
+        label: values.label || null,
+        direction: values.direction,
       });
       onConnectionCreated(created);
+      toast.success('Connection created');
       handleClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create connection');
-    } finally {
-      setSubmitting(false);
+      setServerError(getErrorMessage(err, 'Failed to create connection'));
     }
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={handleClose} title="Add Connection" size="md">
-      <form onSubmit={handleSubmit} className="space-y-4">
-        {error && (
-          <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400">
-            {error}
-          </div>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Add Connection</DialogTitle>
+          <DialogDescription>
+            Link a service, database, or external entity to another node.
+          </DialogDescription>
+        </DialogHeader>
+
+        {serverError && (
+          <Alert variant="destructive">
+            <AlertDescription>{serverError}</AlertDescription>
+          </Alert>
         )}
 
-        {/* Source */}
-        <div>
-          <label className="block text-sm font-medium text-slate-300 mb-1">Source</label>
-          <select
-            value={sourceKey}
-            onChange={(e) => {
-              setSourceKey(e.target.value);
-              // Clear target if same as new source
-              if (targetKey === e.target.value) setTargetKey('');
-            }}
-            className="input w-full"
-            required
-          >
-            <option value="">Select source...</option>
-            {nodeOptions.map((opt) => (
-              <option key={`${opt.type}:${opt.id}`} value={`${opt.type}:${opt.id}`}>
-                [{opt.type === 'service' ? 'Service' : opt.type === 'database' ? 'Database' : 'External'}] {opt.label} ({opt.group})
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Target */}
-        <div>
-          <label className="block text-sm font-medium text-slate-300 mb-1">Target</label>
-          <select
-            value={targetKey}
-            onChange={(e) => setTargetKey(e.target.value)}
-            className="input w-full"
-            required
-          >
-            <option value="">Select target...</option>
-            {targetOptions.map((opt) => (
-              <option key={`${opt.type}:${opt.id}`} value={`${opt.type}:${opt.id}`}>
-                [{opt.type === 'service' ? 'Service' : opt.type === 'database' ? 'Database' : 'External'}] {opt.label} ({opt.group})
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Port & Protocol */}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1">Port</label>
-            <input
-              type="number"
-              value={port}
-              onChange={(e) => setPort(e.target.value)}
-              className="input w-full"
-              placeholder="e.g. 5432"
-              min={1}
-              max={65535}
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            {/* Source */}
+            <FormField
+              control={form.control}
+              name="sourceKey"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Source</FormLabel>
+                  <Select
+                    value={field.value}
+                    onValueChange={(value) => {
+                      field.onChange(value);
+                      // Clear target if it now matches the new source.
+                      if (form.getValues('targetKey') === value) {
+                        form.setValue('targetKey', '');
+                      }
+                    }}
+                  >
+                    <FormControl>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select source..." />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {nodeOptions.map((opt) => (
+                        <SelectItem
+                          key={`${opt.type}:${opt.id}`}
+                          value={`${opt.type}:${opt.id}`}
+                        >
+                          [{typeLabel(opt.type)}] {opt.label} ({opt.group})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
             />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1">Protocol</label>
-            <select
-              value={protocol}
-              onChange={(e) => setProtocol(e.target.value)}
-              className="input w-full"
-            >
-              <option value="">None</option>
-              {PROTOCOLS.map((p) => (
-                <option key={p} value={p}>{p.toUpperCase()}</option>
-              ))}
-            </select>
-          </div>
-        </div>
 
-        {/* Label */}
-        <div>
-          <label className="block text-sm font-medium text-slate-300 mb-1">Label</label>
-          <input
-            type="text"
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            className="input w-full"
-            placeholder="e.g. Primary DB"
-          />
-        </div>
+            {/* Target */}
+            <FormField
+              control={form.control}
+              name="targetKey"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Target</FormLabel>
+                  <Select value={field.value} onValueChange={field.onChange}>
+                    <FormControl>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select target..." />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {targetOptions.map((opt) => (
+                        <SelectItem
+                          key={`${opt.type}:${opt.id}`}
+                          value={`${opt.type}:${opt.id}`}
+                        >
+                          [{typeLabel(opt.type)}] {opt.label} ({opt.group})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
 
-        {/* Direction */}
-        <div>
-          <label className="block text-sm font-medium text-slate-300 mb-1">Direction</label>
-          <div className="flex gap-4">
-            <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-              <input
-                type="radio"
-                name="direction"
-                value="forward"
-                checked={direction === 'forward'}
-                onChange={() => setDirection('forward')}
-                className="text-primary-500"
+            {/* Port & Protocol */}
+            <div className="grid grid-cols-2 gap-3">
+              <FormField
+                control={form.control}
+                name="port"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Port</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        placeholder="e.g. 5432"
+                        min={1}
+                        max={65535}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
               />
-              Directed (source &rarr; target)
-            </label>
-            <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-              <input
-                type="radio"
-                name="direction"
-                value="none"
-                checked={direction === 'none'}
-                onChange={() => setDirection('none')}
-                className="text-primary-500"
+              <FormField
+                control={form.control}
+                name="protocol"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Protocol</FormLabel>
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <FormControl>
+                        <SelectTrigger className="w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value={PROTOCOL_NONE}>None</SelectItem>
+                        {PROTOCOLS.map((p) => (
+                          <SelectItem key={p} value={p}>
+                            {p.toUpperCase()}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
               />
-              Undirected
-            </label>
-          </div>
-        </div>
+            </div>
 
-        {/* Actions */}
-        <div className="flex justify-end gap-2 pt-2">
-          <button type="button" onClick={handleClose} className="btn btn-secondary">
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={submitting || !sourceKey || !targetKey}
-            className="btn btn-primary"
-          >
-            {submitting ? 'Creating...' : 'Add Connection'}
-          </button>
-        </div>
-      </form>
-    </Modal>
+            {/* Label */}
+            <FormField
+              control={form.control}
+              name="label"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Label</FormLabel>
+                  <FormControl>
+                    <Input type="text" placeholder="e.g. Primary DB" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            {/* Direction */}
+            <FormField
+              control={form.control}
+              name="direction"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Direction</FormLabel>
+                  <FormControl>
+                    <RadioGroup
+                      value={field.value}
+                      onValueChange={field.onChange}
+                      className="flex gap-4"
+                    >
+                      <Label
+                        htmlFor="direction-forward"
+                        className="flex cursor-pointer items-center gap-2 font-normal text-foreground"
+                      >
+                        <RadioGroupItem id="direction-forward" value="forward" />
+                        Directed (source &rarr; target)
+                      </Label>
+                      <Label
+                        htmlFor="direction-none"
+                        className="flex cursor-pointer items-center gap-2 font-normal text-foreground"
+                      >
+                        <RadioGroupItem id="direction-none" value="none" />
+                        Undirected
+                      </Label>
+                    </RadioGroup>
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            {/* Actions */}
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={handleClose}>
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={form.formState.isSubmitting || !sourceKey || !form.watch('targetKey')}
+              >
+                {form.formState.isSubmitting ? 'Creating...' : 'Add Connection'}
+              </Button>
+            </div>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
   );
 }
