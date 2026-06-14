@@ -1211,7 +1211,7 @@ export default function ServiceDetail() {
                     <div className="flex items-center gap-2">
                       <span className="text-foreground text-sm">{file.configFile.name}</span>
                       {file.configFile.isBinary && (
-                        <Badge variant="secondary" className="bg-purple-900/30 text-purple-400">
+                        <Badge variant="secondary" className="bg-purple/30 text-purple">
                           bin
                         </Badge>
                       )}
@@ -1743,7 +1743,7 @@ export default function ServiceDetail() {
                       log.action === 'deploy' ? 'bg-info/20 text-info' :
                       log.action === 'restart' ? 'bg-warning/20 text-warning' :
                       log.action === 'health_check' ? 'bg-success/20 text-success' :
-                      log.action === 'update' ? 'bg-purple-500/20 text-purple-400' :
+                      log.action === 'update' ? 'bg-purple/20 text-purple' :
                       'bg-muted text-muted-foreground'
                     )}>
                       {log.action === 'deploy' && <Rocket className="size-4" />}

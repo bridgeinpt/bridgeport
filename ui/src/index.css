@@ -47,6 +47,8 @@
   --warning-foreground: oklch(0.985 0 0);
   --info: oklch(0.55 0.13 234);
   --info-foreground: oklch(0.985 0 0);
+  --purple: oklch(0.52 0.20 305);             /* distinct accent (databases) — darker for AA on light */
+  --purple-foreground: oklch(0.985 0 0);
 
   --chart-1: oklch(0.55 0.15 234);            /* sky */
   --chart-2: oklch(0.60 0.15 155);            /* green */
@@ -96,6 +98,8 @@
   --warning-foreground: oklch(0.205 0.03 80);
   --info: oklch(0.62 0.13 234);
   --info-foreground: oklch(0.985 0 0);
+  --purple: oklch(0.62 0.20 305);             /* distinct accent (databases) */
+  --purple-foreground: oklch(0.985 0 0);
 
   /* Charts */
   --chart-1: oklch(0.585 0.142 234);          /* sky */
@@ -153,6 +157,8 @@
   --color-warning-foreground: var(--warning-foreground);
   --color-info: var(--info);
   --color-info-foreground: var(--info-foreground);
+  --color-purple: var(--purple);
+  --color-purple-foreground: var(--purple-foreground);
 
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);

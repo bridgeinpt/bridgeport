@@ -301,7 +301,7 @@ export default function Monitoring() {
         <div className="mt-6">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <DatabaseIcon className="w-4 h-4 text-purple-400" />
+              <DatabaseIcon className="w-4 h-4 text-purple" />
               <span className="text-sm font-semibold text-foreground">Databases</span>
             </div>
             <Link to="/monitoring/databases" className="text-xs text-primary hover:text-primary/80">View all</Link>
@@ -365,7 +365,7 @@ interface HealthCardProps {
 const HEALTH_COLORS = {
   blue: { icon: 'text-info', bar: 'bg-info' },
   green: { icon: 'text-success', bar: 'bg-success' },
-  purple: { icon: 'text-purple-400', bar: 'bg-purple-500' },
+  purple: { icon: 'text-purple', bar: 'bg-purple' },
 } as const;
 
 const HealthCard = memo(function HealthCard({ title, href, icon: Icon, total, healthy, unhealthy, color }: HealthCardProps) {

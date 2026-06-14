@@ -507,8 +507,8 @@ export default function Databases() {
             <Card key={db.id} className="gap-0 py-4">
               <div className="flex items-start justify-between px-4">
                 <div className="flex items-start gap-4">
-                  <div className="p-3 bg-purple-500/10 rounded-lg">
-                    <DatabaseIcon className="size-6 text-purple-400" />
+                  <div className="p-3 bg-purple/10 rounded-lg">
+                    <DatabaseIcon className="size-6 text-purple" />
                   </div>
                   <div>
                     <div className="flex items-center gap-2">

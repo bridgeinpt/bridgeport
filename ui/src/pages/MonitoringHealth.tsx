@@ -445,7 +445,7 @@ export default function MonitoringHealth() {
               {sortedDatabases.length > 0 && (
                 <div className="mb-6">
                   <h2 className="text-lg font-semibold text-foreground mb-3 flex items-center gap-2">
-                    <DatabaseIcon className="w-5 h-5 text-purple-400" />
+                    <DatabaseIcon className="w-5 h-5 text-purple" />
                     Databases
                     <span className="text-sm font-normal text-muted-foreground">
                       ({healthyCounts.databases} healthy, {unhealthyCounts.databases} unhealthy, {unknownCounts.databases} unknown)
