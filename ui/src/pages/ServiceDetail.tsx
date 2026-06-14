@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useState, useRef } from 'react';
+import { useEffect, useLayoutEffect, useState, useRef, Fragment } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   getService,
@@ -41,20 +41,62 @@ import {
   type CertCheckConfig,
   type CertCheckResult,
 } from '../lib/api';
-import { Modal } from '../components/Modal';
 import { DependencyEditor } from '../components/DependencyEditor';
-import Pagination from '../components/Pagination';
+import { DataPagination } from '@/components/ui/data-pagination';
 import { usePagination } from '../hooks/usePagination';
 import { useAppStore } from '../lib/store';
 import { useToast } from '../components/Toast';
+import { useConfirm } from '@/hooks/useConfirm';
 import { formatDistanceToNow, format } from 'date-fns';
-import {
-  getContainerStatusColor,
-  getHealthStatusColor,
-  getOverallStatusDotColor,
-  getContainerHealthTextColor,
-} from '../lib/status';
+import { getOverallStatusDotColor, getContainerHealthTextColor } from '../lib/status';
 import { safeJsonParse } from '../lib/helpers';
+import {
+  AlertTriangle,
+  ArrowUpCircle,
+  CircleAlert,
+  Pencil,
+  X,
+  Eye,
+  Box as BoxIcon,
+  Rocket,
+  RotateCcw,
+  CheckCircle2,
+  FilePenLine,
+  Plus,
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { cn } from '@/lib/utils';
 
 function parseExposedPorts(portsJson: string | null | undefined): ExposedPort[] {
   return safeJsonParse(portsJson, [] as ExposedPort[]);
@@ -85,6 +127,7 @@ export default function ServiceDetail() {
   const navigate = useNavigate();
   const { selectedEnvironment, setBreadcrumbName } = useAppStore();
   const toast = useToast();
+  const confirm = useConfirm();
   const [service, setService] = useState<ServiceWithServer | null>(null);
   const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [logs, setLogs] = useState<string>('');
@@ -116,7 +159,6 @@ export default function ServiceDetail() {
 
   // Deploy modal state
   const [showDeployModal, setShowDeployModal] = useState(false);
-  const [deployAutoRollback, setDeployAutoRollback] = useState(false);
 
   // Config edit state
   const [editComposePath, setEditComposePath] = useState<string>('');
@@ -351,7 +393,15 @@ export default function ServiceDetail() {
 
   const handleDelete = async () => {
     if (!id || !service) return;
-    if (!confirm(`Are you sure you want to delete the service "${service.name}"? This cannot be undone.`)) return;
+    if (
+      !(await confirm({
+        title: 'Delete service',
+        description: `Are you sure you want to delete the service "${service.name}"? This cannot be undone.`,
+        confirmText: 'Delete',
+        destructive: true,
+      }))
+    )
+      return;
     setDeleting(true);
     try {
       await deleteService(id);
@@ -588,7 +638,15 @@ export default function ServiceDetail() {
 
   const handleDetachFile = async (configFileId: string) => {
     if (!id) return;
-    if (!confirm('Detach this file from the service?')) return;
+    if (
+      !(await confirm({
+        title: 'Detach file',
+        description: 'Detach this file from the service?',
+        confirmText: 'Detach',
+        destructive: true,
+      }))
+    )
+      return;
     await detachServiceFile(id, configFileId);
     setAttachedFiles((prev) => prev.filter((f) => f.configFileId !== configFileId));
   };
@@ -697,11 +755,9 @@ export default function ServiceDetail() {
 
   if (loading) {
     return (
-      <div className="p-6">
-        <div className="animate-pulse">
-          <div className="h-7 w-48 bg-slate-700 rounded mb-5"></div>
-          <div className="h-64 bg-slate-800 rounded-lg"></div>
-        </div>
+      <div className="p-6 space-y-5">
+        <Skeleton className="h-7 w-48" />
+        <Skeleton className="h-64 w-full" />
       </div>
     );
   }
@@ -709,12 +765,12 @@ export default function ServiceDetail() {
   if (!service) {
     return (
       <div className="p-6">
-        <div className="panel text-center py-12">
-          <p className="text-slate-400">Service not found</p>
-          <Link to="/services" className="btn btn-primary mt-4">
-            Back to Services
-          </Link>
-        </div>
+        <Card className="text-center py-12">
+          <p className="text-muted-foreground">Service not found</p>
+          <Button asChild className="mt-4 mx-auto">
+            <Link to="/services">Back to Services</Link>
+          </Button>
+        </Card>
       </div>
     );
   }
@@ -723,39 +779,29 @@ export default function ServiceDetail() {
     <div className="p-6">
       {/* Missing Service Warning */}
       {service.discoveryStatus === 'missing' && (
-        <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-4 mb-5">
-          <div className="flex items-start gap-3">
-            <svg className="w-5 h-5 text-orange-400 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
-            <div>
-              <h4 className="text-orange-400 font-medium">Container Not Found</h4>
-              <p className="text-orange-300/80 text-sm mt-1">
-                This container was not found during the last discovery. It may have been stopped, removed, or crashed.
-                {service.lastDiscoveredAt && (
-                  <> Last seen {formatDistanceToNow(new Date(service.lastDiscoveredAt), { addSuffix: true })}.</>
-                )}
-              </p>
-            </div>
-          </div>
-        </div>
+        <Alert className="mb-5 border-warning/30 bg-warning/10 text-warning">
+          <AlertTriangle className="size-5 text-warning" />
+          <AlertTitle className="text-warning">Container Not Found</AlertTitle>
+          <AlertDescription className="text-warning/80">
+            This container was not found during the last discovery. It may have been stopped, removed, or crashed.
+            {service.lastDiscoveredAt && (
+              <> Last seen {formatDistanceToNow(new Date(service.lastDiscoveredAt), { addSuffix: true })}.</>
+            )}
+          </AlertDescription>
+        </Alert>
       )}
 
       <div className="flex items-center justify-between mb-5">
         <div>
           <div className="flex items-center gap-3">
             {/* Container Status Badge */}
-            <span className={`badge ${getContainerStatusColor(service.containerStatus || service.status || 'unknown')}`}>
-              {service.containerStatus || service.status || 'unknown'}
-            </span>
+            <StatusBadge kind="container" value={service.containerStatus || service.status || 'unknown'} />
             {/* Health Status Badge */}
-            <span className={`badge ${getHealthStatusColor(service.healthStatus || 'unknown')}`}>
-              {service.healthStatus || 'unknown'}
-            </span>
+            <StatusBadge kind="health" value={service.healthStatus || 'unknown'} />
             {/* Inline Editable Name */}
             {editingName ? (
               <div className="flex items-center gap-2">
-                <input
+                <Input
                   ref={nameInputRef}
                   type="text"
                   value={editName}
@@ -763,33 +809,31 @@ export default function ServiceDetail() {
                   onKeyDown={handleNameKeyDown}
                   onBlur={saveEditName}
                   disabled={savingName}
-                  className="text-xl font-bold bg-slate-800 text-white border border-primary-500 rounded px-2 py-0.5 focus:outline-hidden focus:ring-2 focus:ring-primary-500"
+                  className="text-xl font-bold h-auto py-0.5"
                   style={{ minWidth: '200px' }}
                 />
                 {savingName && (
-                  <span className="text-sm text-slate-400">Saving...</span>
+                  <span className="text-sm text-muted-foreground">Saving...</span>
                 )}
               </div>
             ) : (
               <span
-                className="text-xl font-bold text-white cursor-pointer hover:text-primary-400 group flex items-center gap-2"
+                className="text-xl font-bold text-foreground cursor-pointer hover:text-primary group flex items-center gap-2"
                 onClick={startEditingName}
                 title="Click to edit service name"
               >
                 {service.name}
-                <svg className="w-4 h-4 text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                </svg>
+                <Pencil className="size-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
               </span>
             )}
           </div>
-          <p className="text-slate-400 mt-1">
+          <p className="text-muted-foreground mt-1">
             {service.server ? (
               <>
                 on{' '}
                 <Link
                   to={`/servers/${service.server.id}`}
-                  className="text-primary-400 hover:underline"
+                  className="text-primary hover:underline"
                 >
                   {service.server.name}
                 </Link>
@@ -816,157 +860,127 @@ export default function ServiceDetail() {
           </p>
         </div>
         <div className="flex gap-2">
-          <button
-            onClick={loadLogs}
-            className="btn btn-ghost"
-          >
+          <Button variant="ghost" onClick={loadLogs}>
             View Logs
-          </button>
-          <button
-            onClick={handleHealthCheck}
-            disabled={checking}
-            className="btn btn-ghost"
-          >
+          </Button>
+          <Button variant="ghost" onClick={handleHealthCheck} disabled={checking}>
             {checking ? 'Checking...' : 'Health Check'}
-          </button>
-          <button
-            onClick={handleRestart}
-            disabled={restarting}
-            className="btn btn-secondary"
-          >
+          </Button>
+          <Button variant="secondary" onClick={handleRestart} disabled={restarting}>
             {restarting ? 'Restarting...' : 'Restart'}
-          </button>
-          <button
-            onClick={handleDelete}
-            disabled={deleting}
-            className="btn bg-red-600 hover:bg-red-700 text-white"
-          >
+          </Button>
+          <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
             {deleting ? 'Deleting...' : 'Delete'}
-          </button>
+          </Button>
         </div>
       </div>
 
       {/* Update Available Banner */}
       {service.latestAvailableTag && service.latestAvailableTag !== service.imageTag && (
-        <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4 mb-5">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <svg className="w-5 h-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-              </svg>
-              <div>
-                <h4 className="text-blue-400 font-medium">Update Available</h4>
-                <p className="text-blue-300/80 text-sm">
-                  New version <code className="bg-blue-500/20 px-1 rounded">{service.latestAvailableTag}</code> is available
-                  (current: {service.imageTag})
-                </p>
-              </div>
-            </div>
-            <button
+        <Alert className="mb-5 border-info/30 bg-info/10 text-info">
+          <ArrowUpCircle className="size-5 text-info" />
+          <AlertTitle className="text-info">Update Available</AlertTitle>
+          <AlertDescription className="text-info/80">
+            New version <code className="bg-info/20 px-1 rounded">{service.latestAvailableTag}</code> is available
+            (current: {service.imageTag})
+          </AlertDescription>
+          <div className="col-start-2 mt-2">
+            <Button
               onClick={() => handleDeploy(service.latestAvailableTag!)}
               disabled={deploying}
-              className="btn btn-primary"
             >
               {deploying ? 'Deploying...' : 'Deploy Update'}
-            </button>
+            </Button>
           </div>
-        </div>
+        </Alert>
       )}
 
       <div className="grid grid-cols-3 gap-4 mb-5">
         {/* Deploy Card */}
-        <div className="col-span-2 panel">
+        <Card className="col-span-2 p-4">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-white">Deploy</h3>
+            <h3 className="text-lg font-semibold text-foreground">Deploy</h3>
             {containerImage?.registryConnectionId && (
-              <button
-                onClick={handleCheckUpdates}
-                disabled={checkingUpdates}
-                className="btn btn-ghost text-sm"
-              >
+              <Button variant="ghost" size="sm" onClick={handleCheckUpdates} disabled={checkingUpdates}>
                 {checkingUpdates ? 'Checking...' : 'Check for Updates'}
-              </button>
+              </Button>
             )}
           </div>
           <div className="space-y-4">
             {/* Image info - read from containerImage */}
-            <div className="grid grid-cols-2 gap-4 p-3 bg-slate-800/50 rounded-lg">
+            <div className="grid grid-cols-2 gap-4 p-3 bg-muted/50 rounded-lg">
               <div>
-                <dt className="text-xs text-slate-500 uppercase tracking-wide">Image Name</dt>
-                <dd className="text-white font-mono text-sm mt-0.5">
+                <dt className="text-xs text-muted-foreground uppercase tracking-wide">Image Name</dt>
+                <dd className="text-foreground font-mono text-sm mt-0.5">
                   {containerImage ? (
-                    <Link to={`/container-images/${containerImage.id}`} className="text-primary-400 hover:text-primary-300">
+                    <Link to={`/container-images/${containerImage.id}`} className="text-primary hover:underline">
                       {containerImage.imageName}
                     </Link>
                   ) : (
-                    <span className="text-slate-500 italic">Not linked to container image</span>
+                    <span className="text-muted-foreground italic">Not linked to container image</span>
                   )}
                 </dd>
               </div>
               <div>
-                <dt className="text-xs text-slate-500 uppercase tracking-wide">Image Tag</dt>
+                <dt className="text-xs text-muted-foreground uppercase tracking-wide">Image Tag</dt>
                 <dd className="mt-0.5 flex flex-wrap gap-1">
                   {(() => {
                     const tags = containerImage?.deployedDigest?.tags || containerImage?.latestDigest?.tags;
                     if (tags && tags.length > 0) {
                       return tags.map((tag) => (
-                        <span key={tag} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-slate-700 text-slate-200">
+                        <Badge key={tag} variant="secondary" className="font-mono">
                           {tag}
-                        </span>
+                        </Badge>
                       ));
                     }
                     return service.imageTag ? (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-slate-700 text-slate-200">
+                      <Badge variant="secondary" className="font-mono">
                         {service.imageTag}
-                      </span>
+                      </Badge>
                     ) : (
-                      <span className="text-slate-500 italic text-sm">Not set</span>
+                      <span className="text-muted-foreground italic text-sm">Not set</span>
                     );
                   })()}
                 </dd>
               </div>
               <div>
-                <dt className="text-xs text-slate-500 uppercase tracking-wide">Registry</dt>
-                <dd className="text-white text-sm mt-0.5">
+                <dt className="text-xs text-muted-foreground uppercase tracking-wide">Registry</dt>
+                <dd className="text-foreground text-sm mt-0.5">
                   {containerImage?.registryConnection ? (
-                    <Link to="/registries" className="text-primary-400 hover:text-primary-300">
+                    <Link to="/registries" className="text-primary hover:underline">
                       {containerImage.registryConnection.name}
                     </Link>
                   ) : (
-                    <span className="text-slate-500 italic">Not linked</span>
+                    <span className="text-muted-foreground italic">Not linked</span>
                   )}
                 </dd>
               </div>
               <div>
-                <dt className="text-xs text-slate-500 uppercase tracking-wide">Last Updated</dt>
-                <dd className="text-white text-sm mt-0.5">
+                <dt className="text-xs text-muted-foreground uppercase tracking-wide">Last Updated</dt>
+                <dd className="text-foreground text-sm mt-0.5">
                   {service.updatedAt ? (
                     formatDistanceToNow(new Date(service.updatedAt), { addSuffix: true })
                   ) : (
-                    <span className="text-slate-500 italic">Unknown</span>
+                    <span className="text-muted-foreground italic">Unknown</span>
                   )}
                 </dd>
               </div>
             </div>
 
-            <button
-              onClick={() => setShowDeployModal(true)}
-              disabled={deploying}
-              className="btn btn-primary w-full"
-            >
+            <Button onClick={() => setShowDeployModal(true)} disabled={deploying} className="w-full">
               {deploying ? 'Deploying...' : 'Deploy'}
-            </button>
+            </Button>
 
             {/* Last update check */}
             {service.lastUpdateCheckAt && (
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-muted-foreground">
                 Last checked {formatDistanceToNow(new Date(service.lastUpdateCheckAt), { addSuffix: true })}
               </p>
             )}
 
             {/* Update check result */}
             {updateCheckResult && (
-              <div className={`text-sm ${updateCheckResult.hasUpdate ? 'text-blue-400' : 'text-green-400'}`}>
+              <div className={cn('text-sm', updateCheckResult.hasUpdate ? 'text-info' : 'text-success')}>
                 {updateCheckResult.hasUpdate
                   ? `Update available: ${updateCheckResult.bestTag || 'new digest'}`
                   : 'No updates available'}
@@ -975,65 +989,61 @@ export default function ServiceDetail() {
 
             {/* Deploy error */}
             {deployError && (
-              <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
-                <div className="flex items-start gap-2">
-                  <svg className="w-5 h-5 text-red-400 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                  <div className="flex-1">
-                    <p className="text-red-400 font-medium">Deployment Failed</p>
-                    <p className="text-red-300/80 text-sm mt-1">{deployError}</p>
-                  </div>
-                  <button
-                    onClick={() => setDeployError(null)}
-                    className="text-red-400 hover:text-red-300"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
+              <Alert variant="destructive">
+                <CircleAlert className="size-5" />
+                <AlertTitle>Deployment Failed</AlertTitle>
+                <AlertDescription>{deployError}</AlertDescription>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={() => setDeployError(null)}
+                  className="absolute top-2 right-2"
+                  aria-label="Dismiss"
+                >
+                  <X className="size-4" />
+                </Button>
+              </Alert>
             )}
           </div>
-        </div>
+        </Card>
 
         {/* Service Info */}
-        <div className="panel">
+        <Card className="p-4">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-white">Details</h3>
-            <button onClick={openConfig} className="btn btn-ghost text-sm">
+            <h3 className="text-lg font-semibold text-foreground">Details</h3>
+            <Button variant="ghost" size="sm" onClick={openConfig}>
               Configure
-            </button>
+            </Button>
           </div>
           <dl className="space-y-3 text-sm">
             <div>
-              <dt className="text-slate-400">Container</dt>
-              <dd className="text-white font-mono">{service.containerName}</dd>
+              <dt className="text-muted-foreground">Container</dt>
+              <dd className="text-foreground font-mono">{service.containerName}</dd>
             </div>
             <div>
-              <dt className="text-slate-400">Type</dt>
-              <dd className="text-white">{service.serviceType?.displayName || 'Generic'}</dd>
+              <dt className="text-muted-foreground">Type</dt>
+              <dd className="text-foreground">{service.serviceType?.displayName || 'Generic'}</dd>
             </div>
             {/* Exposed Ports */}
             <div>
-              <dt className="text-slate-400">Ports</dt>
-              <dd className="text-white">
+              <dt className="text-muted-foreground">Ports</dt>
+              <dd className="text-foreground">
                 {(() => {
                   const ports = parseExposedPorts(service.exposedPorts);
                   if (ports.length === 0) {
-                    return <span className="text-slate-500">No ports exposed</span>;
+                    return <span className="text-muted-foreground">No ports exposed</span>;
                   }
                   return (
                     <div className="flex flex-wrap gap-1.5 mt-1">
                       {ports.map((port, i) => (
-                        <span
+                        <Badge
                           key={i}
-                          className="px-2 py-0.5 bg-slate-700 rounded text-xs font-mono"
+                          variant="secondary"
+                          className="font-mono"
                           title={`${port.protocol.toUpperCase()}`}
                         >
                           {port.host ? `${port.host}:${port.container}` : port.container}
-                        </span>
+                        </Badge>
                       ))}
                     </div>
                   );
@@ -1042,23 +1052,23 @@ export default function ServiceDetail() {
             </div>
             {service.composePath && (
               <div>
-                <dt className="text-slate-400">Compose Path</dt>
-                <dd className="text-white font-mono text-xs">
+                <dt className="text-muted-foreground">Compose Path</dt>
+                <dd className="text-foreground font-mono text-xs">
                   {service.composePath}
                 </dd>
               </div>
             )}
             {service.healthCheckUrl && (
               <div>
-                <dt className="text-slate-400">Health Check URL</dt>
-                <dd className="text-white font-mono text-xs">
+                <dt className="text-muted-foreground">Health Check URL</dt>
+                <dd className="text-foreground font-mono text-xs">
                   {service.healthCheckUrl}
                 </dd>
               </div>
             )}
             <div>
-              <dt className="text-slate-400">Last Checked</dt>
-              <dd className="text-white">
+              <dt className="text-muted-foreground">Last Checked</dt>
+              <dd className="text-foreground">
                 {service.lastCheckedAt
                   ? formatDistanceToNow(new Date(service.lastCheckedAt), {
                       addSuffix: true,
@@ -1067,40 +1077,36 @@ export default function ServiceDetail() {
               </dd>
             </div>
           </dl>
-        </div>
+        </Card>
       </div>
 
       {/* Orchestration Row: Dependencies & Health Config */}
       <div className="grid grid-cols-2 gap-4 mb-5">
         {/* Dependencies Card */}
-        <div className="panel">
-          <h3 className="text-lg font-semibold text-white mb-4">Dependencies</h3>
+        <Card className="p-4">
+          <h3 className="text-lg font-semibold text-foreground mb-4">Dependencies</h3>
           <DependencyEditor serviceId={id!} onUpdate={refreshDependencies} />
           {dependencies.length > 0 && (
-            <div className="mt-4 pt-4 border-t border-slate-700">
-              <p className="text-xs text-slate-500 mb-2">Current Dependencies</p>
+            <div className="mt-4 pt-4 border-t">
+              <p className="text-xs text-muted-foreground mb-2">Current Dependencies</p>
               <div className="space-y-2">
                 {dependencies.map((dep) => (
                   <div
                     key={dep.id}
-                    className="flex items-center justify-between p-2 bg-slate-800/50 rounded"
+                    className="flex items-center justify-between p-2 bg-muted/50 rounded"
                   >
                     <div className="flex items-center gap-2">
-                      <span className={`text-xs px-1.5 py-0.5 rounded ${
-                        dep.type === 'health_before'
-                          ? 'bg-green-500/20 text-green-400'
-                          : 'bg-blue-500/20 text-blue-400'
-                      }`}>
+                      <Badge variant={dep.type === 'health_before' ? 'success' : 'info'}>
                         {dep.type === 'health_before' ? 'waits for healthy' : 'deploys after'}
-                      </span>
+                      </Badge>
                       <Link
                         to={`/services/${dep.dependsOn.id}`}
-                        className="text-primary-400 hover:underline"
+                        className="text-primary hover:underline"
                       >
                         {dep.dependsOn.name}
                       </Link>
                     </div>
-                    <span className="text-xs text-slate-500">
+                    <span className="text-xs text-muted-foreground">
                       on {dep.dependsOn.server?.name}
                     </span>
                   </div>
@@ -1109,91 +1115,88 @@ export default function ServiceDetail() {
             </div>
           )}
           {containerImage && (
-            <div className="mt-4 pt-4 border-t border-slate-700">
-              <p className="text-xs text-slate-500 mb-2">Container Image</p>
+            <div className="mt-4 pt-4 border-t">
+              <p className="text-xs text-muted-foreground mb-2">Container Image</p>
               <Link
                 to="/container-images"
-                className="flex items-center gap-2 p-2 bg-primary-500/10 border border-primary-500/30 rounded hover:bg-primary-500/20"
+                className="flex items-center gap-2 p-2 bg-primary/10 border border-primary/30 rounded hover:bg-primary/20"
               >
-                <svg className="w-4 h-4 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
-                <span className="text-white font-medium">{containerImage.name}</span>
-                <span className="text-xs text-primary-400 font-mono ml-auto">
+                <BoxIcon className="size-4 text-primary" />
+                <span className="text-foreground font-medium">{containerImage.name}</span>
+                <span className="text-xs text-primary font-mono ml-auto">
                   :{containerImage.bestTag || containerImage.tagFilter}
                 </span>
               </Link>
             </div>
           )}
-        </div>
+        </Card>
 
         {/* Config Files Card */}
-        <div className="panel">
+        <Card className="p-4">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-white">Config Files</h3>
+            <h3 className="text-lg font-semibold text-foreground">Config Files</h3>
             <div className="flex gap-2">
               {attachedFiles.length > 0 && (
-                <button
-                  onClick={handleSyncFiles}
-                  disabled={syncing}
-                  className="btn btn-secondary text-sm"
-                >
+                <Button variant="secondary" size="sm" onClick={handleSyncFiles} disabled={syncing}>
                   {syncing ? 'Syncing...' : 'Sync'}
-                </button>
+                </Button>
               )}
-              <button onClick={openAttachFile} className="btn btn-ghost text-sm">
+              <Button variant="ghost" size="sm" onClick={openAttachFile}>
                 Attach
-              </button>
+              </Button>
             </div>
           </div>
 
           {/* Sync Results */}
           {syncResults && (
             <div
-              className={`mb-4 p-3 rounded-lg border ${
+              className={cn(
+                'mb-4 p-3 rounded-lg border',
                 syncStatus === 'no_targets'
-                  ? 'bg-yellow-500/10 border-yellow-500/30'
-                  : 'bg-slate-800/50 border-slate-700'
-              }`}
+                  ? 'bg-warning/10 border-warning/30'
+                  : 'bg-muted/50 border-border'
+              )}
             >
               {syncStatus === 'no_targets' ? (
                 // 200 OK + no_targets → yellow warning, NOT a green success.
                 // Sync ran but found nothing to write — surface the gap to the
                 // operator (issue #127).
-                <p className="text-sm text-yellow-400">
+                <p className="text-sm text-warning">
                   This service has no files attached, or no deployments to sync to — sync did nothing.
                 </p>
               ) : (
                 <>
-                  <p className="text-sm text-slate-400 mb-2">Sync Results:</p>
+                  <p className="text-sm text-muted-foreground mb-2">Sync Results:</p>
                   <div className="space-y-1">
                     {syncResults.map((result, i) => (
                       <div key={i} className="flex items-center gap-2 text-sm">
                         {result.success ? (
-                          <span className="text-green-400">✓</span>
+                          <CheckCircle2 className="size-4 text-success" />
                         ) : (
-                          <span className="text-red-400">✕</span>
+                          <X className="size-4 text-destructive" />
                         )}
-                        <span className="text-white">{result.file}</span>
-                        <span className="text-slate-500">→</span>
-                        <code className="text-slate-400 text-xs">{result.targetPath}</code>
+                        <span className="text-foreground">{result.file}</span>
+                        <span className="text-muted-foreground">→</span>
+                        <code className="text-muted-foreground text-xs">{result.targetPath}</code>
                         {result.error && (
-                          <span className="text-red-400 text-xs">({result.error})</span>
+                          <span className="text-destructive text-xs">({result.error})</span>
                         )}
                       </div>
                     ))}
                   </div>
                 </>
               )}
-              <button
+              <Button
+                variant="ghost"
+                size="xs"
                 onClick={() => {
                   setSyncResults(null);
                   setSyncStatus(undefined);
                 }}
-                className="mt-2 text-xs text-slate-400 hover:text-white"
+                className="mt-2"
               >
                 Dismiss
-              </button>
+              </Button>
             </div>
           )}
 
@@ -1202,20 +1205,20 @@ export default function ServiceDetail() {
               {attachedFiles.map((file) => (
                 <div
                   key={file.id}
-                  className="flex items-center justify-between p-2 bg-slate-800/50 rounded-lg"
+                  className="flex items-center justify-between p-2 bg-muted/50 rounded-lg"
                 >
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-white text-sm">{file.configFile.name}</span>
+                      <span className="text-foreground text-sm">{file.configFile.name}</span>
                       {file.configFile.isBinary && (
-                        <span className="px-1 py-0.5 text-xs bg-purple-900/30 text-purple-400 rounded">
+                        <Badge variant="secondary" className="bg-purple/30 text-purple">
                           bin
-                        </span>
+                        </Badge>
                       )}
                     </div>
                     {editingMountPath === file.configFileId ? (
                       <div className="flex items-center gap-2 mt-1">
-                        <input
+                        <Input
                           type="text"
                           value={editMountPathValue}
                           onChange={(e) => setEditMountPathValue(e.target.value)}
@@ -1223,7 +1226,7 @@ export default function ServiceDetail() {
                           onBlur={() => saveMountPath(file.configFileId)}
                           disabled={savingMountPath}
                           autoFocus
-                          className="flex-1 bg-slate-900 border border-primary-500 rounded px-2 py-0.5 text-green-400 font-mono text-xs focus:outline-hidden"
+                          className="flex-1 h-7 text-success font-mono text-xs"
                         />
                       </div>
                     ) : (
@@ -1232,108 +1235,99 @@ export default function ServiceDetail() {
                         onClick={() => startEditMountPath(file.configFileId, file.targetPath)}
                         title="Click to edit path"
                       >
-                        <code className="text-xs text-green-400 group-hover:text-green-300">
+                        <code className="text-xs text-success group-hover:text-success">
                           {file.targetPath}
                         </code>
-                        <svg className="w-3 h-3 text-slate-600 group-hover:text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                        </svg>
+                        <Pencil className="size-3 text-muted-foreground group-hover:text-foreground" />
                       </button>
                     )}
                   </div>
                   <div className="flex items-center gap-1">
                     {!file.configFile.isBinary && (
-                      <button
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
                         onClick={() => handleViewFileContent(file.configFileId, file.configFile.name, file.configFile.filename)}
-                        className="p-1 text-slate-400 hover:text-primary-400"
                         title="View"
                       >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                        </svg>
-                      </button>
+                        <Eye className="size-4" />
+                      </Button>
                     )}
-                    <button
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
                       onClick={() => handleDetachFile(file.configFileId)}
-                      className="p-1 text-slate-400 hover:text-red-400"
+                      className="text-muted-foreground hover:text-destructive"
                       title="Detach"
                     >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
+                      <X className="size-4" />
+                    </Button>
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <p className="text-slate-400 text-sm">
+            <p className="text-muted-foreground text-sm">
               No config files attached.
             </p>
           )}
-        </div>
+        </Card>
       </div>
 
       {/* Health Check Result/Error */}
       {(healthCheckError || healthCheckResult) && (
-        <div className="panel mb-5">
+        <Card className="p-4 mb-5">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-white">Health Check Result</h3>
-            <button
+            <h3 className="text-lg font-semibold text-foreground">Health Check Result</h3>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => {
                 setHealthCheckError(null);
                 setHealthCheckResult(null);
               }}
-              className="text-slate-400 hover:text-white text-sm"
             >
               Dismiss
-            </button>
+            </Button>
           </div>
 
           {healthCheckError && (
-            <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
-              <div className="flex items-start gap-3">
-                <svg className="w-5 h-5 text-red-400 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <div>
-                  <p className="text-red-400 font-medium">Health Check Failed</p>
-                  <p className="text-red-300/80 text-sm mt-1">{healthCheckError}</p>
-                </div>
-              </div>
-            </div>
+            <Alert variant="destructive">
+              <CircleAlert className="size-5" />
+              <AlertTitle>Health Check Failed</AlertTitle>
+              <AlertDescription>{healthCheckError}</AlertDescription>
+            </Alert>
           )}
 
           {healthCheckResult && (
             <div className="space-y-4">
               {/* Overall Status */}
               <div className="flex items-center gap-3">
-                <span className={`w-3 h-3 rounded-full ${getOverallStatusDotColor(healthCheckResult.status)}`} />
-                <span className="text-white font-medium capitalize">{healthCheckResult.status}</span>
+                <span className={cn('size-3 rounded-full', getOverallStatusDotColor(healthCheckResult.status))} />
+                <span className="text-foreground font-medium capitalize">{healthCheckResult.status}</span>
               </div>
 
               {/* Container Details */}
-              <div className="p-3 bg-slate-800 rounded-lg">
-                <p className="text-slate-400 text-sm mb-2">Container</p>
+              <div className="p-3 bg-muted rounded-lg">
+                <p className="text-muted-foreground text-sm mb-2">Container</p>
                 <dl className="grid grid-cols-2 gap-2 text-sm">
                   <div>
-                    <dt className="text-slate-500">State</dt>
-                    <dd className="text-white">{healthCheckResult.container.state}</dd>
+                    <dt className="text-muted-foreground">State</dt>
+                    <dd className="text-foreground">{healthCheckResult.container.state}</dd>
                   </div>
                   <div>
-                    <dt className="text-slate-500">Status</dt>
-                    <dd className="text-white">{healthCheckResult.container.status}</dd>
+                    <dt className="text-muted-foreground">Status</dt>
+                    <dd className="text-foreground">{healthCheckResult.container.status}</dd>
                   </div>
                   <div>
-                    <dt className="text-slate-500">Running</dt>
-                    <dd className={healthCheckResult.container.running ? 'text-green-400' : 'text-red-400'}>
+                    <dt className="text-muted-foreground">Running</dt>
+                    <dd className={healthCheckResult.container.running ? 'text-success' : 'text-destructive'}>
                       {healthCheckResult.container.running ? 'Yes' : 'No'}
                     </dd>
                   </div>
                   {healthCheckResult.container.health && (
                     <div>
-                      <dt className="text-slate-500">Health</dt>
+                      <dt className="text-muted-foreground">Health</dt>
                       <dd className={getContainerHealthTextColor(healthCheckResult.container.health)}>
                         {healthCheckResult.container.health}
                       </dd>
@@ -1344,25 +1338,25 @@ export default function ServiceDetail() {
 
               {/* URL Check Details */}
               {healthCheckResult.url && (
-                <div className="p-3 bg-slate-800 rounded-lg">
-                  <p className="text-slate-400 text-sm mb-2">URL Health Check</p>
+                <div className="p-3 bg-muted rounded-lg">
+                  <p className="text-muted-foreground text-sm mb-2">URL Health Check</p>
                   <dl className="grid grid-cols-2 gap-2 text-sm">
                     <div>
-                      <dt className="text-slate-500">Status</dt>
-                      <dd className={healthCheckResult.url.success ? 'text-green-400' : 'text-red-400'}>
+                      <dt className="text-muted-foreground">Status</dt>
+                      <dd className={healthCheckResult.url.success ? 'text-success' : 'text-destructive'}>
                         {healthCheckResult.url.success ? 'Success' : 'Failed'}
                       </dd>
                     </div>
                     {healthCheckResult.url.statusCode && (
                       <div>
-                        <dt className="text-slate-500">HTTP Code</dt>
-                        <dd className="text-white">{healthCheckResult.url.statusCode}</dd>
+                        <dt className="text-muted-foreground">HTTP Code</dt>
+                        <dd className="text-foreground">{healthCheckResult.url.statusCode}</dd>
                       </div>
                     )}
                     {healthCheckResult.url.error && (
                       <div className="col-span-2">
-                        <dt className="text-slate-500">Error</dt>
-                        <dd className="text-red-400 text-xs">{healthCheckResult.url.error}</dd>
+                        <dt className="text-muted-foreground">Error</dt>
+                        <dd className="text-destructive text-xs">{healthCheckResult.url.error}</dd>
                       </div>
                     )}
                   </dl>
@@ -1370,7 +1364,7 @@ export default function ServiceDetail() {
               )}
             </div>
           )}
-        </div>
+        </Card>
       )}
 
       {/* Agent Health Check Results (TCP & Cert) */}
@@ -1381,11 +1375,11 @@ export default function ServiceDetail() {
         <div className="grid grid-cols-2 gap-4 mb-5">
           {/* TCP Check Results */}
           {(schedulerConfig?.collectTcpChecks ?? true) && parseTCPCheckResults(service.agentTcpCheckResults).length > 0 && (
-            <div className="panel">
-              <h3 className="text-lg font-semibold text-white mb-4">
+            <Card className="p-4">
+              <h3 className="text-lg font-semibold text-foreground mb-4">
                 TCP Port Checks
                 {service.agentTcpCheckedAt && (
-                  <span className="text-xs text-slate-500 font-normal ml-2">
+                  <span className="text-xs text-muted-foreground font-normal ml-2">
                     {formatDistanceToNow(new Date(service.agentTcpCheckedAt), { addSuffix: true })}
                   </span>
                 )}
@@ -1394,38 +1388,39 @@ export default function ServiceDetail() {
                 {parseTCPCheckResults(service.agentTcpCheckResults).map((result, i) => (
                   <div
                     key={i}
-                    className={`flex items-center justify-between p-2 rounded-lg ${
-                      result.success ? 'bg-green-500/10' : 'bg-red-500/10'
-                    }`}
+                    className={cn(
+                      'flex items-center justify-between p-2 rounded-lg',
+                      result.success ? 'bg-success/10' : 'bg-destructive/10'
+                    )}
                   >
                     <div className="flex items-center gap-2">
-                      <span className={`w-2 h-2 rounded-full ${result.success ? 'bg-green-400' : 'bg-red-400'}`} />
-                      <span className="text-white font-mono text-sm">
+                      <span className={cn('size-2 rounded-full', result.success ? 'bg-success' : 'bg-destructive')} />
+                      <span className="text-foreground font-mono text-sm">
                         {result.host}:{result.port}
                       </span>
                       {result.name && (
-                        <span className="text-slate-400 text-xs">({result.name})</span>
+                        <span className="text-muted-foreground text-xs">({result.name})</span>
                       )}
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-400">{result.durationMs}ms</span>
+                      <span className="text-xs text-muted-foreground">{result.durationMs}ms</span>
                       {result.error && (
-                        <span className="text-xs text-red-400" title={result.error}>error</span>
+                        <span className="text-xs text-destructive" title={result.error}>error</span>
                       )}
                     </div>
                   </div>
                 ))}
               </div>
-            </div>
+            </Card>
           )}
 
           {/* Certificate Check Results */}
           {(schedulerConfig?.collectCertChecks ?? true) && parseCertCheckResults(service.agentCertCheckResults).length > 0 && (
-            <div className="panel">
-              <h3 className="text-lg font-semibold text-white mb-4">
+            <Card className="p-4">
+              <h3 className="text-lg font-semibold text-foreground mb-4">
                 Certificate Expiry
                 {service.agentCertCheckedAt && (
-                  <span className="text-xs text-slate-500 font-normal ml-2">
+                  <span className="text-xs text-muted-foreground font-normal ml-2">
                     {formatDistanceToNow(new Date(service.agentCertCheckedAt), { addSuffix: true })}
                   </span>
                 )}
@@ -1434,38 +1429,41 @@ export default function ServiceDetail() {
                 {parseCertCheckResults(service.agentCertCheckResults).map((result, i) => (
                   <div
                     key={i}
-                    className={`p-3 rounded-lg ${
+                    className={cn(
+                      'p-3 rounded-lg',
                       result.success
                         ? result.daysUntilExpiry !== undefined && result.daysUntilExpiry < 30
-                          ? 'bg-yellow-500/10'
-                          : 'bg-green-500/10'
-                        : 'bg-red-500/10'
-                    }`}
+                          ? 'bg-warning/10'
+                          : 'bg-success/10'
+                        : 'bg-destructive/10'
+                    )}
                   >
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
-                        <span className={`w-2 h-2 rounded-full ${
+                        <span className={cn(
+                          'size-2 rounded-full',
                           result.success
                             ? result.daysUntilExpiry !== undefined && result.daysUntilExpiry < 30
-                              ? 'bg-yellow-400'
-                              : 'bg-green-400'
-                            : 'bg-red-400'
-                        }`} />
-                        <span className="text-white font-mono text-sm">
+                              ? 'bg-warning'
+                              : 'bg-success'
+                            : 'bg-destructive'
+                        )} />
+                        <span className="text-foreground font-mono text-sm">
                           {result.host}:{result.port}
                         </span>
                         {result.name && (
-                          <span className="text-slate-400 text-xs">({result.name})</span>
+                          <span className="text-muted-foreground text-xs">({result.name})</span>
                         )}
                       </div>
                       {result.daysUntilExpiry !== undefined && (
-                        <span className={`text-sm font-medium ${
+                        <span className={cn(
+                          'text-sm font-medium',
                           result.daysUntilExpiry < 0
-                            ? 'text-red-400'
+                            ? 'text-destructive'
                             : result.daysUntilExpiry < 30
-                            ? 'text-yellow-400'
-                            : 'text-green-400'
-                        }`}>
+                            ? 'text-warning'
+                            : 'text-success'
+                        )}>
                           {result.daysUntilExpiry < 0
                             ? 'Expired'
                             : `${result.daysUntilExpiry} days`}
@@ -1473,7 +1471,7 @@ export default function ServiceDetail() {
                       )}
                     </div>
                     {result.success && (
-                      <div className="text-xs text-slate-400 space-y-0.5">
+                      <div className="text-xs text-muted-foreground space-y-0.5">
                         {result.subject && <div>Subject: {result.subject}</div>}
                         {result.issuer && <div>Issuer: {result.issuer}</div>}
                         {result.expiresAt && (
@@ -1482,264 +1480,247 @@ export default function ServiceDetail() {
                       </div>
                     )}
                     {result.error && (
-                      <div className="text-xs text-red-400 mt-1">{result.error}</div>
+                      <div className="text-xs text-destructive mt-1">{result.error}</div>
                     )}
                   </div>
                 ))}
               </div>
-            </div>
+            </Card>
           )}
         </div>
       )}
 
       {/* Servers */}
       {service.serviceDeployments && service.serviceDeployments.length > 0 && (
-        <div className="panel">
-          <h3 className="text-lg font-semibold text-white mb-4">Servers</h3>
+        <Card className="p-4">
+          <h3 className="text-lg font-semibold text-foreground mb-4">Servers</h3>
           <div className="flex flex-wrap gap-2">
             {service.serviceDeployments.map((dep) => (
-              <Link
-                key={dep.id}
-                to={`/servers/${dep.server.id}`}
-                className="px-2 py-0.5 bg-slate-700 rounded text-sm text-primary-400 hover:underline"
-              >
-                {dep.server.name}
-              </Link>
+              <Badge key={dep.id} variant="secondary" asChild>
+                <Link to={`/servers/${dep.server.id}`} className="text-primary hover:underline">
+                  {dep.server.name}
+                </Link>
+              </Badge>
             ))}
           </div>
-        </div>
+        </Card>
       )}
 
       {/* Deployment History */}
-      <div className="panel">
-            <h3 className="text-lg font-semibold text-white mb-4">
-              Deployment History
-            </h3>
-            {deployments.length > 0 ? (
-              <>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
-                        <th className="pb-3 font-medium">Tag</th>
-                        <th className="pb-3 font-medium">Status</th>
-                        <th className="pb-3 font-medium">Server</th>
-                        <th className="pb-3 font-medium">Triggered By</th>
-                        <th className="pb-3 font-medium">Started</th>
-                        <th className="pb-3 font-medium">Duration</th>
-                        <th className="pb-3 font-medium"></th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-700">
-                      {deploymentPagination.paginatedData.map((deployment) => (
-                        <>
-                          <tr key={deployment.id} className="text-slate-300">
-                            <td className="py-3 font-mono text-primary-400">
-                              {deployment.imageTag}
-                            </td>
-                            <td className="py-3">
-                              <span
-                                className={`badge ${
-                                  deployment.status === 'success'
-                                    ? 'badge-success'
-                                    : deployment.status === 'failed'
-                                    ? 'badge-error'
-                                    : deployment.status === 'deploying'
-                                    ? 'badge-info'
-                                    : 'badge-warning'
-                                }`}
-                              >
-                                {deployment.status}
-                              </span>
-                            </td>
-                            <td className="py-3">
-                              {deployment.serviceDeployment?.server ? (
-                                <Link
-                                  to={`/servers/${deployment.serviceDeployment.server.id}`}
-                                  className="text-primary-400 hover:underline"
-                                >
-                                  {deployment.serviceDeployment.server.name}
-                                </Link>
-                              ) : (
-                                <span className="text-slate-500">—</span>
-                              )}
-                            </td>
-                            <td className="py-3">{deployment.triggeredBy}</td>
-                            <td className="py-3 text-sm">
-                              {format(new Date(deployment.startedAt), 'MMM d, HH:mm')}
-                            </td>
-                            <td className="py-3 text-sm text-slate-400">
-                              {deployment.completedAt
-                                ? `${Math.round(
-                                    (new Date(deployment.completedAt).getTime() -
-                                      new Date(deployment.startedAt).getTime()) /
-                                      1000
-                                  )}s`
-                                : '-'}
-                            </td>
-                            <td className="py-3 text-right">
-                              {deployment.logs && (
-                                <button
-                                  onClick={() =>
-                                    setExpandedDeployment(
-                                      expandedDeployment === deployment.id ? null : deployment.id
-                                    )
-                                  }
-                                  className={`text-sm ${
-                                    deployment.status === 'failed'
-                                      ? 'text-red-400 hover:text-red-300'
-                                      : 'text-slate-400 hover:text-white'
-                                  }`}
-                                >
-                                  {expandedDeployment === deployment.id ? 'Hide Logs' : 'View Logs'}
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                          {expandedDeployment === deployment.id && deployment.logs && (
-                            <tr key={`${deployment.id}-logs`}>
-                              <td colSpan={7} className="p-0">
-                                <pre className="p-4 bg-slate-950 text-xs text-slate-300 font-mono overflow-x-auto max-h-64 overflow-y-auto">
-                                  {deployment.logs}
-                                </pre>
-                              </td>
-                            </tr>
+      <Card className="p-4">
+        <h3 className="text-lg font-semibold text-foreground mb-4">
+          Deployment History
+        </h3>
+        {deployments.length > 0 ? (
+          <>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Tag</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Server</TableHead>
+                    <TableHead>Triggered By</TableHead>
+                    <TableHead>Started</TableHead>
+                    <TableHead>Duration</TableHead>
+                    <TableHead></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {deploymentPagination.paginatedData.map((deployment) => (
+                    <Fragment key={deployment.id}>
+                      <TableRow>
+                        <TableCell className="font-mono text-primary">
+                          {deployment.imageTag}
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge kind="deployment" value={deployment.status} />
+                        </TableCell>
+                        <TableCell>
+                          {deployment.serviceDeployment?.server ? (
+                            <Link
+                              to={`/servers/${deployment.serviceDeployment.server.id}`}
+                              className="text-primary hover:underline"
+                            >
+                              {deployment.serviceDeployment.server.name}
+                            </Link>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
                           )}
-                        </>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {deploymentPagination.totalPages > 1 && (
-                  <div className="mt-4">
-                    <Pagination
-                      currentPage={deploymentPagination.currentPage}
-                      totalPages={deploymentPagination.totalPages}
-                      totalItems={deploymentPagination.totalItems}
-                      pageSize={deploymentPagination.pageSize}
-                      onPageChange={deploymentPagination.setPage}
-                      onPageSizeChange={deploymentPagination.setPageSize}
-                      pageSizeOptions={[10, 25, 50]}
-                    />
-                  </div>
-                )}
-              </>
-            ) : (
-              <p className="text-slate-400">No deployments yet</p>
+                        </TableCell>
+                        <TableCell>{deployment.triggeredBy}</TableCell>
+                        <TableCell className="text-sm">
+                          {format(new Date(deployment.startedAt), 'MMM d, HH:mm')}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {deployment.completedAt
+                            ? `${Math.round(
+                                (new Date(deployment.completedAt).getTime() -
+                                  new Date(deployment.startedAt).getTime()) /
+                                  1000
+                              )}s`
+                            : '-'}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {deployment.logs && (
+                            <Button
+                              variant="link"
+                              size="sm"
+                              onClick={() =>
+                                setExpandedDeployment(
+                                  expandedDeployment === deployment.id ? null : deployment.id
+                                )
+                              }
+                              className={cn(
+                                'h-auto p-0',
+                                deployment.status === 'failed'
+                                  ? 'text-destructive hover:text-destructive'
+                                  : 'text-muted-foreground hover:text-foreground'
+                              )}
+                            >
+                              {expandedDeployment === deployment.id ? 'Hide Logs' : 'View Logs'}
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                      {expandedDeployment === deployment.id && deployment.logs && (
+                        <TableRow>
+                          <TableCell colSpan={7} className="p-0">
+                            <pre className="p-4 bg-background text-xs text-foreground font-mono overflow-x-auto max-h-64 overflow-y-auto">
+                              {deployment.logs}
+                            </pre>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </Fragment>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            {deploymentPagination.totalPages > 1 && (
+              <div className="mt-4">
+                <DataPagination
+                  currentPage={deploymentPagination.currentPage}
+                  totalPages={deploymentPagination.totalPages}
+                  totalItems={deploymentPagination.totalItems}
+                  pageSize={deploymentPagination.pageSize}
+                  onPageChange={deploymentPagination.setPage}
+                  onPageSizeChange={deploymentPagination.setPageSize}
+                  pageSizeOptions={[10, 25, 50]}
+                />
+              </div>
             )}
-          </div>
+          </>
+        ) : (
+          <p className="text-muted-foreground">No deployments yet</p>
+        )}
+      </Card>
 
       {/* Health Check History */}
-      <div className="panel mt-5">
-            <h3 className="text-lg font-semibold text-white mb-4">
-              Health Check History
-            </h3>
-            {healthCheckHistory.length > 0 ? (
-              <>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
-                        <th className="pb-3 font-medium">Time</th>
-                        <th className="pb-3 font-medium">Status</th>
-                        <th className="pb-3 font-medium">Container</th>
-                        <th className="pb-3 font-medium">URL Check</th>
-                        <th className="pb-3 font-medium">User</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-700">
-                      {healthPagination.paginatedData.map((log) => {
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        const details = safeJsonParse<Record<string, any> | null>(log.details, null);
-                        return (
-                          <tr key={log.id} className="text-slate-300">
-                            <td className="py-3 text-sm">
-                              {format(new Date(log.createdAt), 'MMM d, HH:mm:ss')}
-                            </td>
-                            <td className="py-3">
-                              {log.success ? (
-                                <span
-                                  className={`badge ${
-                                    details?.status === 'healthy'
-                                      ? 'badge-success'
-                                      : details?.status === 'running'
-                                      ? 'badge-info'
-                                      : details?.status === 'unhealthy'
-                                      ? 'badge-error'
-                                      : 'badge-warning'
-                                  }`}
-                                >
-                                  {details?.status || 'unknown'}
-                                </span>
-                              ) : (
-                                <span className="badge badge-error">failed</span>
-                              )}
-                            </td>
-                            <td className="py-3 text-sm">
-                              {details?.containerHealth ? (
-                                <span
-                                  className={
-                                    details.containerHealth.running ? 'text-green-400' : 'text-red-400'
-                                  }
-                                >
-                                  {details.containerHealth.state}
-                                  {details.containerHealth.health && ` (${details.containerHealth.health})`}
-                                </span>
-                              ) : (
-                                <span className="text-slate-500">-</span>
-                              )}
-                            </td>
-                            <td className="py-3 text-sm">
-                              {details?.urlHealth ? (
-                                <span
-                                  className={details.urlHealth.success ? 'text-green-400' : 'text-red-400'}
-                                >
-                                  {details.urlHealth.success ? 'OK' : 'Failed'}
-                                  {details.urlHealth.statusCode && ` (${details.urlHealth.statusCode})`}
-                                </span>
-                              ) : (
-                                <span className="text-slate-500">-</span>
-                              )}
-                            </td>
-                            <td className="py-3 text-sm text-slate-400">
-                              {log.user?.email || 'System'}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-                {healthPagination.totalPages > 1 && (
-                  <div className="mt-4">
-                    <Pagination
-                      currentPage={healthPagination.currentPage}
-                      totalPages={healthPagination.totalPages}
-                      totalItems={healthPagination.totalItems}
-                      pageSize={healthPagination.pageSize}
-                      onPageChange={healthPagination.setPage}
-                      onPageSizeChange={healthPagination.setPageSize}
-                      pageSizeOptions={[10, 25, 50]}
-                    />
-                  </div>
-                )}
-              </>
-            ) : (
-              <p className="text-slate-400">No health checks recorded yet</p>
+      <Card className="p-4 mt-5">
+        <h3 className="text-lg font-semibold text-foreground mb-4">
+          Health Check History
+        </h3>
+        {healthCheckHistory.length > 0 ? (
+          <>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Time</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Container</TableHead>
+                    <TableHead>URL Check</TableHead>
+                    <TableHead>User</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {healthPagination.paginatedData.map((log) => {
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const details = safeJsonParse<Record<string, any> | null>(log.details, null);
+                    return (
+                      <TableRow key={log.id}>
+                        <TableCell className="text-sm">
+                          {format(new Date(log.createdAt), 'MMM d, HH:mm:ss')}
+                        </TableCell>
+                        <TableCell>
+                          {log.success ? (
+                            <StatusBadge
+                              kind="overall"
+                              value={details?.status}
+                              label={details?.status || 'unknown'}
+                            />
+                          ) : (
+                            <Badge variant="destructive">failed</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {details?.containerHealth ? (
+                            <span
+                              className={
+                                details.containerHealth.running ? 'text-success' : 'text-destructive'
+                              }
+                            >
+                              {details.containerHealth.state}
+                              {details.containerHealth.health && ` (${details.containerHealth.health})`}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {details?.urlHealth ? (
+                            <span
+                              className={details.urlHealth.success ? 'text-success' : 'text-destructive'}
+                            >
+                              {details.urlHealth.success ? 'OK' : 'Failed'}
+                              {details.urlHealth.statusCode && ` (${details.urlHealth.statusCode})`}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {log.user?.email || 'System'}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+            {healthPagination.totalPages > 1 && (
+              <div className="mt-4">
+                <DataPagination
+                  currentPage={healthPagination.currentPage}
+                  totalPages={healthPagination.totalPages}
+                  totalItems={healthPagination.totalItems}
+                  pageSize={healthPagination.pageSize}
+                  onPageChange={healthPagination.setPage}
+                  onPageSizeChange={healthPagination.setPageSize}
+                  pageSizeOptions={[10, 25, 50]}
+                />
+              </div>
             )}
-          </div>
+          </>
+        ) : (
+          <p className="text-muted-foreground">No health checks recorded yet</p>
+        )}
+      </Card>
 
       {/* Action History */}
-      <div className="panel mt-5">
+      <Card className="p-4 mt-5">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white">Action History</h3>
+          <h3 className="text-lg font-semibold text-foreground">Action History</h3>
           {actionHistory.length > 5 && (
-            <button
+            <Button
+              variant="link"
+              size="sm"
               onClick={() => setShowAllHistory(!showAllHistory)}
-              className="text-sm text-primary-400 hover:text-primary-300"
+              className="h-auto p-0"
             >
               {showAllHistory ? 'Show Less' : `Show All (${actionHistory.length})`}
-            </button>
+            </Button>
           )}
         </div>
         {actionHistory.length > 0 ? (
@@ -1750,67 +1731,51 @@ export default function ServiceDetail() {
               return (
                 <div
                   key={log.id}
-                  className={`flex items-center justify-between p-3 rounded-lg ${
-                    log.success ? 'bg-slate-800/50' : 'bg-red-500/10'
-                  }`}
+                  className={cn(
+                    'flex items-center justify-between p-3 rounded-lg',
+                    log.success ? 'bg-muted/50' : 'bg-destructive/10'
+                  )}
                 >
                   <div className="flex items-center gap-3">
                     {/* Action icon */}
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                      log.action === 'deploy' ? 'bg-blue-500/20 text-blue-400' :
-                      log.action === 'restart' ? 'bg-yellow-500/20 text-yellow-400' :
-                      log.action === 'health_check' ? 'bg-green-500/20 text-green-400' :
-                      log.action === 'update' ? 'bg-purple-500/20 text-purple-400' :
-                      'bg-slate-600 text-slate-400'
-                    }`}>
-                      {log.action === 'deploy' && (
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                        </svg>
-                      )}
-                      {log.action === 'restart' && (
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                        </svg>
-                      )}
-                      {log.action === 'health_check' && (
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                      )}
-                      {log.action === 'update' && (
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                        </svg>
-                      )}
-                      {log.action === 'create' && (
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                        </svg>
-                      )}
+                    <div className={cn(
+                      'size-8 rounded-full flex items-center justify-center',
+                      log.action === 'deploy' ? 'bg-info/20 text-info' :
+                      log.action === 'restart' ? 'bg-warning/20 text-warning' :
+                      log.action === 'health_check' ? 'bg-success/20 text-success' :
+                      log.action === 'update' ? 'bg-purple/20 text-purple' :
+                      'bg-muted text-muted-foreground'
+                    )}>
+                      {log.action === 'deploy' && <Rocket className="size-4" />}
+                      {log.action === 'restart' && <RotateCcw className="size-4" />}
+                      {log.action === 'health_check' && <CheckCircle2 className="size-4" />}
+                      {log.action === 'update' && <FilePenLine className="size-4" />}
+                      {log.action === 'create' && <Plus className="size-4" />}
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="text-white font-medium capitalize">{log.action.replace('_', ' ')}</span>
+                        <span className="text-foreground font-medium capitalize">{log.action.replace('_', ' ')}</span>
                         {!log.success && (
-                          <span className="badge badge-error text-xs">failed</span>
+                          <Badge variant="destructive">failed</Badge>
                         )}
                         {log.action === 'deploy' && details?.imageTag && (
-                          <span className="text-xs text-primary-400 font-mono">{details.imageTag}</span>
+                          <span className="text-xs text-primary font-mono">{details.imageTag}</span>
                         )}
                         {log.action === 'health_check' && details?.status && (
-                          <span className={`badge text-xs ${getHealthStatusColor(details.healthStatus || details.status)}`}>
-                            {details.healthStatus || details.status}
-                          </span>
+                          <StatusBadge
+                            kind="health"
+                            value={details.healthStatus || details.status}
+                            label={details.healthStatus || details.status}
+                          />
                         )}
                       </div>
-                      <div className="text-xs text-slate-400">
+                      <div className="text-xs text-muted-foreground">
                         {log.user?.email || 'System'} • {format(new Date(log.createdAt), 'MMM d, HH:mm')}
                       </div>
                     </div>
                   </div>
                   {log.error && (
-                    <div className="text-xs text-red-400 max-w-xs truncate" title={log.error}>
+                    <div className="text-xs text-destructive max-w-xs truncate" title={log.error}>
                       {log.error}
                     </div>
                   )}
@@ -1819,542 +1784,486 @@ export default function ServiceDetail() {
             })}
           </div>
         ) : (
-          <p className="text-slate-400">No actions recorded yet</p>
+          <p className="text-muted-foreground">No actions recorded yet</p>
         )}
-      </div>
+      </Card>
 
       {/* Attach File Modal */}
-      {showAttachFile && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-lg p-6">
-            <h3 className="text-lg font-semibold text-white mb-4">Attach Config File</h3>
-            <form onSubmit={handleAttachFile} className="space-y-4">
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Config File</label>
-                <div className="flex gap-2">
-                  <select
-                    value={attachConfigFileId}
-                    onChange={(e) => {
-                      setAttachConfigFileId(e.target.value);
-                      // Auto-suggest target path based on selected file
-                      const selected = configFiles.find((f) => f.id === e.target.value);
-                      if (selected) {
-                        const serviceName = service?.name.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase() || 'app';
-                        const defaultPath = service?.composePath
-                          ? service.composePath.replace(/[^/]+$/, selected.filename)
-                          : `/opt/${serviceName}/${selected.filename}`;
-                        setAttachTargetPath(defaultPath);
-                      }
-                    }}
-                    className="input flex-1"
-                    required
-                  >
-                    <option value="">Select a file...</option>
+      <Dialog open={showAttachFile} onOpenChange={(open) => !open && setShowAttachFile(false)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Attach Config File</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleAttachFile} className="space-y-4">
+            <div>
+              <Label className="mb-1 block text-muted-foreground">Config File</Label>
+              <div className="flex gap-2">
+                <Select
+                  value={attachConfigFileId}
+                  onValueChange={(value) => {
+                    setAttachConfigFileId(value);
+                    // Auto-suggest target path based on selected file
+                    const selected = configFiles.find((f) => f.id === value);
+                    if (selected) {
+                      const serviceName = service?.name.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase() || 'app';
+                      const defaultPath = service?.composePath
+                        ? service.composePath.replace(/[^/]+$/, selected.filename)
+                        : `/opt/${serviceName}/${selected.filename}`;
+                      setAttachTargetPath(defaultPath);
+                    }
+                  }}
+                >
+                  <SelectTrigger className="flex-1">
+                    <SelectValue placeholder="Select a file..." />
+                  </SelectTrigger>
+                  <SelectContent>
                     {configFiles
                       .filter((f) => !attachedFiles.some((af) => af.configFileId === f.id))
                       .map((file) => (
-                        <option key={file.id} value={file.id}>
+                        <SelectItem key={file.id} value={file.id}>
                           {file.name} ({file.filename})
-                        </option>
+                        </SelectItem>
                       ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={() => setShowCreateFile(true)}
-                    className="btn btn-secondary whitespace-nowrap"
-                  >
-                    Create New
-                  </button>
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Target Path on Server</label>
-                <input
-                  type="text"
-                  value={attachTargetPath}
-                  onChange={(e) => setAttachTargetPath(e.target.value)}
-                  placeholder={`/opt/${service?.name.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase() || 'app'}/config.yml`}
-                  className="input font-mono text-sm"
-                  required
-                />
-                <p className="text-xs text-slate-500 mt-1">
-                  Full path where the file will be written on the server
-                </p>
-              </div>
-              <div className="flex gap-2 justify-end">
-                <button
+                  </SelectContent>
+                </Select>
+                <Button
                   type="button"
-                  onClick={() => setShowAttachFile(false)}
-                  className="btn btn-ghost"
+                  variant="secondary"
+                  onClick={() => setShowCreateFile(true)}
+                  className="whitespace-nowrap"
                 >
-                  Cancel
-                </button>
-                <button type="submit" disabled={attaching} className="btn btn-primary">
-                  {attaching ? 'Attaching...' : 'Attach'}
-                </button>
+                  Create New
+                </Button>
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+            </div>
+            <div>
+              <Label className="mb-1 block text-muted-foreground">Target Path on Server</Label>
+              <Input
+                type="text"
+                value={attachTargetPath}
+                onChange={(e) => setAttachTargetPath(e.target.value)}
+                placeholder={`/opt/${service?.name.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase() || 'app'}/config.yml`}
+                className="font-mono text-sm"
+                required
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Full path where the file will be written on the server
+              </p>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={() => setShowAttachFile(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={attaching || !attachConfigFileId}>
+                {attaching ? 'Attaching...' : 'Attach'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* View File Content Modal */}
-      {viewingFileContent && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-4xl max-h-[80vh] flex flex-col">
-            <div className="flex items-center justify-between p-4 border-b border-slate-700">
-              <div>
-                <h3 className="text-lg font-semibold text-white">{viewingFileContent.name}</h3>
-                <p className="text-sm text-slate-400">{viewingFileContent.filename}</p>
-              </div>
-              <button
-                onClick={() => setViewingFileContent(null)}
-                className="text-slate-400 hover:text-white"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            <div className="flex-1 overflow-auto p-4">
-              <pre className="text-sm font-mono text-slate-300 whitespace-pre-wrap">
-                {viewingFileContent.content}
-              </pre>
-            </div>
+      <Dialog open={!!viewingFileContent} onOpenChange={(open) => !open && setViewingFileContent(null)}>
+        <DialogContent className="sm:max-w-4xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>{viewingFileContent?.name}</DialogTitle>
+            <DialogDescription>{viewingFileContent?.filename}</DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-auto">
+            <pre className="text-sm font-mono text-foreground whitespace-pre-wrap">
+              {viewingFileContent?.content}
+            </pre>
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
 
       {/* Create New Config File Modal */}
-      {showCreateFile && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]">
-          <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-3xl p-6 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-lg font-semibold text-white mb-4">Create New Config File</h3>
-            <form onSubmit={handleCreateNewFile} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm text-slate-400 mb-1">Display Name</label>
-                  <input
-                    type="text"
-                    value={newFileName}
-                    onChange={(e) => setNewFileName(e.target.value)}
-                    placeholder="my-config"
-                    className="input"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm text-slate-400 mb-1">Filename</label>
-                  <input
-                    type="text"
-                    value={newFileFilename}
-                    onChange={(e) => setNewFileFilename(e.target.value)}
-                    placeholder="config.yml"
-                    className="input"
-                    required
-                  />
-                </div>
-              </div>
+      <Dialog open={showCreateFile} onOpenChange={(open) => !open && setShowCreateFile(false)}>
+        <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Create New Config File</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleCreateNewFile} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm text-slate-400 mb-1">Description (optional)</label>
-                <input
+                <Label className="mb-1 block text-muted-foreground">Display Name</Label>
+                <Input
                   type="text"
-                  value={newFileDescription}
-                  onChange={(e) => setNewFileDescription(e.target.value)}
-                  placeholder="Description..."
-                  className="input"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Content</label>
-                <textarea
-                  value={newFileContent}
-                  onChange={(e) => setNewFileContent(e.target.value)}
-                  placeholder="Paste file content here..."
-                  rows={12}
-                  className="input font-mono text-sm"
+                  value={newFileName}
+                  onChange={(e) => setNewFileName(e.target.value)}
+                  placeholder="my-config"
                   required
                 />
               </div>
-              <div className="flex gap-2 justify-end">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateFile(false)}
-                  className="btn btn-ghost"
-                >
-                  Cancel
-                </button>
-                <button type="submit" disabled={creatingFile} className="btn btn-primary">
-                  {creatingFile ? 'Creating...' : 'Create'}
-                </button>
+              <div>
+                <Label className="mb-1 block text-muted-foreground">Filename</Label>
+                <Input
+                  type="text"
+                  value={newFileFilename}
+                  onChange={(e) => setNewFileFilename(e.target.value)}
+                  placeholder="config.yml"
+                  required
+                />
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+            </div>
+            <div>
+              <Label className="mb-1 block text-muted-foreground">Description (optional)</Label>
+              <Input
+                type="text"
+                value={newFileDescription}
+                onChange={(e) => setNewFileDescription(e.target.value)}
+                placeholder="Description..."
+              />
+            </div>
+            <div>
+              <Label className="mb-1 block text-muted-foreground">Content</Label>
+              <Textarea
+                value={newFileContent}
+                onChange={(e) => setNewFileContent(e.target.value)}
+                placeholder="Paste file content here..."
+                rows={12}
+                className="font-mono text-sm"
+                required
+              />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={() => setShowCreateFile(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={creatingFile}>
+                {creatingFile ? 'Creating...' : 'Create'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Config Modal */}
-      {showConfig && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 overflow-y-auto py-8">
-          <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-2xl p-6 my-auto">
-            <h3 className="text-lg font-semibold text-white mb-4">
-              Configure Service
-            </h3>
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm text-slate-400 mb-1">
-                    Container Name
-                  </label>
-                  <input
-                    type="text"
-                    value={editContainerName}
-                    onChange={(e) => setEditContainerName(e.target.value)}
-                    placeholder="my-container"
-                    className="input font-mono text-sm"
-                  />
-                  <p className="text-xs text-slate-500 mt-1">
-                    Must match <code>container_name</code> in compose. Discovery matches this, not the display name.
-                  </p>
-                </div>
-                <div>
-                  <label className="block text-sm text-slate-400 mb-1">
-                    Service Type
-                  </label>
-                  <select
-                    value={editServiceTypeId}
-                    onChange={(e) => setEditServiceTypeId(e.target.value)}
-                    className="input"
-                  >
-                    <option value="">None</option>
+      <Dialog open={showConfig} onOpenChange={(open) => !open && setShowConfig(false)}>
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Configure Service</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="mb-1 block text-muted-foreground">Container Name</Label>
+                <Input
+                  type="text"
+                  value={editContainerName}
+                  onChange={(e) => setEditContainerName(e.target.value)}
+                  placeholder="my-container"
+                  className="font-mono text-sm"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Must match <code>container_name</code> in compose. Discovery matches this, not the display name.
+                </p>
+              </div>
+              <div>
+                <Label className="mb-1 block text-muted-foreground">Service Type</Label>
+                <Select
+                  value={editServiceTypeId || '__none__'}
+                  onValueChange={(value) => setEditServiceTypeId(value === '__none__' ? '' : value)}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">None</SelectItem>
                     {serviceTypes.map((t) => (
-                      <option key={t.id} value={t.id}>
+                      <SelectItem key={t.id} value={t.id}>
                         {t.displayName}
-                      </option>
+                      </SelectItem>
                     ))}
-                  </select>
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">
-                  Compose Path
-                </label>
-                <input
-                  type="text"
-                  value={editComposePath}
-                  onChange={(e) => setEditComposePath(e.target.value)}
-                  placeholder="/opt/myservice/docker-compose.yml"
-                  className="input font-mono text-sm"
-                />
-                <p className="text-xs text-slate-500 mt-1">
-                  Path to docker-compose.yml on the server
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">
-                  Health Check URL
-                </label>
-                <input
-                  type="text"
-                  value={editHealthCheckUrl}
-                  onChange={(e) => setEditHealthCheckUrl(e.target.value)}
-                  placeholder="http://localhost:8000/health"
-                  className="input font-mono text-sm"
-                />
-                <p className="text-xs text-slate-500 mt-1">
-                  URL to check during health checks (from the server via agent)
-                </p>
-              </div>
-              {containerImage && (
-                <div className="p-3 bg-slate-800/50 rounded-lg">
-                  <label className="block text-sm text-slate-400 mb-1">
-                    Container Image
-                  </label>
-                  <Link
-                    to="/container-images"
-                    className="text-primary-400 hover:underline"
-                  >
-                    {containerImage.name} ({containerImage.imageName})
-                  </Link>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Image name and registry are managed via Container Images
-                  </p>
-                </div>
-              )}
-
-              {/* TCP Port Checks */}
-              <div className="border-t border-slate-700 pt-4">
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm text-slate-400">
-                    TCP Port Checks (Agent)
-                    {schedulerConfig && !schedulerConfig.collectTcpChecks && (
-                      <span className="text-yellow-500 text-xs ml-2">(disabled in environment settings)</span>
-                    )}
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setEditTcpChecks([...editTcpChecks, { host: 'localhost', port: 0, name: '' }])}
-                    className="text-xs text-primary-400 hover:text-primary-300"
-                    disabled={schedulerConfig !== null && !schedulerConfig.collectTcpChecks}
-                  >
-                    + Add Check
-                  </button>
-                </div>
-                {editTcpChecks.length > 0 ? (
-                  <div className="space-y-2">
-                    {editTcpChecks.map((check, i) => (
-                      <div key={i} className="flex gap-2 items-center">
-                        <input
-                          type="text"
-                          value={check.host}
-                          onChange={(e) => {
-                            const newChecks = [...editTcpChecks];
-                            newChecks[i] = { ...check, host: e.target.value };
-                            setEditTcpChecks(newChecks);
-                          }}
-                          placeholder="host"
-                          className="input font-mono text-sm flex-1"
-                        />
-                        <input
-                          type="number"
-                          value={check.port || ''}
-                          onChange={(e) => {
-                            const newChecks = [...editTcpChecks];
-                            newChecks[i] = { ...check, port: parseInt(e.target.value) || 0 };
-                            setEditTcpChecks(newChecks);
-                          }}
-                          placeholder="port"
-                          className="input font-mono text-sm w-24"
-                        />
-                        <input
-                          type="text"
-                          value={check.name || ''}
-                          onChange={(e) => {
-                            const newChecks = [...editTcpChecks];
-                            newChecks[i] = { ...check, name: e.target.value };
-                            setEditTcpChecks(newChecks);
-                          }}
-                          placeholder="label (optional)"
-                          className="input text-sm w-32"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setEditTcpChecks(editTcpChecks.filter((_, j) => j !== i))}
-                          className="text-red-400 hover:text-red-300 p-1"
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-500">No TCP checks configured. Agent will check port connectivity.</p>
-                )}
-              </div>
-
-              {/* Certificate Expiry Checks */}
-              <div className="border-t border-slate-700 pt-4">
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm text-slate-400">
-                    Certificate Expiry Checks (Agent)
-                    {schedulerConfig && !schedulerConfig.collectCertChecks && (
-                      <span className="text-yellow-500 text-xs ml-2">(disabled in environment settings)</span>
-                    )}
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => setEditCertChecks([...editCertChecks, { host: '', port: 443, name: '' }])}
-                    className="text-xs text-primary-400 hover:text-primary-300"
-                    disabled={schedulerConfig !== null && !schedulerConfig.collectCertChecks}
-                  >
-                    + Add Check
-                  </button>
-                </div>
-                {editCertChecks.length > 0 ? (
-                  <div className="space-y-2">
-                    {editCertChecks.map((check, i) => (
-                      <div key={i} className="flex gap-2 items-center">
-                        <input
-                          type="text"
-                          value={check.host}
-                          onChange={(e) => {
-                            const newChecks = [...editCertChecks];
-                            newChecks[i] = { ...check, host: e.target.value };
-                            setEditCertChecks(newChecks);
-                          }}
-                          placeholder="hostname"
-                          className="input font-mono text-sm flex-1"
-                        />
-                        <input
-                          type="number"
-                          value={check.port || ''}
-                          onChange={(e) => {
-                            const newChecks = [...editCertChecks];
-                            newChecks[i] = { ...check, port: parseInt(e.target.value) || 443 };
-                            setEditCertChecks(newChecks);
-                          }}
-                          placeholder="port"
-                          className="input font-mono text-sm w-24"
-                        />
-                        <input
-                          type="text"
-                          value={check.name || ''}
-                          onChange={(e) => {
-                            const newChecks = [...editCertChecks];
-                            newChecks[i] = { ...check, name: e.target.value };
-                            setEditCertChecks(newChecks);
-                          }}
-                          placeholder="label (optional)"
-                          className="input text-sm w-32"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setEditCertChecks(editCertChecks.filter((_, j) => j !== i))}
-                          className="text-red-400 hover:text-red-300 p-1"
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-500">No certificate checks configured. Agent will check TLS cert expiry.</p>
-                )}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
-            <div className="flex gap-2 justify-end mt-6">
-              <button
-                onClick={() => setShowConfig(false)}
-                className="btn btn-ghost"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={saveConfig}
-                disabled={saving}
-                className="btn btn-primary"
-              >
-                {saving ? 'Saving...' : 'Save'}
-              </button>
+            <div>
+              <Label className="mb-1 block text-muted-foreground">Compose Path</Label>
+              <Input
+                type="text"
+                value={editComposePath}
+                onChange={(e) => setEditComposePath(e.target.value)}
+                placeholder="/opt/myservice/docker-compose.yml"
+                className="font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Path to docker-compose.yml on the server
+              </p>
+            </div>
+            <div>
+              <Label className="mb-1 block text-muted-foreground">Health Check URL</Label>
+              <Input
+                type="text"
+                value={editHealthCheckUrl}
+                onChange={(e) => setEditHealthCheckUrl(e.target.value)}
+                placeholder="http://localhost:8000/health"
+                className="font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                URL to check during health checks (from the server via agent)
+              </p>
+            </div>
+            {containerImage && (
+              <div className="p-3 bg-muted/50 rounded-lg">
+                <Label className="mb-1 block text-muted-foreground">Container Image</Label>
+                <Link to="/container-images" className="text-primary hover:underline">
+                  {containerImage.name} ({containerImage.imageName})
+                </Link>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Image name and registry are managed via Container Images
+                </p>
+              </div>
+            )}
+
+            {/* TCP Port Checks */}
+            <div className="border-t pt-4">
+              <div className="flex items-center justify-between mb-2">
+                <Label className="text-muted-foreground">
+                  TCP Port Checks (Agent)
+                  {schedulerConfig && !schedulerConfig.collectTcpChecks && (
+                    <span className="text-warning text-xs ml-2">(disabled in environment settings)</span>
+                  )}
+                </Label>
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  onClick={() => setEditTcpChecks([...editTcpChecks, { host: 'localhost', port: 0, name: '' }])}
+                  className="h-auto p-0"
+                  disabled={schedulerConfig !== null && !schedulerConfig.collectTcpChecks}
+                >
+                  + Add Check
+                </Button>
+              </div>
+              {editTcpChecks.length > 0 ? (
+                <div className="space-y-2">
+                  {editTcpChecks.map((check, i) => (
+                    <div key={i} className="flex gap-2 items-center">
+                      <Input
+                        type="text"
+                        value={check.host}
+                        onChange={(e) => {
+                          const newChecks = [...editTcpChecks];
+                          newChecks[i] = { ...check, host: e.target.value };
+                          setEditTcpChecks(newChecks);
+                        }}
+                        placeholder="host"
+                        className="font-mono text-sm flex-1"
+                      />
+                      <Input
+                        type="number"
+                        value={check.port || ''}
+                        onChange={(e) => {
+                          const newChecks = [...editTcpChecks];
+                          newChecks[i] = { ...check, port: parseInt(e.target.value) || 0 };
+                          setEditTcpChecks(newChecks);
+                        }}
+                        placeholder="port"
+                        className="font-mono text-sm w-24"
+                      />
+                      <Input
+                        type="text"
+                        value={check.name || ''}
+                        onChange={(e) => {
+                          const newChecks = [...editTcpChecks];
+                          newChecks[i] = { ...check, name: e.target.value };
+                          setEditTcpChecks(newChecks);
+                        }}
+                        placeholder="label (optional)"
+                        className="text-sm w-32"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => setEditTcpChecks(editTcpChecks.filter((_, j) => j !== i))}
+                        className="text-destructive hover:text-destructive"
+                      >
+                        <X className="size-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">No TCP checks configured. Agent will check port connectivity.</p>
+              )}
+            </div>
+
+            {/* Certificate Expiry Checks */}
+            <div className="border-t pt-4">
+              <div className="flex items-center justify-between mb-2">
+                <Label className="text-muted-foreground">
+                  Certificate Expiry Checks (Agent)
+                  {schedulerConfig && !schedulerConfig.collectCertChecks && (
+                    <span className="text-warning text-xs ml-2">(disabled in environment settings)</span>
+                  )}
+                </Label>
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  onClick={() => setEditCertChecks([...editCertChecks, { host: '', port: 443, name: '' }])}
+                  className="h-auto p-0"
+                  disabled={schedulerConfig !== null && !schedulerConfig.collectCertChecks}
+                >
+                  + Add Check
+                </Button>
+              </div>
+              {editCertChecks.length > 0 ? (
+                <div className="space-y-2">
+                  {editCertChecks.map((check, i) => (
+                    <div key={i} className="flex gap-2 items-center">
+                      <Input
+                        type="text"
+                        value={check.host}
+                        onChange={(e) => {
+                          const newChecks = [...editCertChecks];
+                          newChecks[i] = { ...check, host: e.target.value };
+                          setEditCertChecks(newChecks);
+                        }}
+                        placeholder="hostname"
+                        className="font-mono text-sm flex-1"
+                      />
+                      <Input
+                        type="number"
+                        value={check.port || ''}
+                        onChange={(e) => {
+                          const newChecks = [...editCertChecks];
+                          newChecks[i] = { ...check, port: parseInt(e.target.value) || 443 };
+                          setEditCertChecks(newChecks);
+                        }}
+                        placeholder="port"
+                        className="font-mono text-sm w-24"
+                      />
+                      <Input
+                        type="text"
+                        value={check.name || ''}
+                        onChange={(e) => {
+                          const newChecks = [...editCertChecks];
+                          newChecks[i] = { ...check, name: e.target.value };
+                          setEditCertChecks(newChecks);
+                        }}
+                        placeholder="label (optional)"
+                        className="text-sm w-32"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => setEditCertChecks(editCertChecks.filter((_, j) => j !== i))}
+                        className="text-destructive hover:text-destructive"
+                      >
+                        <X className="size-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">No certificate checks configured. Agent will check TLS cert expiry.</p>
+              )}
             </div>
           </div>
-        </div>
-      )}
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowConfig(false)}>
+              Cancel
+            </Button>
+            <Button onClick={saveConfig} disabled={saving}>
+              {saving ? 'Saving...' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Logs Modal */}
-      {showLogs && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-4xl max-h-[80vh] flex flex-col">
-            <div className="flex items-center justify-between p-4 border-b border-slate-700">
-              <h3 className="text-lg font-semibold text-white">
-                Logs - {service.containerName}
-              </h3>
-              <button
-                onClick={() => {
-                  setShowLogs(false);
-                  // Clear so a reopen always transitions '' -> content, which
-                  // guarantees the [logs] layout effect re-fires and re-pins to
-                  // the newest entry even if the logs are byte-identical.
-                  setLogs('');
-                }}
-                className="text-slate-400 hover:text-white"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="flex items-center justify-between px-4 py-2 border-b border-slate-700 bg-slate-900/60">
-              <button
-                onClick={loadOlderLogs}
-                disabled={!oldestLogTimestamp || logsLoadingOlder || noMoreOlderLogs || logsLoading}
-                className="btn btn-ghost btn-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                title={noMoreOlderLogs ? 'No earlier logs available' : 'Load earlier log entries'}
-              >
-                {logsLoadingOlder ? 'Loading...' : noMoreOlderLogs ? 'No earlier logs' : 'Load older'}
-              </button>
-              <div className="text-xs text-slate-500">
-                {logsLoading ? 'Loading...' : oldestLogTimestamp ? `Oldest visible: ${oldestLogTimestamp}` : ''}
-              </div>
-            </div>
-            <pre
-              ref={logsContainerRef}
-              className="flex-1 p-4 overflow-auto font-mono text-sm text-slate-300 bg-slate-950"
-            >
-              {logs || (logsLoading ? 'Loading logs...' : 'No logs available')}
-            </pre>
-          </div>
-        </div>
-      )}
-      {/* Deploy Modal */}
-      <Modal
-        isOpen={showDeployModal}
-        onClose={() => setShowDeployModal(false)}
-        title="Deploy Service"
-        subtitle={service.name}
-        size="lg"
-        footer={
-          <>
-            <button onClick={() => setShowDeployModal(false)} className="btn btn-ghost">
-              Cancel
-            </button>
-            <button
-              onClick={() => handleDeploy()}
-              disabled={deploying}
-              className="btn btn-primary"
-            >
-              {deploying ? 'Starting Deploy...' : 'Deploy'}
-            </button>
-          </>
-        }
+      <Dialog
+        open={showLogs}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShowLogs(false);
+            // Clear so a reopen always transitions '' -> content, which
+            // guarantees the [logs] layout effect re-fires and re-pins to
+            // the newest entry even if the logs are byte-identical.
+            setLogs('');
+          }
+        }}
       >
-        <div className="space-y-4">
-          {containerImage?.latestDigest ? (
-            <>
-              <div className="bg-slate-800/50 rounded p-3">
-                <div className="text-sm text-slate-400 mb-1">Digest</div>
-                <div className="font-mono text-white text-sm">
-                  {formatDigestShort(containerImage.latestDigest.manifestDigest)}
-                </div>
-              </div>
-              <div className="bg-slate-800/50 rounded p-3">
-                <div className="text-sm text-slate-400 mb-2">Tags</div>
-                <div className="flex flex-wrap gap-1">
-                  {containerImage.latestDigest.tags.length > 0 ? (
-                    containerImage.latestDigest.tags.map((tag) => (
-                      <span key={tag} className="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-slate-700 text-slate-200">
-                        {tag}
-                      </span>
-                    ))
-                  ) : (
-                    <span className="text-slate-500 italic text-sm">No tags</span>
-                  )}
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="bg-slate-800/50 rounded p-3">
-              <div className="text-sm text-slate-400 mb-1">Tag</div>
-              <div className="font-mono text-white text-sm">{service.imageTag || 'latest'}</div>
+        <DialogContent className="sm:max-w-4xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Logs - {service.containerName}</DialogTitle>
+          </DialogHeader>
+          <div className="flex items-center justify-between border-y py-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={loadOlderLogs}
+              disabled={!oldestLogTimestamp || logsLoadingOlder || noMoreOlderLogs || logsLoading}
+              title={noMoreOlderLogs ? 'No earlier logs available' : 'Load earlier log entries'}
+            >
+              {logsLoadingOlder ? 'Loading...' : noMoreOlderLogs ? 'No earlier logs' : 'Load older'}
+            </Button>
+            <div className="text-xs text-muted-foreground">
+              {logsLoading ? 'Loading...' : oldestLogTimestamp ? `Oldest visible: ${oldestLogTimestamp}` : ''}
             </div>
-          )}
-
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="serviceDeployAutoRollback"
-              checked={deployAutoRollback}
-              onChange={(e) => setDeployAutoRollback(e.target.checked)}
-              className="rounded bg-slate-700 border-slate-600 text-primary-500 focus:ring-primary-500"
-            />
-            <label htmlFor="serviceDeployAutoRollback" className="text-sm text-slate-300">
-              Auto-rollback on failure
-            </label>
           </div>
-        </div>
-      </Modal>
+          <pre
+            ref={logsContainerRef}
+            className="flex-1 overflow-auto font-mono text-sm text-foreground bg-background rounded-md p-4"
+          >
+            {logs || (logsLoading ? 'Loading logs...' : 'No logs available')}
+          </pre>
+        </DialogContent>
+      </Dialog>
+
+      {/* Deploy Modal */}
+      <Dialog open={showDeployModal} onOpenChange={(open) => !open && setShowDeployModal(false)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Deploy Service</DialogTitle>
+            <DialogDescription>{service.name}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {containerImage?.latestDigest ? (
+              <>
+                <div className="bg-muted/50 rounded p-3">
+                  <div className="text-sm text-muted-foreground mb-1">Digest</div>
+                  <div className="font-mono text-foreground text-sm">
+                    {formatDigestShort(containerImage.latestDigest.manifestDigest)}
+                  </div>
+                </div>
+                <div className="bg-muted/50 rounded p-3">
+                  <div className="text-sm text-muted-foreground mb-2">Tags</div>
+                  <div className="flex flex-wrap gap-1">
+                    {containerImage.latestDigest.tags.length > 0 ? (
+                      containerImage.latestDigest.tags.map((tag) => (
+                        <Badge key={tag} variant="secondary" className="font-mono">
+                          {tag}
+                        </Badge>
+                      ))
+                    ) : (
+                      <span className="text-muted-foreground italic text-sm">No tags</span>
+                    )}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="bg-muted/50 rounded p-3">
+                <div className="text-sm text-muted-foreground mb-1">Tag</div>
+                <div className="font-mono text-foreground text-sm">{service.imageTag || 'latest'}</div>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setShowDeployModal(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => handleDeploy()} disabled={deploying}>
+              {deploying ? 'Starting Deploy...' : 'Deploy'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

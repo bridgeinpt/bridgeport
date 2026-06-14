@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { CircleCheck, CircleX, Clock, CircleHelp } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import {
   getHealthLogs,
@@ -14,13 +15,34 @@ import {
 } from '../lib/api';
 import { formatDistanceToNow, format } from 'date-fns';
 import { ServerIcon, CubeIcon, DatabaseIcon } from '../components/Icons';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { EmptyState } from '@/components/ui/empty-state';
+import { TableSkeleton } from '@/components/ui/table-skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import StatCard from '../components/monitoring/StatCard';
+import TimeRangeSelector from '../components/monitoring/TimeRangeSelector';
+import AutoRefreshToggle from '../components/monitoring/AutoRefreshToggle';
 
-const timeRanges = [
-  { label: '1h', hours: 1 },
-  { label: '6h', hours: 6 },
-  { label: '24h', hours: 24 },
-  { label: '7d', hours: 168 },
-];
+const HEALTH_TYPE_ALL = 'all';
+const HEALTH_STATUS_ALL = 'all';
 
 export default function MonitoringHealth() {
   const {
@@ -33,6 +55,8 @@ export default function MonitoringHealth() {
     setMonitoringHealthType,
     monitoringHealthStatus,
     setMonitoringHealthStatus,
+    autoRefreshEnabled,
+    setAutoRefreshEnabled,
   } = useAppStore();
 
   // Status tab state
@@ -48,6 +72,7 @@ export default function MonitoringHealth() {
 
   // Shared state
   const [running, setRunning] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const fetchStatusData = async () => {
     if (!selectedEnvironment?.id) return;
@@ -89,6 +114,40 @@ export default function MonitoringHealth() {
     }
   }, [selectedEnvironment?.id, monitoringHealthType, monitoringHealthStatus, monitoringTimeRange, page, monitoringHealthTab]);
 
+  // Auto-refresh — mirror MonitoringServers: a 30s interval re-fetches the
+  // active tab silently (no skeleton flash) while the toggle is enabled.
+  // A ref holds the latest fetchers so the interval doesn't churn on each
+  // filter/tab change.
+  const refreshRef = useRef<() => Promise<void>>(async () => {});
+  refreshRef.current = async () => {
+    setRefreshing(true);
+    try {
+      if (monitoringHealthTab === 'status') {
+        const response = await getHealthStatus(selectedEnvironment!.id);
+        setStatusData(response);
+      } else {
+        const response = await getHealthLogs(selectedEnvironment!.id, {
+          ...(monitoringHealthType && { type: monitoringHealthType as 'server' | 'service' | 'container' }),
+          ...(monitoringHealthStatus && { status: monitoringHealthStatus as 'success' | 'failure' | 'timeout' }),
+          hours: monitoringTimeRange,
+          page,
+          limit,
+        });
+        setLogsData(response);
+      }
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!autoRefreshEnabled || !selectedEnvironment?.id) return;
+    const id = setInterval(() => {
+      void refreshRef.current();
+    }, 30000);
+    return () => clearInterval(id);
+  }, [autoRefreshEnabled, selectedEnvironment?.id]);
+
   const handleRunAll = async () => {
     if (!selectedEnvironment?.id) return;
     setRunning(true);
@@ -101,6 +160,14 @@ export default function MonitoringHealth() {
       }
     } finally {
       setRunning(false);
+    }
+  };
+
+  const handleRefresh = () => {
+    if (monitoringHealthTab === 'status') {
+      void fetchStatusData();
+    } else {
+      void fetchLogsData();
     }
   };
 
@@ -135,49 +202,18 @@ export default function MonitoringHealth() {
     }
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'success':
-      case 'healthy':
-        return 'text-green-400';
-      case 'failure':
-      case 'unhealthy':
-        return 'text-red-400';
-      case 'timeout':
-        return 'text-yellow-400';
-      default:
-        return 'text-slate-400';
-    }
-  };
-
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'success':
       case 'healthy':
-        return (
-          <svg className="w-4 h-4 text-green-400" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-          </svg>
-        );
+        return <CircleCheck className="w-4 h-4 text-success" />;
       case 'failure':
       case 'unhealthy':
-        return (
-          <svg className="w-4 h-4 text-red-400" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-          </svg>
-        );
+        return <CircleX className="w-4 h-4 text-destructive" />;
       case 'timeout':
-        return (
-          <svg className="w-4 h-4 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-          </svg>
-        );
+        return <Clock className="w-4 h-4 text-warning" />;
       case 'unknown':
-        return (
-          <svg className="w-4 h-4 text-slate-400" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
-          </svg>
-        );
+        return <CircleHelp className="w-4 h-4 text-muted-foreground" />;
       default:
         return null;
     }
@@ -186,7 +222,7 @@ export default function MonitoringHealth() {
   if (!selectedEnvironment) {
     return (
       <div className="p-6">
-        <p className="text-slate-400">Select an environment to view health checks</p>
+        <p className="text-muted-foreground">Select an environment to view health checks</p>
       </div>
     );
   }
@@ -224,123 +260,86 @@ export default function MonitoringHealth() {
 
   return (
     <div className="p-6">
-      <div className="flex items-center justify-end mb-5">
-        <div className="flex gap-2">
-          <button
-            onClick={handleRunAll}
-            disabled={running}
-            className="btn btn-primary"
-          >
-            {running ? 'Running...' : 'Run All Checks'}
-          </button>
-          <button
-            onClick={() => monitoringHealthTab === 'status' ? fetchStatusData() : fetchLogsData()}
-            disabled={statusLoading || logsLoading}
-            className="btn btn-secondary"
-          >
-            Refresh
-          </button>
-        </div>
+      <div className="flex items-center justify-end gap-3 mb-5">
+        <Button onClick={handleRunAll} disabled={running}>
+          {running ? 'Running...' : 'Run All Checks'}
+        </Button>
+        <AutoRefreshToggle
+          enabled={autoRefreshEnabled}
+          onChange={setAutoRefreshEnabled}
+          onRefresh={handleRefresh}
+          refreshing={refreshing || statusLoading || logsLoading}
+        />
       </div>
 
       {/* Tab Navigation */}
-      <div className="flex gap-6 border-b border-slate-700 mb-6">
-        <button
-          onClick={() => setMonitoringHealthTab('status')}
-          className={`pb-3 text-sm font-medium border-b-2 -mb-px ${
-            monitoringHealthTab === 'status'
-              ? 'border-brand-600 text-white'
-              : 'border-transparent text-slate-400 hover:text-slate-300'
-          }`}
-        >
-          Status
-        </button>
-        <button
-          onClick={() => setMonitoringHealthTab('logs')}
-          className={`pb-3 text-sm font-medium border-b-2 -mb-px ${
-            monitoringHealthTab === 'logs'
-              ? 'border-brand-600 text-white'
-              : 'border-transparent text-slate-400 hover:text-slate-300'
-          }`}
-        >
-          Logs
-        </button>
-      </div>
+      <Tabs
+        value={monitoringHealthTab}
+        onValueChange={(v) => setMonitoringHealthTab(v as 'status' | 'logs')}
+        className="mb-6"
+      >
+        <TabsList>
+          <TabsTrigger value="status">Status</TabsTrigger>
+          <TabsTrigger value="logs">Logs</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       {/* Status Tab */}
       {monitoringHealthTab === 'status' && (
         <>
           {/* Quick Stats */}
           <div className="grid grid-cols-4 gap-4 mb-6">
-            <div className="card">
-              <div className="text-2xl font-bold text-white">{totalResources}</div>
-              <div className="text-sm text-slate-400">Total Resources</div>
-            </div>
-            <div className="card">
-              <div className="text-2xl font-bold text-green-400">{totalHealthy}</div>
-              <div className="text-sm text-slate-400">Healthy</div>
-            </div>
-            <div className="card">
-              <div className="text-2xl font-bold text-red-400">{totalUnhealthy}</div>
-              <div className="text-sm text-slate-400">Unhealthy</div>
-            </div>
-            <div className="card">
-              <div className="text-2xl font-bold text-slate-400">{totalUnknown}</div>
-              <div className="text-sm text-slate-400">Unknown</div>
-            </div>
+            <StatCard label="Total Resources" value={totalResources} color="slate" />
+            <StatCard label="Healthy" value={totalHealthy} color="green" />
+            <StatCard label="Unhealthy" value={totalUnhealthy} color="red" />
+            <StatCard label="Unknown" value={totalUnknown} color="slate" />
           </div>
 
           {statusLoading ? (
-            <div className="card">
-              <div className="animate-pulse space-y-3">
-                {[1, 2, 3, 4, 5].map((i) => (
-                  <div key={i} className="h-10 bg-slate-700 rounded" />
-                ))}
-              </div>
-            </div>
+            <Card className="py-0 overflow-hidden">
+              <TableSkeleton rows={5} columns={5} />
+            </Card>
           ) : (
             <>
               {/* Servers Section */}
               {sortedServers.length > 0 && (
                 <div className="mb-6">
-                  <h2 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
-                    <ServerIcon className="w-5 h-5 text-blue-400" />
+                  <h2 className="text-lg font-semibold text-foreground mb-3 flex items-center gap-2">
+                    <ServerIcon className="w-5 h-5 text-info" />
                     Servers
-                    <span className="text-sm font-normal text-slate-400">
+                    <span className="text-sm font-normal text-muted-foreground">
                       ({healthyCounts.servers} healthy, {unhealthyCounts.servers} unhealthy, {unknownCounts.servers} unknown)
                     </span>
                   </h2>
-                  <div className="card overflow-hidden">
-                    <table className="w-full">
-                      <thead>
-                        <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
-                          <th className="pb-3 font-medium">Name</th>
-                          <th className="pb-3 font-medium">Status</th>
-                          <th className="pb-3 font-medium">Last Check</th>
-                          <th className="pb-3 font-medium">Duration</th>
-                          <th className="pb-3 font-medium text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-700">
+                  <Card className="py-0 overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Last Check</TableHead>
+                          <TableHead>Duration</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
                         {sortedServers.map((server) => (
-                          <tr key={server.id} className="text-slate-300">
-                            <td className="py-3">
+                          <TableRow key={server.id}>
+                            <TableCell>
                               <Link
                                 to={`/servers/${server.id}`}
-                                className="text-white hover:text-primary-400 font-medium"
+                                className="text-foreground hover:text-primary font-medium"
                               >
                                 {server.name}
                               </Link>
-                            </td>
-                            <td className="py-3">
+                            </TableCell>
+                            <TableCell>
                               <div className="flex items-center gap-1.5">
                                 {getStatusIcon(server.status)}
-                                <span className={getStatusColor(server.status)}>
-                                  {server.status}
-                                </span>
+                                <StatusBadge kind="health" value={server.status} />
                               </div>
-                            </td>
-                            <td className="py-3 text-sm text-slate-400">
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">
                               {server.lastCheck ? (
                                 <span title={format(new Date(server.lastCheck.timestamp), 'PPpp')}>
                                   {formatDistanceToNow(new Date(server.lastCheck.timestamp), { addSuffix: true })}
@@ -348,72 +347,71 @@ export default function MonitoringHealth() {
                               ) : (
                                 'Never'
                               )}
-                            </td>
-                            <td className="py-3 text-sm font-mono">
+                            </TableCell>
+                            <TableCell className="text-sm font-mono">
                               {server.lastCheck?.durationMs != null ? `${server.lastCheck.durationMs}ms` : '-'}
-                            </td>
-                            <td className="py-3 text-right">
-                              <button
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                variant="ghost"
+                                size="sm"
                                 onClick={() => handleTestServer(server.id)}
                                 disabled={testingResource === server.id}
-                                className="btn btn-ghost text-sm"
                               >
                                 {testingResource === server.id ? 'Testing...' : 'Test'}
-                              </button>
-                            </td>
-                          </tr>
+                              </Button>
+                            </TableCell>
+                          </TableRow>
                         ))}
-                      </tbody>
-                    </table>
-                  </div>
+                      </TableBody>
+                    </Table>
+                  </Card>
                 </div>
               )}
 
               {/* Services Section */}
               {sortedServices.length > 0 && (
                 <div className="mb-6">
-                  <h2 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
-                    <CubeIcon className="w-5 h-5 text-green-400" />
+                  <h2 className="text-lg font-semibold text-foreground mb-3 flex items-center gap-2">
+                    <CubeIcon className="w-5 h-5 text-success" />
                     Services
-                    <span className="text-sm font-normal text-slate-400">
+                    <span className="text-sm font-normal text-muted-foreground">
                       ({healthyCounts.services} healthy, {unhealthyCounts.services} unhealthy, {unknownCounts.services} unknown)
                     </span>
                   </h2>
-                  <div className="card overflow-hidden">
-                    <table className="w-full">
-                      <thead>
-                        <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
-                          <th className="pb-3 font-medium">Name</th>
-                          <th className="pb-3 font-medium">Server</th>
-                          <th className="pb-3 font-medium">Status</th>
-                          <th className="pb-3 font-medium">Last Check</th>
-                          <th className="pb-3 font-medium">Duration</th>
-                          <th className="pb-3 font-medium text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-700">
+                  <Card className="py-0 overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Server</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Last Check</TableHead>
+                          <TableHead>Duration</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
                         {sortedServices.map((service) => (
-                          <tr key={service.id} className="text-slate-300">
-                            <td className="py-3">
+                          <TableRow key={service.id}>
+                            <TableCell>
                               <Link
                                 to={`/services/${service.id}`}
-                                className="text-white hover:text-primary-400 font-medium"
+                                className="text-foreground hover:text-primary font-medium"
                               >
                                 {service.name}
                               </Link>
-                            </td>
-                            <td className="py-3 text-sm text-slate-400">
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">
                               {service.serverName}
-                            </td>
-                            <td className="py-3">
+                            </TableCell>
+                            <TableCell>
                               <div className="flex items-center gap-1.5">
                                 {getStatusIcon(service.status)}
-                                <span className={getStatusColor(service.status)}>
-                                  {service.status}
-                                </span>
+                                <StatusBadge kind="health" value={service.status} />
                               </div>
-                            </td>
-                            <td className="py-3 text-sm text-slate-400">
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">
                               {service.lastCheck ? (
                                 <span title={format(new Date(service.lastCheck.timestamp), 'PPpp')}>
                                   {formatDistanceToNow(new Date(service.lastCheck.timestamp), { addSuffix: true })}
@@ -421,76 +419,75 @@ export default function MonitoringHealth() {
                               ) : (
                                 'Never'
                               )}
-                            </td>
-                            <td className="py-3 text-sm font-mono">
+                            </TableCell>
+                            <TableCell className="text-sm font-mono">
                               {service.lastCheck?.durationMs != null ? `${service.lastCheck.durationMs}ms` : '-'}
-                            </td>
-                            <td className="py-3 text-right">
-                              <button
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                variant="ghost"
+                                size="sm"
                                 onClick={() => handleTestService(service.id)}
                                 disabled={testingResource === service.id}
-                                className="btn btn-ghost text-sm"
                               >
                                 {testingResource === service.id ? 'Testing...' : 'Test'}
-                              </button>
-                            </td>
-                          </tr>
+                              </Button>
+                            </TableCell>
+                          </TableRow>
                         ))}
-                      </tbody>
-                    </table>
-                  </div>
+                      </TableBody>
+                    </Table>
+                  </Card>
                 </div>
               )}
 
               {/* Databases Section */}
               {sortedDatabases.length > 0 && (
                 <div className="mb-6">
-                  <h2 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
-                    <DatabaseIcon className="w-5 h-5 text-purple-400" />
+                  <h2 className="text-lg font-semibold text-foreground mb-3 flex items-center gap-2">
+                    <DatabaseIcon className="w-5 h-5 text-purple" />
                     Databases
-                    <span className="text-sm font-normal text-slate-400">
+                    <span className="text-sm font-normal text-muted-foreground">
                       ({healthyCounts.databases} healthy, {unhealthyCounts.databases} unhealthy, {unknownCounts.databases} unknown)
                     </span>
                   </h2>
-                  <div className="card overflow-hidden">
-                    <table className="w-full">
-                      <thead>
-                        <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
-                          <th className="pb-3 font-medium">Name</th>
-                          <th className="pb-3 font-medium">Type</th>
-                          <th className="pb-3 font-medium">Server</th>
-                          <th className="pb-3 font-medium">Status</th>
-                          <th className="pb-3 font-medium">Last Collection</th>
-                          <th className="pb-3 font-medium">Error</th>
-                          <th className="pb-3 font-medium text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-700">
+                  <Card className="py-0 overflow-hidden">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Server</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Last Collection</TableHead>
+                          <TableHead>Error</TableHead>
+                          <TableHead className="text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
                         {sortedDatabases.map((db) => (
-                          <tr key={db.id} className="text-slate-300">
-                            <td className="py-3">
+                          <TableRow key={db.id}>
+                            <TableCell>
                               <Link
                                 to={`/databases/${db.id}`}
-                                className="text-white hover:text-primary-400 font-medium"
+                                className="text-foreground hover:text-primary font-medium"
                               >
                                 {db.name}
                               </Link>
-                            </td>
-                            <td className="py-3 text-sm">
-                              <span className="badge bg-slate-700 text-slate-300 text-xs">{db.dbType}</span>
-                            </td>
-                            <td className="py-3 text-sm text-slate-400">
+                            </TableCell>
+                            <TableCell className="text-sm">
+                              <Badge variant="neutral" className="text-xs">{db.dbType}</Badge>
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">
                               {db.serverName || '-'}
-                            </td>
-                            <td className="py-3">
+                            </TableCell>
+                            <TableCell>
                               <div className="flex items-center gap-1.5">
                                 {getStatusIcon(db.status)}
-                                <span className={getStatusColor(db.status)}>
-                                  {db.status}
-                                </span>
+                                <StatusBadge kind="health" value={db.status} />
                               </div>
-                            </td>
-                            <td className="py-3 text-sm text-slate-400">
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">
                               {db.lastCheck ? (
                                 <span title={format(new Date(db.lastCheck.timestamp), 'PPpp')}>
                                   {formatDistanceToNow(new Date(db.lastCheck.timestamp), { addSuffix: true })}
@@ -498,35 +495,34 @@ export default function MonitoringHealth() {
                               ) : (
                                 'Never'
                               )}
-                            </td>
-                            <td className="py-3 text-sm text-red-400 max-w-xs truncate" title={db.lastCheck?.errorMessage || undefined}>
+                            </TableCell>
+                            <TableCell className="text-sm text-destructive max-w-xs truncate" title={db.lastCheck?.errorMessage || undefined}>
                               {db.lastCheck?.errorMessage || '-'}
-                            </td>
-                            <td className="py-3 text-right">
-                              <button
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                variant="ghost"
+                                size="sm"
                                 onClick={() => handleTestDatabase(db.id)}
                                 disabled={testingResource === db.id}
-                                className="btn btn-ghost text-sm"
                               >
                                 {testingResource === db.id ? 'Testing...' : 'Test'}
-                              </button>
-                            </td>
-                          </tr>
+                              </Button>
+                            </TableCell>
+                          </TableRow>
                         ))}
-                      </tbody>
-                    </table>
-                  </div>
+                      </TableBody>
+                    </Table>
+                  </Card>
                 </div>
               )}
 
               {/* Empty State */}
               {sortedServers.length === 0 && sortedServices.length === 0 && sortedDatabases.length === 0 && (
-                <div className="card text-center py-12">
-                  <p className="text-slate-400">No resources found in this environment</p>
-                  <p className="text-slate-500 text-sm mt-1">
-                    Add servers, services, or databases to monitor their health
-                  </p>
-                </div>
+                <EmptyState
+                  message="No resources found in this environment"
+                  description="Add servers, services, or databases to monitor their health"
+                />
               )}
             </>
           )}
@@ -538,152 +534,141 @@ export default function MonitoringHealth() {
         <>
           {/* Filters */}
           <div className="flex flex-wrap items-center gap-4 mb-4">
-            <select
-              value={monitoringHealthType}
-              onChange={(e) => {
-                setMonitoringHealthType(e.target.value);
+            <Select
+              value={monitoringHealthType || HEALTH_TYPE_ALL}
+              onValueChange={(value) => {
+                setMonitoringHealthType(value === HEALTH_TYPE_ALL ? '' : value);
                 setPage(1);
               }}
-              className="input w-40"
             >
-              <option value="">All Types</option>
-              <option value="server">Server</option>
-              <option value="service">Service</option>
-              <option value="container">Container</option>
-            </select>
+              <SelectTrigger className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={HEALTH_TYPE_ALL}>All Types</SelectItem>
+                <SelectItem value="server">Server</SelectItem>
+                <SelectItem value="service">Service</SelectItem>
+                <SelectItem value="container">Container</SelectItem>
+              </SelectContent>
+            </Select>
 
-            <select
-              value={monitoringHealthStatus}
-              onChange={(e) => {
-                setMonitoringHealthStatus(e.target.value);
+            <Select
+              value={monitoringHealthStatus || HEALTH_STATUS_ALL}
+              onValueChange={(value) => {
+                setMonitoringHealthStatus(value === HEALTH_STATUS_ALL ? '' : value);
                 setPage(1);
               }}
-              className="input w-40"
             >
-              <option value="">All Status</option>
-              <option value="success">Success</option>
-              <option value="failure">Failure</option>
-              <option value="timeout">Timeout</option>
-            </select>
+              <SelectTrigger className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={HEALTH_STATUS_ALL}>All Status</SelectItem>
+                <SelectItem value="success">Success</SelectItem>
+                <SelectItem value="failure">Failure</SelectItem>
+                <SelectItem value="timeout">Timeout</SelectItem>
+              </SelectContent>
+            </Select>
 
-            <div className="flex rounded-lg overflow-hidden border border-slate-600">
-              {timeRanges.map((range) => (
-                <button
-                  key={range.hours}
-                  onClick={() => {
-                    setMonitoringTimeRange(range.hours);
-                    setPage(1);
-                  }}
-                  className={`px-3 py-1.5 text-sm ${
-                    monitoringTimeRange === range.hours
-                      ? 'bg-brand-600 text-white'
-                      : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                  }`}
-                >
-                  {range.label}
-                </button>
-              ))}
-            </div>
+            <TimeRangeSelector
+              value={monitoringTimeRange}
+              onChange={(hours) => {
+                setMonitoringTimeRange(hours);
+                setPage(1);
+              }}
+            />
           </div>
 
           {/* Logs Table */}
           {logsLoading ? (
-            <div className="card">
-              <div className="animate-pulse space-y-3">
-                {[1, 2, 3, 4, 5].map((i) => (
-                  <div key={i} className="h-10 bg-slate-700 rounded" />
-                ))}
-              </div>
-            </div>
+            <Card className="py-0 overflow-hidden">
+              <TableSkeleton rows={5} columns={6} />
+            </Card>
           ) : logsData && logsData.logs.length > 0 ? (
-            <div className="card overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
-                      <th className="pb-3 font-medium">Time</th>
-                      <th className="pb-3 font-medium">Resource</th>
-                      <th className="pb-3 font-medium">Type</th>
-                      <th className="pb-3 font-medium">Status</th>
-                      <th className="pb-3 font-medium">Duration</th>
-                      <th className="pb-3 font-medium">Error</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-700">
-                    {logsData.logs.map((log) => (
-                      <tr key={log.id} className="text-slate-300">
-                        <td className="py-3 text-sm">
-                          <span className="text-slate-400" title={format(new Date(log.createdAt), 'PPpp')}>
-                            {formatDistanceToNow(new Date(log.createdAt), { addSuffix: true })}
-                          </span>
-                        </td>
-                        <td className="py-3">
-                          <div>
-                            <span className="text-white">{log.resourceName}</span>
-                            <span className="text-slate-500 text-xs ml-2 capitalize">{log.resourceType}</span>
-                          </div>
-                        </td>
-                        <td className="py-3 text-sm">
-                          <span className="capitalize">{log.checkType.replace('_', ' ')}</span>
-                          {log.httpStatus && (
-                            <span className="ml-2 text-slate-500">{log.httpStatus}</span>
-                          )}
-                        </td>
-                        <td className="py-3">
-                          <div className="flex items-center gap-1.5">
-                            {getStatusIcon(log.status)}
-                            <span className={getStatusColor(log.status)}>
-                              {log.status}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="py-3 text-sm font-mono">
-                          {log.durationMs != null ? `${log.durationMs}ms` : '-'}
-                        </td>
-                        <td className="py-3 text-sm text-red-400 max-w-xs truncate" title={log.errorMessage || undefined}>
-                          {log.errorMessage || '-'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+            <Card className="gap-0 overflow-hidden">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Time</TableHead>
+                    <TableHead>Resource</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Duration</TableHead>
+                    <TableHead>Error</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {logsData.logs.map((log) => (
+                    <TableRow key={log.id}>
+                      <TableCell className="text-sm">
+                        <span className="text-muted-foreground" title={format(new Date(log.createdAt), 'PPpp')}>
+                          {formatDistanceToNow(new Date(log.createdAt), { addSuffix: true })}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <div>
+                          <span className="text-foreground">{log.resourceName}</span>
+                          <span className="text-muted-foreground text-xs ml-2 capitalize">{log.resourceType}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        <span className="capitalize">{log.checkType.replace('_', ' ')}</span>
+                        {log.httpStatus && (
+                          <span className="ml-2 text-muted-foreground">{log.httpStatus}</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1.5">
+                          {getStatusIcon(log.status)}
+                          <StatusBadge kind="health" value={log.status} />
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-sm font-mono">
+                        {log.durationMs != null ? `${log.durationMs}ms` : '-'}
+                      </TableCell>
+                      <TableCell className="text-sm text-destructive max-w-xs truncate" title={log.errorMessage || undefined}>
+                        {log.errorMessage || '-'}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
 
               {/* Pagination */}
               {logsData.totalPages > 1 && (
-                <div className="flex items-center justify-between border-t border-slate-700 pt-4 mt-4">
-                  <span className="text-sm text-slate-400">
+                <div className="flex items-center justify-between border-t px-4 py-4">
+                  <span className="text-sm text-muted-foreground">
                     Showing {(logsData.page - 1) * limit + 1} to {Math.min(logsData.page * limit, logsData.total)} of {logsData.total} results
                   </span>
-                  <div className="flex gap-2">
-                    <button
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="secondary"
+                      size="sm"
                       onClick={() => setPage(page - 1)}
                       disabled={page === 1}
-                      className="btn btn-secondary px-3 py-1"
                     >
                       Previous
-                    </button>
-                    <span className="px-3 py-1 text-slate-400">
+                    </Button>
+                    <span className="px-3 py-1 text-sm text-muted-foreground">
                       Page {logsData.page} of {logsData.totalPages}
                     </span>
-                    <button
+                    <Button
+                      variant="secondary"
+                      size="sm"
                       onClick={() => setPage(page + 1)}
                       disabled={page >= logsData.totalPages}
-                      className="btn btn-secondary px-3 py-1"
                     >
                       Next
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
-            </div>
+            </Card>
           ) : (
-            <div className="card text-center py-12">
-              <p className="text-slate-400">No health check logs found</p>
-              <p className="text-slate-500 text-sm mt-1">
-                Logs will appear here as health checks run automatically
-              </p>
-            </div>
+            <EmptyState
+              message="No health check logs found"
+              description="Logs will appear here as health checks run automatically"
+            />
           )}
         </>
       )}

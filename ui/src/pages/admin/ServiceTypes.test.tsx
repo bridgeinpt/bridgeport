@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '../../../test/render';
 import { useAuthStore } from '../../lib/store';
+import { ConfirmProvider } from '@/hooks/useConfirm';
 
 // Mock Toast
 vi.mock('../../components/Toast', () => ({
@@ -57,7 +58,11 @@ describe('ServiceTypes', () => {
   });
 
   it('should display service type names', async () => {
-    renderWithProviders(<ServiceTypes />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <ServiceTypes />
+      </ConfirmProvider>
+    );
     await waitFor(() => {
       expect(screen.getByText('Node.js')).toBeInTheDocument();
       expect(screen.getByText('Django')).toBeInTheDocument();
@@ -65,7 +70,11 @@ describe('ServiceTypes', () => {
   });
 
   it('should display command count', async () => {
-    renderWithProviders(<ServiceTypes />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <ServiceTypes />
+      </ConfirmProvider>
+    );
     await waitFor(() => {
       expect(screen.getByText(/1 command/i)).toBeInTheDocument();
     });

@@ -56,6 +56,8 @@ vi.mock('../lib/api', async () => {
 // Dynamic import of Servers
 const Servers = (await import('./Servers')).default;
 
+const renderServers = () => renderWithProviders(<Servers />);
+
 describe('Servers', () => {
   beforeEach(() => {
     useAppStore.setState({
@@ -73,7 +75,7 @@ describe('Servers', () => {
   });
 
   it('should display server list after loading', async () => {
-    renderWithProviders(<Servers />);
+    renderServers();
     await waitFor(() => {
       expect(screen.getByText('web-01')).toBeInTheDocument();
       expect(screen.getByText('db-01')).toBeInTheDocument();
@@ -81,7 +83,7 @@ describe('Servers', () => {
   });
 
   it('should display server hostnames', async () => {
-    renderWithProviders(<Servers />);
+    renderServers();
     await waitFor(() => {
       expect(screen.getByText('10.0.0.1')).toBeInTheDocument();
       expect(screen.getByText('10.0.0.2')).toBeInTheDocument();
@@ -89,7 +91,7 @@ describe('Servers', () => {
   });
 
   it('should display server status badges', async () => {
-    renderWithProviders(<Servers />);
+    renderServers();
     await waitFor(() => {
       expect(screen.getByText('healthy')).toBeInTheDocument();
       expect(screen.getByText('unhealthy')).toBeInTheDocument();
@@ -97,7 +99,7 @@ describe('Servers', () => {
   });
 
   it('should link server names to detail pages', async () => {
-    renderWithProviders(<Servers />);
+    renderServers();
     await waitFor(() => {
       const link = screen.getByText('web-01').closest('a');
       expect(link).toHaveAttribute('href', '/servers/server-1');
@@ -106,7 +108,7 @@ describe('Servers', () => {
 
   it('should show empty state when no environment selected', async () => {
     useAppStore.setState({ selectedEnvironment: null });
-    renderWithProviders(<Servers />);
+    renderServers();
     // Without environment, nothing loads
     await waitFor(() => {
       expect(screen.queryByText('web-01')).not.toBeInTheDocument();

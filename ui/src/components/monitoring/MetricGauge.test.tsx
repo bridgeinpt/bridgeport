@@ -24,33 +24,38 @@ describe('MetricGauge', () => {
     expect(screen.getByText('-')).toBeInTheDocument();
   });
 
-  it('should calculate percentage correctly', () => {
+  const indicatorTransform = (container: HTMLElement) =>
+    container.querySelector<HTMLElement>('[data-slot="progress-indicator"]')?.style.transform;
+
+  it('should fill the bar to the percentage', () => {
     const { container } = render(<MetricGauge label="Test" value={50} max={100} color="primary" />);
-    const bar = container.querySelector('[style*="width"]');
-    expect(bar?.getAttribute('style')).toContain('width: 50%');
+    expect(screen.getByRole('progressbar')).toBeInTheDocument();
+    expect(indicatorTransform(container)).toBe('translateX(-50%)');
   });
 
-  it('should cap percentage at 100%', () => {
+  it('should cap the fill at 100%', () => {
     const { container } = render(<MetricGauge label="Test" value={150} max={100} color="primary" />);
-    const bar = container.querySelector('[style*="width"]');
-    expect(bar?.getAttribute('style')).toContain('width: 100%');
+    expect(indicatorTransform(container)).toBe('translateX(-0%)');
   });
 
-  it('should set 0% width when value is undefined', () => {
+  it('should be empty when value is undefined', () => {
     const { container } = render(<MetricGauge label="Test" max={100} color="primary" />);
-    const bar = container.querySelector('[style*="width"]');
-    expect(bar?.getAttribute('style')).toContain('width: 0%');
+    expect(indicatorTransform(container)).toBe('translateX(-100%)');
   });
 
-  it('should apply primary color classes', () => {
-    const { container } = render(<MetricGauge label="Test" value={50} max={100} color="primary" />);
-    expect(container.firstElementChild?.className).toContain('bg-primary-900/30');
-    const bar = container.querySelector('[style*="width"]');
-    expect(bar?.className).toContain('bg-primary-500');
+  it('should color by static color token when no thresholds given', () => {
+    render(<MetricGauge label="Test" value={50} max={100} color="green" />);
+    expect(screen.getByRole('progressbar').className).toContain('bg-success');
   });
 
-  it('should apply green color classes', () => {
-    const { container } = render(<MetricGauge label="Test" value={50} max={100} color="green" />);
-    expect(container.firstElementChild?.className).toContain('bg-green-900/30');
+  it('should color by severity when warn/crit thresholds are given', () => {
+    const { rerender } = render(<MetricGauge label="CPU" value={95} max={100} warn={70} crit={90} />);
+    expect(screen.getByRole('progressbar').className).toContain('bg-destructive');
+
+    rerender(<MetricGauge label="CPU" value={75} max={100} warn={70} crit={90} />);
+    expect(screen.getByRole('progressbar').className).toContain('bg-warning');
+
+    rerender(<MetricGauge label="CPU" value={20} max={100} warn={70} crit={90} />);
+    expect(screen.getByRole('progressbar').className).toContain('bg-success');
   });
 });

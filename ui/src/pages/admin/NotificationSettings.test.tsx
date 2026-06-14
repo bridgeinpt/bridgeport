@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '../../../test/render';
 import { useAuthStore } from '../../lib/store';
+import { ConfirmProvider } from '@/hooks/useConfirm';
 
 // Mock Toast
 vi.mock('../../components/Toast', () => ({
@@ -80,7 +81,11 @@ describe('NotificationSettings', () => {
   });
 
   it('should display tab navigation', async () => {
-    renderWithProviders(<NotificationSettings />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <NotificationSettings />
+      </ConfirmProvider>
+    );
     await waitFor(() => {
       expect(screen.getByText('Email (SMTP)')).toBeInTheDocument();
       expect(screen.getByText('Webhooks')).toBeInTheDocument();
@@ -90,7 +95,11 @@ describe('NotificationSettings', () => {
   });
 
   it('should load notification types on Types tab', async () => {
-    renderWithProviders(<NotificationSettings />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <NotificationSettings />
+      </ConfirmProvider>
+    );
     await waitFor(() => {
       expect(screen.getByText('Email (SMTP)')).toBeInTheDocument();
     });

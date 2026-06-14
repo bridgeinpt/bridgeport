@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '../../../test/render';
+import { ConfirmProvider } from '../../hooks/useConfirm';
 
 // Mock API
 vi.mock('../../lib/api', async () => {
@@ -43,14 +44,22 @@ const SystemSettings = (await import('./SystemSettings')).default;
 
 describe('SystemSettings', () => {
   it('should display settings sections', async () => {
-    renderWithProviders(<SystemSettings />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <SystemSettings />
+      </ConfirmProvider>
+    );
     await waitFor(() => {
       expect(screen.getByText('SSH Configuration')).toBeInTheDocument();
     });
   });
 
   it('should load and display setting values', async () => {
-    renderWithProviders(<SystemSettings />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <SystemSettings />
+      </ConfirmProvider>
+    );
     await waitFor(() => {
       // SSH command timeout (30s) and databaseMetricsRetentionDays (30) both have value 30
       const inputs = screen.getAllByDisplayValue('30');

@@ -4,14 +4,28 @@ import { useAppStore, useAuthStore, isAdmin } from '../lib/store.js';
 import { listServices, listServiceTypeCounts, deployService, checkServiceHealth, deleteService, getDependencyGraph, type ServiceWithServerName, type ExposedPort, type DependencyGraphNode, type DependencyGraphEdge, type ServiceTypeCount } from '../lib/api.js';
 import { usePaginatedFetch } from '../hooks/usePaginatedFetch.js';
 import { formatDistanceToNow } from 'date-fns';
-import { getContainerStatusColor, getHealthStatusColor } from '../lib/status.js';
-import { RefreshIcon, CubeIcon, HeartPulseIcon, TrashIcon } from '../components/Icons.js';
+import { RefreshCw, Box, HeartPulse, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
 import { useToast } from '../components/Toast.js';
-import Pagination from '../components/Pagination.js';
-import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
-import { EmptyState } from '../components/EmptyState.js';
 import { OperationResultsModal, type OperationResult } from '../components/OperationResultsModal.js';
-import { Modal } from '../components/Modal.js';
+import { DataPagination } from '@/components/ui/data-pagination';
+import { EmptyState } from '@/components/ui/empty-state';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { Card } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { cn } from '@/lib/utils';
 import { safeJsonParse } from '../lib/helpers.js';
 
 // Lazy load DependencyFlow to avoid loading @xyflow/react (~80KB) until needed
@@ -249,7 +263,13 @@ export default function Services() {
   };
 
   if (loading) {
-    return <LoadingSkeleton rows={3} rowHeight="h-20" />;
+    return (
+      <div className="space-y-4 p-6">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} className="h-20 w-full" />
+        ))}
+      </div>
+    );
   }
 
   return (
@@ -258,86 +278,59 @@ export default function Services() {
         <div className="flex items-center gap-4">
           {activeTab === 'list' && servicesWithUpdates.length > 0 && (
             <>
-              <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer">
-                <input
-                  type="checkbox"
+              <Label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+                <Switch
                   checked={servicesShowUpdatesOnly}
-                  onChange={(e) => setServicesShowUpdatesOnly(e.target.checked)}
-                  className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-primary-600 focus:ring-primary-500"
+                  onCheckedChange={setServicesShowUpdatesOnly}
                 />
                 Show updates only ({servicesWithUpdates.length})
-              </label>
-              <button
-                onClick={handleBulkDeployAll}
-                disabled={bulkDeploying}
-                className="btn btn-primary flex items-center gap-2"
-              >
-                <RefreshIcon className={`w-4 h-4 ${bulkDeploying ? 'animate-spin' : ''}`} />
+              </Label>
+              <Button onClick={handleBulkDeployAll} disabled={bulkDeploying}>
+                <RefreshCw className={cn('size-4', bulkDeploying && 'animate-spin')} />
                 Update All ({servicesWithUpdates.length})
-              </button>
+              </Button>
             </>
           )}
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-slate-700 mb-6">
-        <button
-          onClick={() => setActiveTab('list')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
-            activeTab === 'list'
-              ? 'border-brand-600 text-white'
-              : 'border-transparent text-slate-400 hover:text-white'
-          }`}
-        >
-          List
-        </button>
-        <button
-          onClick={() => setActiveTab('dependencies')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
-            activeTab === 'dependencies'
-              ? 'border-brand-600 text-white'
-              : 'border-transparent text-slate-400 hover:text-white'
-          }`}
-        >
-          Dependencies
-        </button>
-      </div>
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabType)} className="mb-6">
+        <TabsList>
+          <TabsTrigger value="list">List</TabsTrigger>
+          <TabsTrigger value="dependencies">Dependencies</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
-      {/* Delete Confirmation Modal */}
-      <Modal
-        isOpen={!!serviceToDelete}
-        onClose={() => setServiceToDelete(null)}
-        title="Delete Service"
-        size="sm"
-      >
-        <div className="space-y-4">
-          <p className="text-slate-300">
-            Are you sure you want to delete <span className="font-semibold text-white">{serviceToDelete?.name}</span>?
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!serviceToDelete} onOpenChange={(open) => !open && setServiceToDelete(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete Service</DialogTitle>
+            <DialogDescription>
+              This will remove the service from BRIDGEPORT. The container will not be stopped or
+              removed. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <p className="text-sm text-foreground">
+            Are you sure you want to delete{' '}
+            <span className="font-semibold">{serviceToDelete?.name}</span>?
           </p>
-          <p className="text-sm text-slate-400">
-            This will remove the service from BRIDGEPORT. The container will not be stopped or removed. This action cannot be undone.
-          </p>
-          <div className="flex gap-2 justify-end">
-            <button
+          <DialogFooter>
+            <Button
               type="button"
+              variant="ghost"
               onClick={() => setServiceToDelete(null)}
-              className="btn btn-ghost"
               disabled={deleting}
             >
               Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleDelete}
-              disabled={deleting}
-              className="btn bg-red-600 hover:bg-red-700 text-white"
-            >
+            </Button>
+            <Button type="button" variant="destructive" onClick={handleDelete} disabled={deleting}>
               {deleting ? 'Deleting...' : 'Delete Service'}
-            </button>
-          </div>
-        </div>
-      </Modal>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Bulk Deploy Results Modal */}
       <OperationResultsModal
@@ -355,8 +348,8 @@ export default function Services() {
       {activeTab === 'dependencies' ? (
         <Suspense
           fallback={
-            <div className="flex items-center justify-center h-96 bg-slate-800 rounded-lg">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
+            <div className="flex items-center justify-center h-96 rounded-lg border bg-card/40">
+              <div className="size-8 animate-spin rounded-full border-b-2 border-primary"></div>
             </div>
           }
         >
@@ -375,49 +368,43 @@ export default function Services() {
             aria-label="Filter services by type"
             className="flex flex-wrap items-center gap-2"
           >
-            <button
+            <Button
               type="button"
+              size="sm"
+              variant={activeTypeFilter === null ? 'secondary' : 'outline'}
               onClick={() => setActiveTypeFilter(null)}
               aria-pressed={activeTypeFilter === null}
-              className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                activeTypeFilter === null
-                  ? 'bg-primary-500/20 border-primary-500/50 text-primary-300'
-                  : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-600'
-              }`}
+              className="rounded-full"
             >
               All ({services.length})
-            </button>
+            </Button>
             {serviceTypeCounts.map((t) => {
               const active = activeTypeFilter === t.id;
               return (
-                <button
+                <Button
                   key={t.id}
                   type="button"
+                  size="sm"
+                  variant={active ? 'secondary' : 'outline'}
                   onClick={() => setActiveTypeFilter(t.id)}
                   aria-pressed={active}
-                  className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                    active
-                      ? 'bg-primary-500/20 border-primary-500/50 text-primary-300'
-                      : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-600'
-                  }`}
+                  className="rounded-full"
                 >
                   {t.displayName} ({t.count})
-                </button>
+                </Button>
               );
             })}
             {noTypeCount > 0 && (
-              <button
+              <Button
                 type="button"
+                size="sm"
+                variant={activeTypeFilter === NO_TYPE_FILTER ? 'secondary' : 'outline'}
                 onClick={() => setActiveTypeFilter(NO_TYPE_FILTER)}
                 aria-pressed={activeTypeFilter === NO_TYPE_FILTER}
-                className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                  activeTypeFilter === NO_TYPE_FILTER
-                    ? 'bg-primary-500/20 border-primary-500/50 text-primary-300'
-                    : 'bg-slate-800 border-slate-700 text-slate-400 italic hover:border-slate-600'
-                }`}
+                className="rounded-full italic"
               >
                 No type ({noTypeCount})
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -434,52 +421,54 @@ export default function Services() {
               const hasContainerImage = depNode?.containerImage;
               const containerStatus = service.containerStatus ?? service.status ?? 'unknown';
               return (
-                <div key={service.id} className={`panel ${hasUpdate ? 'border-green-500/30' : ''}`}>
+                <Card key={service.id} className={cn('p-4', hasUpdate && 'border-success/30')}>
                   <div className="flex items-start justify-between">
                     <div className="flex items-start gap-4">
-                      <div className="p-3 bg-green-500/10 rounded-lg">
-                        <CubeIcon className="w-6 h-6 text-green-400" />
+                      <div className="p-3 bg-success/10 rounded-lg">
+                        <Box className="size-6 text-success" />
                       </div>
                       <div>
                         {/* Row 1: Name + badges */}
                         <div className="flex items-center gap-2 flex-wrap">
                           <Link
                             to={`/services/${service.id}`}
-                            className="text-lg font-semibold text-white hover:text-primary-400"
+                            className="text-lg font-semibold text-foreground hover:text-primary"
                           >
                             {service.name}
                           </Link>
-                          <span className={`badge text-xs ${getContainerStatusColor(containerStatus)}`}>
-                            {containerStatus}
-                          </span>
-                          <span className={`badge text-xs ${getHealthStatusColor(service.healthStatus || 'unknown')}`}>
-                            {service.healthStatus || 'unknown'}
-                          </span>
+                          <StatusBadge kind="container" value={containerStatus} />
+                          <StatusBadge kind="health" value={service.healthStatus || 'unknown'} />
                           {hasUpdate && (
-                            <span className="badge bg-green-500/20 text-green-400 text-xs">Update available</span>
+                            <Badge variant="success">Update available</Badge>
                           )}
                           {hasContainerImage && (
                             <span
-                              className="w-2 h-2 bg-primary-400 rounded-full"
+                              className="size-2 bg-primary rounded-full"
                               title="Linked to container image"
                             />
                           )}
                           {hasDependencies && (
                             <span
-                              className="flex items-center gap-0.5 text-xs text-slate-500"
+                              className="flex items-center gap-0.5 text-xs text-muted-foreground"
                               title={`${depNode.dependencyCount} dependencies, ${depNode.dependentCount} dependents`}
                             >
                               {depNode.dependencyCount > 0 && (
-                                <span className="text-green-400">↑{depNode.dependencyCount}</span>
+                                <span className="flex items-center text-success">
+                                  <ArrowUp className="size-3" />
+                                  {depNode.dependencyCount}
+                                </span>
                               )}
                               {depNode.dependentCount > 0 && (
-                                <span className="text-blue-400">↓{depNode.dependentCount}</span>
+                                <span className="flex items-center text-info">
+                                  <ArrowDown className="size-3" />
+                                  {depNode.dependentCount}
+                                </span>
                               )}
                             </span>
                           )}
                         </div>
                         {/* Row 2: Server + Type + Image */}
-                        <p className="text-slate-400 text-sm mt-1">
+                        <p className="text-muted-foreground text-sm mt-1">
                           {(() => {
                             // Prefer deployment-shaped servers from the API
                             // (post-Service-split shape); fall back to the
@@ -496,24 +485,24 @@ export default function Services() {
                             }
                             return <span>{servers.join(', ')}</span>;
                           })()}
-                          <span className="text-slate-500"> · </span>
-                          <span className="badge badge-neutral">
+                          <span className="text-muted-foreground/70"> · </span>
+                          <Badge variant="neutral">
                             {service.serviceType?.displayName || 'Generic'}
-                          </span>
-                          <span className="text-slate-500"> · </span>
+                          </Badge>
+                          <span className="text-muted-foreground/70"> · </span>
                           <span className="font-mono">
                             {service.containerImage?.imageName?.split('/').pop() || 'unknown'}
-                            :<span className="text-primary-400">{service.imageTag}</span>
+                            :<span className="text-primary">{service.imageTag}</span>
                           </span>
                           {hasUpdate && (
                             <>
-                              <span className="text-slate-500"> → </span>
-                              <span className="font-mono text-green-400">{targetTag}</span>
+                              <span className="text-muted-foreground/70"> → </span>
+                              <span className="font-mono text-success">{targetTag}</span>
                             </>
                           )}
                         </p>
                         {/* Row 3: Ports + Container + Last checked */}
-                        <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
+                        <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
                           {ports.length > 0 && <span>Ports: {formatPorts(ports)}</span>}
                           {service.containerName && <span className="font-mono">{service.containerName}</span>}
                           <span>
@@ -527,7 +516,8 @@ export default function Services() {
                     {/* Actions - hybrid pattern */}
                     <div className="flex items-center gap-2">
                       {hasUpdate && targetTag && (
-                        <button
+                        <Button
+                          size="sm"
                           onClick={() => {
                             deployService(service.id, {
                               imageTag: targetTag,
@@ -539,34 +529,36 @@ export default function Services() {
                               toast.error(err instanceof Error ? err.message : 'Deploy failed');
                             });
                           }}
-                          className="btn btn-primary text-sm"
                         >
                           Deploy {targetTag}
-                        </button>
+                        </Button>
                       )}
-                      <button
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
                         onClick={() => handleHealthCheck(service.id)}
                         disabled={actionLoading === service.id}
-                        className="p-1.5 text-slate-400 hover:text-white rounded"
                         title="Health Check"
                       >
-                        <HeartPulseIcon className="w-4 h-4" />
-                      </button>
+                        <HeartPulse className="size-4" />
+                      </Button>
                       {isAdmin(user) && (
-                        <button
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
                           onClick={() => setServiceToDelete(service)}
-                          className="p-1.5 text-slate-400 hover:text-red-400 rounded"
+                          className="text-muted-foreground hover:text-destructive"
                           title="Delete"
                         >
-                          <TrashIcon className="w-4 h-4" />
-                        </button>
+                          <Trash2 className="size-4" />
+                        </Button>
                       )}
                     </div>
                   </div>
-                </div>
+                </Card>
               );
             })}
-            <Pagination
+            <DataPagination
               currentPage={currentPage}
               totalPages={totalPages}
               totalItems={total}
@@ -577,7 +569,7 @@ export default function Services() {
           </>
         ) : (
           <EmptyState
-            icon={CubeIcon}
+            icon={Box}
             message="No services discovered"
             description="Go to a server and click 'Discover Containers' to find services"
           />

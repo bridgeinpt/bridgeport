@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '../../test/render';
+import { ConfirmProvider } from '@/hooks/useConfirm';
 import { useAppStore } from '../lib/store';
 
 // Mock API
@@ -63,7 +64,11 @@ describe('MonitoringAgents', () => {
   });
 
   it('should display server names', async () => {
-    renderWithProviders(<MonitoringAgents />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <MonitoringAgents />
+      </ConfirmProvider>
+    );
     await waitFor(() => {
       expect(screen.getByText('web-01')).toBeInTheDocument();
       expect(screen.getByText('web-02')).toBeInTheDocument();
@@ -71,14 +76,22 @@ describe('MonitoringAgents', () => {
   });
 
   it('should display metrics mode for servers', async () => {
-    renderWithProviders(<MonitoringAgents />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <MonitoringAgents />
+      </ConfirmProvider>
+    );
     await waitFor(() => {
       expect(screen.getByText(/agent/)).toBeInTheDocument();
     });
   });
 
   it('should show tab navigation', async () => {
-    renderWithProviders(<MonitoringAgents />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <MonitoringAgents />
+      </ConfirmProvider>
+    );
     await waitFor(() => {
       // SSH tab and Agents tab links exist
       const links = screen.getAllByRole('link');

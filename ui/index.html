@@ -4,6 +4,20 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- No-FOUC: resolve the theme (localStorage override → OS preference) and
+         set the `dark` class before first paint, matching the ThemeProvider. -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('bridgeport-theme');
+          var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var dark = stored === 'dark' || ((stored === 'system' || !stored) && prefersDark);
+          document.documentElement.classList.toggle('dark', dark);
+        } catch (e) {
+          /* localStorage/matchMedia unavailable — default to light */
+        }
+      })();
+    </script>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
     <title>BRIDGEPORT</title>
   </head>

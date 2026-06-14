@@ -1,21 +1,19 @@
+import { ChevronDown, LogOut, Terminal, User } from 'lucide-react';
 import { useAuthStore } from '../lib/store';
-import { UserIcon, LogoutIcon } from './Icons';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { ThemeMenuItems } from '@/components/ui/theme-switcher';
 import NotificationBell from './NotificationBell';
 import Breadcrumbs from './Breadcrumbs';
-
-// Terminal icon for CLI
-function TerminalIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-      />
-    </svg>
-  );
-}
 
 interface AdminTopBarProps {
   onOpenAccount: () => void;
@@ -26,61 +24,57 @@ export default function AdminTopBar({ onOpenAccount, onOpenCLI }: AdminTopBarPro
   const { user, logout } = useAuthStore();
 
   return (
-    <header className="h-12 flex-shrink-0 bg-slate-900 border-b border-slate-700 flex items-center justify-between px-4">
-      {/* Left side: Breadcrumbs */}
-      <div className="flex items-center min-w-0">
+    <TooltipProvider>
+      <div className="flex min-w-0 flex-1 items-center">
         <Breadcrumbs />
       </div>
 
-      {/* Right side: User info & actions */}
-      <div className="flex items-center gap-3">
-        {/* User name and role */}
-        <div className="hidden sm:flex items-center gap-2 text-sm">
-          <span className="text-white truncate max-w-[150px]">
-            {user?.name || user?.email}
-          </span>
-          {user?.role && (
-            <span className="px-1.5 py-0.5 text-[10px] rounded bg-slate-700 text-slate-300 uppercase">
-              {user.role}
-            </span>
-          )}
-        </div>
+      <div className="flex items-center gap-1">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" onClick={onOpenCLI} title="CLI Tool" aria-label="CLI Tool">
+              <Terminal className="size-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>CLI Tool</TooltipContent>
+        </Tooltip>
 
-        {/* Divider */}
-        <div className="hidden sm:block w-px h-5 bg-slate-700" />
+        <NotificationBell />
 
-        {/* Action buttons */}
-        <div className="flex items-center gap-1">
-          <NotificationBell />
-          <button
-            onClick={onOpenCLI}
-            className="icon-btn"
-            title="CLI Tool"
-            aria-label="CLI Tool"
-          >
-            <TerminalIcon className="w-4 h-4" />
-          </button>
-          <button
-            onClick={onOpenAccount}
-            className="icon-btn"
-            title="My Account"
-            aria-label="My Account"
-          >
-            <UserIcon className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => {
-              logout();
-              window.location.href = '/login';
-            }}
-            className="icon-btn"
-            title="Logout"
-            aria-label="Logout"
-          >
-            <LogoutIcon className="w-4 h-4" />
-          </button>
-        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" className="gap-2" aria-label="User menu">
+              <User className="size-4" />
+              <span className="hidden max-w-[140px] truncate sm:inline">{user?.name || user?.email}</span>
+              {user?.role && (
+                <Badge variant="neutral" className="hidden uppercase sm:inline-flex">
+                  {user.role}
+                </Badge>
+              )}
+              <ChevronDown className="size-3 opacity-60" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuLabel className="truncate">{user?.name || user?.email}</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={onOpenAccount}>
+              <User className="size-4" />
+              My Account
+            </DropdownMenuItem>
+            <ThemeMenuItems />
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() => {
+                logout();
+                window.location.href = '/login';
+              }}
+            >
+              <LogOut className="size-4" />
+              Logout
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
-    </header>
+    </TooltipProvider>
   );
 }

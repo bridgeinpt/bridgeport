@@ -1,11 +1,25 @@
 import { memo } from 'react';
+import { CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts';
 import {
-  LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer,
-} from 'recharts';
+  ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from '@/components/ui/chart';
+import { Card } from '@/components/ui/card';
 import ChartCardSkeleton from './ChartCardSkeleton';
 import RefreshingDot from './RefreshingDot';
 
-const COLORS = ['#60a5fa', '#34d399', '#fbbf24', '#f472b6', '#a78bfa', '#f87171'];
+// Series colors come from the Deep Slate chart palette (--chart-1..5).
+const CHART_VARS = [
+  'var(--chart-1)',
+  'var(--chart-2)',
+  'var(--chart-3)',
+  'var(--chart-4)',
+  'var(--chart-5)',
+] as const;
 
 export interface ChartCardProps {
   title: string;
@@ -14,91 +28,86 @@ export interface ChartCardProps {
   formatTime: (time: string) => string;
   unit?: string;
   domain?: [number | 'auto', number | 'auto'];
-  // Issue #171 — per-card loading states. `loading` renders the inline
-  // skeleton (used during the card's first fetch). `refreshing` shows a
-  // small spinner in the corner while a delta-refresh is in flight so the
-  // existing chart stays visible.
+  // Per-card loading states (#171). `loading` renders the inline skeleton on
+  // first fetch; `refreshing` shows a small spinner while a delta-refresh is in
+  // flight so the existing chart stays visible.
   loading?: boolean;
   refreshing?: boolean;
 }
 
-const ChartCard = memo(function ChartCard({ title, data, names, formatTime, unit, domain, loading, refreshing }: ChartCardProps) {
-  // While the card is doing its initial load, render the matching skeleton
-  // in place so the rest of the page chrome can paint without waiting on
-  // any one card's data.
+const ChartCard = memo(function ChartCard({
+  title,
+  data,
+  names,
+  formatTime,
+  unit,
+  domain,
+  loading,
+  refreshing,
+}: ChartCardProps) {
   if (loading) {
     return <ChartCardSkeleton title={title} />;
   }
 
   if (data.length === 0) {
     return (
-      <div className="card relative">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-medium text-white">{title}</h3>
+      <Card className="relative p-4">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-sm font-medium text-foreground">{title}</h3>
           {refreshing && <RefreshingDot />}
         </div>
-        <div className="h-56 flex items-center justify-center text-slate-500">
-          No data available
-        </div>
-      </div>
+        <div className="flex h-56 items-center justify-center text-muted-foreground">No data available</div>
+      </Card>
     );
   }
 
+  const config: ChartConfig = Object.fromEntries(
+    names.map((name, i) => [name, { label: name, color: CHART_VARS[i % CHART_VARS.length] }])
+  );
+
   return (
-    <div className="card relative">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-medium text-white">{title}</h3>
-        {refreshing && (
-          <span
-            className="inline-block w-3 h-3 border-2 border-slate-600 border-t-brand-400 rounded-full animate-spin"
-            aria-label="Refreshing"
-          />
-        )}
+    <Card className="relative p-4">
+      <div className="mb-4 flex items-center justify-between">
+        <h3 className="text-sm font-medium text-foreground">{title}</h3>
+        {refreshing && <RefreshingDot />}
       </div>
-      <ResponsiveContainer width="100%" height={220}>
+      <ChartContainer config={config} className="h-56 w-full">
         <LineChart data={data} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-          <XAxis
-            dataKey="time"
-            tickFormatter={formatTime}
-            tick={{ fill: '#64748b', fontSize: 11 }}
-            axisLine={{ stroke: '#334155' }}
-            tickLine={{ stroke: '#334155' }}
-          />
+          <CartesianGrid vertical={false} strokeDasharray="3 3" />
+          <XAxis dataKey="time" tickFormatter={formatTime} tickLine={false} axisLine={false} fontSize={11} />
           <YAxis
             domain={domain}
-            tick={{ fill: '#64748b', fontSize: 11 }}
-            axisLine={{ stroke: '#334155' }}
-            tickLine={{ stroke: '#334155' }}
             tickFormatter={(v) => `${v}${unit || ''}`}
+            tickLine={false}
+            axisLine={false}
             width={50}
+            fontSize={11}
           />
-          <Tooltip
-            contentStyle={{
-              backgroundColor: '#1e293b',
-              border: '1px solid #334155',
-              borderRadius: '8px',
-            }}
-            labelFormatter={(label) => formatTime(String(label))}
-            formatter={(value: unknown) => [`${Number(value).toFixed(1)}${unit || ''}`, '']}
+          <ChartTooltip
+            content={
+              <ChartTooltipContent
+                labelFormatter={(label) => formatTime(String(label))}
+                formatter={(value) => `${Number(value).toFixed(1)}${unit || ''}`}
+              />
+            }
           />
-          <Legend wrapperStyle={{ fontSize: 12 }} />
+          <ChartLegend content={<ChartLegendContent />} />
           {names.map((name, i) => (
             <Line
               key={name}
               type="monotone"
               dataKey={name}
               name={name}
-              stroke={COLORS[i % COLORS.length]}
+              stroke={CHART_VARS[i % CHART_VARS.length]}
               dot={false}
               strokeWidth={2}
               connectNulls
             />
           ))}
         </LineChart>
-      </ResponsiveContainer>
-    </div>
+      </ChartContainer>
+    </Card>
   );
 });
 
 export default ChartCard;
-export { COLORS };

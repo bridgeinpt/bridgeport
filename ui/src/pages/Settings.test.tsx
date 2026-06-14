@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '../../test/render';
+import { ConfirmProvider } from '@/hooks/useConfirm';
 import { useAppStore, useAuthStore } from '../lib/store';
 
 // Mock Toast
@@ -63,7 +64,11 @@ describe('Settings', () => {
   });
 
   it('should display tab navigation', () => {
-    renderWithProviders(<Settings />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <Settings />
+      </ConfirmProvider>
+    );
     expect(screen.getByText('General')).toBeInTheDocument();
     expect(screen.getByText('Operations')).toBeInTheDocument();
     expect(screen.getByText('Monitoring')).toBeInTheDocument();
@@ -72,16 +77,24 @@ describe('Settings', () => {
   });
 
   it('should highlight General tab as active by default', async () => {
-    renderWithProviders(<Settings />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <Settings />
+      </ConfirmProvider>
+    );
     // General tab should be active with appropriate styling
     const generalTab = screen.getByText('General');
     expect(generalTab).toBeInTheDocument();
-    expect(generalTab.className).toContain('border-brand-600');
+    expect(generalTab.className).toContain('border-brand');
   });
 
   it('should show empty state when no environment selected', () => {
     useAppStore.setState({ selectedEnvironment: null });
-    renderWithProviders(<Settings />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <Settings />
+      </ConfirmProvider>
+    );
     expect(screen.getByText(/select an environment/i)).toBeInTheDocument();
   });
 });

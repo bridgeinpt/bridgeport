@@ -60,10 +60,52 @@ import {
   deleteServerCluster,
 } from '../../lib/api';
 import { inferConnections, mergeConnections, aggregateCollapsedEdges, type TopologyEdge } from '../../lib/topology';
-import { EmptyState } from '../EmptyState';
+import { EmptyState } from '@/components/ui/empty-state';
 import { useToast } from '../Toast';
 import { toPng } from 'html-to-image';
 import { safeJsonParse, getErrorMessage } from '../../lib/helpers';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import {
+  Download,
+  Maximize2,
+  Minimize2,
+  Plus,
+  Globe,
+  Layers,
+  Search,
+  ChevronDown,
+  ChevronUp,
+  X,
+  ArrowRight,
+  Trash2,
+  Link2,
+  Network,
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 function downloadFile(filename: string, content: string, mimeType: string) {
   const blob = new Blob([content], { type: mimeType });
@@ -144,7 +186,7 @@ function TopologyEdgeComponent({
       {showLabel && (
         <EdgeLabelRenderer>
           <div
-            className="absolute flex items-center gap-1 text-[10px] bg-slate-800 border border-slate-600 px-1.5 py-0.5 rounded text-slate-300 pointer-events-auto nopan nodrag"
+            className="absolute flex items-center gap-1 text-[10px] bg-card border border-border px-1.5 py-0.5 rounded text-foreground pointer-events-auto nopan nodrag"
             style={{
               transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
             }}
@@ -162,13 +204,11 @@ function TopologyEdgeComponent({
                 }}
                 onPointerDown={stopAllPropagation}
                 onMouseDown={stopAllPropagation}
-                className="p-0.5 text-slate-400 hover:text-red-400 hover:bg-slate-700 rounded ml-0.5 cursor-pointer"
+                className="p-0.5 text-muted-foreground hover:text-destructive hover:bg-muted rounded ml-0.5 cursor-pointer"
                 title="Delete connection"
                 aria-label="Delete connection"
               >
-                <svg className="w-3.5 h-3.5 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <X className="w-3.5 h-3.5 pointer-events-none" aria-hidden="true" />
               </button>
             )}
           </div>
@@ -604,9 +644,12 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
   const [savedPositions, setSavedPositions] = useState<DiagramLayoutPositions | null>(null);
   const [showConnectionsList, setShowConnectionsList] = useState(false);
   const [showAddConnectionModal, setShowAddConnectionModal] = useState(false);
+  // Drives the create-cluster / create-external-entity Dialog forms (these
+  // replaced the old browser-prompt flows).
+  const [showCreateClusterDialog, setShowCreateClusterDialog] = useState(false);
+  const [showCreateExternalDialog, setShowCreateExternalDialog] = useState(false);
   const [externalEntities, setExternalEntities] = useState<ExternalEntity[]>([]);
   const [serverClusters, setServerClusters] = useState<ServerCluster[]>([]);
-  const connectionsListRef = useRef<HTMLDivElement>(null);
   const reactFlowInstance = useReactFlow();
   const containerRef = useRef<HTMLDivElement>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -903,10 +946,15 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     }
   }, [canInteract, serverClusters, toast]);
 
-  const handleCreateCluster = useCallback(async () => {
+  // Opens the create-cluster dialog (cancel = no-op). The actual create runs
+  // in submitCreateCluster once the user confirms a name.
+  const handleCreateCluster = useCallback(() => {
     if (!canInteract || !environmentId) return;
-    const name = window.prompt('Cluster name (e.g. "Production HA", "EU region")');
-    if (!name) return;
+    setShowCreateClusterDialog(true);
+  }, [canInteract, environmentId]);
+
+  const submitCreateCluster = useCallback(async (name: string) => {
+    if (!canInteract || !environmentId) return;
     try {
       // Place the new cluster at the current viewport center so it lands on
       // screen rather than at (0,0).
@@ -923,6 +971,7 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
         height: 280,
       });
       setServerClusters((prev) => [...prev, res.serverCluster]);
+      setShowCreateClusterDialog(false);
     } catch (err) {
       toast.error(`Failed to create cluster: ${getErrorMessage(err, 'Unknown error')}`);
     }
@@ -942,11 +991,15 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     }
   }, [canInteract, externalEntities, toast]);
 
-  const handleCreateExternalEntity = useCallback(async () => {
+  // Opens the create-external-entity dialog (cancel = no-op). The create runs
+  // in submitCreateExternalEntity once the user confirms label + kind.
+  const handleCreateExternalEntity = useCallback(() => {
     if (!canInteract || !environmentId) return;
-    const label = window.prompt('External entity label (e.g. "Cloudflare", "Web", "Internet")');
-    if (!label) return;
-    const kind = (window.prompt('Kind (e.g. cloudflare, cdn, web, client) — used for styling', 'web') || 'web').trim();
+    setShowCreateExternalDialog(true);
+  }, [canInteract, environmentId]);
+
+  const submitCreateExternalEntity = useCallback(async (label: string, kind: string) => {
+    if (!canInteract || !environmentId) return;
     try {
       const { x: vx, y: vy, zoom } = reactFlowInstance.getViewport();
       const center = {
@@ -955,11 +1008,12 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
       };
       const res = await createExternalEntity(environmentId, {
         label: label.trim(),
-        kind,
+        kind: (kind || 'web').trim(),
         x: center.x,
         y: center.y,
       });
       setExternalEntities((prev) => [...prev, res.externalEntity]);
+      setShowCreateExternalDialog(false);
     } catch (err) {
       toast.error(`Failed to create external entity: ${getErrorMessage(err, 'Unknown error')}`);
     }
@@ -1012,49 +1066,24 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [mode, showAddConnectionModal]);
 
-  // Export
-  const [showExportMenu, setShowExportMenu] = useState(false);
-  const exportMenuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!showExportMenu) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as HTMLElement)) {
-        setShowExportMenu(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showExportMenu]);
-
-  useEffect(() => {
-    if (!showConnectionsList) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (connectionsListRef.current && !connectionsListRef.current.contains(e.target as HTMLElement)) {
-        setShowConnectionsList(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showConnectionsList]);
-
+  // Export — the DropdownMenu (see ExportMenu) owns its own open state, so no
+  // manual menu-visibility state or outside-click listener is needed.
   const handleExportMermaid = useCallback(async () => {
-    setShowExportMenu(false);
     try {
       const res = await exportDiagramMermaid(environmentId);
       downloadFile('topology.md', res.mermaid, 'text/markdown');
-    } catch {
-      // Silently fail
+    } catch (err) {
+      // B14: surface export failures instead of swallowing them.
+      toast.error(`Failed to export diagram: ${getErrorMessage(err, 'Unknown error')}`);
     }
-  }, [environmentId]);
+  }, [environmentId, toast]);
 
   const handleExportPng = useCallback(async () => {
-    setShowExportMenu(false);
     const viewport = document.querySelector('.react-flow__viewport') as HTMLElement | null;
     if (!viewport) return;
     try {
       const dataUrl = await toPng(viewport, {
-        backgroundColor: '#0f172a',
+        backgroundColor: '#0a0e14', // Deep Slate shell
         pixelRatio: 2,
         skipFonts: true,
       });
@@ -1062,10 +1091,11 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
       a.href = dataUrl;
       a.download = 'topology.png';
       a.click();
-    } catch {
-      // Export failed silently
+    } catch (err) {
+      // B14: surface export failures instead of swallowing them.
+      toast.error(`Failed to export PNG: ${getErrorMessage(err, 'Unknown error')}`);
     }
-  }, []);
+  }, [toast]);
 
   // Build name lookup for connection list display
   const nodeNameMap = useMemo(() => {
@@ -1224,12 +1254,12 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
 
   if (isEmpty) {
     return (
-      <div className="panel">
+      <div className="rounded-lg border bg-card p-4">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-white">Environment Diagram</h2>
+          <h2 className="text-lg font-semibold text-foreground">Environment Diagram</h2>
         </div>
         <EmptyState
-          icon={NetworkIcon}
+          icon={Network}
           message="No services discovered yet"
           description="Add servers and discover containers to see the topology diagram"
         />
@@ -1262,26 +1292,38 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
   };
 
   const addConnectionModal = canInteract ? (
-    <AddConnectionModal
-      isOpen={showAddConnectionModal}
-      onClose={() => setShowAddConnectionModal(false)}
-      environmentId={environmentId}
-      servers={servers}
-      databases={databases}
-      externalEntities={externalEntities}
-      onConnectionCreated={(conn) => setManualConnections((prev) => [...prev, conn])}
-    />
+    <>
+      <AddConnectionModal
+        isOpen={showAddConnectionModal}
+        onClose={() => setShowAddConnectionModal(false)}
+        environmentId={environmentId}
+        servers={servers}
+        databases={databases}
+        externalEntities={externalEntities}
+        onConnectionCreated={(conn) => setManualConnections((prev) => [...prev, conn])}
+      />
+      <CreateClusterDialog
+        open={showCreateClusterDialog}
+        onOpenChange={setShowCreateClusterDialog}
+        onSubmit={submitCreateCluster}
+      />
+      <CreateExternalEntityDialog
+        open={showCreateExternalDialog}
+        onOpenChange={setShowCreateExternalDialog}
+        onSubmit={submitCreateExternalEntity}
+      />
+    </>
   ) : null;
 
   if (mode === 'fullscreen') {
     return (
       <>
         <style>{reactFlowDarkStyles}</style>
-        <div className="fixed inset-0 bg-slate-900 z-50 flex flex-col">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700">
+        <div className="fixed inset-0 bg-background z-50 flex flex-col">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-border">
             <div className="flex items-center gap-3">
-              <h2 className="text-lg font-semibold text-white">Environment Diagram</h2>
-              <span className="text-xs text-slate-400">
+              <h2 className="text-lg font-semibold text-foreground">Environment Diagram</h2>
+              <span className="text-xs text-muted-foreground">
                 {servers.length} server{servers.length !== 1 ? 's' : ''} &middot; {totalServices} service{totalServices !== 1 ? 's' : ''} &middot; {databases.length} database{databases.length !== 1 ? 's' : ''}
               </span>
             </div>
@@ -1301,39 +1343,15 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
                     nodeNameMap={nodeNameMap}
                     onDelete={handleDeleteConnection}
                     show={showConnectionsList}
-                    onToggle={() => setShowConnectionsList((v) => !v)}
-                    menuRef={connectionsListRef}
+                    onOpenChange={setShowConnectionsList}
                   />
                 </>
               )}
-              <div className="relative" ref={showExportMenu ? exportMenuRef : undefined}>
-                <button
-                  onClick={() => setShowExportMenu((v) => !v)}
-                  className="p-1.5 text-slate-400 hover:text-white rounded"
-                  title="Export"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                  </svg>
-                </button>
-                {showExportMenu && (
-                  <div className="absolute right-0 top-full mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-lg py-1 z-50 min-w-[140px]">
-                    <button onClick={handleExportMermaid} className="w-full text-left px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-700">
-                      Mermaid (.md)
-                    </button>
-                    <button onClick={handleExportPng} className="w-full text-left px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-700">
-                      PNG (.png)
-                    </button>
-                  </div>
-                )}
-              </div>
-              <button
-                onClick={() => setMode('expanded')}
-                className="btn btn-sm btn-secondary"
-                title="Exit fullscreen (Esc)"
-              >
+              <ExportMenu onExportMermaid={handleExportMermaid} onExportPng={handleExportPng} />
+              <Button variant="secondary" size="sm" onClick={() => setMode('expanded')} title="Exit fullscreen (Esc)">
+                <Minimize2 className="w-4 h-4" aria-hidden="true" />
                 Exit Fullscreen
-              </button>
+              </Button>
             </div>
           </div>
           <div className="flex-1">
@@ -1346,21 +1364,21 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
                   if (n.type === 'databaseNode') return '#7c3aed';
                   return '#3b82f6';
                 }}
-                className="!bg-slate-800 !border-slate-700"
+                className="!bg-card !border-border"
               />
             </ReactFlow>
           </div>
-          <div className="flex items-center gap-4 px-4 py-2 border-t border-slate-700 text-xs text-slate-400">
+          <div className="flex items-center gap-4 px-4 py-2 border-t border-border text-xs text-muted-foreground">
             <div className="flex items-center gap-1.5">
-              <span className="w-4 h-0.5 bg-blue-400 inline-block rounded" />
+              <span className="w-4 h-0.5 bg-info inline-block rounded" />
               Auto-inferred
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="w-4 h-0.5 bg-green-400 inline-block rounded" />
+              <span className="w-4 h-0.5 bg-success inline-block rounded" />
               Manual
             </div>
             {canInteract && (
-              <div className="text-slate-500 ml-auto">
+              <div className="text-muted-foreground ml-auto">
                 Drag from a node handle (the dots on each side) onto another node to connect.
               </div>
             )}
@@ -1374,11 +1392,11 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
   return (
     <>
       <style>{reactFlowDarkStyles}</style>
-      <div className="panel">
+      <div className="rounded-lg border bg-card p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
-            <h2 className="text-lg font-semibold text-white">Environment Diagram</h2>
-            <span className="text-xs text-slate-400">
+            <h2 className="text-lg font-semibold text-foreground">Environment Diagram</h2>
+            <span className="text-xs text-muted-foreground">
               {servers.length} server{servers.length !== 1 ? 's' : ''} &middot; {totalServices} service{totalServices !== 1 ? 's' : ''} &middot; {databases.length} database{databases.length !== 1 ? 's' : ''}
             </span>
           </div>
@@ -1396,76 +1414,47 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
                   nodeNameMap={nodeNameMap}
                   onDelete={handleDeleteConnection}
                   show={showConnectionsList}
-                  onToggle={() => setShowConnectionsList((v) => !v)}
-                  menuRef={connectionsListRef}
+                  onOpenChange={setShowConnectionsList}
                 />
               </>
             )}
-            <div className="relative" ref={showExportMenu ? exportMenuRef : undefined}>
-              <button
-                onClick={() => setShowExportMenu((v) => !v)}
-                className="p-1.5 text-slate-400 hover:text-white rounded"
-                title="Export"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                </svg>
-              </button>
-              {showExportMenu && (
-                <div className="absolute right-0 top-full mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-lg py-1 z-50 min-w-[140px]">
-                  <button onClick={handleExportMermaid} className="w-full text-left px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-700">
-                    Mermaid (.md)
-                  </button>
-                  <button onClick={handleExportPng} className="w-full text-left px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-700">
-                    PNG (.png)
-                  </button>
-                </div>
-              )}
-            </div>
-            <button
+            <ExportMenu onExportMermaid={handleExportMermaid} onExportPng={handleExportPng} />
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => setMode(mode === 'compact' ? 'expanded' : 'compact')}
-              className="p-1.5 text-slate-400 hover:text-white rounded"
               title={mode === 'compact' ? 'Expand' : 'Compact'}
+              aria-label={mode === 'compact' ? 'Expand' : 'Compact'}
             >
               {mode === 'compact' ? (
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                </svg>
+                <Maximize2 className="w-4 h-4" aria-hidden="true" />
               ) : (
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9V4.5M9 9H4.5M9 9L3.5 3.5m11 5.5V4.5m0 4.5h4.5m-4.5 0l5.5-5.5M9 15v4.5M9 15H4.5M9 15l-5.5 5.5m11-5.5v4.5m0-4.5h4.5m-4.5 0l5.5 5.5" />
-                </svg>
+                <Minimize2 className="w-4 h-4" aria-hidden="true" />
               )}
-            </button>
-            <button
-              onClick={() => setMode('fullscreen')}
-              className="p-1.5 text-slate-400 hover:text-white rounded"
-              title="Fullscreen"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-              </svg>
-            </button>
+            </Button>
+            <Button variant="ghost" size="icon" onClick={() => setMode('fullscreen')} title="Fullscreen" aria-label="Fullscreen">
+              <Maximize2 className="w-4 h-4" aria-hidden="true" />
+            </Button>
           </div>
         </div>
-        <div ref={containerRef} className={`${heightClass} rounded-lg overflow-hidden border border-slate-700`}>
+        <div ref={containerRef} className={`${heightClass} rounded-lg overflow-hidden border border-border`}>
           <ReactFlow {...flowProps}>
             <Background color="#334155" gap={20} size={1} />
             <Controls showInteractive={false} position="bottom-left" />
           </ReactFlow>
         </div>
         {edges.length > 0 && (
-          <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
+          <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
             <div className="flex items-center gap-1.5">
-              <span className="w-4 h-0.5 bg-blue-400 inline-block rounded" />
+              <span className="w-4 h-0.5 bg-info inline-block rounded" />
               Auto-inferred
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="w-4 h-0.5 bg-green-400 inline-block rounded" />
+              <span className="w-4 h-0.5 bg-success inline-block rounded" />
               Manual
             </div>
             {canInteract && (
-              <div className="text-slate-500 ml-auto hidden md:block">
+              <div className="text-muted-foreground ml-auto hidden md:block">
                 Hover a node, drag from a side dot to connect.
               </div>
             )}
@@ -1477,18 +1466,190 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
   );
 }
 
+// ==================== Create dialogs (shadcn Dialog forms) ====================
+
+const clusterSchema = z.object({
+  name: z.string().trim().min(1, 'Cluster name is required'),
+});
+type ClusterValues = z.infer<typeof clusterSchema>;
+
+// Collects a cluster name. Cancel (dialog dismiss) = no-op, preserving the
+// original behavior where an empty/cancelled input created nothing.
+function CreateClusterDialog({
+  open,
+  onOpenChange,
+  onSubmit,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (name: string) => Promise<void>;
+}) {
+  const form = useForm<ClusterValues>({
+    resolver: zodResolver(clusterSchema),
+    defaultValues: { name: '' },
+  });
+
+  useEffect(() => {
+    if (open) form.reset({ name: '' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const handleSubmit = async (values: ClusterValues) => {
+    await onSubmit(values.name);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>New Cluster</DialogTitle>
+          <DialogDescription>
+            Group servers into a logical cluster (HA pair, swarm/k8s nodes, a region).
+          </DialogDescription>
+        </DialogHeader>
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
+            <FormField
+              control={form.control}
+              name="name"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Cluster name</FormLabel>
+                  <FormControl>
+                    <Input placeholder='e.g. "Production HA", "EU region"' autoFocus {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={form.formState.isSubmitting}>
+                {form.formState.isSubmitting ? 'Creating...' : 'Create Cluster'}
+              </Button>
+            </div>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+const externalSchema = z.object({
+  label: z.string().trim().min(1, 'Label is required'),
+  // Mirrors the old prompt's 'web' default; styling keys off this value.
+  kind: z.string().trim().min(1, 'Kind is required'),
+});
+type ExternalValues = z.infer<typeof externalSchema>;
+
+// Collects label + kind in a single form (previously two chained inputs).
+// Cancel = no-op.
+function CreateExternalEntityDialog({
+  open,
+  onOpenChange,
+  onSubmit,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (label: string, kind: string) => Promise<void>;
+}) {
+  const form = useForm<ExternalValues>({
+    resolver: zodResolver(externalSchema),
+    defaultValues: { label: '', kind: 'web' },
+  });
+
+  useEffect(() => {
+    if (open) form.reset({ label: '', kind: 'web' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const handleSubmit = async (values: ExternalValues) => {
+    await onSubmit(values.label, values.kind);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Add External Entity</DialogTitle>
+          <DialogDescription>
+            Represent inbound external traffic (a CDN, the public web, a client) on the diagram.
+          </DialogDescription>
+        </DialogHeader>
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
+            <FormField
+              control={form.control}
+              name="label"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Label</FormLabel>
+                  <FormControl>
+                    <Input placeholder='e.g. "Cloudflare", "Web", "Internet"' autoFocus {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="kind"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Kind</FormLabel>
+                  <FormControl>
+                    <Input placeholder="e.g. cloudflare, cdn, web, client" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={form.formState.isSubmitting}>
+                {form.formState.isSubmitting ? 'Adding...' : 'Add Entity'}
+              </Button>
+            </div>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function AddConnectionButton({ onClick }: { onClick: () => void }) {
   return (
-    <button
-      onClick={onClick}
-      className="p-1.5 text-slate-400 hover:text-white rounded"
-      title="Add connection"
-      aria-label="Add connection"
-    >
-      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-      </svg>
-    </button>
+    <Button variant="ghost" size="icon" onClick={onClick} title="Add connection" aria-label="Add connection">
+      <Plus className="w-4 h-4" aria-hidden="true" />
+    </Button>
+  );
+}
+
+// Export dropdown (Mermaid / PNG). Replaces the hand-rolled menu + outside-click
+// listener with a Radix DropdownMenu (Escape + outside-click handled natively).
+function ExportMenu({
+  onExportMermaid,
+  onExportPng,
+}: {
+  onExportMermaid: () => void;
+  onExportPng: () => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" title="Export" aria-label="Export">
+          <Download className="w-4 h-4" aria-hidden="true" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-[140px]">
+        <DropdownMenuItem onSelect={onExportMermaid}>Mermaid (.md)</DropdownMenuItem>
+        <DropdownMenuItem onSelect={onExportPng}>PNG (.png)</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -1496,16 +1657,9 @@ function AddConnectionButton({ onClick }: { onClick: () => void }) {
 // canvas. Used to represent inbound external traffic toward a service.
 function AddExternalEntityButton({ onClick }: { onClick: () => void }) {
   return (
-    <button
-      onClick={onClick}
-      className="p-1.5 text-slate-400 hover:text-white rounded"
-      title="Add external entity"
-      aria-label="Add external entity"
-    >
-      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
-    </button>
+    <Button variant="ghost" size="icon" onClick={onClick} title="Add external entity" aria-label="Add external entity">
+      <Globe className="w-4 h-4" aria-hidden="true" />
+    </Button>
   );
 }
 
@@ -1514,16 +1668,9 @@ function AddExternalEntityButton({ onClick }: { onClick: () => void }) {
 // (or by selection in a separate flow — see docs/guides/topology.md).
 function NewClusterButton({ onClick }: { onClick: () => void }) {
   return (
-    <button
-      onClick={onClick}
-      className="p-1.5 text-slate-400 hover:text-white rounded"
-      title="New cluster"
-      aria-label="New cluster"
-    >
-      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14-4H5m14 8H5m14 4H5" />
-      </svg>
-    </button>
+    <Button variant="ghost" size="icon" onClick={onClick} title="New cluster" aria-label="New cluster">
+      <Layers className="w-4 h-4" aria-hidden="true" />
+    </Button>
   );
 }
 
@@ -1532,15 +1679,13 @@ function ConnectionsListButton({
   nodeNameMap,
   onDelete,
   show,
-  onToggle,
-  menuRef,
+  onOpenChange,
 }: {
   connections: ServiceConnection[];
   nodeNameMap: Map<string, string>;
   onDelete: (id: string) => void;
   show: boolean;
-  onToggle: () => void;
-  menuRef: React.Ref<HTMLDivElement>;
+  onOpenChange: (open: boolean) => void;
 }) {
   if (connections.length === 0) return null;
 
@@ -1548,48 +1693,39 @@ function ConnectionsListButton({
     nodeNameMap.get(`${type}:${id}`) || id.slice(0, 8);
 
   return (
-    <div className="relative" ref={show ? menuRef : undefined}>
-      <button
-        onClick={onToggle}
-        className="p-1.5 text-slate-400 hover:text-white rounded"
-        title="Manage connections"
-      >
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-        </svg>
-      </button>
-      {show && (
-        <div className="absolute right-0 top-full mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-lg py-1 z-50 min-w-[240px] max-h-[300px] overflow-y-auto">
-          <div className="px-3 py-1.5 text-xs font-medium text-slate-400 border-b border-slate-700">
-            Manual Connections ({connections.length})
-          </div>
-          {connections.map((conn) => (
-            <div key={conn.id} className="flex items-center justify-between px-3 py-1.5 hover:bg-slate-700 group">
-              <div className="flex items-center gap-1 text-sm text-slate-300 min-w-0">
-                <span className="truncate max-w-[80px]" title={resolveName(conn.sourceType, conn.sourceId)}>
-                  {resolveName(conn.sourceType, conn.sourceId)}
-                </span>
-                <svg className="w-3 h-3 text-slate-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
-                </svg>
-                <span className="truncate max-w-[80px]" title={resolveName(conn.targetType, conn.targetId)}>
-                  {resolveName(conn.targetType, conn.targetId)}
-                </span>
-              </div>
-              <button
-                onClick={() => onDelete(conn.id)}
-                className="p-0.5 text-slate-500 hover:text-red-400 rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-2"
-                title="Delete connection"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-              </button>
-            </div>
-          ))}
+    <DropdownMenu open={show} onOpenChange={onOpenChange}>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" title="Manage connections" aria-label="Manage connections">
+          <Link2 className="w-4 h-4" aria-hidden="true" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-[240px] max-h-[300px] overflow-y-auto">
+        <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground border-b border-border">
+          Manual Connections ({connections.length})
         </div>
-      )}
-    </div>
+        {connections.map((conn) => (
+          <div key={conn.id} className="flex items-center justify-between px-2 py-1.5 rounded-sm hover:bg-accent group">
+            <div className="flex items-center gap-1 text-sm text-foreground min-w-0">
+              <span className="truncate max-w-[80px]" title={resolveName(conn.sourceType, conn.sourceId)}>
+                {resolveName(conn.sourceType, conn.sourceId)}
+              </span>
+              <ArrowRight className="w-3 h-3 text-muted-foreground shrink-0" aria-hidden="true" />
+              <span className="truncate max-w-[80px]" title={resolveName(conn.targetType, conn.targetId)}>
+                {resolveName(conn.targetType, conn.targetId)}
+              </span>
+            </div>
+            <button
+              onClick={() => onDelete(conn.id)}
+              className="p-0.5 text-muted-foreground hover:text-destructive rounded opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-2"
+              title="Delete connection"
+              aria-label="Delete connection"
+            >
+              <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+            </button>
+          </div>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -1604,42 +1740,16 @@ function ToolbarButtons({
 }) {
   return (
     <>
-      <button
-        onClick={onFitView}
-        className="p-1.5 text-slate-400 hover:text-white rounded"
-        title="Fit to view"
-      >
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-        </svg>
-      </button>
-      <button
-        onClick={onExpandAll}
-        className="p-1.5 text-slate-400 hover:text-white rounded"
-        title="Expand all servers"
-      >
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-      <button
-        onClick={onCollapseAll}
-        className="p-1.5 text-slate-400 hover:text-white rounded"
-        title="Collapse all servers"
-      >
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
-        </svg>
-      </button>
+      <Button variant="ghost" size="icon" onClick={onFitView} title="Fit to view" aria-label="Fit to view">
+        <Search className="w-4 h-4" aria-hidden="true" />
+      </Button>
+      <Button variant="ghost" size="icon" onClick={onExpandAll} title="Expand all servers" aria-label="Expand all servers">
+        <ChevronDown className="w-4 h-4" aria-hidden="true" />
+      </Button>
+      <Button variant="ghost" size="icon" onClick={onCollapseAll} title="Collapse all servers" aria-label="Collapse all servers">
+        <ChevronUp className="w-4 h-4" aria-hidden="true" />
+      </Button>
     </>
-  );
-}
-
-function NetworkIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
-    </svg>
   );
 }
 

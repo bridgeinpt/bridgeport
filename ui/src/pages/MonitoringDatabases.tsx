@@ -14,7 +14,18 @@ import ChartCard from '../components/monitoring/ChartCard';
 import ChartCardSkeleton from '../components/monitoring/ChartCardSkeleton';
 import TimeRangeSelector from '../components/monitoring/TimeRangeSelector';
 import AutoRefreshToggle from '../components/monitoring/AutoRefreshToggle';
-import EmptyState from '../components/EmptyState';
+import { EntityFilterPills } from '@/components/monitoring/EntityFilterPills';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Card } from '@/components/ui/card';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { DatabaseIcon } from '../components/Icons';
 import { useMetricResource } from '../hooks/useMetricResource';
 import { mergeDatabaseHistory } from '../lib/metricsMerge';
@@ -305,7 +316,7 @@ export default function MonitoringDatabases() {
   if (!selectedEnvironment) {
     return (
       <div className="p-6">
-        <p className="text-slate-400">Select an environment to view database monitoring</p>
+        <p className="text-muted-foreground">Select an environment to view database monitoring</p>
       </div>
     );
   }
@@ -360,22 +371,18 @@ export default function MonitoringDatabases() {
       </div>
 
       {/* Type Tabs */}
-      <div className="flex border-b border-slate-700 mb-6">
-        {typeGroups.map((group) => (
-          <button
-            key={group.type}
-            onClick={() => handleTypeChange(group.type)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${
-              activeType === group.type
-                ? 'border-brand-600 text-white'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            {group.typeName}
-            <span className="ml-1.5 text-xs text-slate-500">({group.databases.length})</span>
-          </button>
-        ))}
-      </div>
+      {typeGroups.length > 0 && (
+        <Tabs value={activeType} onValueChange={handleTypeChange} className="mb-6">
+          <TabsList variant="line">
+            {typeGroups.map((group) => (
+              <TabsTrigger key={group.type} value={group.type}>
+                {group.typeName}
+                <span className="ml-1.5 text-xs text-muted-foreground">({group.databases.length})</span>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      )}
 
       {/* Controls: Time Range + Database Filter */}
       <div className="flex items-center flex-wrap gap-4 mb-6">
@@ -386,30 +393,13 @@ export default function MonitoringDatabases() {
 
         {allDatabasesForType.length > 1 && (
           <div className="flex items-center gap-2">
-            <span className="text-sm text-slate-400">Databases:</span>
-            <div className="flex flex-wrap gap-1">
-              {allDatabasesForType.map((db) => (
-                <button
-                  key={db.id}
-                  onClick={() => handleFilterToggle(db.id)}
-                  className={`px-2 py-1 text-xs rounded-full transition-colors ${
-                    filterSet.has(db.id)
-                      ? 'bg-brand-600 text-white'
-                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                  }`}
-                >
-                  {db.name}
-                </button>
-              ))}
-              {filterSet.size > 0 && (
-                <button
-                  onClick={() => setMonitoringDatabaseFilter([])}
-                  className="px-2 py-1 text-xs rounded-full bg-slate-800 text-slate-400 hover:bg-slate-700"
-                >
-                  Clear
-                </button>
-              )}
-            </div>
+            <span className="text-sm text-muted-foreground">Databases:</span>
+            <EntityFilterPills
+              items={allDatabasesForType}
+              selected={monitoringDatabaseFilter}
+              onToggle={handleFilterToggle}
+              onClear={filterSet.size > 0 ? () => setMonitoringDatabaseFilter([]) : undefined}
+            />
           </div>
         )}
       </div>
@@ -455,34 +445,34 @@ export default function MonitoringDatabases() {
             return perDb.map(({ dbName, rows }) => {
               const columns = Object.keys(rows[0]);
               return (
-                <div key={`${meta.name}-${dbName}`} className="card mt-6">
-                  <h3 className="text-sm font-medium text-white mb-1">{meta.displayName}</h3>
+                <Card key={`${meta.name}-${dbName}`} className="mt-6 gap-0 p-4">
+                  <h3 className="text-sm font-medium text-foreground mb-1">{meta.displayName}</h3>
                   {filteredDatabases.length > 1 && (
-                    <p className="text-xs text-slate-500 mb-3">{dbName}</p>
+                    <p className="text-xs text-muted-foreground mb-3">{dbName}</p>
                   )}
                   <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
                           {columns.map(col => (
-                            <th key={col} className="pb-3 pr-4 font-medium capitalize">{col}</th>
+                            <TableHead key={col} className="capitalize">{col}</TableHead>
                           ))}
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-700">
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
                         {rows.map((row, i) => (
-                          <tr key={i} className="text-slate-300">
+                          <TableRow key={i}>
                             {columns.map(col => (
-                              <td key={col} className="py-3 pr-4 text-sm font-mono">
+                              <TableCell key={col} className="text-sm font-mono">
                                 {formatTableValue(row[col], col.toLowerCase().includes('size') ? 'bytes' : meta.unit)}
-                              </td>
+                              </TableCell>
                             ))}
-                          </tr>
+                          </TableRow>
                         ))}
-                      </tbody>
-                    </table>
+                      </TableBody>
+                    </Table>
                   </div>
-                </div>
+                </Card>
               );
             });
           })}

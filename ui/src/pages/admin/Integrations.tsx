@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { useAuthStore, isAdmin } from '../../lib/store';
 import {
   listApiTokens,
@@ -17,7 +21,48 @@ import {
   type UserRole,
   type Environment,
 } from '../../lib/api';
-import { TrashIcon, PencilIcon } from '../../components/Icons';
+import { getErrorMessage } from '@/lib/helpers';
+import { toast } from '@/components/Toast';
+import { useConfirm } from '@/hooks/useConfirm';
+import { Section } from '@/components/ui/page-header';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { CopyButton } from '@/components/ui/copy-button';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form';
+import { KeyRound, Pencil, Trash2, Users as UsersIcon } from 'lucide-react';
 
 const ROLE_LABELS: Record<UserRole, string> = {
   admin: 'Admin',
@@ -25,11 +70,12 @@ const ROLE_LABELS: Record<UserRole, string> = {
   viewer: 'Viewer',
 };
 
-const ROLE_BADGE: Record<UserRole, string> = {
-  admin: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-  operator: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-  viewer: 'bg-slate-500/20 text-slate-400 border-slate-500/30',
-};
+/** Role badge color, mapped onto the shared status variants. */
+function roleVariant(role: UserRole): 'info' | 'warning' | 'neutral' {
+  if (role === 'admin') return 'warning';
+  if (role === 'operator') return 'info';
+  return 'neutral';
+}
 
 function roleLessThanOrEqual(child: UserRole, parent: UserRole): boolean {
   const rank: Record<UserRole, number> = { admin: 3, operator: 2, viewer: 1 };
@@ -38,7 +84,7 @@ function roleLessThanOrEqual(child: UserRole, parent: UserRole): boolean {
 
 export default function Integrations() {
   const { user: currentUser } = useAuthStore();
-  const [error, setError] = useState<string | null>(null);
+  const confirm = useConfirm();
   const [loading, setLoading] = useState(true);
 
   const [tokens, setTokens] = useState<ApiTokenRecord[]>([]);
@@ -59,7 +105,6 @@ export default function Integrations() {
 
   async function loadAll() {
     setLoading(true);
-    setError(null);
     try {
       const [t, s, u, e] = await Promise.all([
         listApiTokens(),
@@ -72,75 +117,77 @@ export default function Integrations() {
       setUsers(u.users);
       setEnvironments(e.environments);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load');
+      toast.error(getErrorMessage(err, 'Failed to load'));
     } finally {
       setLoading(false);
     }
   }
 
   async function handleRevokeToken(token: ApiTokenRecord) {
-    if (!confirm(`Revoke token "${token.name}"? Any tool using it will stop working immediately.`)) {
-      return;
-    }
+    const ok = await confirm({
+      title: 'Revoke token?',
+      description: `Revoke token "${token.name}"? Any tool using it will stop working immediately.`,
+      confirmText: 'Revoke',
+      destructive: true,
+    });
+    if (!ok) return;
     try {
       await deleteApiToken(token.id);
       setTokens((prev) => prev.filter((t) => t.id !== token.id));
+      toast.success('Token revoked');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to revoke token');
+      toast.error(getErrorMessage(err, 'Failed to revoke token'));
     }
   }
 
   async function handleDeleteSa(sa: ServiceAccount) {
     const tokenCount = sa._count?.apiTokens ?? 0;
-    const message = tokenCount
+    const description = tokenCount
       ? `Delete service account "${sa.name}"? This will revoke ${tokenCount} token${tokenCount === 1 ? '' : 's'} immediately.`
       : `Delete service account "${sa.name}"?`;
-    if (!confirm(message)) return;
+    const ok = await confirm({
+      title: 'Delete service account?',
+      description,
+      confirmText: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
     try {
       await deleteServiceAccount(sa.id);
       setAccounts((prev) => prev.filter((a) => a.id !== sa.id));
       // Tokens are cascaded server-side; reflect that in UI too.
       setTokens((prev) => prev.filter((t) => t.serviceAccountId !== sa.id));
+      toast.success('Service account deleted');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete service account');
+      toast.error(getErrorMessage(err, 'Failed to delete service account'));
     }
   }
 
   if (!isAdmin(currentUser)) {
     return (
       <div className="p-6">
-        <div className="panel text-center py-12">
-          <p className="text-red-400">Access denied. Admin privileges required.</p>
-        </div>
+        <Card className="py-12 text-center">
+          <p className="text-destructive">Access denied. Admin privileges required.</p>
+        </Card>
       </div>
     );
   }
 
   if (loading) {
     return (
-      <div className="p-6">
-        <div className="animate-pulse space-y-4">
-          <div className="h-8 w-48 bg-slate-700 rounded" />
-          <div className="h-32 bg-slate-800 rounded-lg" />
-          <div className="h-32 bg-slate-800 rounded-lg" />
-        </div>
+      <div className="p-6 space-y-4">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-32 rounded-lg" />
+        <Skeleton className="h-32 rounded-lg" />
       </div>
     );
   }
 
   return (
     <div className="p-6 space-y-8">
-      <div>
-        <p className="text-slate-400 text-sm">
-          Manage credentials and connections for tools that talk to BRIDGEPORT.
-        </p>
-      </div>
-
-      {error && (
-        <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
-          <p className="text-red-400">{error}</p>
-        </div>
-      )}
+      <p className="text-sm text-muted-foreground">
+        Manage credentials and connections for tools that talk to BRIDGEPORT.
+      </p>
 
       <ApiTokensSection
         tokens={tokens}
@@ -159,57 +206,63 @@ export default function Integrations() {
         onDelete={handleDeleteSa}
       />
 
-      <ComingSoonSection
+      <Section
         title="Webhooks"
         description="Outbound HTTP callbacks when events happen in BRIDGEPORT."
-      />
-      <ComingSoonSection
+      >
+        <p className="text-sm text-muted-foreground">
+          Global notification webhooks are configured under{' '}
+          <Link to="/admin/notifications" className="text-primary hover:underline">
+            Notification Settings
+          </Link>
+          . Per-environment signed webhook subscriptions (with delivery history) are also available
+          via the environment webhooks API.
+        </p>
+      </Section>
+
+      <Section
         title="OAuth Apps"
         description="Let third-party tools sign users in via BRIDGEPORT."
+      >
+        <Badge variant="neutral">Coming soon</Badge>
+      </Section>
+
+      <CreateTokenModal
+        open={showCreateToken}
+        users={users}
+        accounts={accounts}
+        environments={environments}
+        currentUserRole={currentUser?.role ?? 'viewer'}
+        onClose={() => setShowCreateToken(false)}
+        onCreated={(token, record) => {
+          setNewTokenValue(token);
+          // Refresh list so the new token shows with its scope details.
+          void loadAll();
+          setShowCreateToken(false);
+          // record is unused beyond closing the modal but kept for future extension
+          void record;
+        }}
       />
 
-      {showCreateToken && (
-        <CreateTokenModal
-          users={users}
-          accounts={accounts}
-          environments={environments}
-          currentUserRole={currentUser?.role ?? 'viewer'}
-          onClose={() => setShowCreateToken(false)}
-          onCreated={(token, record) => {
-            setNewTokenValue(token);
-            // Refresh list so the new token shows with its scope details.
-            void loadAll();
-            setShowCreateToken(false);
-            // record is unused beyond closing the modal but kept for future extension
-            void record;
-          }}
-        />
-      )}
+      <TokenRevealModal token={newTokenValue} onClose={() => setNewTokenValue(null)} />
 
-      {newTokenValue && (
-        <TokenRevealModal token={newTokenValue} onClose={() => setNewTokenValue(null)} />
-      )}
+      <CreateServiceAccountModal
+        open={showCreateSa}
+        onClose={() => setShowCreateSa(false)}
+        onCreated={(sa) => {
+          setAccounts((prev) => [sa, ...prev]);
+          setShowCreateSa(false);
+        }}
+      />
 
-      {showCreateSa && (
-        <CreateServiceAccountModal
-          onClose={() => setShowCreateSa(false)}
-          onCreated={(sa) => {
-            setAccounts((prev) => [sa, ...prev]);
-            setShowCreateSa(false);
-          }}
-        />
-      )}
-
-      {editingSa && (
-        <EditServiceAccountModal
-          account={editingSa}
-          onClose={() => setEditingSa(null)}
-          onUpdated={(sa) => {
-            setAccounts((prev) => prev.map((a) => (a.id === sa.id ? sa : a)));
-            setEditingSa(null);
-          }}
-        />
-      )}
+      <EditServiceAccountModal
+        account={editingSa}
+        onClose={() => setEditingSa(null)}
+        onUpdated={(sa) => {
+          setAccounts((prev) => prev.map((a) => (a.id === sa.id ? sa : a)));
+          setEditingSa(null);
+        }}
+      />
     </div>
   );
 }
@@ -241,23 +294,13 @@ function ApiTokensSection({
   void currentUserRole;
 
   return (
-    <section>
-      <div className="flex items-center justify-between mb-3">
-        <div>
-          <h2 className="text-base font-semibold text-white">API Tokens</h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Bearer credentials for scripts, CI/CD, and other tools.
-          </p>
-        </div>
-        <button className="btn btn-primary" onClick={onCreate}>
-          New Token
-        </button>
-      </div>
-
+    <Section
+      title="API Tokens"
+      description="Bearer credentials for scripts, CI/CD, and other tools."
+      actions={<Button onClick={onCreate}>New Token</Button>}
+    >
       {tokens.length === 0 ? (
-        <div className="panel text-center py-8">
-          <p className="text-slate-400 text-sm">No API tokens yet.</p>
-        </div>
+        <EmptyState icon={KeyRound} message="No API tokens yet." />
       ) : (
         <div className="space-y-2">
           {tokens.map((t) => (
@@ -265,7 +308,7 @@ function ApiTokensSection({
           ))}
         </div>
       )}
-    </section>
+    </Section>
   );
 }
 
@@ -278,37 +321,31 @@ function TokenRow({ token, onRevoke }: { token: ApiTokenRecord; onRevoke: () => 
       : 'Unknown';
 
   return (
-    <div className="panel">
+    <Card className="p-4">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="font-medium text-white truncate">{token.name}</h3>
-            <span className={`px-2 py-0.5 text-[10px] rounded-full border ${ROLE_BADGE[token.role]}`}>
-              {ROLE_LABELS[token.role]}
-            </span>
-            {expired && (
-              <span className="px-2 py-0.5 text-[10px] rounded-full bg-red-500/20 text-red-400 border border-red-500/30">
-                Expired
-              </span>
-            )}
-            {token.serviceAccount?.disabled && (
-              <span className="px-2 py-0.5 text-[10px] rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                Owner disabled
-              </span>
-            )}
+            <h3 className="font-medium text-foreground truncate">{token.name}</h3>
+            <Badge variant={roleVariant(token.role)}>{ROLE_LABELS[token.role]}</Badge>
+            {expired && <Badge variant="destructive">Expired</Badge>}
+            {token.serviceAccount?.disabled && <Badge variant="warning">Owner disabled</Badge>}
           </div>
-          <div className="text-xs text-slate-400 mt-1 space-x-3">
+          <div className="text-xs text-muted-foreground mt-1 space-x-3">
             <span>Owner: {ownerLabel}</span>
-            <span>Scope: {token.allEnvironments
-              ? 'All environments'
-              : token.environments.map((e) => e.environment.name).join(', ') || '—'}
+            <span>
+              Scope:{' '}
+              {token.allEnvironments
+                ? 'All environments'
+                : token.environments.map((e) => e.environment.name).join(', ') || '—'}
             </span>
           </div>
-          <div className="text-xs text-slate-500 mt-1 space-x-3">
+          <div className="text-xs text-muted-foreground mt-1 space-x-3">
             {token.tokenPrefix && <span className="font-mono">{token.tokenPrefix}…</span>}
             <span>Created {formatDistanceToNow(new Date(token.createdAt), { addSuffix: true })}</span>
             {token.lastUsedAt ? (
-              <span>Last used {formatDistanceToNow(new Date(token.lastUsedAt), { addSuffix: true })}</span>
+              <span>
+                Last used {formatDistanceToNow(new Date(token.lastUsedAt), { addSuffix: true })}
+              </span>
             ) : (
               <span>Never used</span>
             )}
@@ -320,22 +357,35 @@ function TokenRow({ token, onRevoke }: { token: ApiTokenRecord; onRevoke: () => 
             )}
           </div>
         </div>
-        <button
+        <Button
+          variant="ghost"
+          size="icon-sm"
           onClick={onRevoke}
-          className="p-1.5 text-slate-400 hover:text-red-400 rounded"
           title="Revoke"
+          className="text-muted-foreground hover:text-destructive"
         >
-          <TrashIcon className="w-4 h-4" />
-        </button>
+          <Trash2 className="size-4" />
+        </Button>
       </div>
-    </div>
+    </Card>
   );
 }
 
 // ============================================================
 // Create Token Modal
 // ============================================================
+const createTokenSchema = z.object({
+  name: z.string().trim().min(1, 'Name is required').max(100),
+  expiresInDays: z
+    .number({ error: 'Enter a number of days' })
+    .int()
+    .min(1, 'At least 1 day')
+    .max(365, 'Max 365 days'),
+});
+type CreateTokenValues = z.infer<typeof createTokenSchema>;
+
 function CreateTokenModal({
+  open,
   users,
   accounts,
   environments,
@@ -343,6 +393,7 @@ function CreateTokenModal({
   onClose,
   onCreated,
 }: {
+  open: boolean;
   users: User[];
   accounts: ServiceAccount[];
   environments: Environment[];
@@ -350,16 +401,33 @@ function CreateTokenModal({
   onClose: () => void;
   onCreated: (token: string, record: unknown) => void;
 }) {
-  const [name, setName] = useState('');
   const [ownerKind, setOwnerKind] = useState<'user' | 'service-account'>('service-account');
   const [ownerUserId, setOwnerUserId] = useState('');
   const [ownerSaId, setOwnerSaId] = useState('');
   const [role, setRole] = useState<UserRole>('viewer');
   const [scopeKind, setScopeKind] = useState<'all' | 'specific'>('all');
   const [envIds, setEnvIds] = useState<Set<string>>(new Set());
-  const [expiresInDays, setExpiresInDays] = useState(90);
-  const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+
+  const form = useForm<CreateTokenValues>({
+    resolver: zodResolver(createTokenSchema),
+    defaultValues: { name: '', expiresInDays: 90 },
+  });
+
+  // Reset all state whenever the modal opens.
+  useEffect(() => {
+    if (open) {
+      form.reset({ name: '', expiresInDays: 90 });
+      setOwnerKind('service-account');
+      setOwnerUserId('');
+      setOwnerSaId('');
+      setRole('viewer');
+      setScopeKind('all');
+      setEnvIds(new Set());
+      setFormError(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   // Compute the role ceiling. The minted token's role can't exceed the owner's,
   // and the admin can't grant a role above their own (UI enforcement).
@@ -370,9 +438,10 @@ function CreateTokenModal({
     return (accounts.find((a) => a.id === ownerSaId)?.role ?? null) as UserRole | null;
   }, [ownerKind, ownerUserId, ownerSaId, users, accounts]);
 
-  const roleCeiling: UserRole = ownerRole && roleLessThanOrEqual(ownerRole, currentUserRole) ? ownerRole : currentUserRole;
-  const availableRoles: UserRole[] = (['viewer', 'operator', 'admin'] as UserRole[]).filter(
-    (r) => roleLessThanOrEqual(r, roleCeiling)
+  const roleCeiling: UserRole =
+    ownerRole && roleLessThanOrEqual(ownerRole, currentUserRole) ? ownerRole : currentUserRole;
+  const availableRoles: UserRole[] = (['viewer', 'operator', 'admin'] as UserRole[]).filter((r) =>
+    roleLessThanOrEqual(r, roleCeiling)
   );
 
   // If current role choice is no longer allowed, snap down.
@@ -382,8 +451,7 @@ function CreateTokenModal({
     }
   }, [availableRoles, role]);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function onSubmit(values: CreateTokenValues) {
     setFormError(null);
 
     if (ownerKind === 'user' && !ownerUserId) {
@@ -399,251 +467,245 @@ function CreateTokenModal({
       return;
     }
 
-    setSubmitting(true);
     try {
       const res = await createApiToken({
-        name: name.trim(),
+        name: values.name.trim(),
         ownerUserId: ownerKind === 'user' ? ownerUserId : undefined,
         ownerServiceAccountId: ownerKind === 'service-account' ? ownerSaId : undefined,
         role,
         allEnvironments: scopeKind === 'all',
         environmentIds: scopeKind === 'specific' ? Array.from(envIds) : undefined,
-        expiresInDays,
+        expiresInDays: values.expiresInDays,
       });
       onCreated(res.token, res.tokenRecord);
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Failed to create token');
-    } finally {
-      setSubmitting(false);
+      setFormError(getErrorMessage(err, 'Failed to create token'));
     }
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
-        <h3 className="text-lg font-semibold text-white mb-4">New API Token</h3>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm text-slate-400 mb-1">Name</label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="ci-deploy-staging"
-              className="input"
-              required
-              minLength={1}
-              maxLength={100}
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>New API Token</DialogTitle>
+        </DialogHeader>
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            <FormField
+              control={form.control}
+              name="name"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Name</FormLabel>
+                  <FormControl>
+                    <Input placeholder="ci-deploy-staging" maxLength={100} {...field} />
+                  </FormControl>
+                  <FormDescription>A label so you can identify this token later.</FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
             />
-            <p className="text-xs text-slate-500 mt-1">A label so you can identify this token later.</p>
-          </div>
 
-          <div>
-            <label className="block text-sm text-slate-400 mb-1">Owner type</label>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setOwnerKind('service-account')}
-                className={`flex-1 px-3 py-2 rounded border text-sm ${
-                  ownerKind === 'service-account'
-                    ? 'border-brand-600 bg-brand-600/10 text-white'
-                    : 'border-slate-700 text-slate-400 hover:border-slate-600'
-                }`}
-              >
-                Service account
-              </button>
-              <button
-                type="button"
-                onClick={() => setOwnerKind('user')}
-                className={`flex-1 px-3 py-2 rounded border text-sm ${
-                  ownerKind === 'user'
-                    ? 'border-brand-600 bg-brand-600/10 text-white'
-                    : 'border-slate-700 text-slate-400 hover:border-slate-600'
-                }`}
-              >
-                User
-              </button>
-            </div>
-            <p className="text-xs text-slate-500 mt-1">
-              Service accounts survive admin turnover — recommended for tools and pipelines.
-            </p>
-          </div>
-
-          {ownerKind === 'service-account' ? (
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">Service account</label>
-              <select
-                value={ownerSaId}
-                onChange={(e) => setOwnerSaId(e.target.value)}
-                className="input"
-                required
-              >
-                <option value="">Choose one…</option>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id} disabled={a.disabled}>
-                    {a.name} ({ROLE_LABELS[a.role]}){a.disabled ? ' — disabled' : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : (
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">User</label>
-              <select
-                value={ownerUserId}
-                onChange={(e) => setOwnerUserId(e.target.value)}
-                className="input"
-                required
-              >
-                <option value="">Choose one…</option>
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name || u.email} ({ROLE_LABELS[u.role]})
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          <div>
-            <label className="block text-sm text-slate-400 mb-1">Role</label>
-            <select
-              value={role}
-              onChange={(e) => setRole(e.target.value as UserRole)}
-              className="input"
-              disabled={availableRoles.length === 0}
-            >
-              {availableRoles.map((r) => (
-                <option key={r} value={r}>
-                  {ROLE_LABELS[r]}
-                </option>
-              ))}
-            </select>
-            {ownerRole && (
-              <p className="text-xs text-slate-500 mt-1">
-                Capped at the owner's role ({ROLE_LABELS[ownerRole]}).
-              </p>
-            )}
-          </div>
-
-          <div>
-            <label className="block text-sm text-slate-400 mb-2">Environment scope</label>
             <div className="space-y-2">
-              <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-                <input
-                  type="radio"
-                  name="scope"
-                  checked={scopeKind === 'all'}
-                  onChange={() => setScopeKind('all')}
-                />
-                All environments
-              </label>
-              <label className="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-                <input
-                  type="radio"
-                  name="scope"
-                  checked={scopeKind === 'specific'}
-                  onChange={() => setScopeKind('specific')}
-                />
-                Specific environments
-              </label>
+              <Label>Owner type</Label>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant={ownerKind === 'service-account' ? 'default' : 'outline'}
+                  className="flex-1"
+                  onClick={() => setOwnerKind('service-account')}
+                >
+                  Service account
+                </Button>
+                <Button
+                  type="button"
+                  variant={ownerKind === 'user' ? 'default' : 'outline'}
+                  className="flex-1"
+                  onClick={() => setOwnerKind('user')}
+                >
+                  User
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Service accounts survive admin turnover — recommended for tools and pipelines.
+              </p>
             </div>
-            {scopeKind === 'specific' && (
-              <div className="mt-2 border border-slate-700 rounded p-2 max-h-40 overflow-y-auto space-y-1">
-                {environments.length === 0 ? (
-                  <p className="text-xs text-slate-500 px-1">No environments exist yet.</p>
-                ) : (
-                  environments.map((env) => (
-                    <label
-                      key={env.id}
-                      className="flex items-center gap-2 text-sm text-slate-300 px-1 py-0.5 hover:bg-slate-800 rounded cursor-pointer"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={envIds.has(env.id)}
-                        onChange={(e) => {
-                          const next = new Set(envIds);
-                          if (e.target.checked) next.add(env.id);
-                          else next.delete(env.id);
-                          setEnvIds(next);
-                        }}
-                      />
-                      {env.name}
-                    </label>
-                  ))
-                )}
+
+            {ownerKind === 'service-account' ? (
+              <div className="space-y-2">
+                <Label>Service account</Label>
+                <Select value={ownerSaId} onValueChange={setOwnerSaId}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Choose one…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {accounts.map((a) => (
+                      <SelectItem key={a.id} value={a.id} disabled={a.disabled}>
+                        {a.name} ({ROLE_LABELS[a.role]})
+                        {a.disabled ? ' — disabled' : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label>User</Label>
+                <Select value={ownerUserId} onValueChange={setOwnerUserId}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Choose one…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {users.map((u) => (
+                      <SelectItem key={u.id} value={u.id}>
+                        {u.name || u.email} ({ROLE_LABELS[u.role]})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             )}
-          </div>
 
-          <div>
-            <label className="block text-sm text-slate-400 mb-1">Expires in (days)</label>
-            <input
-              type="number"
-              value={expiresInDays}
-              onChange={(e) => setExpiresInDays(Number(e.target.value))}
-              min={1}
-              max={365}
-              className="input"
-              required
-            />
-            <p className="text-xs text-slate-500 mt-1">Max 365 days. Tokens cannot live forever.</p>
-          </div>
-
-          {formError && (
-            <div className="p-3 bg-red-500/10 border border-red-500/30 rounded text-red-400 text-sm">
-              {formError}
+            <div className="space-y-2">
+              <Label>Role</Label>
+              <Select
+                value={role}
+                onValueChange={(v) => setRole(v as UserRole)}
+                disabled={availableRoles.length === 0}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select a role" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableRoles.map((r) => (
+                    <SelectItem key={r} value={r}>
+                      {ROLE_LABELS[r]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {ownerRole && (
+                <p className="text-xs text-muted-foreground">
+                  Capped at the owner's role ({ROLE_LABELS[ownerRole]}).
+                </p>
+              )}
             </div>
-          )}
 
-          <div className="flex gap-2 justify-end pt-2">
-            <button type="button" className="btn btn-ghost" onClick={onClose}>
-              Cancel
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={submitting}>
-              {submitting ? 'Creating…' : 'Create Token'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+            <div className="space-y-2">
+              <Label>Environment scope</Label>
+              <RadioGroup
+                value={scopeKind}
+                onValueChange={(v) => setScopeKind(v as 'all' | 'specific')}
+                className="gap-2"
+              >
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem value="all" id="scope-all" />
+                  <Label htmlFor="scope-all" className="font-normal cursor-pointer">
+                    All environments
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <RadioGroupItem value="specific" id="scope-specific" />
+                  <Label htmlFor="scope-specific" className="font-normal cursor-pointer">
+                    Specific environments
+                  </Label>
+                </div>
+              </RadioGroup>
+              {scopeKind === 'specific' && (
+                <div className="mt-2 border rounded p-2 max-h-40 overflow-y-auto space-y-1">
+                  {environments.length === 0 ? (
+                    <p className="text-xs text-muted-foreground px-1">No environments exist yet.</p>
+                  ) : (
+                    environments.map((env) => (
+                      <Label
+                        key={env.id}
+                        htmlFor={`env-${env.id}`}
+                        className="flex items-center gap-2 font-normal px-1 py-1 hover:bg-accent rounded cursor-pointer"
+                      >
+                        <Checkbox
+                          id={`env-${env.id}`}
+                          checked={envIds.has(env.id)}
+                          onCheckedChange={(checked) => {
+                            const next = new Set(envIds);
+                            if (checked) next.add(env.id);
+                            else next.delete(env.id);
+                            setEnvIds(next);
+                          }}
+                        />
+                        {env.name}
+                      </Label>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+
+            <FormField
+              control={form.control}
+              name="expiresInDays"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Expires in (days)</FormLabel>
+                  <FormControl>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={365}
+                      value={Number.isNaN(field.value) ? '' : field.value}
+                      onChange={(e) => field.onChange(e.target.valueAsNumber)}
+                      onBlur={field.onBlur}
+                      name={field.name}
+                      ref={field.ref}
+                    />
+                  </FormControl>
+                  <FormDescription>Max 365 days. Tokens cannot live forever.</FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            {formError && (
+              <Alert variant="destructive">
+                <AlertDescription>{formError}</AlertDescription>
+              </Alert>
+            )}
+
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={form.formState.isSubmitting}>
+                {form.formState.isSubmitting ? 'Creating…' : 'Create Token'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
-function TokenRevealModal({ token, onClose }: { token: string; onClose: () => void }) {
-  const [copied, setCopied] = useState(false);
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(token);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // ignore
-    }
-  }
-
+function TokenRevealModal({ token, onClose }: { token: string | null; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-lg p-6">
-        <h3 className="text-lg font-semibold text-white mb-2">Token Created</h3>
-        <p className="text-sm text-amber-400 mb-3">
-          Copy this token now. It will not be shown again.
-        </p>
-        <div className="bg-slate-950 border border-slate-700 rounded p-3 font-mono text-xs text-slate-200 break-all">
-          {token}
+    <Dialog open={token !== null} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Token Created</DialogTitle>
+          <DialogDescription className="text-warning">
+            Copy this token now. It will not be shown again.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex items-start gap-2">
+          <div className="flex-1 bg-muted border rounded p-3 font-mono text-xs text-foreground break-all">
+            {token}
+          </div>
+          {token && <CopyButton value={token} />}
         </div>
-        <div className="flex gap-2 justify-end mt-4">
-          <button className="btn btn-ghost" onClick={copy}>
-            {copied ? 'Copied' : 'Copy'}
-          </button>
-          <button className="btn btn-primary" onClick={onClose}>
-            Done
-          </button>
-        </div>
-      </div>
-    </div>
+        <DialogFooter>
+          <Button onClick={onClose}>Done</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -662,272 +724,308 @@ function ServiceAccountsSection({
   onDelete: (sa: ServiceAccount) => void;
 }) {
   return (
-    <section>
-      <div className="flex items-center justify-between mb-3">
-        <div>
-          <h2 className="text-base font-semibold text-white">Service Accounts</h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Machine identities for tools. Tokens minted against a service account survive owner turnover.
-          </p>
-        </div>
-        <button className="btn btn-primary" onClick={onCreate}>
-          New Service Account
-        </button>
-      </div>
-
+    <Section
+      title="Service Accounts"
+      description="Machine identities for tools. Tokens minted against a service account survive owner turnover."
+      actions={<Button onClick={onCreate}>New Service Account</Button>}
+    >
       {accounts.length === 0 ? (
-        <div className="panel text-center py-8">
-          <p className="text-slate-400 text-sm">No service accounts yet.</p>
-        </div>
+        <EmptyState icon={UsersIcon} message="No service accounts yet." />
       ) : (
         <div className="space-y-2">
           {accounts.map((sa) => (
-            <div key={sa.id} className="panel">
+            <Card key={sa.id} className="p-4">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="font-medium text-white font-mono truncate">{sa.name}</h3>
-                    <span className={`px-2 py-0.5 text-[10px] rounded-full border ${ROLE_BADGE[sa.role]}`}>
-                      {ROLE_LABELS[sa.role]}
-                    </span>
-                    {sa.disabled && (
-                      <span className="px-2 py-0.5 text-[10px] rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                        Disabled
-                      </span>
-                    )}
+                    <h3 className="font-medium text-foreground font-mono truncate">{sa.name}</h3>
+                    <Badge variant={roleVariant(sa.role)}>{ROLE_LABELS[sa.role]}</Badge>
+                    {sa.disabled && <Badge variant="warning">Disabled</Badge>}
                   </div>
                   {sa.description && (
-                    <p className="text-sm text-slate-400 mt-1">{sa.description}</p>
+                    <p className="text-sm text-muted-foreground mt-1">{sa.description}</p>
                   )}
-                  <div className="text-xs text-slate-500 mt-1 space-x-3">
-                    <span>{sa._count?.apiTokens ?? 0} token{(sa._count?.apiTokens ?? 0) === 1 ? '' : 's'}</span>
-                    <span>Created {formatDistanceToNow(new Date(sa.createdAt), { addSuffix: true })}</span>
+                  <div className="text-xs text-muted-foreground mt-1 space-x-3">
+                    <span>
+                      {sa._count?.apiTokens ?? 0} token
+                      {(sa._count?.apiTokens ?? 0) === 1 ? '' : 's'}
+                    </span>
+                    <span>
+                      Created {formatDistanceToNow(new Date(sa.createdAt), { addSuffix: true })}
+                    </span>
                     {sa.createdBy && <span>by {sa.createdBy.name || sa.createdBy.email}</span>}
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
                     onClick={() => onEdit(sa)}
-                    className="p-1.5 text-slate-400 hover:text-white rounded"
                     title="Edit"
+                    className="text-muted-foreground hover:text-foreground"
                   >
-                    <PencilIcon className="w-4 h-4" />
-                  </button>
-                  <button
+                    <Pencil className="size-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
                     onClick={() => onDelete(sa)}
-                    className="p-1.5 text-slate-400 hover:text-red-400 rounded"
                     title="Delete"
+                    className="text-muted-foreground hover:text-destructive"
                   >
-                    <TrashIcon className="w-4 h-4" />
-                  </button>
+                    <Trash2 className="size-4" />
+                  </Button>
                 </div>
               </div>
-            </div>
+            </Card>
           ))}
         </div>
       )}
-    </section>
+    </Section>
   );
 }
 
+const createSaSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, 'Name is required')
+    .max(64)
+    .regex(
+      /^[a-z0-9][a-z0-9_-]*$/,
+      'Lowercase letters, digits, hyphens, underscores. Must start with a letter or digit.'
+    ),
+  description: z.string().max(500).optional(),
+});
+type CreateSaValues = z.infer<typeof createSaSchema>;
+
 function CreateServiceAccountModal({
+  open,
   onClose,
   onCreated,
 }: {
+  open: boolean;
   onClose: () => void;
   onCreated: (sa: ServiceAccount) => void;
 }) {
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
   const [role, setRole] = useState<UserRole>('viewer');
-  const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  const form = useForm<CreateSaValues>({
+    resolver: zodResolver(createSaSchema),
+    defaultValues: { name: '', description: '' },
+  });
+
+  useEffect(() => {
+    if (open) {
+      form.reset({ name: '', description: '' });
+      setRole('viewer');
+      setFormError(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  async function onSubmit(values: CreateSaValues) {
     setFormError(null);
-    setSubmitting(true);
     try {
       const res = await createServiceAccount({
-        name: name.trim(),
-        description: description.trim() || undefined,
+        name: values.name.trim(),
+        description: values.description?.trim() || undefined,
         role,
       });
       onCreated(res.serviceAccount);
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Failed to create service account');
-    } finally {
-      setSubmitting(false);
+      setFormError(getErrorMessage(err, 'Failed to create service account'));
     }
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-md p-6">
-        <h3 className="text-lg font-semibold text-white mb-4">New Service Account</h3>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm text-slate-400 mb-1">Name</label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="ci-deploy-staging"
-              className="input"
-              pattern="[a-z0-9][a-z0-9_-]*"
-              required
-              maxLength={64}
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>New Service Account</DialogTitle>
+        </DialogHeader>
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            <FormField
+              control={form.control}
+              name="name"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Name</FormLabel>
+                  <FormControl>
+                    <Input placeholder="ci-deploy-staging" maxLength={64} {...field} />
+                  </FormControl>
+                  <FormDescription>
+                    Lowercase letters, digits, hyphens, underscores. Must start with a letter or
+                    digit.
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
             />
-            <p className="text-xs text-slate-500 mt-1">
-              Lowercase letters, digits, hyphens, underscores. Must start with a letter or digit.
-            </p>
-          </div>
-          <div>
-            <label className="block text-sm text-slate-400 mb-1">Description (optional)</label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="GitHub Actions deployer for staging"
-              className="input"
-              rows={2}
-              maxLength={500}
+            <FormField
+              control={form.control}
+              name="description"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Description (optional)</FormLabel>
+                  <FormControl>
+                    <Textarea
+                      placeholder="GitHub Actions deployer for staging"
+                      rows={2}
+                      maxLength={500}
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
             />
-          </div>
-          <div>
-            <label className="block text-sm text-slate-400 mb-1">Role</label>
-            <select
-              value={role}
-              onChange={(e) => setRole(e.target.value as UserRole)}
-              className="input"
-            >
-              <option value="viewer">Viewer — Read-only</option>
-              <option value="operator">Operator — Deploy and manage services</option>
-              <option value="admin">Admin — Full access</option>
-            </select>
-            <p className="text-xs text-slate-500 mt-1">
-              Tokens minted against this service account are capped at this role.
-            </p>
-          </div>
-          {formError && (
-            <div className="p-3 bg-red-500/10 border border-red-500/30 rounded text-red-400 text-sm">
-              {formError}
+            <div className="space-y-2">
+              <Label>Role</Label>
+              <Select value={role} onValueChange={(v) => setRole(v as UserRole)}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="viewer">Viewer — Read-only</SelectItem>
+                  <SelectItem value="operator">Operator — Deploy and manage services</SelectItem>
+                  <SelectItem value="admin">Admin — Full access</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Tokens minted against this service account are capped at this role.
+              </p>
             </div>
-          )}
-          <div className="flex gap-2 justify-end pt-2">
-            <button type="button" className="btn btn-ghost" onClick={onClose}>
-              Cancel
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={submitting}>
-              {submitting ? 'Creating…' : 'Create'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+            {formError && (
+              <Alert variant="destructive">
+                <AlertDescription>{formError}</AlertDescription>
+              </Alert>
+            )}
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={form.formState.isSubmitting}>
+                {form.formState.isSubmitting ? 'Creating…' : 'Create'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
   );
 }
+
+const editSaSchema = z.object({
+  description: z.string().max(500).optional(),
+});
+type EditSaValues = z.infer<typeof editSaSchema>;
 
 function EditServiceAccountModal({
   account,
   onClose,
   onUpdated,
 }: {
-  account: ServiceAccount;
+  account: ServiceAccount | null;
   onClose: () => void;
   onUpdated: (sa: ServiceAccount) => void;
 }) {
-  const [description, setDescription] = useState(account.description ?? '');
-  const [role, setRole] = useState<UserRole>(account.role);
-  const [disabled, setDisabled] = useState(account.disabled);
-  const [submitting, setSubmitting] = useState(false);
+  const [role, setRole] = useState<UserRole>('viewer');
+  const [disabled, setDisabled] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  const form = useForm<EditSaValues>({
+    resolver: zodResolver(editSaSchema),
+    defaultValues: { description: '' },
+  });
+
+  useEffect(() => {
+    if (account) {
+      form.reset({ description: account.description ?? '' });
+      setRole(account.role);
+      setDisabled(account.disabled);
+      setFormError(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account]);
+
+  async function onSubmit(values: EditSaValues) {
+    if (!account) return;
     setFormError(null);
-    setSubmitting(true);
     try {
       const res = await updateServiceAccount(account.id, {
-        description: description.trim() || undefined,
+        description: values.description?.trim() || undefined,
         role,
         disabled,
       });
       onUpdated(res.serviceAccount);
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'Failed to update');
-    } finally {
-      setSubmitting(false);
+      setFormError(getErrorMessage(err, 'Failed to update'));
     }
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-md p-6">
-        <h3 className="text-lg font-semibold text-white mb-1">Edit Service Account</h3>
-        <p className="text-sm text-slate-500 mb-4 font-mono">{account.name}</p>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm text-slate-400 mb-1">Description</label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="input"
-              rows={2}
-              maxLength={500}
+    <Dialog open={account !== null} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Edit Service Account</DialogTitle>
+          {account && <DialogDescription className="font-mono">{account.name}</DialogDescription>}
+        </DialogHeader>
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            <FormField
+              control={form.control}
+              name="description"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Description</FormLabel>
+                  <FormControl>
+                    <Textarea rows={2} maxLength={500} {...field} value={field.value ?? ''} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
             />
-          </div>
-          <div>
-            <label className="block text-sm text-slate-400 mb-1">Role</label>
-            <select
-              value={role}
-              onChange={(e) => setRole(e.target.value as UserRole)}
-              className="input"
-            >
-              <option value="viewer">Viewer</option>
-              <option value="operator">Operator</option>
-              <option value="admin">Admin</option>
-            </select>
-            <p className="text-xs text-slate-500 mt-1">
-              Existing tokens with a higher role are automatically downgraded at use time.
-            </p>
-          </div>
-          <label className="flex items-center gap-2 text-sm text-slate-300">
-            <input
-              type="checkbox"
-              checked={disabled}
-              onChange={(e) => setDisabled(e.target.checked)}
-            />
-            Disabled — all tokens belonging to this service account stop working
-          </label>
-          {formError && (
-            <div className="p-3 bg-red-500/10 border border-red-500/30 rounded text-red-400 text-sm">
-              {formError}
+            <div className="space-y-2">
+              <Label>Role</Label>
+              <Select value={role} onValueChange={(v) => setRole(v as UserRole)}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="viewer">Viewer</SelectItem>
+                  <SelectItem value="operator">Operator</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Existing tokens with a higher role are automatically downgraded at use time.
+              </p>
             </div>
-          )}
-          <div className="flex gap-2 justify-end pt-2">
-            <button type="button" className="btn btn-ghost" onClick={onClose}>
-              Cancel
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={submitting}>
-              {submitting ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-function ComingSoonSection({ title, description }: { title: string; description: string }) {
-  return (
-    <section className="opacity-60">
-      <div className="flex items-center gap-2 mb-2">
-        <h2 className="text-base font-semibold text-white">{title}</h2>
-        <span className="px-2 py-0.5 text-[10px] rounded-full bg-slate-700/50 text-slate-400 border border-slate-700">
-          Coming soon
-        </span>
-      </div>
-      <p className="text-xs text-slate-500">{description}</p>
-    </section>
+            <div className="flex items-center gap-2">
+              <Switch id="sa-disabled" checked={disabled} onCheckedChange={setDisabled} />
+              <Label htmlFor="sa-disabled" className="font-normal cursor-pointer">
+                Disabled — all tokens belonging to this service account stop working
+              </Label>
+            </div>
+            {formError && (
+              <Alert variant="destructive">
+                <AlertDescription>{formError}</AlertDescription>
+              </Alert>
+            )}
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={form.formState.isSubmitting}>
+                {form.formState.isSubmitting ? 'Saving…' : 'Save'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -1,5 +1,6 @@
 import { memo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import { ChevronRight } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import {
   getMonitoringOverview,
@@ -12,6 +13,18 @@ import {
 import { ServerIcon, CubeIcon, DatabaseIcon } from '../components/Icons';
 import { formatDistanceToNow } from 'date-fns';
 import { useMetricResource } from '../hooks/useMetricResource';
+import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import AutoRefreshToggle from '../components/monitoring/AutoRefreshToggle';
 
 interface FlatService {
   id: string;
@@ -124,31 +137,19 @@ export default function Monitoring() {
   return (
     <div className="p-6">
       <div className="flex items-center justify-end mb-5">
-        <div className="flex items-center gap-3">
-          <label className="flex items-center gap-2 text-sm text-slate-400">
-            <input
-              type="checkbox"
-              checked={autoRefreshEnabled}
-              onChange={(e) => setAutoRefreshEnabled(e.target.checked)}
-              className="rounded bg-slate-700 border-slate-600"
-            />
-            Auto: 30s
-          </label>
-          <button
-            onClick={reloadAll}
-            disabled={refreshing}
-            className="btn btn-secondary"
-          >
-            {refreshing ? 'Refreshing...' : 'Refresh'}
-          </button>
-        </div>
+        <AutoRefreshToggle
+          enabled={autoRefreshEnabled}
+          onChange={setAutoRefreshEnabled}
+          onRefresh={reloadAll}
+          refreshing={refreshing}
+        />
       </div>
 
       {/* Health Sections */}
       {overviewLoading ? (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="panel h-28 animate-pulse" />
+            <Skeleton key={i} className="h-28 rounded-xl" />
           ))}
         </div>
       ) : stats && (
@@ -188,23 +189,23 @@ export default function Monitoring() {
         <div className="mt-6">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <ServerIcon className="w-4 h-4 text-blue-400" />
-              <span className="text-sm font-semibold text-white">Servers</span>
+              <ServerIcon className="w-4 h-4 text-info" />
+              <span className="text-sm font-semibold text-foreground">Servers</span>
             </div>
-            <Link to="/monitoring/servers" className="text-xs text-primary-400 hover:text-primary-300">View all</Link>
+            <Link to="/monitoring/servers" className="text-xs text-primary hover:text-primary/80">View all</Link>
           </div>
-          <div className="panel p-0 overflow-hidden">
-            <table className="w-full">
-              <thead>
-                <tr className="text-left text-slate-400 text-xs border-b border-slate-700">
-                  <th className="px-4 py-2.5 font-medium">Name</th>
-                  <th className="px-4 py-2.5 font-medium text-right">CPU</th>
-                  <th className="px-4 py-2.5 font-medium text-right">Memory</th>
-                  <th className="px-4 py-2.5 font-medium text-right">Disk</th>
-                  <th className="px-4 py-2.5 font-medium text-right">Load</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-700/50">
+          <Card className="gap-0 py-0 overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead className="text-right">CPU</TableHead>
+                  <TableHead className="text-right">Memory</TableHead>
+                  <TableHead className="text-right">Disk</TableHead>
+                  <TableHead className="text-right">Load</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {sortedServers.map((s) => {
                   const m = s.latestMetrics;
                   const memPct = m?.memoryUsedMb != null && m?.memoryTotalMb
@@ -214,41 +215,41 @@ export default function Monitoring() {
                     ? Math.round((m.diskUsedGb / m.diskTotalGb) * 100)
                     : null;
                   return (
-                    <tr key={s.id} className="text-sm">
-                      <td className="px-4 py-2.5">
+                    <TableRow key={s.id}>
+                      <TableCell>
                         <div className="flex items-center gap-2">
-                          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${m ? 'bg-green-400' : 'bg-slate-500'}`} />
-                          <Link to={`/servers/${s.id}`} className="text-white hover:text-primary-400 font-medium truncate">
+                          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${m ? 'bg-success' : 'bg-muted-foreground'}`} />
+                          <Link to={`/servers/${s.id}`} className="text-foreground hover:text-primary font-medium truncate">
                             {s.name}
                           </Link>
                         </div>
-                      </td>
+                      </TableCell>
                       {m ? (
                         <>
-                          <td className="px-4 py-2.5 text-right tabular-nums">
+                          <TableCell className="text-right tabular-nums">
                             <MetricValue value={m.cpuPercent} suffix="%" warn={80} crit={95} />
-                          </td>
-                          <td className="px-4 py-2.5 text-right tabular-nums">
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
                             <MetricValue value={memPct} suffix="%" warn={80} crit={95} />
-                          </td>
-                          <td className="px-4 py-2.5 text-right tabular-nums">
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
                             <MetricValue value={diskPct} suffix="%" warn={80} crit={95} />
-                          </td>
-                          <td className="px-4 py-2.5 text-right tabular-nums text-slate-300">
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">
                             {m.loadAvg1 != null ? m.loadAvg1.toFixed(2) : '-'}
-                          </td>
+                          </TableCell>
                         </>
                       ) : (
-                        <td colSpan={4} className="px-4 py-2.5 text-slate-500 text-xs text-center">
+                        <TableCell colSpan={4} className="text-muted-foreground text-xs text-center">
                           No metrics
-                        </td>
+                        </TableCell>
                       )}
-                    </tr>
+                    </TableRow>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
+              </TableBody>
+            </Table>
+          </Card>
         </div>
       )}
 
@@ -257,41 +258,41 @@ export default function Monitoring() {
         <div className="mt-6">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <CubeIcon className="w-4 h-4 text-green-400" />
-              <span className="text-sm font-semibold text-white">Services</span>
+              <CubeIcon className="w-4 h-4 text-success" />
+              <span className="text-sm font-semibold text-foreground">Services</span>
             </div>
-            <Link to="/monitoring/services" className="text-xs text-primary-400 hover:text-primary-300">View all</Link>
+            <Link to="/monitoring/services" className="text-xs text-primary hover:text-primary/80">View all</Link>
           </div>
-          <div className="panel p-0 overflow-hidden">
-            <table className="w-full">
-              <thead>
-                <tr className="text-left text-slate-400 text-xs border-b border-slate-700">
-                  <th className="px-4 py-2.5 font-medium">Name</th>
-                  <th className="px-4 py-2.5 font-medium">Server</th>
-                  <th className="px-4 py-2.5 font-medium text-right">CPU</th>
-                  <th className="px-4 py-2.5 font-medium text-right">Memory</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-700/50">
+          <Card className="gap-0 py-0 overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Server</TableHead>
+                  <TableHead className="text-right">CPU</TableHead>
+                  <TableHead className="text-right">Memory</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {flatServices.map((svc) => (
-                  <tr key={svc.id} className="text-sm">
-                    <td className="px-4 py-2.5">
-                      <Link to={`/services/${svc.id}`} className="text-white hover:text-primary-400 font-medium truncate">
+                  <TableRow key={svc.id}>
+                    <TableCell>
+                      <Link to={`/services/${svc.id}`} className="text-foreground hover:text-primary font-medium truncate">
                         {svc.name}
                       </Link>
-                    </td>
-                    <td className="px-4 py-2.5 text-slate-400 text-xs">{svc.serverName}</td>
-                    <td className="px-4 py-2.5 text-right tabular-nums">
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-xs">{svc.serverName}</TableCell>
+                    <TableCell className="text-right tabular-nums">
                       <MetricValue value={svc.cpuPercent} suffix="%" warn={80} crit={95} />
-                    </td>
-                    <td className="px-4 py-2.5 text-right tabular-nums text-slate-300">
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums text-muted-foreground">
                       {svc.memoryUsedMb != null ? `${Math.round(svc.memoryUsedMb)} MB` : '-'}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </TableBody>
+            </Table>
+          </Card>
         </div>
       )}
 
@@ -300,51 +301,51 @@ export default function Monitoring() {
         <div className="mt-6">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <DatabaseIcon className="w-4 h-4 text-purple-400" />
-              <span className="text-sm font-semibold text-white">Databases</span>
+              <DatabaseIcon className="w-4 h-4 text-purple" />
+              <span className="text-sm font-semibold text-foreground">Databases</span>
             </div>
-            <Link to="/monitoring/databases" className="text-xs text-primary-400 hover:text-primary-300">View all</Link>
+            <Link to="/monitoring/databases" className="text-xs text-primary hover:text-primary/80">View all</Link>
           </div>
-          <div className="panel p-0 overflow-hidden">
-            <table className="w-full">
-              <thead>
-                <tr className="text-left text-slate-400 text-xs border-b border-slate-700">
-                  <th className="px-4 py-2.5 font-medium">Name</th>
-                  <th className="px-4 py-2.5 font-medium">Type</th>
-                  <th className="px-4 py-2.5 font-medium">Server</th>
-                  <th className="px-4 py-2.5 font-medium text-right">Last Collection</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-700/50">
+          <Card className="gap-0 py-0 overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Server</TableHead>
+                  <TableHead className="text-right">Last Collection</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {monitoredDbs.map((db) => (
-                  <tr key={db.id} className="text-sm">
-                    <td className="px-4 py-2.5">
+                  <TableRow key={db.id}>
+                    <TableCell>
                       <div className="flex items-center gap-2">
                         <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                          db.monitoringStatus === 'connected' ? 'bg-green-400' :
-                          db.monitoringStatus === 'error' ? 'bg-red-400' : 'bg-yellow-400'
+                          db.monitoringStatus === 'connected' ? 'bg-success' :
+                          db.monitoringStatus === 'error' ? 'bg-destructive' : 'bg-warning'
                         }`} />
-                        <Link to={`/databases/${db.id}`} className="text-white hover:text-primary-400 font-medium truncate">
+                        <Link to={`/databases/${db.id}`} className="text-foreground hover:text-primary font-medium truncate">
                           {db.name}
                         </Link>
                       </div>
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <span className="badge bg-slate-700 text-slate-300 text-xs">
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="neutral" className="text-xs">
                         {db.databaseType?.displayName || db.type}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2.5 text-slate-400 text-xs">{db.serverName || '-'}</td>
-                    <td className="px-4 py-2.5 text-right text-slate-400 text-xs">
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-xs">{db.serverName || '-'}</TableCell>
+                    <TableCell className="text-right text-muted-foreground text-xs">
                       {db.lastCollectedAt
                         ? formatDistanceToNow(new Date(db.lastCollectedAt), { addSuffix: true })
                         : 'Never'}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </TableBody>
+            </Table>
+          </Card>
         </div>
       )}
     </div>
@@ -362,9 +363,9 @@ interface HealthCardProps {
 }
 
 const HEALTH_COLORS = {
-  blue: { icon: 'text-blue-400', bar: 'bg-blue-500' },
-  green: { icon: 'text-green-400', bar: 'bg-green-500' },
-  purple: { icon: 'text-purple-400', bar: 'bg-purple-500' },
+  blue: { icon: 'text-info', bar: 'bg-info' },
+  green: { icon: 'text-success', bar: 'bg-success' },
+  purple: { icon: 'text-purple', bar: 'bg-purple' },
 } as const;
 
 const HealthCard = memo(function HealthCard({ title, href, icon: Icon, total, healthy, unhealthy, color }: HealthCardProps) {
@@ -372,48 +373,50 @@ const HealthCard = memo(function HealthCard({ title, href, icon: Icon, total, he
   const healthPct = total > 0 ? Math.round((healthy / total) * 100) : 0;
 
   return (
-    <Link to={href} className="panel hover:border-slate-600 transition-colors group">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2.5">
-          <Icon className={`w-5 h-5 ${HEALTH_COLORS[color].icon}`} />
-          <span className="text-sm font-semibold text-white group-hover:text-primary-400 transition-colors">{title}</span>
+    <Link to={href} className="group">
+      <Card className="gap-0 p-4 transition-colors hover:border-ring">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2.5">
+            <Icon className={`w-5 h-5 ${HEALTH_COLORS[color].icon}`} />
+            <span className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors">{title}</span>
+          </div>
+          <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
         </div>
-        <svg className="w-4 h-4 text-slate-500 group-hover:text-primary-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-        </svg>
-      </div>
 
-      {total === 0 ? (
-        <p className="text-slate-500 text-sm">No resources configured</p>
-      ) : (
-        <>
-          {/* Progress bar */}
-          <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden mb-3">
-            {healthy > 0 && (
-              <div
-                className={`h-full ${HEALTH_COLORS[color].bar} rounded-full`}
-                style={{ width: `${healthPct}%` }}
-              />
-            )}
-          </div>
-
-          <div className="flex items-center justify-between text-xs">
-            <div className="flex gap-3">
-              <span className="text-green-400">{healthy} healthy</span>
-              {unhealthy > 0 && <span className="text-red-400">{unhealthy} unhealthy</span>}
-              {unknown > 0 && <span className="text-slate-500">{unknown} unknown</span>}
+        {total === 0 ? (
+          <p className="text-muted-foreground text-sm">No resources configured</p>
+        ) : (
+          <>
+            {/* Progress bar — hand-rolled so each card keeps its per-domain
+                accent color (shadcn Progress hardcodes the indicator to the
+                primary token). */}
+            <div className="w-full h-2 bg-muted rounded-full overflow-hidden mb-3">
+              {healthy > 0 && (
+                <div
+                  className={`h-full ${HEALTH_COLORS[color].bar} rounded-full`}
+                  style={{ width: `${healthPct}%` }}
+                />
+              )}
             </div>
-            <span className="text-slate-400">{total} total</span>
-          </div>
-        </>
-      )}
+
+            <div className="flex items-center justify-between text-xs">
+              <div className="flex gap-3">
+                <span className="text-success">{healthy} healthy</span>
+                {unhealthy > 0 && <span className="text-destructive">{unhealthy} unhealthy</span>}
+                {unknown > 0 && <span className="text-muted-foreground">{unknown} unknown</span>}
+              </div>
+              <span className="text-muted-foreground">{total} total</span>
+            </div>
+          </>
+        )}
+      </Card>
     </Link>
   );
 });
 
 function MetricValue({ value, suffix, warn, crit }: { value: number | null; suffix: string; warn: number; crit: number }) {
-  if (value == null) return <span className="text-slate-500">-</span>;
+  if (value == null) return <span className="text-muted-foreground">-</span>;
   const rounded = Math.round(value);
-  const color = rounded >= crit ? 'text-red-400' : rounded >= warn ? 'text-yellow-400' : 'text-slate-300';
+  const color = rounded >= crit ? 'text-destructive' : rounded >= warn ? 'text-warning' : 'text-muted-foreground';
   return <span className={color}>{rounded}{suffix}</span>;
 }

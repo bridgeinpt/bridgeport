@@ -12,13 +12,42 @@ import {
   type ConfigFragmentUsage,
 } from '../lib/api.js';
 import { formatDistanceToNow } from 'date-fns';
-import { Modal } from '../components/Modal.js';
-import { ConfirmDialog } from '../components/ConfirmDialog.js';
-import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
-import { EmptyState } from '../components/EmptyState.js';
-import { PencilIcon, TrashIcon, EyeIcon, LinkIcon } from '../components/Icons.js';
+import { Eye, Pencil, Trash2, Link2 } from 'lucide-react';
 import { useToast } from '../components/Toast.js';
 import { getErrorMessage } from '../lib/helpers.js';
+import { ConfigFileEditor } from '../components/ConfigFileEditor.js';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { EmptyState } from '@/components/ui/empty-state';
+import { TableSkeleton } from '@/components/ui/table-skeleton';
+import { CopyButton } from '@/components/ui/copy-button';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { buttonVariants } from '@/components/ui/button';
 
 /**
  * Env-scoped ConfigFragments: named, reusable text blocks that ConfigFiles can
@@ -114,19 +143,19 @@ export default function Fragments() {
     <div className="space-y-2 text-sm">
       {usage.map((u) => (
         <div key={u.configFileId}>
-          <Link to="/config-files" className="text-slate-300 hover:text-white">
+          <Link to="/config-files" className="text-foreground hover:text-foreground/80">
             {u.configFileName}{' '}
-            <span className="text-slate-500">({u.configFileFilename})</span>
+            <span className="text-muted-foreground">({u.configFileFilename})</span>
           </Link>
           {u.services.length > 0 && (
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-muted-foreground">
               {' — '}
               {u.services.map((svc, i) => (
                 <span key={svc.serviceId}>
                   {i > 0 && ', '}
                   <Link
                     to={`/services/${svc.serviceId}`}
-                    className="text-primary-400 hover:text-primary-300"
+                    className="text-primary hover:text-primary/80"
                   >
                     {svc.serviceName}
                   </Link>
@@ -198,26 +227,28 @@ export default function Fragments() {
   if (!selectedEnvironment) {
     return (
       <div className="p-6">
-        <div className="panel text-center py-12">
-          <p className="text-slate-400">Please select an environment</p>
+        <div className="rounded-lg border bg-card text-center py-12">
+          <p className="text-muted-foreground">Please select an environment</p>
         </div>
       </div>
     );
   }
 
   if (loading) {
-    return <LoadingSkeleton rows={5} rowHeight="h-11" />;
+    return (
+      <div className="p-6">
+        <TableSkeleton rows={5} columns={5} />
+      </div>
+    );
   }
 
   return (
     <div className="p-6">
       <div className="flex items-center justify-end mb-4">
-        <button onClick={openCreate} className="btn btn-primary">
-          New Fragment
-        </button>
+        <Button onClick={openCreate}>New Fragment</Button>
       </div>
 
-      <p className="text-sm text-slate-400 mb-4">
+      <p className="text-sm text-muted-foreground mb-4">
         Fragments are reusable text blocks that ConfigFiles can include. The fragment
         content is concatenated before the ConfigFile&apos;s own content at deploy/sync
         time. Use them to share common <code>{'${KEY}'}</code> blocks across services
@@ -231,223 +262,266 @@ export default function Fragments() {
           action={{ label: 'Create First Fragment', onClick: openCreate }}
         />
       ) : (
-        <div className="border border-slate-700 rounded-lg overflow-hidden">
-          <table className="w-full">
-            <thead>
-              <tr className="bg-slate-800/50 text-left text-xs text-slate-400 uppercase tracking-wider">
-                <th className="px-4 py-2.5">Name</th>
-                <th className="px-4 py-2.5">Description</th>
-                <th className="px-4 py-2.5">Used by</th>
-                <th className="px-4 py-2.5">Updated</th>
-                <th className="px-4 py-2.5 w-24"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-700/50">
+        <div className="rounded-lg border overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Description</TableHead>
+                <TableHead>Used by</TableHead>
+                <TableHead>Updated</TableHead>
+                <TableHead className="w-24"></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {fragments.map((fragment) => {
                 const usageCount = fragment.usedByCount ?? 0;
                 return (
                 <Fragment key={fragment.id}>
-                <tr className="hover:bg-slate-800/30">
-                  <td className="px-4 py-2.5">
-                    <span className="font-mono font-medium text-white text-sm">
+                <TableRow>
+                  <TableCell>
+                    <span className="font-mono font-medium text-foreground text-sm">
                       {fragment.name}
                     </span>
-                  </td>
-                  <td className="px-4 py-2.5 text-sm text-slate-400">
-                    {fragment.description || <span className="text-slate-600">—</span>}
-                  </td>
-                  <td className="px-4 py-2.5 text-sm text-slate-400">
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {fragment.description || <span className="text-muted-foreground/60">—</span>}
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
                     {usageCount > 0 ? (
                       <button
                         onClick={() => toggleUsage(fragment.id)}
-                        className="text-sm text-primary-400 hover:text-primary-300 flex items-center gap-1"
+                        className="text-sm text-primary hover:text-primary/80 flex items-center gap-1"
                       >
-                        <LinkIcon className="w-3 h-3" />
+                        <Link2 className="w-3 h-3" />
                         {usageCount}
                       </button>
                     ) : (
-                      <span className="text-xs text-yellow-400/60">—</span>
+                      <span className="text-xs text-muted-foreground/60">—</span>
                     )}
-                  </td>
-                  <td className="px-4 py-2.5 text-sm text-slate-400">
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
                     {formatDistanceToNow(new Date(fragment.updatedAt), { addSuffix: true })}
-                  </td>
-                  <td className="px-4 py-2.5">
+                  </TableCell>
+                  <TableCell>
                     <div className="flex gap-1 justify-end">
-                      <button
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
                         onClick={() => {
                           setViewing(fragment);
                           ensureUsage(fragment.id);
                         }}
-                        className="p-1.5 text-slate-500 hover:text-slate-200"
                         title="View"
                       >
-                        <EyeIcon className="w-3.5 h-3.5" />
-                      </button>
-                      <button
+                        <Eye className="w-3.5 h-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
                         onClick={() => openEdit(fragment)}
-                        className="p-1.5 text-slate-500 hover:text-slate-200"
                         title="Edit"
                       >
-                        <PencilIcon className="w-3.5 h-3.5" />
-                      </button>
-                      <button
+                        <Pencil className="w-3.5 h-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
                         onClick={() => setDeleteTarget(fragment)}
-                        className="p-1.5 text-slate-500 hover:text-red-400"
+                        className="hover:text-destructive"
                         title="Delete"
                       >
-                        <TrashIcon className="w-3.5 h-3.5" />
-                      </button>
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
                     </div>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
                 {/* Expanded usage row: config files that include this fragment */}
                 {expandedUsage[fragment.id] && (
-                  <tr>
-                    <td colSpan={5} className="px-8 py-2 bg-slate-800/20">
+                  <TableRow>
+                    <TableCell colSpan={5} className="px-8 py-2 bg-muted/30">
                       {usageLoading[fragment.id] ? (
-                        <p className="text-xs text-slate-500">Loading usage…</p>
+                        <p className="text-xs text-muted-foreground">Loading usage…</p>
                       ) : usageById[fragment.id] && usageById[fragment.id].length > 0 ? (
                         renderUsageList(usageById[fragment.id])
                       ) : (
-                        <p className="text-xs text-slate-500">Not used by any config files.</p>
+                        <p className="text-xs text-muted-foreground">Not used by any config files.</p>
                       )}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 )}
                 </Fragment>
                 );
               })}
-            </tbody>
-          </table>
+            </TableBody>
+          </Table>
         </div>
       )}
 
       {/* Create / Edit Modal */}
-      <Modal
-        isOpen={creating || !!editing}
-        onClose={closeForm}
-        title={editing ? `Edit fragment: ${editing.name}` : 'New Fragment'}
-        size="lg"
+      <Dialog
+        open={creating || !!editing}
+        onOpenChange={(open) => {
+          if (!open) closeForm();
+        }}
       >
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm text-slate-400 mb-1">Name</label>
-            <input
-              type="text"
-              value={formName}
-              onChange={(e) => setFormName(e.target.value)}
-              placeholder="common-backend"
-              className="input"
-              required
-            />
-            <p className="text-xs text-slate-500 mt-1">Must be unique within this environment.</p>
-          </div>
-          <div>
-            <label className="block text-sm text-slate-400 mb-1">Description (optional)</label>
-            <input
-              type="text"
-              value={formDescription}
-              onChange={(e) => setFormDescription(e.target.value)}
-              placeholder="Common DB + Redis config shared across backend services"
-              className="input"
-            />
-          </div>
-          <div>
-            <label className="block text-sm text-slate-400 mb-1">Content</label>
-            <textarea
-              value={formContent}
-              onChange={(e) => setFormContent(e.target.value)}
-              rows={14}
-              className="input font-mono text-sm"
-              placeholder={'DB_URL=${DB_URL}\nREDIS_URL=${REDIS_URL}'}
-            />
-            <p className="text-xs text-slate-500 mt-1">
-              <code>{'${KEY}'}</code> placeholders are resolved against this
-              environment&apos;s secrets and vars when the including ConfigFile is
-              deployed or synced.
-            </p>
-          </div>
-          <div className="flex gap-2 justify-end">
-            <button type="button" onClick={closeForm} className="btn btn-ghost">
-              Cancel
-            </button>
-            <button type="submit" disabled={saving} className="btn btn-primary">
-              {saving ? 'Saving...' : editing ? 'Save Changes' : 'Create'}
-            </button>
-          </div>
-        </form>
-      </Modal>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editing ? `Edit fragment: ${editing.name}` : 'New Fragment'}</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <Label htmlFor="fragment-name">Name</Label>
+              <Input
+                id="fragment-name"
+                type="text"
+                value={formName}
+                onChange={(e) => setFormName(e.target.value)}
+                placeholder="common-backend"
+                className="mt-1"
+                required
+              />
+              <p className="text-xs text-muted-foreground mt-1">Must be unique within this environment.</p>
+            </div>
+            <div>
+              <Label htmlFor="fragment-description">Description (optional)</Label>
+              <Input
+                id="fragment-description"
+                type="text"
+                value={formDescription}
+                onChange={(e) => setFormDescription(e.target.value)}
+                placeholder="Common DB + Redis config shared across backend services"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label className="mb-1 block">Content</Label>
+              <ConfigFileEditor
+                value={formContent}
+                onChange={setFormContent}
+                language="env"
+                height="20rem"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                <code>{'${KEY}'}</code> placeholders are resolved against this
+                environment&apos;s secrets and vars when the including ConfigFile is
+                deployed or synced.
+              </p>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={closeForm}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={saving}>
+                {saving ? 'Saving...' : editing ? 'Save Changes' : 'Create'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Read-only View Modal */}
-      <Modal
-        isOpen={!!viewing}
-        onClose={() => setViewing(null)}
-        title={viewing ? `Fragment: ${viewing.name}` : ''}
-        size="lg"
+      <Dialog
+        open={!!viewing}
+        onOpenChange={(open) => {
+          if (!open) setViewing(null);
+        }}
       >
-        {viewing && (
-          <div className="space-y-4">
-            {viewing.description && (
-              <p className="text-sm text-slate-400">{viewing.description}</p>
-            )}
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">Content</label>
-              <pre className="bg-slate-950 rounded p-3 text-sm text-slate-200 font-mono whitespace-pre-wrap max-h-96 overflow-auto">
-                {viewing.content}
-              </pre>
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">Used by</label>
-              {usageLoading[viewing.id] && !usageById[viewing.id] ? (
-                <p className="text-xs text-slate-500">Loading usage…</p>
-              ) : usageById[viewing.id] && usageById[viewing.id].length > 0 ? (
-                renderUsageList(usageById[viewing.id])
-              ) : (
-                <p className="text-xs text-slate-500">Not used by any config files.</p>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{viewing ? `Fragment: ${viewing.name}` : ''}</DialogTitle>
+          </DialogHeader>
+          {viewing && (
+            <div className="space-y-4">
+              {viewing.description && (
+                <p className="text-sm text-muted-foreground">{viewing.description}</p>
               )}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <Label>Content</Label>
+                  <CopyButton value={viewing.content} />
+                </div>
+                <pre className="bg-muted rounded p-3 text-sm text-foreground font-mono whitespace-pre-wrap max-h-96 overflow-auto">
+                  {viewing.content}
+                </pre>
+              </div>
+              <div>
+                <Label className="mb-1 block">Used by</Label>
+                {usageLoading[viewing.id] && !usageById[viewing.id] ? (
+                  <p className="text-xs text-muted-foreground">Loading usage…</p>
+                ) : usageById[viewing.id] && usageById[viewing.id].length > 0 ? (
+                  renderUsageList(usageById[viewing.id])
+                ) : (
+                  <p className="text-xs text-muted-foreground">Not used by any config files.</p>
+                )}
+              </div>
+              <DialogFooter>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    openEdit(viewing);
+                    setViewing(null);
+                  }}
+                >
+                  Edit
+                </Button>
+                <Button variant="ghost" onClick={() => setViewing(null)}>
+                  Close
+                </Button>
+              </DialogFooter>
             </div>
-            <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => {
-                  openEdit(viewing);
-                  setViewing(null);
-                }}
-                className="btn btn-secondary"
-              >
-                Edit
-              </button>
-              <button onClick={() => setViewing(null)} className="btn btn-ghost">
-                Close
-              </button>
-            </div>
-          </div>
-        )}
-      </Modal>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Confirmation */}
-      <ConfirmDialog
-        isOpen={!!deleteTarget}
-        onClose={() => {
-          setDeleteTarget(null);
-          setDeleteBlockedBy(null);
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteTarget(null);
+            setDeleteBlockedBy(null);
+          }
         }}
-        onConfirm={handleDelete}
-        title="Delete fragment"
-        message={
-          deleteBlockedBy && deleteBlockedBy.length > 0
-            ? `This fragment is in use and cannot be deleted. It is referenced by: ${deleteBlockedBy
-                .map((r) =>
-                  r.serviceName
-                    ? `${r.configFileName} (service: ${r.serviceName})`
-                    : `${r.configFileName} (unattached)`
-                )
-                .join(', ')}.`
-            : `Delete fragment "${deleteTarget?.name}"? This cannot be undone.`
-        }
-        confirmText="Delete"
-        variant="danger"
-      />
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete fragment</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteBlockedBy && deleteBlockedBy.length > 0
+                ? `This fragment is in use and cannot be deleted. It is referenced by: ${deleteBlockedBy
+                    .map((r) =>
+                      r.serviceName
+                        ? `${r.configFileName} (service: ${r.serviceName})`
+                        : `${r.configFileName} (unattached)`
+                    )
+                    .join(', ')}.`
+                : `Delete fragment "${deleteTarget?.name}"? This cannot be undone.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onClick={() => {
+                setDeleteTarget(null);
+                setDeleteBlockedBy(null);
+              }}
+            >
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
+              className={buttonVariants({ variant: 'destructive' })}
+              onClick={(e) => {
+                // Keep the dialog open: handleDelete decides whether to close
+                // (success) or surface the blocked-by list (409).
+                e.preventDefault();
+                handleDelete();
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

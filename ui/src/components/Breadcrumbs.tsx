@@ -1,32 +1,43 @@
+import { Fragment } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ChevronRightIcon } from './Icons';
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from '@/components/ui/breadcrumb';
 import { useAppStore } from '../lib/store';
 
 // Route name mappings
 const routeNames: Record<string, string> = {
   '': 'Dashboard',
-  'services': 'Services',
-  'servers': 'Servers',
-  'secrets': 'Secrets',
+  services: 'Services',
+  servers: 'Servers',
+  secrets: 'Secrets',
   'config-files': 'Config Files',
-  'fragments': 'Fragments',
-  'registries': 'Registries',
-  'databases': 'Databases',
-  'settings': 'Settings',
+  fragments: 'Fragments',
+  registries: 'Registries',
+  databases: 'Databases',
+  settings: 'Settings',
   'container-images': 'Container Images',
   'deployment-plans': 'Deployment Plans',
-  'notifications': 'Notifications',
-  'monitoring': 'Monitoring',
-  'health': 'Health Checks',
-  'agents': 'Agents & SSH',
+  notifications: 'Notifications',
+  monitoring: 'Monitoring',
+  health: 'Health Checks',
+  agents: 'Agents & SSH',
   // Admin routes
-  'admin': 'Admin',
-  'system': 'System',
+  admin: 'Admin',
+  system: 'System',
   'service-types': 'Service Types',
-  'storage': 'Storage',
-  'users': 'Users',
-  'audit': 'Audit',
-  'about': 'About',
+  'database-types': 'Database Types',
+  storage: 'Storage',
+  users: 'Users',
+  audit: 'Audit',
+  about: 'About',
+  integrations: 'Integrations',
+  mcp: 'MCP Server',
 };
 
 interface Crumb {
@@ -35,65 +46,60 @@ interface Crumb {
   isLast: boolean;
 }
 
+/**
+ * Breadcrumb trail on shadcn primitives (#246). Owns the page title (no `<h1>`
+ * on pages). Keeps the route-name map + session `breadcrumbNames` ID resolution.
+ */
 export default function Breadcrumbs() {
   const location = useLocation();
   const breadcrumbNames = useAppStore((s) => s.breadcrumbNames);
   const pathSegments = location.pathname.split('/').filter(Boolean);
   const isAdminSection = pathSegments[0] === 'admin';
 
-  // Build breadcrumbs from path segments
   const crumbs: Crumb[] = [];
   let currentPath = '';
-
   pathSegments.forEach((segment, index) => {
     currentPath += `/${segment}`;
     const isLast = index === pathSegments.length - 1;
-
-    // Skip ID segments (UUIDs or numeric IDs)
     const isId = /^[0-9a-f-]{36}$|^\d+$/.test(segment);
-
-    if (isId) {
-      crumbs.push({
-        name: breadcrumbNames[segment] || 'Details',
-        href: currentPath,
-        isLast,
-      });
-    } else {
-      crumbs.push({
-        name: routeNames[segment] || segment.charAt(0).toUpperCase() + segment.slice(1).replace(/-/g, ' '),
-        href: currentPath,
-        isLast,
-      });
-    }
+    crumbs.push({
+      name: isId
+        ? breadcrumbNames[segment] || 'Details'
+        : routeNames[segment] || segment.charAt(0).toUpperCase() + segment.slice(1).replace(/-/g, ' '),
+      href: currentPath,
+      isLast,
+    });
   });
 
-  // If on root, don't show breadcrumbs
   if (crumbs.length === 0) {
     return null;
   }
 
-  // Link styling based on section
-  const linkClass = isAdminSection
-    ? 'text-brand-600 hover:text-brand-500 transition-colors'
-    : 'hover:text-white transition-colors';
+  const linkClass = isAdminSection ? 'text-brand hover:text-brand/80' : undefined;
 
   return (
-    <nav aria-label="Breadcrumb" className="flex items-center text-sm text-slate-400">
-      <Link to="/" className={linkClass}>
-        Dashboard
-      </Link>
-      {crumbs.map((crumb) => (
-        <span key={crumb.href} className="flex items-center">
-          <ChevronRightIcon className="w-3 h-3 mx-2 text-slate-600" />
-          {crumb.isLast ? (
-            <span className="text-white">{crumb.name}</span>
-          ) : (
-            <Link to={crumb.href} className={linkClass}>
-              {crumb.name}
-            </Link>
-          )}
-        </span>
-      ))}
-    </nav>
+    <Breadcrumb>
+      <BreadcrumbList>
+        <BreadcrumbItem>
+          <BreadcrumbLink asChild className={linkClass}>
+            <Link to="/">Dashboard</Link>
+          </BreadcrumbLink>
+        </BreadcrumbItem>
+        {crumbs.map((crumb) => (
+          <Fragment key={crumb.href}>
+            <BreadcrumbSeparator />
+            <BreadcrumbItem>
+              {crumb.isLast ? (
+                <BreadcrumbPage>{crumb.name}</BreadcrumbPage>
+              ) : (
+                <BreadcrumbLink asChild className={linkClass}>
+                  <Link to={crumb.href}>{crumb.name}</Link>
+                </BreadcrumbLink>
+              )}
+            </BreadcrumbItem>
+          </Fragment>
+        ))}
+      </BreadcrumbList>
+    </Breadcrumb>
   );
 }

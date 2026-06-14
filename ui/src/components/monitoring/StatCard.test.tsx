@@ -15,34 +15,26 @@ describe('StatCard', () => {
     expect(screen.getByText('5')).toBeInTheDocument();
   });
 
-  it('should apply blue color classes', () => {
+  it('should map blue to the info token', () => {
     const { container } = render(<StatCard label="Test" value="1" color="blue" />);
-    const card = container.firstElementChild;
-    expect(card?.className).toContain('bg-blue-500/10');
-    expect(card?.className).toContain('border-blue-500/30');
+    expect(container.firstElementChild?.className).toContain('bg-info/10');
+    expect(container.firstElementChild?.className).toContain('border-info/30');
   });
 
-  it('should apply green color classes', () => {
-    const { container } = render(<StatCard label="Test" value="1" color="green" />);
-    const card = container.firstElementChild;
-    expect(card?.className).toContain('bg-green-500/10');
+  it('should map green/emerald to the success token', () => {
+    const { container, rerender } = render(<StatCard label="Test" value="1" color="green" />);
+    expect(container.firstElementChild?.className).toContain('bg-success/10');
+    rerender(<StatCard label="Test" value="1" color="emerald" />);
+    expect(container.firstElementChild?.className).toContain('bg-success/10');
   });
 
-  it('should apply red color classes', () => {
+  it('should map red to the destructive token', () => {
     const { container } = render(<StatCard label="Test" value="1" color="red" />);
-    const card = container.firstElementChild;
-    expect(card?.className).toContain('bg-red-500/10');
+    expect(container.firstElementChild?.className).toContain('bg-destructive/10');
   });
 
-  it('should apply emerald color classes', () => {
-    const { container } = render(<StatCard label="Test" value="1" color="emerald" />);
-    const card = container.firstElementChild;
-    expect(card?.className).toContain('bg-emerald-500/10');
-  });
-
-  it('should apply slate color classes', () => {
+  it('should map slate to the muted token', () => {
     const { container } = render(<StatCard label="Test" value="1" color="slate" />);
-    const card = container.firstElementChild;
-    expect(card?.className).toContain('bg-slate-500/10');
+    expect(container.firstElementChild?.className).toContain('bg-muted');
   });
 });

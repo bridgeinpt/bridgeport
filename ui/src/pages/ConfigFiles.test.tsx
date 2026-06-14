@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../test/render';
+import { ConfirmProvider } from '@/hooks/useConfirm';
 import { useAppStore } from '../lib/store';
 import * as api from '../lib/api';
 
@@ -80,7 +81,11 @@ describe('ConfigFiles', () => {
   });
 
   it('should display config file names', async () => {
-    renderWithProviders(<ConfigFiles />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <ConfigFiles />
+      </ConfirmProvider>
+    );
     await waitFor(() => {
       expect(screen.getAllByText('nginx.conf').length).toBeGreaterThan(0);
       expect(screen.getAllByText('cert.pem').length).toBeGreaterThan(0);
@@ -88,14 +93,22 @@ describe('ConfigFiles', () => {
   });
 
   it('should show service count info', async () => {
-    renderWithProviders(<ConfigFiles />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <ConfigFiles />
+      </ConfirmProvider>
+    );
     await waitFor(() => {
       expect(screen.getByText(/2 services/i)).toBeInTheDocument();
     });
   });
 
   it('should display description when present', async () => {
-    renderWithProviders(<ConfigFiles />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <ConfigFiles />
+      </ConfirmProvider>
+    );
     await waitFor(() => {
       expect(screen.getByText('Nginx config')).toBeInTheDocument();
     });
@@ -128,7 +141,11 @@ describe('ConfigFiles', () => {
       },
     } as never);
 
-    renderWithProviders(<ConfigFiles />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <ConfigFiles />
+      </ConfirmProvider>
+    );
     await waitFor(() => {
       expect(screen.getAllByText('nginx.conf').length).toBeGreaterThan(0);
     });

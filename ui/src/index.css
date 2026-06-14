@@ -1,256 +1,212 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+
+/* Class-based dark mode: `dark:` variants respond to `.dark` on <html>
+   (set in index.html), not the OS `prefers-color-scheme`. The light theme +
+   switcher (#255) builds on this. */
+@custom-variant dark (&:is(.dark *));
 
 /*
- * CSS-first theme configuration (Tailwind v4) — replaces the
- * `theme.extend` block that used to live in tailwind.config.js.
- * Custom colors are exposed as `--color-*` so utilities like
- * `bg-primary-600`, `text-brand-500`, `shadow-card` are generated.
+ * ── Theme tokens (shadcn/ui semantic layer) ────────────────────────────────
+ * `:root` is the LIGHT palette (default); `.dark` is the DEEP SLATE dark
+ * palette (shell #0a0e14). The ThemeProvider (#255) toggles the `dark` class on
+ * <html>; the no-FOUC script in index.html sets it before first paint.
+ *
+ * Accent mapping is shared by both palettes (no collisions):
+ *   --primary     sky      #0284c7   (default actions, focus ring, links)
+ *   --destructive red      #dc2626   (delete / danger)
+ *   --brand       burgundy #cc0000   (nav / admin / identity)
+ * Both palettes target WCAG AA on the key surfaces.
  */
-@theme {
-  --color-primary-50: #f0f9ff;
-  --color-primary-100: #e0f2fe;
-  --color-primary-200: #bae6fd;
-  --color-primary-300: #7dd3fc;
-  --color-primary-400: #38bdf8;
-  --color-primary-500: #0ea5e9;
-  --color-primary-600: #0284c7;
-  --color-primary-700: #0369a1;
-  --color-primary-800: #075985;
-  --color-primary-900: #0c4a6e;
+:root {
+  --background: oklch(0.985 0.002 248);       /* ~#f8fafc near-white */
+  --foreground: oklch(0.22 0.03 256);         /* slate-900 */
+  --card: oklch(1 0 0);                        /* white */
+  --card-foreground: oklch(0.22 0.03 256);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.22 0.03 256);
+  --primary: oklch(0.585 0.142 234);          /* #0284c7 sky */
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.962 0.005 248);        /* slate-100 */
+  --secondary-foreground: oklch(0.30 0.03 256);
+  --muted: oklch(0.962 0.005 248);            /* slate-100 */
+  --muted-foreground: oklch(0.50 0.02 256);   /* slate-500/600 — AA on white */
+  --accent: oklch(0.94 0.006 248);            /* slate-150 hover */
+  --accent-foreground: oklch(0.30 0.03 256);
+  --destructive: oklch(0.58 0.21 27);         /* #dc2626 red */
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.91 0.006 248);            /* slate-200 */
+  --input: oklch(0.91 0.006 248);
+  --ring: oklch(0.585 0.142 234);             /* sky focus ring */
 
-  --color-brand-400: #ff3333;
-  --color-brand-500: #e60000;
-  --color-brand-600: #cc0000;
-  --color-brand-700: #b30000;
-  --color-brand-800: #990000;
+  --brand: oklch(0.53 0.21 28);               /* #cc0000 burgundy */
+  --brand-foreground: oklch(0.985 0 0);
+  --success: oklch(0.56 0.13 155);            /* darker green — AA on light */
+  --success-foreground: oklch(0.985 0 0);
+  --warning: oklch(0.60 0.13 72);             /* darker amber — AA on light */
+  --warning-foreground: oklch(0.985 0 0);
+  --info: oklch(0.55 0.13 234);
+  --info-foreground: oklch(0.985 0 0);
+  --purple: oklch(0.52 0.20 305);             /* distinct accent (databases) — darker for AA on light */
+  --purple-foreground: oklch(0.985 0 0);
 
-  --shadow-card: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
-  --shadow-modal: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  --chart-1: oklch(0.55 0.15 234);            /* sky */
+  --chart-2: oklch(0.60 0.15 155);            /* green */
+  --chart-3: oklch(0.70 0.15 72);             /* amber */
+  --chart-4: oklch(0.55 0.20 305);            /* purple */
+  --chart-5: oklch(0.58 0.19 25);             /* coral */
+
+  --sidebar: oklch(0.97 0.003 248);
+  --sidebar-foreground: oklch(0.30 0.03 256);
+  --sidebar-primary: oklch(0.53 0.21 28);     /* burgundy active stripe */
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.94 0.006 248);
+  --sidebar-accent-foreground: oklch(0.30 0.03 256);
+  --sidebar-border: oklch(0.91 0.006 248);
+  --sidebar-ring: oklch(0.585 0.142 234);
+
+  --radius: 0.625rem;
+}
+
+.dark {
+  --background: oklch(0.165 0.013 252);       /* #0a0e14 */
+  --foreground: oklch(0.968 0.007 248);       /* #f1f5f9 */
+  --card: oklch(0.205 0.014 252);             /* #11161f */
+  --card-foreground: oklch(0.968 0.007 248);
+  --popover: oklch(0.235 0.015 252);
+  --popover-foreground: oklch(0.968 0.007 248);
+  --primary: oklch(0.585 0.142 234);          /* #0284c7 sky */
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.27 0.017 252);
+  --secondary-foreground: oklch(0.968 0.007 248);
+  --muted: oklch(0.245 0.016 252);            /* #161d28 */
+  --muted-foreground: oklch(0.66 0.022 252);  /* #8b97a8 */
+  --accent: oklch(0.285 0.018 252);
+  --accent-foreground: oklch(0.968 0.007 248);
+  --destructive: oklch(0.58 0.21 27);         /* #dc2626 red */
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.30 0.017 252);            /* #1f2733 */
+  --input: oklch(0.30 0.017 252);
+  --ring: oklch(0.585 0.142 234);             /* sky focus ring */
+
+  /* Extended semantic accents (custom — mapped in @theme inline below) */
+  --brand: oklch(0.53 0.21 28);               /* #cc0000 burgundy */
+  --brand-foreground: oklch(0.985 0 0);
+  --success: oklch(0.70 0.15 155);
+  --success-foreground: oklch(0.985 0 0);
+  --warning: oklch(0.80 0.15 80);
+  --warning-foreground: oklch(0.205 0.03 80);
+  --info: oklch(0.62 0.13 234);
+  --info-foreground: oklch(0.985 0 0);
+  --purple: oklch(0.62 0.20 305);             /* distinct accent (databases) */
+  --purple-foreground: oklch(0.985 0 0);
+
+  /* Charts */
+  --chart-1: oklch(0.585 0.142 234);          /* sky */
+  --chart-2: oklch(0.70 0.15 155);            /* green */
+  --chart-3: oklch(0.80 0.15 80);             /* amber */
+  --chart-4: oklch(0.62 0.20 305);            /* purple */
+  --chart-5: oklch(0.65 0.19 25);             /* coral */
+
+  /* Sidebar */
+  --sidebar: oklch(0.19 0.013 252);
+  --sidebar-foreground: oklch(0.968 0.007 248);
+  --sidebar-primary: oklch(0.53 0.21 28);     /* burgundy active stripe */
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.27 0.017 252);
+  --sidebar-accent-foreground: oklch(0.968 0.007 248);
+  --sidebar-border: oklch(0.30 0.017 252);
+  --sidebar-ring: oklch(0.585 0.142 234);
+
+  --radius: 0.625rem;
 }
 
 /*
- * Tailwind v4's Preflight dropped three defaults that v3 set. Restore them so
- * any element that relied on the Preflight default — rather than an explicit
- * `border-*` / `placeholder-*` / `cursor-*` utility — keeps rendering as it did
- * under v3. The colors resolve to v4's gray-200/gray-400; the literal hex
- * fallbacks only apply if the default palette is ever cleared via `@theme`.
+ * Map the runtime CSS variables above to Tailwind v4 color/size utilities.
+ * `@theme inline` resolves to `var(--token)` at point of use, so utilities like
+ * `bg-background`, `text-foreground`, `border-border`, `bg-primary`, `bg-brand`,
+ * and `bg-chart-1` track the live token values (and will flip with the light
+ * theme once #255 lands).
  */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-purple: var(--purple);
+  --color-purple-foreground: var(--purple-foreground);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
 @layer base {
-  /* v4 defaults bare `border`/`divide` to currentColor; v3 used gray-200. */
-  *,
-  ::after,
-  ::before,
-  ::backdrop,
-  ::file-selector-button {
-    border-color: var(--color-gray-200, currentColor);
+  /* shadcn convention: default every element's border + outline to the theme
+     tokens. Supersedes v3's gray-200 border default. */
+  * {
+    @apply border-border outline-ring/50;
   }
 
-  /* v4 dropped Preflight's `cursor: pointer` on buttons — restore it. */
+  body {
+    @apply bg-background text-foreground font-sans;
+  }
+
+  /* Tailwind v4's Preflight dropped two v3 defaults we still rely on. */
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;
   }
 
-  /* v4 sets the default placeholder to a translucent currentColor; restore a
-     solid gray-400 placeholder for inputs that don't set their own color. */
   input::placeholder,
   textarea::placeholder {
-    color: var(--color-gray-400, #9ca3af);
+    color: var(--color-muted-foreground);
   }
-}
-
-:root {
-  --bg-primary: #0f172a;
-  --bg-secondary: #1e293b;
-  --bg-tertiary: #334155;
-  --text-primary: #f8fafc;
-  --text-secondary: #94a3b8;
-  --border-color: #475569;
-}
-
-body {
-  background-color: var(--bg-primary);
-  color: var(--text-primary);
-  font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 code, pre, .font-mono {
-  font-family: 'IBM Plex Mono', monospace;
-}
-
-@layer components {
-  /* Buttons - reduced density */
-  .btn {
-    @apply px-3 py-1.5 rounded-md font-medium transition-colors duration-200 text-sm
-           focus:outline-hidden focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 focus:ring-offset-slate-900
-           disabled:opacity-50 disabled:cursor-not-allowed;
-  }
-
-  .btn-primary {
-    @apply bg-primary-600 hover:bg-primary-700 text-white;
-  }
-
-  .btn-secondary {
-    @apply bg-slate-700 hover:bg-slate-600 text-white;
-  }
-
-  .btn-danger {
-    @apply bg-red-600 hover:bg-red-700 text-white;
-  }
-
-  .btn-ghost {
-    @apply hover:bg-slate-700 text-slate-300;
-  }
-
-  /* Inputs - reduced density */
-  .input {
-    @apply w-full px-2.5 py-1.5 bg-slate-800 border border-slate-600 rounded-md text-sm text-white placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-primary-500 focus:border-transparent;
-  }
-
-  /* Cards - with subtle elevation */
-  .card {
-    @apply bg-slate-800 rounded-xl border border-slate-700 p-4 shadow-card;
-  }
-
-  /* Panels - border-based containers (lighter feel) */
-  .panel {
-    @apply border border-slate-700 rounded-lg p-4;
-  }
-
-  /* Panel highlight - for active/selected states */
-  .panel-highlight {
-    @apply border border-slate-600 rounded-lg p-4 bg-slate-800/50;
-  }
-
-  /* Section divider for grouping without box */
-  .section {
-    @apply border-b border-slate-700 pb-4 mb-4;
-  }
-
-  .badge {
-    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium;
-  }
-
-  .badge-success {
-    @apply bg-green-900/30 text-green-300;
-  }
-
-  .badge-warning {
-    @apply bg-yellow-900/30 text-yellow-300;
-  }
-
-  .badge-error {
-    @apply bg-red-900/30 text-red-300;
-  }
-
-  .badge-info {
-    @apply bg-blue-900/30 text-blue-300;
-  }
-
-  .badge-neutral {
-    @apply bg-slate-600 text-slate-300;
-  }
-
-  /* Typography - standardize labels */
-  .label {
-    @apply block text-sm text-slate-400 mb-1;
-  }
-
-  .label-xs {
-    @apply text-[10px] text-slate-500 uppercase tracking-wider;
-  }
-
-  .help-text {
-    @apply text-xs text-slate-500 mt-1;
-  }
-
-  .section-title {
-    @apply text-lg font-semibold text-white;
-  }
-
-  /* Typography hierarchy */
-  .h1 {
-    @apply text-2xl font-bold text-white;
-  }
-
-  .h2 {
-    @apply text-xl font-semibold text-white;
-  }
-
-  .h3 {
-    @apply text-lg font-semibold text-white;
-  }
-
-  .text-muted {
-    @apply text-slate-400;
-  }
-
-  /* Alert variants */
-  .alert {
-    @apply p-4 rounded-lg border;
-  }
-
-  .alert-error {
-    @apply bg-red-500/10 border-red-500/30 text-red-300;
-  }
-
-  .alert-warning {
-    @apply bg-yellow-500/10 border-yellow-500/30 text-yellow-300;
-  }
-
-  .alert-success {
-    @apply bg-green-500/10 border-green-500/30 text-green-300;
-  }
-
-  .alert-info {
-    @apply bg-blue-500/10 border-blue-500/30 text-blue-300;
-  }
-
-  /* Icon buttons - consistent hover */
-  .icon-btn {
-    @apply p-1.5 rounded text-slate-400 hover:text-white hover:bg-slate-800 transition-colors;
-  }
-
-  /* Tabs */
-  .tabs {
-    @apply flex border-b border-slate-700;
-  }
-
-  .tab {
-    @apply px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors;
-  }
-
-  .tab-active {
-    @apply border-brand-600 text-white;
-  }
-
-  .tab-inactive {
-    @apply border-transparent text-slate-400 hover:text-white;
-  }
-
-  /* Table row hover */
-  .table-row-hover:hover {
-    @apply bg-slate-700/50;
-  }
-
-  .animate-slide-in {
-    animation: slide-in 0.2s ease-out;
-  }
-}
-
-@keyframes slide-in {
-  from {
-    transform: translateX(100%);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
-}
-
-/* Focus states for select and textarea */
-select:focus,
-textarea:focus {
-  @apply outline-hidden ring-2 ring-primary-500 border-transparent;
+  font-family: var(--font-mono);
 }

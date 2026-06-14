@@ -1,6 +1,6 @@
 import { useMemo, type ReactElement } from 'react';
 import CodeMirror, { type Extension } from '@uiw/react-codemirror';
-import { dracula } from '@uiw/codemirror-theme-dracula';
+import { slateCodeMirrorTheme } from './codemirror-theme';
 import { yaml } from '@codemirror/lang-yaml';
 import { json } from '@codemirror/lang-json';
 import { sql } from '@codemirror/lang-sql';
@@ -90,12 +90,12 @@ export function ConfigFileEditor({
 
   return (
     <div
-      className={`overflow-hidden rounded-lg border border-slate-700 bg-slate-950 ${className ?? ''}`}
+      className={`overflow-hidden rounded-lg border border-border ${className ?? ''}`}
     >
       <CodeMirror
         value={value}
         height={height}
-        theme={dracula}
+        theme={slateCodeMirrorTheme}
         extensions={extensions}
         editable={!readOnly}
         readOnly={readOnly}
