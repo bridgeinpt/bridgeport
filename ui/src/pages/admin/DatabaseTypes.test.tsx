@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '../../../test/render';
 import { useAuthStore } from '../../lib/store';
+import { ConfirmProvider } from '@/hooks/useConfirm';
 
 // Mock Toast
 vi.mock('../../components/Toast', () => ({
@@ -69,7 +70,11 @@ describe('DatabaseTypes', () => {
   });
 
   it('should display database type names', async () => {
-    renderWithProviders(<DatabaseTypes />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <DatabaseTypes />
+      </ConfirmProvider>
+    );
     await waitFor(() => {
       expect(screen.getByText('PostgreSQL')).toBeInTheDocument();
       expect(screen.getByText('MySQL')).toBeInTheDocument();
@@ -77,7 +82,11 @@ describe('DatabaseTypes', () => {
   });
 
   it('should display default ports', async () => {
-    renderWithProviders(<DatabaseTypes />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <DatabaseTypes />
+      </ConfirmProvider>
+    );
     await waitFor(() => {
       expect(screen.getByText(/5432/)).toBeInTheDocument();
       expect(screen.getByText(/3306/)).toBeInTheDocument();

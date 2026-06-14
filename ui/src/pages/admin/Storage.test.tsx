@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '../../../test/render';
 import { useAuthStore } from '../../lib/store';
+import { ConfirmProvider } from '../../hooks/useConfirm';
 
 // Mock Toast
 vi.mock('../../components/Toast', () => ({
@@ -41,7 +42,11 @@ describe('Storage', () => {
   });
 
   it('should display storage page when not configured', async () => {
-    renderWithProviders(<Storage />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <Storage />
+      </ConfirmProvider>
+    );
     await waitFor(() => {
       expect(screen.getByText(/not configured/i)).toBeInTheDocument();
     });

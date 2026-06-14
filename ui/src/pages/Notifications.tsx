@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Check, RefreshCw, Settings } from 'lucide-react';
 import {
   listNotifications,
   markNotificationAsRead,
@@ -11,7 +12,30 @@ import {
   type NotificationPreference,
 } from '../lib/api';
 import { useToast } from '../components/Toast';
-import { CheckIcon, RefreshIcon, SettingsIcon } from '../components/Icons';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
+import { EmptyState } from '@/components/ui/empty-state';
+import { DataPagination } from '@/components/ui/data-pagination';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { cn } from '@/lib/utils';
 
 function formatTimeAgo(date: string): string {
   const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
@@ -23,27 +47,20 @@ function formatTimeAgo(date: string): string {
   return new Date(date).toLocaleDateString();
 }
 
-function getSeverityColor(severity: string): string {
+function getSeverityBorder(severity: string): string {
   switch (severity) {
     case 'critical':
-      return 'border-red-500';
+      return 'border-destructive';
     case 'warning':
-      return 'border-yellow-500';
+      return 'border-warning';
     default:
-      return 'border-primary-500';
+      return 'border-primary';
   }
 }
 
-function getSeverityBadge(severity: string): { bg: string; text: string } {
-  switch (severity) {
-    case 'critical':
-      return { bg: 'bg-red-500/20', text: 'text-red-400' };
-    case 'warning':
-      return { bg: 'bg-yellow-500/20', text: 'text-yellow-400' };
-    default:
-      return { bg: 'bg-primary-500/20', text: 'text-primary-400' };
-  }
-}
+// Sentinel value for the "All environments" Select option — Radix Select
+// disallows an empty-string value, so we map it to/from envFilter ('').
+const ALL_ENVS = '__all__';
 
 export default function Notifications() {
   const toast = useToast();
@@ -152,131 +169,142 @@ export default function Notifications() {
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-5">
-        <p className="text-slate-400">
+        <p className="text-muted-foreground">
           {total} notification{total !== 1 ? 's' : ''}
           {unreadCount > 0 && ` (${unreadCount} unread)`}
         </p>
         <div className="flex items-center gap-2">
-          <button onClick={loadNotifications} className="btn btn-ghost" title="Refresh">
-            <RefreshIcon className="w-4 h-4" />
-          </button>
-          <button onClick={openPreferences} className="btn btn-ghost" title="Preferences">
-            <SettingsIcon className="w-4 h-4" />
-          </button>
+          <Button variant="ghost" size="icon" onClick={loadNotifications} title="Refresh">
+            <RefreshCw className="size-4" />
+          </Button>
+          <Button variant="ghost" size="icon" onClick={openPreferences} title="Preferences">
+            <Settings className="size-4" />
+          </Button>
           {unreadCount > 0 && (
-            <button onClick={handleMarkAllAsRead} className="btn btn-secondary">
+            <Button variant="secondary" onClick={handleMarkAllAsRead}>
               Mark all as read
-            </button>
+            </Button>
           )}
         </div>
       </div>
 
       {/* Filters */}
-      <div className="card mb-6">
-        <div className="flex flex-wrap items-center gap-4">
-          <div>
-            <label className="text-xs text-slate-400 uppercase tracking-wide block mb-1">
+      <Card className="mb-6 py-4">
+        <div className="flex flex-wrap items-end gap-4 px-6">
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground uppercase tracking-wide">
               Category
-            </label>
-            <select
+            </Label>
+            <Select
               value={category}
-              onChange={(e) => {
-                setCategory(e.target.value as 'all' | 'user' | 'system');
+              onValueChange={(v) => {
+                setCategory(v as 'all' | 'user' | 'system');
                 setPage(0);
               }}
-              className="input py-2"
             >
-              <option value="all">All</option>
-              <option value="user">User</option>
-              <option value="system">System</option>
-            </select>
+              <SelectTrigger className="w-40">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All</SelectItem>
+                <SelectItem value="user">User</SelectItem>
+                <SelectItem value="system">System</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-          <div>
-            <label className="text-xs text-slate-400 uppercase tracking-wide block mb-1">
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground uppercase tracking-wide">
               Environment
-            </label>
-            <select
-              value={envFilter}
-              onChange={(e) => {
-                setEnvFilter(e.target.value);
+            </Label>
+            <Select
+              value={envFilter || ALL_ENVS}
+              onValueChange={(v) => {
+                setEnvFilter(v === ALL_ENVS ? '' : v);
                 setPage(0);
               }}
-              className="input py-2"
             >
-              <option value="">All environments</option>
-              {environments.map((env) => (
-                <option key={env.id} value={env.id}>
-                  {env.name}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="w-52">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_ENVS}>All environments</SelectItem>
+                {environments.map((env) => (
+                  <SelectItem key={env.id} value={env.id}>
+                    {env.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-          <div className="flex items-center gap-2 pt-5">
-            <input
-              type="checkbox"
+          <div className="flex items-center gap-2 pb-2">
+            <Checkbox
               id="unreadOnly"
               checked={unreadOnly}
-              onChange={(e) => {
-                setUnreadOnly(e.target.checked);
+              onCheckedChange={(checked) => {
+                setUnreadOnly(checked === true);
                 setPage(0);
               }}
-              className="rounded bg-slate-800 border-slate-600 text-primary-500 focus:ring-primary-500"
             />
-            <label htmlFor="unreadOnly" className="text-sm text-slate-300">
+            <Label htmlFor="unreadOnly" className="text-sm">
               Unread only
-            </label>
+            </Label>
           </div>
         </div>
-      </div>
+      </Card>
 
       {/* Notification list */}
-      <div className="card">
+      <Card className="py-0 gap-0">
         {loading ? (
-          <div className="p-8 text-center text-slate-400">Loading...</div>
+          <div className="p-8 text-center text-muted-foreground">Loading...</div>
         ) : notifications.length === 0 ? (
-          <div className="p-12 text-center">
-            <p className="text-slate-400">No notifications</p>
-            {(category !== 'all' || unreadOnly || envFilter) && (
-              <p className="text-slate-500 text-sm mt-2">Try adjusting your filters</p>
-            )}
+          <div className="p-12">
+            <EmptyState
+              message="No notifications"
+              description={
+                category !== 'all' || unreadOnly || envFilter
+                  ? 'Try adjusting your filters'
+                  : undefined
+              }
+            />
           </div>
         ) : (
           <>
-            <ul className="divide-y divide-slate-700">
+            <ul className="divide-y divide-border">
               {notifications.map((notification) => {
                 const isUnread = !notification.inAppReadAt;
-                const severityColor = getSeverityColor(notification.type.severity);
-                const badge = getSeverityBadge(notification.type.severity);
+                const severityBorder = getSeverityBorder(notification.type.severity);
                 const env = environments.find((e) => e.id === notification.environmentId);
 
                 return (
                   <li
                     key={notification.id}
-                    className={`px-6 py-4 ${isUnread ? 'bg-slate-800/50' : ''}`}
+                    className={cn('px-6 py-4', isUnread && 'bg-muted/40')}
                   >
-                    <div className={`border-l-2 pl-4 ${severityColor}`}>
+                    <div className={cn('border-l-2 pl-4', severityBorder)}>
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <h3 className={`text-sm font-medium ${isUnread ? 'text-white' : 'text-slate-300'}`}>
+                            <h3
+                              className={cn(
+                                'text-sm font-medium',
+                                isUnread ? 'text-foreground' : 'text-muted-foreground'
+                              )}
+                            >
                               {notification.title}
                             </h3>
                             {notification.type.severity !== 'info' && (
-                              <span className={`text-[10px] px-1.5 py-0.5 rounded ${badge.bg} ${badge.text}`}>
-                                {notification.type.severity}
-                              </span>
+                              <StatusBadge
+                                kind="severity"
+                                value={notification.type.severity}
+                              />
                             )}
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700 text-slate-400">
-                              {notification.type.category}
-                            </span>
-                            {env && (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700 text-slate-400">
-                                {env.name}
-                              </span>
-                            )}
+                            <Badge variant="neutral">{notification.type.category}</Badge>
+                            {env && <Badge variant="neutral">{env.name}</Badge>}
                           </div>
-                          <p className="text-sm text-slate-400 mt-1">{notification.message}</p>
-                          <p className="text-xs text-slate-500 mt-2">
+                          <p className="text-sm text-muted-foreground mt-1">
+                            {notification.message}
+                          </p>
+                          <p className="text-xs text-muted-foreground/70 mt-2">
                             {formatTimeAgo(notification.createdAt)}
                             {notification.inAppReadAt && (
                               <span className="ml-2">
@@ -286,13 +314,14 @@ export default function Notifications() {
                           </p>
                         </div>
                         {isUnread && (
-                          <button
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
                             onClick={() => handleMarkAsRead(notification.id)}
-                            className="btn btn-ghost text-xs"
                             title="Mark as read"
                           >
-                            <CheckIcon className="w-4 h-4" />
-                          </button>
+                            <Check className="size-4" />
+                          </Button>
                         )}
                       </div>
                     </div>
@@ -303,120 +332,88 @@ export default function Notifications() {
 
             {/* Pagination */}
             {totalPages > 1 && (
-              <div className="px-6 py-4 border-t border-slate-700 flex items-center justify-between">
-                <p className="text-sm text-slate-400">
-                  Showing {page * pageSize + 1}-{Math.min((page + 1) * pageSize, total)} of {total}
-                </p>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setPage(Math.max(0, page - 1))}
-                    disabled={page === 0}
-                    className="btn btn-ghost text-sm disabled:opacity-50"
-                  >
-                    Previous
-                  </button>
-                  <span className="text-sm text-slate-400">
-                    Page {page + 1} of {totalPages}
-                  </span>
-                  <button
-                    onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
-                    disabled={page >= totalPages - 1}
-                    className="btn btn-ghost text-sm disabled:opacity-50"
-                  >
-                    Next
-                  </button>
-                </div>
+              <div className="px-6 py-4">
+                <DataPagination
+                  currentPage={page}
+                  totalPages={totalPages}
+                  totalItems={total}
+                  pageSize={pageSize}
+                  onPageChange={setPage}
+                />
               </div>
             )}
           </>
         )}
-      </div>
+      </Card>
 
       {/* Preferences Modal */}
-      {showPreferences && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-2xl p-6 max-h-[80vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-white">Notification Preferences</h3>
-              <button
-                onClick={() => setShowPreferences(false)}
-                className="text-slate-400 hover:text-white"
-              >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
+      <Dialog open={showPreferences} onOpenChange={setShowPreferences}>
+        <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Notification Preferences</DialogTitle>
+            <DialogDescription>
+              Choose which notifications you want to receive and how.
+            </DialogDescription>
+          </DialogHeader>
 
-            {prefsLoading ? (
-              <div className="py-8 text-center text-slate-400">Loading...</div>
-            ) : (
-              <div className="space-y-4">
-                <p className="text-sm text-slate-400 mb-4">
-                  Choose which notifications you want to receive and how.
-                </p>
+          {prefsLoading ? (
+            <div className="py-8 text-center text-muted-foreground">Loading...</div>
+          ) : (
+            <div className="space-y-4">
+              {/* Group preferences by category */}
+              {['user', 'system'].map((cat) => {
+                const catPrefs = preferences.filter((p) => p.type.category === cat);
+                if (catPrefs.length === 0) return null;
 
-                {/* Group preferences by category */}
-                {['user', 'system'].map((cat) => {
-                  const catPrefs = preferences.filter((p) => p.type.category === cat);
-                  if (catPrefs.length === 0) return null;
-
-                  return (
-                    <div key={cat} className="mb-6">
-                      <h4 className="text-sm font-medium text-white uppercase tracking-wide mb-3">
-                        {cat === 'user' ? 'Account Notifications' : 'System Notifications'}
-                      </h4>
-                      <div className="space-y-2">
-                        {catPrefs.map((pref) => (
-                          <div
-                            key={pref.typeId}
-                            className="flex items-center justify-between p-3 bg-slate-800 rounded-lg"
-                          >
-                            <div>
-                              <p className="text-sm font-medium text-white">{pref.type.name}</p>
-                              <p className="text-xs text-slate-400">{pref.type.description}</p>
-                            </div>
-                            <div className="flex items-center gap-4">
-                              <label className="flex items-center gap-2">
-                                <input
-                                  type="checkbox"
-                                  checked={pref.inAppEnabled}
-                                  onChange={(e) =>
-                                    handleTogglePreference(pref.typeId, 'inAppEnabled', e.target.checked)
-                                  }
-                                  className="rounded bg-slate-700 border-slate-600 text-primary-500"
-                                />
-                                <span className="text-xs text-slate-300">In-App</span>
-                              </label>
-                              <label className="flex items-center gap-2">
-                                <input
-                                  type="checkbox"
-                                  checked={pref.emailEnabled}
-                                  onChange={(e) =>
-                                    handleTogglePreference(pref.typeId, 'emailEnabled', e.target.checked)
-                                  }
-                                  className="rounded bg-slate-700 border-slate-600 text-primary-500"
-                                />
-                                <span className="text-xs text-slate-300">Email</span>
-                              </label>
-                            </div>
+                return (
+                  <div key={cat} className="mb-6">
+                    <h4 className="text-sm font-medium text-foreground uppercase tracking-wide mb-3">
+                      {cat === 'user' ? 'Account Notifications' : 'System Notifications'}
+                    </h4>
+                    <div className="space-y-2">
+                      {catPrefs.map((pref) => (
+                        <div
+                          key={pref.typeId}
+                          className="flex items-center justify-between p-3 bg-muted/40 rounded-lg"
+                        >
+                          <div>
+                            <p className="text-sm font-medium text-foreground">{pref.type.name}</p>
+                            <p className="text-xs text-muted-foreground">{pref.type.description}</p>
                           </div>
-                        ))}
-                      </div>
+                          <div className="flex items-center gap-4">
+                            <Label className="flex items-center gap-2">
+                              <Checkbox
+                                checked={pref.inAppEnabled}
+                                onCheckedChange={(checked) =>
+                                  handleTogglePreference(pref.typeId, 'inAppEnabled', checked === true)
+                                }
+                              />
+                              <span className="text-xs text-muted-foreground">In-App</span>
+                            </Label>
+                            <Label className="flex items-center gap-2">
+                              <Checkbox
+                                checked={pref.emailEnabled}
+                                onCheckedChange={(checked) =>
+                                  handleTogglePreference(pref.typeId, 'emailEnabled', checked === true)
+                                }
+                              />
+                              <span className="text-xs text-muted-foreground">Email</span>
+                            </Label>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  );
-                })}
-              </div>
-            )}
-
-            <div className="mt-6 pt-4 border-t border-slate-700 flex justify-end">
-              <button onClick={() => setShowPreferences(false)} className="btn btn-primary">
-                Done
-              </button>
+                  </div>
+                );
+              })}
             </div>
-          </div>
-        </div>
-      )}
+          )}
+
+          <DialogFooter>
+            <Button onClick={() => setShowPreferences(false)}>Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
