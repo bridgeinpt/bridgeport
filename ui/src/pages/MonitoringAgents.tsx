@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
+import { ChevronRight } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAppStore } from '../lib/store';
 import {
@@ -16,6 +17,31 @@ import {
   type AgentStatus,
 } from '../lib/api';
 import { formatDistanceToNow, format } from 'date-fns';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { Skeleton } from '@/components/ui/skeleton';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { useConfirm } from '@/hooks/useConfirm';
+import { type StatusVariant } from '@/lib/status';
+import { cn } from '@/lib/utils';
 
 type TabType = 'ssh' | 'agents';
 
@@ -23,6 +49,7 @@ export default function MonitoringAgents() {
   const { selectedEnvironment, autoRefreshEnabled, setAutoRefreshEnabled } = useAppStore();
   const location = useLocation();
   const navigate = useNavigate();
+  const confirm = useConfirm();
 
   // Get tab from URL hash, default to 'ssh'
   const getTabFromHash = (): TabType => {
@@ -118,7 +145,12 @@ export default function MonitoringAgents() {
   };
 
   const handleRegenerateToken = async (serverId: string) => {
-    if (!confirm('This will regenerate the agent token and redeploy the agent. Continue?')) {
+    const ok = await confirm({
+      title: 'Regenerate agent token?',
+      description: 'This will regenerate the agent token and redeploy the agent. Continue?',
+      confirmText: 'Regenerate',
+    });
+    if (!ok) {
       return;
     }
     setRegenerating(serverId);
@@ -138,7 +170,13 @@ export default function MonitoringAgents() {
   };
 
   const handleRemoveAgent = async (serverId: string, serverName: string) => {
-    if (!confirm(`This will stop and remove the monitoring agent from ${serverName}. Continue?`)) {
+    const ok = await confirm({
+      title: 'Remove monitoring agent?',
+      description: `This will stop and remove the monitoring agent from ${serverName}. Continue?`,
+      confirmText: 'Remove',
+      destructive: true,
+    });
+    if (!ok) {
       return;
     }
     setRemoving(serverId);
@@ -191,58 +229,47 @@ export default function MonitoringAgents() {
   };
 
   const getEventTypeBadge = (eventType: string) => {
-    switch (eventType) {
-      case 'deploy_started':
-        return <span className="px-2 py-0.5 text-xs rounded-full bg-blue-500/20 text-blue-400">Deploy Started</span>;
-      case 'deploy_success':
-        return <span className="px-2 py-0.5 text-xs rounded-full bg-green-500/20 text-green-400">Deploy Success</span>;
-      case 'deploy_failed':
-        return <span className="px-2 py-0.5 text-xs rounded-full bg-red-500/20 text-red-400">Deploy Failed</span>;
-      case 'token_regenerated':
-        return <span className="px-2 py-0.5 text-xs rounded-full bg-purple-500/20 text-purple-400">Token Regenerated</span>;
-      case 'status_change':
-        return <span className="px-2 py-0.5 text-xs rounded-full bg-yellow-500/20 text-yellow-400">Status Change</span>;
-      default:
-        return <span className="px-2 py-0.5 text-xs rounded-full bg-slate-500/20 text-slate-400">{eventType}</span>;
-    }
+    const EVENT_BADGES: Record<string, { variant: StatusVariant; label: string }> = {
+      deploy_started: { variant: 'info', label: 'Deploy Started' },
+      deploy_success: { variant: 'success', label: 'Deploy Success' },
+      deploy_failed: { variant: 'destructive', label: 'Deploy Failed' },
+      token_regenerated: { variant: 'info', label: 'Token Regenerated' },
+      status_change: { variant: 'warning', label: 'Status Change' },
+    };
+    const badge = EVENT_BADGES[eventType] ?? { variant: 'neutral' as StatusVariant, label: eventType };
+    return <StatusBadge kind="severity" value={eventType} variant={badge.variant} label={badge.label} />;
   };
 
   const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'healthy':
-        return <span className="px-2 py-0.5 text-xs rounded-full bg-green-500/20 text-green-400">OK</span>;
-      case 'unhealthy':
-        return <span className="px-2 py-0.5 text-xs rounded-full bg-red-500/20 text-red-400">Failed</span>;
-      default:
-        return <span className="px-2 py-0.5 text-xs rounded-full bg-slate-500/20 text-slate-400">Unknown</span>;
-    }
+    const label = status === 'healthy' ? 'OK' : status === 'unhealthy' ? 'Failed' : 'Unknown';
+    return <StatusBadge kind="health" value={status} label={label} />;
   };
 
   const getAgentStatusBadge = (status: AgentStatus) => {
-    switch (status) {
-      case 'active':
-        return <span className="px-2 py-0.5 text-xs rounded-full bg-green-500/20 text-green-400">Active</span>;
-      case 'deploying':
-        return (
-          <span className="px-2 py-0.5 text-xs rounded-full bg-blue-500/20 text-blue-400 animate-pulse">
-            Deploying...
-          </span>
-        );
-      case 'waiting':
-        return <span className="px-2 py-0.5 text-xs rounded-full bg-yellow-500/20 text-yellow-400">Waiting</span>;
-      case 'stale':
-        return <span className="px-2 py-0.5 text-xs rounded-full bg-orange-500/20 text-orange-400">Stale</span>;
-      case 'offline':
-        return <span className="px-2 py-0.5 text-xs rounded-full bg-red-500/20 text-red-400">Offline</span>;
-      default:
-        return <span className="px-2 py-0.5 text-xs rounded-full bg-slate-500/20 text-slate-400">Unknown</span>;
-    }
+    const AGENT_BADGES: Record<AgentStatus, { variant: StatusVariant; label: string; pulse?: boolean }> = {
+      active: { variant: 'success', label: 'Active' },
+      deploying: { variant: 'info', label: 'Deploying...', pulse: true },
+      waiting: { variant: 'warning', label: 'Waiting' },
+      stale: { variant: 'warning', label: 'Stale' },
+      offline: { variant: 'destructive', label: 'Offline' },
+      unknown: { variant: 'neutral', label: 'Unknown' },
+    };
+    const badge = AGENT_BADGES[status] ?? { variant: 'neutral' as StatusVariant, label: 'Unknown' };
+    return (
+      <StatusBadge
+        kind="severity"
+        value={status}
+        variant={badge.variant}
+        label={badge.label}
+        className={cn(badge.pulse && 'animate-pulse')}
+      />
+    );
   };
 
   if (!selectedEnvironment) {
     return (
       <div className="p-6">
-        <p className="text-slate-400">Select an environment to view agents</p>
+        <p className="text-muted-foreground">Select an environment to view agents</p>
       </div>
     );
   }
@@ -250,316 +277,302 @@ export default function MonitoringAgents() {
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-5">
-        <p className="text-slate-400">
+        <p className="text-muted-foreground">
           Manage SSH connections and monitoring agents
         </p>
         <div className="flex items-center gap-3">
-          <label className="flex items-center gap-2 text-sm text-slate-400">
-            <input
-              type="checkbox"
+          <Label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Switch
               checked={autoRefreshEnabled}
-              onChange={(e) => setAutoRefreshEnabled(e.target.checked)}
-              className="rounded bg-slate-700 border-slate-600"
+              onCheckedChange={setAutoRefreshEnabled}
+              aria-label="Auto-refresh"
             />
             Auto: 30s
-          </label>
-          <button
-            onClick={handleTestAll}
-            disabled={testingAll}
-            className="btn btn-primary"
-          >
+          </Label>
+          <Button onClick={handleTestAll} disabled={testingAll}>
             {testingAll ? 'Testing...' : 'Test All'}
-          </button>
+          </Button>
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex border-b border-slate-700 mb-6">
-        <button
-          onClick={() => setActiveTab('ssh')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
-            activeTab === 'ssh'
-              ? 'border-brand-600 text-white'
-              : 'border-transparent text-slate-400 hover:text-white'
-          }`}
-        >
-          SSH Connections
-        </button>
-        <button
-          onClick={() => setActiveTab('agents')}
-          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
-            activeTab === 'agents'
-              ? 'border-brand-600 text-white'
-              : 'border-transparent text-slate-400 hover:text-white'
-          }`}
-        >
-          Monitoring Agents
-        </button>
-      </div>
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabType)} className="mb-6">
+        <TabsList variant="line">
+          <TabsTrigger value="ssh">SSH Connections</TabsTrigger>
+          <TabsTrigger value="agents">Monitoring Agents</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       {loading ? (
-        <div className="card">
-          <div className="animate-pulse space-y-3">
+        <Card className="p-4">
+          <div className="space-y-3">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="h-12 bg-slate-700 rounded" />
+              <Skeleton key={i} className="h-12 w-full" />
             ))}
           </div>
-        </div>
+        </Card>
       ) : activeTab === 'ssh' ? (
         <>
           {/* SSH Config */}
-          <div className="card mb-6">
-            <h3 className="text-sm font-medium text-slate-400 mb-2">Environment SSH Config</h3>
+          <Card className="mb-6 gap-0 p-4">
+            <h3 className="text-sm font-medium text-muted-foreground mb-2">Environment SSH Config</h3>
             <div className="flex items-center gap-4">
               <div>
-                <span className="text-slate-500 text-sm">Username:</span>
-                <span className="ml-2 text-white font-mono">{sshUser}</span>
+                <span className="text-muted-foreground text-sm">Username:</span>
+                <span className="ml-2 text-foreground font-mono">{sshUser}</span>
               </div>
               <div>
-                <span className="text-slate-500 text-sm">SSH Key:</span>
-                <span className="ml-2 text-slate-400">Configured</span>
+                <span className="text-muted-foreground text-sm">SSH Key:</span>
+                <span className="ml-2 text-muted-foreground">Configured</span>
               </div>
-              <Link to="/settings" className="btn btn-secondary ml-auto">
-                Update
-              </Link>
+              <Button asChild variant="secondary" className="ml-auto">
+                <Link to="/settings">Update</Link>
+              </Button>
             </div>
-          </div>
+          </Card>
 
           {/* Server Connections */}
-          <div className="card overflow-hidden">
-            <h3 className="text-sm font-medium text-slate-400 mb-4">Server Connections</h3>
-            <table className="w-full">
-              <thead>
-                <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
-                  <th className="pb-3 font-medium">Server</th>
-                  <th className="pb-3 font-medium">Private IP</th>
-                  <th className="pb-3 font-medium">Status</th>
-                  <th className="pb-3 font-medium">Last Test</th>
-                  <th className="pb-3 font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-700">
+          <Card className="gap-0 overflow-hidden p-4">
+            <h3 className="text-sm font-medium text-muted-foreground mb-4">Server Connections</h3>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Server</TableHead>
+                  <TableHead>Private IP</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Last Test</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {agents.map((agent) => (
-                  <tr key={agent.id} className="text-slate-300">
-                    <td className="py-3">
-                      <Link to={`/servers/${agent.id}`} className="text-white hover:text-brand-400">
+                  <TableRow key={agent.id}>
+                    <TableCell>
+                      <Link to={`/servers/${agent.id}`} className="text-foreground hover:text-primary">
                         {agent.name}
                       </Link>
-                    </td>
-                    <td className="py-3 font-mono text-sm">{agent.hostname}</td>
-                    <td className="py-3">
+                    </TableCell>
+                    <TableCell className="font-mono text-sm">{agent.hostname}</TableCell>
+                    <TableCell>
                       {testResults[agent.id] ? (
                         testResults[agent.id].success ? (
-                          <span className="px-2 py-0.5 text-xs rounded-full bg-green-500/20 text-green-400">
-                            OK ({testResults[agent.id].durationMs}ms)
-                          </span>
+                          <StatusBadge
+                            kind="health"
+                            value="healthy"
+                            label={`OK (${testResults[agent.id].durationMs}ms)`}
+                          />
                         ) : (
-                          <span className="px-2 py-0.5 text-xs rounded-full bg-red-500/20 text-red-400" title={testResults[agent.id].error}>
-                            Failed
-                          </span>
+                          <StatusBadge
+                            kind="health"
+                            value="unhealthy"
+                            label="Failed"
+                            title={testResults[agent.id].error}
+                          />
                         )
                       ) : (
                         getStatusBadge(agent.sshStatus)
                       )}
-                    </td>
-                    <td className="py-3 text-sm text-slate-500">
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
                       {agent.lastCheckedAt
                         ? formatDistanceToNow(new Date(agent.lastCheckedAt), { addSuffix: true })
                         : 'Never'}
-                    </td>
-                    <td className="py-3">
-                      <button
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="secondary"
+                        size="xs"
                         onClick={() => handleTestSingle(agent.id)}
                         disabled={testingServer === agent.id}
-                        className="btn btn-secondary px-2 py-1 text-xs"
                       >
                         {testingServer === agent.id ? 'Testing...' : 'Test'}
-                      </button>
-                    </td>
-                  </tr>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </TableBody>
+            </Table>
+          </Card>
         </>
       ) : (
         <>
           {/* Monitoring Agents */}
-          <div className="card overflow-hidden">
-            <table className="w-full">
-              <thead>
-                <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
-                  <th className="pb-3 font-medium w-8"></th>
-                  <th className="pb-3 font-medium">Server</th>
-                  <th className="pb-3 font-medium">Metrics Mode</th>
-                  <th className="pb-3 font-medium">Status</th>
-                  <th className="pb-3 font-medium">Status Changed</th>
-                  <th className="pb-3 font-medium">Version</th>
-                  <th className="pb-3 font-medium">Update</th>
-                  <th className="pb-3 font-medium">Last Push</th>
-                  <th className="pb-3 font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
+          <Card className="gap-0 overflow-hidden p-4">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-8"></TableHead>
+                  <TableHead>Server</TableHead>
+                  <TableHead>Metrics Mode</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Status Changed</TableHead>
+                  <TableHead>Version</TableHead>
+                  <TableHead>Update</TableHead>
+                  <TableHead>Last Push</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {agents.map((agent) => (
-                  <>
-                    <tr key={agent.id} className="text-slate-300 border-b border-slate-700">
-                      <td className="py-3">
+                  <Fragment key={agent.id}>
+                    <TableRow>
+                      <TableCell>
                         {agent.metricsMode === 'agent' && (
-                          <button
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
                             onClick={() => handleToggleExpand(agent.id)}
-                            className="text-slate-400 hover:text-white p-1"
                             title={expandedAgent === agent.id ? 'Collapse' : 'Show event history'}
                           >
-                            <svg
-                              className={`w-4 h-4 transition-transform ${expandedAgent === agent.id ? 'rotate-90' : ''}`}
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                            </svg>
-                          </button>
+                            <ChevronRight
+                              className={cn(
+                                'size-4 transition-transform',
+                                expandedAgent === agent.id && 'rotate-90'
+                              )}
+                            />
+                          </Button>
                         )}
-                      </td>
-                      <td className="py-3">
-                        <Link to={`/servers/${agent.id}`} className="text-white hover:text-brand-400">
+                      </TableCell>
+                      <TableCell>
+                        <Link to={`/servers/${agent.id}`} className="text-foreground hover:text-primary">
                           {agent.name}
                         </Link>
-                      </td>
-                      <td className="py-3">
-                        <select
+                      </TableCell>
+                      <TableCell>
+                        <Select
                           value={agent.metricsMode}
-                          onChange={(e) => handleModeChange(agent.id, e.target.value as MetricsMode)}
+                          onValueChange={(v) => handleModeChange(agent.id, v as MetricsMode)}
                           disabled={changingMode === agent.id}
-                          className="input py-1 px-2 w-28"
                         >
-                          <option value="disabled">Disabled</option>
-                          <option value="ssh">SSH</option>
-                          <option value="agent">Agent</option>
-                        </select>
-                      </td>
-                      <td className="py-3">
+                          <SelectTrigger size="sm" className="w-28">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="disabled">Disabled</SelectItem>
+                            <SelectItem value="ssh">SSH</SelectItem>
+                            <SelectItem value="agent">Agent</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell>
                         {agent.metricsMode === 'agent' ? (
                           getAgentStatusBadge(agent.agentStatus)
                         ) : (
-                          <span className="text-slate-500">--</span>
+                          <span className="text-muted-foreground">--</span>
                         )}
-                      </td>
-                      <td className="py-3 text-sm text-slate-500">
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
                         {agent.metricsMode === 'agent' && agent.agentStatusChangedAt
                           ? formatDistanceToNow(new Date(agent.agentStatusChangedAt), { addSuffix: true })
                           : '--'}
-                      </td>
-                      <td className="py-3 text-sm text-slate-500 font-mono">
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground font-mono">
                         {agent.metricsMode === 'agent' && agent.agentVersion
                           ? agent.agentVersion
                           : '--'}
-                      </td>
-                      <td className="py-3">
+                      </TableCell>
+                      <TableCell>
                         {agent.metricsMode === 'agent' &&
                           agent.agentVersion &&
                           bundledAgentVersion !== 'unknown' &&
                           agent.agentVersion !== bundledAgentVersion ? (
-                          <span className="px-2 py-0.5 text-xs rounded bg-yellow-500/20 text-yellow-400">
-                            Available
-                          </span>
+                          <StatusBadge kind="severity" value="warning" variant="warning" label="Available" />
                         ) : agent.metricsMode === 'agent' && agent.agentVersion ? (
-                          <span className="text-slate-500 text-xs">Up to date</span>
+                          <span className="text-muted-foreground text-xs">Up to date</span>
                         ) : (
-                          <span className="text-slate-500">--</span>
+                          <span className="text-muted-foreground">--</span>
                         )}
-                      </td>
-                      <td className="py-3 text-sm text-slate-500">
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
                         {agent.metricsMode === 'agent' && agent.lastAgentPushAt
                           ? formatDistanceToNow(new Date(agent.lastAgentPushAt), { addSuffix: true })
                           : '--'}
-                      </td>
-                      <td className="py-3">
+                      </TableCell>
+                      <TableCell>
                         {agent.metricsMode === 'agent' && (
                           <div className="flex gap-2">
                             {agent.agentVersion &&
                               bundledAgentVersion !== 'unknown' &&
                               agent.agentVersion !== bundledAgentVersion && (
-                              <button
+                              <Button
+                                size="xs"
                                 onClick={() => handleUpdateAgent(agent.id)}
                                 disabled={updating === agent.id || regenerating === agent.id || removing === agent.id}
-                                className="btn btn-primary px-2 py-1 text-xs"
                                 title="Update agent to latest version"
                               >
                                 {updating === agent.id ? 'Updating...' : 'Update'}
-                              </button>
+                              </Button>
                             )}
-                            <button
+                            <Button
+                              variant="secondary"
+                              size="xs"
                               onClick={() => handleRegenerateToken(agent.id)}
                               disabled={regenerating === agent.id || removing === agent.id || updating === agent.id}
-                              className="btn btn-secondary px-2 py-1 text-xs"
                               title="Regenerate token and redeploy agent"
                             >
                               {regenerating === agent.id ? 'Regenerating...' : 'Regenerate Token'}
-                            </button>
-                            <button
+                            </Button>
+                            <Button
+                              variant="destructive"
+                              size="xs"
                               onClick={() => handleRemoveAgent(agent.id, agent.name)}
                               disabled={removing === agent.id || regenerating === agent.id || updating === agent.id}
-                              className="btn btn-danger px-2 py-1 text-xs"
                               title="Stop and remove agent"
                             >
                               {removing === agent.id ? 'Removing...' : 'Remove'}
-                            </button>
+                            </Button>
                           </div>
                         )}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                     {expandedAgent === agent.id && (
-                      <tr key={`${agent.id}-events`} className="bg-slate-800/50">
-                        <td colSpan={9} className="p-4">
-                          <div className="text-sm font-medium text-slate-300 mb-3">Event History</div>
+                      <TableRow className="bg-muted/50 hover:bg-muted/50">
+                        <TableCell colSpan={9} className="p-4">
+                          <div className="text-sm font-medium text-foreground mb-3">Event History</div>
                           {loadingEvents ? (
-                            <div className="animate-pulse space-y-2">
+                            <div className="space-y-2">
                               {[1, 2, 3].map((i) => (
-                                <div key={i} className="h-8 bg-slate-700 rounded" />
+                                <Skeleton key={i} className="h-8 w-full" />
                               ))}
                             </div>
                           ) : agentEvents.length === 0 ? (
-                            <div className="text-slate-500 text-sm">No events recorded</div>
+                            <div className="text-muted-foreground text-sm">No events recorded</div>
                           ) : (
-                            <table className="w-full text-sm">
-                              <thead>
-                                <tr className="text-left text-slate-500 border-b border-slate-700">
-                                  <th className="pb-2 font-medium">Type</th>
-                                  <th className="pb-2 font-medium">Status</th>
-                                  <th className="pb-2 font-medium">Message</th>
-                                  <th className="pb-2 font-medium">Time</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-700/50">
+                            <Table className="text-sm">
+                              <TableHeader>
+                                <TableRow>
+                                  <TableHead>Type</TableHead>
+                                  <TableHead>Status</TableHead>
+                                  <TableHead>Message</TableHead>
+                                  <TableHead>Time</TableHead>
+                                </TableRow>
+                              </TableHeader>
+                              <TableBody>
                                 {agentEvents.map((event) => (
-                                  <tr key={event.id}>
-                                    <td className="py-2">{getEventTypeBadge(event.eventType)}</td>
-                                    <td className="py-2 text-slate-400">
+                                  <TableRow key={event.id}>
+                                    <TableCell>{getEventTypeBadge(event.eventType)}</TableCell>
+                                    <TableCell className="text-muted-foreground">
                                       {event.status || '--'}
-                                    </td>
-                                    <td className={`py-2 ${event.eventType === 'deploy_failed' ? 'text-red-400' : 'text-slate-400'}`}>
+                                    </TableCell>
+                                    <TableCell className={event.eventType === 'deploy_failed' ? 'text-destructive' : 'text-muted-foreground'}>
                                       {event.message || '--'}
-                                    </td>
-                                    <td className="py-2 text-slate-500">
+                                    </TableCell>
+                                    <TableCell className="text-muted-foreground">
                                       {format(new Date(event.createdAt), 'MMM d, HH:mm:ss')}
-                                    </td>
-                                  </tr>
+                                    </TableCell>
+                                  </TableRow>
                                 ))}
-                              </tbody>
-                            </table>
+                              </TableBody>
+                            </Table>
                           )}
-                        </td>
-                      </tr>
+                        </TableCell>
+                      </TableRow>
                     )}
-                  </>
+                  </Fragment>
                 ))}
-              </tbody>
-            </table>
-
-          </div>
-
+              </TableBody>
+            </Table>
+          </Card>
         </>
       )}
     </div>
