@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import { ChevronRight } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import {
   getEnvironmentMetricsSummary,
@@ -14,6 +15,10 @@ import ChartCard from '../components/monitoring/ChartCard';
 import MetricGauge from '../components/monitoring/MetricGauge';
 import TimeRangeSelector from '../components/monitoring/TimeRangeSelector';
 import AutoRefreshToggle from '../components/monitoring/AutoRefreshToggle';
+import { EntityFilterPills } from '@/components/monitoring/EntityFilterPills';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
 import { useMetricResource } from '../hooks/useMetricResource';
 import { mergeColumnarHistory } from '../lib/metricsMerge';
 
@@ -170,6 +175,12 @@ export default function MonitoringServers() {
     [monitoringServerFilter, setMonitoringServerFilter]
   );
 
+  // Server filter pill items (id/name) for the shared EntityFilterPills.
+  const serverFilterItems = useMemo(
+    () => servers.map((s) => ({ id: s.id, name: s.name })),
+    [servers]
+  );
+
   // Columnar API → Recharts-ready array. We do one unpack per metric so each
   // chart's data array can be memoized independently — the rest of the
   // monitoring code (auto-refresh every 30s) already expects stable refs.
@@ -255,30 +266,13 @@ export default function MonitoringServers() {
 
         {servers.length > 1 && (
           <div className="flex items-center gap-2">
-            <span className="text-sm text-slate-400">Servers:</span>
-            <div className="flex flex-wrap gap-1">
-              {servers.map((server) => (
-                <button
-                  key={server.id}
-                  onClick={() => handleFilterToggle(server.id)}
-                  className={`px-2 py-1 text-xs rounded-full transition-colors ${
-                    filterSet.has(server.id)
-                      ? 'bg-brand-600 text-white'
-                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                  }`}
-                >
-                  {server.name}
-                </button>
-              ))}
-              {filterSet.size > 0 && (
-                <button
-                  onClick={() => setMonitoringServerFilter([])}
-                  className="px-2 py-1 text-xs rounded-full bg-slate-800 text-slate-400 hover:bg-slate-700"
-                >
-                  Clear
-                </button>
-              )}
-            </div>
+            <span className="text-sm text-muted-foreground">Servers:</span>
+            <EntityFilterPills
+              items={serverFilterItems}
+              selected={monitoringServerFilter}
+              onToggle={handleFilterToggle}
+              onClear={() => setMonitoringServerFilter([])}
+            />
           </div>
         )}
       </div>
@@ -307,29 +301,28 @@ export default function MonitoringServers() {
           )}
         </div>
       ) : (
-        <div className="card text-center py-8 mb-8">
-          <p className="text-slate-400">No historical metrics data available</p>
-          <p className="text-slate-500 text-sm mt-1">
-            Metrics will appear here as they are collected
-          </p>
-        </div>
+        <EmptyState
+          className="mb-8"
+          message="No historical metrics data available"
+          description="Metrics will appear here as they are collected"
+        />
       )}
 
       {/* Current Server Metrics */}
       {serversWithMetrics.length > 0 && (
         <div className="mb-8">
-          <h2 className="text-lg font-semibold text-white mb-4">Current Server Metrics</h2>
+          <h2 className="text-lg font-semibold text-foreground mb-4">Current Server Metrics</h2>
           <div className="space-y-4">
             {serversWithMetrics.map((server) => (
-              <div key={server.id} className="card">
+              <Card key={server.id} className="p-6">
                 <div className="flex items-center justify-between mb-4">
                   <Link
                     to={`/servers/${server.id}`}
-                    className="text-lg font-semibold text-white hover:text-brand-400"
+                    className="text-lg font-semibold text-foreground hover:text-primary"
                   >
                     {server.name}
                   </Link>
-                  <span className="text-xs text-slate-500">
+                  <span className="text-xs text-muted-foreground">
                     {server.latestMetrics &&
                       formatDistanceToNow(new Date(server.latestMetrics.collectedAt), {
                         addSuffix: true,
@@ -346,6 +339,8 @@ export default function MonitoringServers() {
                       max={100}
                       unit="%"
                       color="primary"
+                      warn={70}
+                      crit={90}
                     />
                   )}
                   {(schedulerConfig?.collectMemory ?? true) && (
@@ -366,6 +361,8 @@ export default function MonitoringServers() {
                       max={100}
                       unit="%"
                       color="green"
+                      warn={75}
+                      crit={90}
                     />
                   )}
                   {(schedulerConfig?.collectDisk ?? true) && (
@@ -386,6 +383,8 @@ export default function MonitoringServers() {
                       max={100}
                       unit="%"
                       color="yellow"
+                      warn={80}
+                      crit={90}
                     />
                   )}
                   {(schedulerConfig?.collectLoad ?? true) && (
@@ -441,53 +440,55 @@ export default function MonitoringServers() {
                       max={100}
                       unit="%"
                       color="yellow"
+                      warn={80}
+                      crit={90}
                     />
                   )}
                   {(schedulerConfig?.collectTcp ?? true) && (
-                    <div className="p-4 rounded-lg bg-slate-800/50">
-                      <p className="text-slate-400 text-xs mb-2">TCP Connections</p>
+                    <div className="rounded-lg border bg-card p-4">
+                      <p className="text-muted-foreground text-xs mb-2">TCP Connections</p>
                       {server.latestMetrics?.tcpTotal != null ? (
                         <div className="text-sm">
-                          <span className="text-white font-bold text-lg">{server.latestMetrics.tcpTotal}</span>
-                          <span className="text-slate-500 text-xs ml-2">total</span>
+                          <span className="text-foreground font-bold text-lg">{server.latestMetrics.tcpTotal}</span>
+                          <span className="text-muted-foreground text-xs ml-2">total</span>
                           <div className="flex gap-3 mt-1 text-xs">
-                            <span className="text-green-400">{server.latestMetrics.tcpEstablished ?? 0} est</span>
-                            <span className="text-blue-400">{server.latestMetrics.tcpListen ?? 0} listen</span>
-                            <span className="text-yellow-400">{server.latestMetrics.tcpTimeWait ?? 0} tw</span>
+                            <span className="text-success">{server.latestMetrics.tcpEstablished ?? 0} est</span>
+                            <span className="text-info">{server.latestMetrics.tcpListen ?? 0} listen</span>
+                            <span className="text-warning">{server.latestMetrics.tcpTimeWait ?? 0} tw</span>
                           </div>
                         </div>
                       ) : (
-                        <p className="text-slate-500 text-sm">-</p>
+                        <p className="text-muted-foreground text-sm">-</p>
                       )}
                     </div>
                   )}
-                  <div className="p-4 rounded-lg bg-slate-800/50">
-                    <p className="text-slate-400 text-xs mb-2">Uptime</p>
+                  <div className="rounded-lg border bg-card p-4">
+                    <p className="text-muted-foreground text-xs mb-2">Uptime</p>
                     {server.latestMetrics?.uptime != null ? (
-                      <p className="text-white font-bold text-lg">
+                      <p className="text-foreground font-bold text-lg">
                         {Math.floor(server.latestMetrics.uptime / 86400)}d {Math.floor((server.latestMetrics.uptime % 86400) / 3600)}h
                       </p>
                     ) : (
-                      <p className="text-slate-500 text-sm">-</p>
+                      <p className="text-muted-foreground text-sm">-</p>
                     )}
                   </div>
                 </div>
-              </div>
+              </Card>
             ))}
           </div>
         </div>
       )}
 
       {serversWithMetrics.length === 0 && (
-        <div className="card text-center py-12 mb-8">
-          <p className="text-slate-400 mb-2">No metrics available</p>
-          <p className="text-slate-500 text-sm">
-            Enable monitoring on your servers to see resource usage.
-          </p>
-          <Link to="/servers" className="btn btn-primary mt-4">
-            Configure Servers
-          </Link>
-        </div>
+        <EmptyState
+          className="mb-8"
+          message="No metrics available"
+          description="Enable monitoring on your servers to see resource usage."
+        >
+          <Button asChild className="mt-4">
+            <Link to="/servers">Configure Servers</Link>
+          </Button>
+        </EmptyState>
       )}
 
       {/* Disabled Metrics Section */}
@@ -507,48 +508,41 @@ export default function MonitoringServers() {
         if (disabledMetrics.length === 0) return null;
 
         return (
-          <div className="card mt-6">
+          <Card className="mt-6 p-6">
             <button
               onClick={() => setDisabledMetricsExpanded(!disabledMetricsExpanded)}
               className="w-full flex items-center justify-between"
             >
               <div className="flex items-center gap-2">
-                <svg
-                  className={`w-4 h-4 text-slate-400 transition-transform ${disabledMetricsExpanded ? 'rotate-90' : ''}`}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-                <span className="text-slate-400">Disabled Metrics ({disabledMetrics.length})</span>
+                <ChevronRight
+                  className={`w-4 h-4 text-muted-foreground transition-transform ${disabledMetricsExpanded ? 'rotate-90' : ''}`}
+                />
+                <span className="text-muted-foreground">Disabled Metrics ({disabledMetrics.length})</span>
               </div>
-              <span className="text-xs text-slate-500">Click to expand</span>
+              <span className="text-xs text-muted-foreground">Click to expand</span>
             </button>
 
             {disabledMetricsExpanded && (
-              <div className="mt-4 pt-4 border-t border-slate-700">
+              <div className="mt-4 pt-4 border-t border-border">
                 <div className="space-y-2">
                   {disabledMetrics.map((metric) => (
-                    <div key={metric} className="flex items-center gap-2 text-sm text-slate-400">
-                      <span className="w-1.5 h-1.5 bg-slate-600 rounded-full" />
+                    <div key={metric} className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <span className="w-1.5 h-1.5 bg-muted-foreground rounded-full" />
                       <span>{metric}</span>
-                      <span className="text-slate-500">- Disabled in environment settings</span>
+                      <span className="text-muted-foreground">- Disabled in environment settings</span>
                     </div>
                   ))}
                 </div>
                 <Link
                   to="/settings"
-                  className="inline-flex items-center gap-1 mt-4 text-sm text-primary-400 hover:text-primary-300"
+                  className="inline-flex items-center gap-1 mt-4 text-sm text-primary hover:text-primary/80"
                 >
                   Configure in Settings
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
+                  <ChevronRight className="w-4 h-4" />
                 </Link>
               </div>
             )}
-          </div>
+          </Card>
         );
       })()}
     </div>

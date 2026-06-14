@@ -219,3 +219,17 @@ export function statusVariant(kind: StatusKind, value: string | null | undefined
       return 'neutral';
   }
 }
+
+/** Severity of a numeric metric against warn/critical thresholds (#250). */
+export type MetricSeverity = 'normal' | 'warning' | 'critical';
+
+/**
+ * Classify a metric value by threshold. `crit`/`warn` are upper bounds:
+ * value ≥ crit → critical, value ≥ warn → warning, else normal. Drives the
+ * danger-zone coloring on monitoring gauges.
+ */
+export function metricSeverity(value: number, warn: number, crit: number): MetricSeverity {
+  if (value >= crit) return 'critical';
+  if (value >= warn) return 'warning';
+  return 'normal';
+}

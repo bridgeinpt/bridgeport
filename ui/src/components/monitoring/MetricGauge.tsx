@@ -1,4 +1,7 @@
 import { memo } from 'react';
+import { Progress } from '@/components/ui/progress';
+import { cn } from '@/lib/utils';
+import { metricSeverity } from '@/lib/status';
 
 export interface MetricGaugeProps {
   label: string;
@@ -6,41 +9,55 @@ export interface MetricGaugeProps {
   displayValue?: string;
   max: number;
   unit?: string;
-  color: 'primary' | 'green' | 'yellow' | 'purple';
+  color?: 'primary' | 'green' | 'yellow' | 'purple';
+  /** Warn / critical thresholds (same unit as `value`). When both are set, the
+   *  bar color reflects severity (danger zones) instead of the static `color`. */
+  warn?: number;
+  crit?: number;
 }
 
-const GAUGE_COLOR_CLASSES = {
-  primary: 'bg-primary-500',
-  green: 'bg-green-500',
-  yellow: 'bg-yellow-500',
-  purple: 'bg-purple-500',
+// Full static class strings (Tailwind can't see dynamically-built ones).
+const COLOR_INDICATOR = {
+  primary: '[&>[data-slot=progress-indicator]]:bg-primary',
+  green: '[&>[data-slot=progress-indicator]]:bg-success',
+  yellow: '[&>[data-slot=progress-indicator]]:bg-warning',
+  purple: '[&>[data-slot=progress-indicator]]:bg-chart-4',
 } as const;
 
-const GAUGE_BG_COLOR_CLASSES = {
-  primary: 'bg-primary-900/30',
-  green: 'bg-green-900/30',
-  yellow: 'bg-yellow-900/30',
-  purple: 'bg-purple-900/30',
+const SEVERITY_INDICATOR = {
+  normal: '[&>[data-slot=progress-indicator]]:bg-success',
+  warning: '[&>[data-slot=progress-indicator]]:bg-warning',
+  critical: '[&>[data-slot=progress-indicator]]:bg-destructive',
 } as const;
 
-const MetricGauge = memo(function MetricGauge({ label, value, displayValue, max, unit, color }: MetricGaugeProps) {
+const MetricGauge = memo(function MetricGauge({
+  label,
+  value,
+  displayValue,
+  max,
+  unit,
+  color = 'primary',
+  warn,
+  crit,
+}: MetricGaugeProps) {
   const percentage = value != null ? Math.min((value / max) * 100, 100) : 0;
+  const useSeverity = value != null && warn != null && crit != null;
+  const indicatorClass = useSeverity
+    ? SEVERITY_INDICATOR[metricSeverity(value, warn, crit)]
+    : COLOR_INDICATOR[color];
 
   return (
-    <div className={`p-4 rounded-lg ${GAUGE_BG_COLOR_CLASSES[color]}`}>
-      <p className="text-slate-400 text-xs mb-2">{label}</p>
-      <p className="text-2xl font-bold text-white mb-3">
+    <div className="rounded-lg border bg-card p-4">
+      <p className="mb-2 text-xs text-muted-foreground">{label}</p>
+      <p className="mb-3 text-2xl font-bold text-foreground">
         {displayValue ?? (value != null ? value.toFixed(1) : '-')}
-        {!displayValue && unit && value != null && (
-          <span className="text-sm text-slate-400">{unit}</span>
-        )}
+        {!displayValue && unit && value != null && <span className="text-sm text-muted-foreground">{unit}</span>}
       </p>
-      <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all ${GAUGE_COLOR_CLASSES[color]}`}
-          style={{ width: `${percentage}%` }}
-        />
-      </div>
+      <Progress
+        value={percentage}
+        aria-label={label}
+        className={cn('h-2', indicatorClass)}
+      />
     </div>
   );
 });

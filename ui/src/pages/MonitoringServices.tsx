@@ -13,6 +13,19 @@ import { format } from 'date-fns';
 import ChartCard from '../components/monitoring/ChartCard';
 import TimeRangeSelector from '../components/monitoring/TimeRangeSelector';
 import AutoRefreshToggle from '../components/monitoring/AutoRefreshToggle';
+import { EntityFilterPills } from '@/components/monitoring/EntityFilterPills';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { EmptyState } from '@/components/ui/empty-state';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { cn } from '@/lib/utils';
 import { useMetricResource } from '../hooks/useMetricResource';
 import { mergeColumnarHistory } from '../lib/metricsMerge';
 
@@ -250,30 +263,13 @@ export default function MonitoringServices() {
 
         {allServices.length > 1 && (
           <div className="flex items-center gap-2">
-            <span className="text-sm text-slate-400">Services:</span>
-            <div className="flex flex-wrap gap-1">
-              {allServices.map((service) => (
-                <button
-                  key={service.id}
-                  onClick={() => handleFilterToggle(service.id)}
-                  className={`px-2 py-1 text-xs rounded-full transition-colors ${
-                    filterSet.has(service.id)
-                      ? 'bg-brand-600 text-white'
-                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-                  }`}
-                >
-                  {service.name}
-                </button>
-              ))}
-              {filterSet.size > 0 && (
-                <button
-                  onClick={() => setMonitoringServiceFilter([])}
-                  className="px-2 py-1 text-xs rounded-full bg-slate-800 text-slate-400 hover:bg-slate-700"
-                >
-                  Clear
-                </button>
-              )}
-            </div>
+            <span className="text-sm text-muted-foreground">Services:</span>
+            <EntityFilterPills
+              items={allServices}
+              selected={monitoringServiceFilter}
+              onToggle={handleFilterToggle}
+              onClear={() => setMonitoringServiceFilter([])}
+            />
           </div>
         )}
       </div>
@@ -282,7 +278,7 @@ export default function MonitoringServices() {
       {historyLoading || hasAnyHistory ? (
         <>
           <div className="grid grid-cols-2 gap-6 mb-8">
-            <ChartCard title="CPU Usage" data={cpuChart.data} names={cpuChart.names} formatTime={formatTime} unit="%" domain={[0, 'auto']} loading={historyLoading} refreshing={historyRefreshing} />
+            <ChartCard title="CPU Usage" data={cpuChart.data} names={cpuChart.names} formatTime={formatTime} unit="%" domain={[0, 100]} loading={historyLoading} refreshing={historyRefreshing} />
             <ChartCard title="Memory Usage" data={memoryChart.data} names={memoryChart.names} formatTime={formatTime} unit=" MB" domain={[0, 'auto']} loading={historyLoading} refreshing={historyRefreshing} />
             <ChartCard title="Network RX" data={networkRxChart.data} names={networkRxChart.names} formatTime={formatTime} unit=" MB" domain={[0, 'auto']} loading={historyLoading} refreshing={historyRefreshing} />
             <ChartCard title="Network TX" data={networkTxChart.data} names={networkTxChart.names} formatTime={formatTime} unit=" MB" domain={[0, 'auto']} loading={historyLoading} refreshing={historyRefreshing} />
@@ -290,110 +286,107 @@ export default function MonitoringServices() {
 
           {/* Services Table */}
           {servicesWithMetrics.length > 0 && (
-            <div className="card">
-              <h2 className="text-lg font-semibold text-white mb-4">
+            <Card className="p-6">
+              <h2 className="text-lg font-semibold text-foreground mb-4">
                 Service Resource Usage
               </h2>
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
-                      <th className="pb-3 font-medium">Service</th>
-                      <th className="pb-3 font-medium">Server</th>
-                      <th className="pb-3 font-medium">CPU</th>
-                      <th className="pb-3 font-medium">Memory</th>
-                      <th className="pb-3 font-medium">Network I/O</th>
-                      <th className="pb-3 font-medium">Restarts</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-700">
-                    {servicesWithMetrics.map((service) => (
-                      <tr key={service.id} className="text-slate-300">
-                        <td className="py-3">
-                          <Link
-                            to={`/services/${service.id}`}
-                            className="text-white hover:text-brand-400"
-                          >
-                            {service.name}
-                          </Link>
-                        </td>
-                        <td className="py-3">
-                          <Link
-                            to={`/servers/${service.serverId}`}
-                            className="hover:text-brand-400"
-                          >
-                            {service.serverName}
-                          </Link>
-                        </td>
-                        <td className="py-3">
-                          <span
-                            className={
-                              (service.metrics.cpuPercent || 0) > 80 ? 'text-red-400' : ''
-                            }
-                          >
-                            {service.metrics.cpuPercent?.toFixed(1) ?? '-'}%
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Service</TableHead>
+                    <TableHead>Server</TableHead>
+                    <TableHead>CPU</TableHead>
+                    <TableHead>Memory</TableHead>
+                    <TableHead>Network I/O</TableHead>
+                    <TableHead>Restarts</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {servicesWithMetrics.map((service) => (
+                    <TableRow key={service.id}>
+                      <TableCell>
+                        <Link
+                          to={`/services/${service.id}`}
+                          className="text-foreground hover:text-primary"
+                        >
+                          {service.name}
+                        </Link>
+                      </TableCell>
+                      <TableCell>
+                        <Link
+                          to={`/servers/${service.serverId}`}
+                          className="text-muted-foreground hover:text-primary"
+                        >
+                          {service.serverName}
+                        </Link>
+                      </TableCell>
+                      <TableCell>
+                        <span
+                          className={cn(
+                            (service.metrics.cpuPercent || 0) > 80 && 'text-destructive'
+                          )}
+                        >
+                          {service.metrics.cpuPercent?.toFixed(1) ?? '-'}%
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        {service.metrics.memoryUsedMb != null ? (
+                          <span>
+                            {service.metrics.memoryUsedMb.toFixed(0)}MB
+                            {service.metrics.memoryLimitMb != null && (
+                              <span className="text-muted-foreground">
+                                {' '}
+                                / {service.metrics.memoryLimitMb.toFixed(0)}MB
+                              </span>
+                            )}
                           </span>
-                        </td>
-                        <td className="py-3">
-                          {service.metrics.memoryUsedMb ? (
-                            <span>
-                              {service.metrics.memoryUsedMb.toFixed(0)}MB
-                              {service.metrics.memoryLimitMb && (
-                                <span className="text-slate-500">
-                                  {' '}
-                                  / {service.metrics.memoryLimitMb.toFixed(0)}MB
-                                </span>
-                              )}
+                        ) : (
+                          '-'
+                        )}
+                      </TableCell>
+                      <TableCell className="text-sm font-mono">
+                        {service.metrics.networkRxMb != null || service.metrics.networkTxMb != null ? (
+                          <span>
+                            <span className="text-success">
+                              {service.metrics.networkRxMb?.toFixed(1) ?? '0'}
                             </span>
-                          ) : (
-                            '-'
-                          )}
-                        </td>
-                        <td className="py-3 text-sm font-mono">
-                          {service.metrics.networkRxMb || service.metrics.networkTxMb ? (
-                            <span>
-                              <span className="text-green-400">
-                                {service.metrics.networkRxMb?.toFixed(1) ?? '0'}
-                              </span>
-                              /
-                              <span className="text-blue-400">
-                                {service.metrics.networkTxMb?.toFixed(1) ?? '0'}
-                              </span>
-                              MB
+                            /
+                            <span className="text-info">
+                              {service.metrics.networkTxMb?.toFixed(1) ?? '0'}
                             </span>
-                          ) : (
-                            '-'
-                          )}
-                        </td>
-                        <td className="py-3">
-                          {service.metrics.restartCount != null ? (
-                            <span
-                              className={service.metrics.restartCount > 0 ? 'text-yellow-400' : ''}
-                            >
-                              {service.metrics.restartCount}
-                            </span>
-                          ) : (
-                            '-'
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+                            MB
+                          </span>
+                        ) : (
+                          '-'
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {service.metrics.restartCount != null ? (
+                          <span
+                            className={cn(service.metrics.restartCount > 0 && 'text-warning')}
+                          >
+                            {service.metrics.restartCount}
+                          </span>
+                        ) : (
+                          '-'
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Card>
           )}
         </>
       ) : (
-        <div className="card text-center py-12">
-          <p className="text-slate-400 mb-2">No service metrics available</p>
-          <p className="text-slate-500 text-sm">
-            Deploy a monitoring agent to collect service metrics.
-          </p>
-          <Link to="/monitoring/agents#agents" className="btn btn-primary mt-4">
-            Configure Agents
-          </Link>
-        </div>
+        <EmptyState
+          message="No service metrics available"
+          description="Deploy a monitoring agent to collect service metrics."
+        >
+          <Button asChild className="mt-4">
+            <Link to="/monitoring/agents#agents">Configure Agents</Link>
+          </Button>
+        </EmptyState>
       )}
     </div>
   );
