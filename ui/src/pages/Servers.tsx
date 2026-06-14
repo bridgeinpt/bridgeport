@@ -4,7 +4,7 @@ import { useAppStore, useAuthStore, isAdmin } from '../lib/store.js';
 import { usePaginatedFetch } from '../hooks/usePaginatedFetch.js';
 import { listServers, checkServerHealth, discoverContainers, createServer, deleteServer, getHostInfo, registerHost, getHealthLogs, type Server, type HostInfo, type HealthCheckLog } from '../lib/api.js';
 import { formatDistanceToNow } from 'date-fns';
-import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '../components/Toast.js';
 import { ServerIcon, HeartPulseIcon, TrashIcon } from '../components/Icons.js';
 import { safeJsonParse } from '../lib/helpers.js';
@@ -163,7 +163,13 @@ export default function Servers() {
   };
 
   if (loading) {
-    return <LoadingSkeleton rows={3} rowHeight="h-20" />;
+    return (
+      <div className="space-y-3">
+        {Array.from({ length: 3 }).map((_, i) => (
+          <Skeleton key={i} className="h-20 w-full" />
+        ))}
+      </div>
+    );
   }
 
   return (

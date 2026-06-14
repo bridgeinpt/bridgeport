@@ -1,8 +1,18 @@
 import { useState, useEffect } from 'react';
-import { Modal } from './Modal';
-import { Alert } from './Alert';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { updateSshSettings, deleteSshKey, checkServerHealth } from '../lib/api';
 import { useAppStore } from '../lib/store';
+import { getErrorMessage } from '@/lib/helpers';
 
 interface SshKeyModalProps {
   isOpen: boolean;
@@ -62,7 +72,7 @@ export function SshKeyModal({
       setSshPrivateKey('');
       onUpdate?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update SSH settings');
+      setError(getErrorMessage(err, 'Failed to update SSH settings'));
     } finally {
       setSaving(false);
     }
@@ -86,7 +96,7 @@ export function SshKeyModal({
         setError(`SSH connection test failed: ${result.error || 'Unknown error'}`);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to test SSH connection');
+      setError(getErrorMessage(err, 'Failed to test SSH connection'));
     } finally {
       setTesting(false);
     }
@@ -110,88 +120,96 @@ export function SshKeyModal({
       setConfirmDelete(false);
       onUpdate?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete SSH key');
+      setError(getErrorMessage(err, 'Failed to delete SSH key'));
     } finally {
       setDeleting(false);
     }
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="SSH Configuration" size="lg">
-      {error && (
-        <Alert variant="error" className="mb-4">
-          {error}
-        </Alert>
-      )}
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>SSH Configuration</DialogTitle>
+        </DialogHeader>
 
-      {success && (
-        <Alert variant="success" className="mb-4">
-          {success}
-        </Alert>
-      )}
+        {error && (
+          <Alert variant="destructive">
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="label">SSH Username</label>
-          <input
-            type="text"
-            value={sshUser}
-            onChange={(e) => setSshUser(e.target.value)}
-            placeholder="root"
-            className="input"
-          />
-          <p className="text-xs text-slate-400 mt-1">
-            Username for SSH connections to servers in this environment
-          </p>
-        </div>
+        {success && (
+          <Alert variant="success">
+            <AlertDescription>{success}</AlertDescription>
+          </Alert>
+        )}
 
-        <div>
-          <label className="label">SSH Private Key</label>
-          <textarea
-            value={sshPrivateKey}
-            onChange={(e) => setSshPrivateKey(e.target.value)}
-            placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;...&#10;-----END OPENSSH PRIVATE KEY-----"
-            className="input font-mono text-sm min-h-[200px] resize-y"
-            rows={10}
-          />
-          <p className="text-xs text-slate-400 mt-1">
-            Paste the full private key content. The key is encrypted before storage.
-          </p>
-        </div>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="ssh-user">SSH Username</Label>
+            <Input
+              id="ssh-user"
+              type="text"
+              value={sshUser}
+              onChange={(e) => setSshUser(e.target.value)}
+              placeholder="root"
+            />
+            <p className="text-xs text-muted-foreground">
+              Username for SSH connections to servers in this environment
+            </p>
+          </div>
 
-        <div className="flex items-center justify-between pt-2">
-          <div className="flex gap-2">
-            {testServerId && (
-              <button
+          <div className="space-y-2">
+            <Label htmlFor="ssh-private-key">SSH Private Key</Label>
+            <Textarea
+              id="ssh-private-key"
+              value={sshPrivateKey}
+              onChange={(e) => setSshPrivateKey(e.target.value)}
+              placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;...&#10;-----END OPENSSH PRIVATE KEY-----"
+              className="font-mono text-sm min-h-[200px] resize-y"
+              rows={10}
+            />
+            <p className="text-xs text-muted-foreground">
+              Paste the full private key content. The key is encrypted before storage.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between pt-2">
+            <div className="flex gap-2">
+              {testServerId && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={handleTestConnection}
+                  disabled={testing || saving}
+                >
+                  {testing ? 'Testing...' : 'Test Connection'}
+                </Button>
+              )}
+              <Button
                 type="button"
-                onClick={handleTestConnection}
-                disabled={testing || saving}
-                className="btn btn-secondary"
+                variant={confirmDelete ? 'destructive' : 'ghost'}
+                onClick={handleDelete}
+                disabled={deleting || saving}
+                className={confirmDelete ? undefined : 'text-destructive hover:text-destructive'}
               >
-                {testing ? 'Testing...' : 'Test Connection'}
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={handleDelete}
-              disabled={deleting || saving}
-              className={`btn ${confirmDelete ? 'btn-danger' : 'btn-ghost text-red-400 hover:text-red-300'}`}
-            >
-              {deleting ? 'Removing...' : confirmDelete ? 'Confirm Remove' : 'Remove Key'}
-            </button>
-          </div>
+                {deleting ? 'Removing...' : confirmDelete ? 'Confirm Remove' : 'Remove Key'}
+              </Button>
+            </div>
 
-          <div className="flex gap-2">
-            <button type="button" onClick={onClose} className="btn btn-secondary">
-              Cancel
-            </button>
-            <button type="submit" disabled={saving || !sshPrivateKey.trim()} className="btn btn-primary">
-              {saving ? 'Saving...' : 'Save'}
-            </button>
+            <div className="flex gap-2">
+              <Button type="button" variant="secondary" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={saving || !sshPrivateKey.trim()}>
+                {saving ? 'Saving...' : 'Save'}
+              </Button>
+            </div>
           </div>
-        </div>
-      </form>
-    </Modal>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 

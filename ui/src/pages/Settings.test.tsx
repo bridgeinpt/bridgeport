@@ -85,7 +85,7 @@ describe('Settings', () => {
     // General tab should be active with appropriate styling
     const generalTab = screen.getByText('General');
     expect(generalTab).toBeInTheDocument();
-    expect(generalTab.className).toContain('border-brand-600');
+    expect(generalTab.className).toContain('border-brand');
   });
 
   it('should show empty state when no environment selected', () => {

@@ -16,12 +16,25 @@ import '@xyflow/react/dist/style.css';
 import { Link } from 'react-router-dom';
 import { Workflow } from 'lucide-react';
 import type { DependencyGraphNode, DependencyGraphEdge } from '../lib/api';
-import { getContainerStatusColor, getHealthStatusColor } from '../lib/status';
+import { statusVariant, type StatusKind, type StatusVariant } from '../lib/status';
 
 interface DependencyFlowProps {
   nodes: DependencyGraphNode[];
   edges: DependencyGraphEdge[];
   deploymentOrder: string[][];
+}
+
+/** Map a status variant to a token-based dot background class. */
+const dotColorByVariant: Record<StatusVariant, string> = {
+  success: 'bg-success',
+  warning: 'bg-warning',
+  destructive: 'bg-destructive',
+  info: 'bg-info',
+  neutral: 'bg-muted-foreground',
+};
+
+function statusDotColor(kind: StatusKind, value: string | null | undefined): string {
+  return dotColorByVariant[statusVariant(kind, value)];
 }
 
 // Custom node component for services
@@ -38,9 +51,9 @@ function ServiceNode({ data }: { data: DependencyGraphNode & { level: number } }
           {data.name}
         </Link>
         <div className="flex gap-1">
-          <span className={`w-2 h-2 rounded-full ${getContainerStatusColor(data.status).replace('badge-', 'bg-')}`}
+          <span className={`w-2 h-2 rounded-full ${statusDotColor('container', data.status)}`}
                 title={`Container: ${data.status}`} />
-          <span className={`w-2 h-2 rounded-full ${getHealthStatusColor(data.healthStatus).replace('badge-', 'bg-')}`}
+          <span className={`w-2 h-2 rounded-full ${statusDotColor('health', data.healthStatus)}`}
                 title={`Health: ${data.healthStatus}`} />
         </div>
       </div>
