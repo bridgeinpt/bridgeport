@@ -48,6 +48,24 @@ import { ERROR_ENVELOPE_SCHEMA_ID } from '../plugins/openapi.js';
 /** HTTP status codes for which `errors` can attach an ErrorEnvelope response. */
 export type ErrorStatusCode = 400 | 401 | 403 | 404 | 409 | 422 | 429 | 500;
 
+/**
+ * Shared, documentation-only query schemas for list endpoints.
+ *
+ * These describe the `limit`/`offset` pagination query params for the OpenAPI
+ * spec only — there is NO runtime enforcement. The global no-op validator
+ * compiler in `src/server.ts` makes all route `schema` options docs-only; the
+ * handlers read pagination via `parsePaginationQuery()` themselves.
+ */
+export const paginationQuerySchema = z.object({
+  limit: z.coerce.number().min(0).optional(),
+  offset: z.coerce.number().min(0).optional(),
+});
+
+/** Documentation-only query schema for endpoints that accept only `limit`. */
+export const limitQuerySchema = z.object({
+  limit: z.coerce.number().min(0).optional(),
+});
+
 export interface RouteSchemaOptions {
   tags?: string[];
   summary?: string;

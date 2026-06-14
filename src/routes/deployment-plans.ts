@@ -14,16 +14,13 @@ import { logAudit, actorFrom } from '../services/audit.js';
 import { PLAN_STATUS, STEP_STATUS } from '../lib/constants.js';
 import { validateBody, findOrNotFound, getErrorMessage } from '../lib/helpers.js';
 import { isDryRun } from '../lib/dry-run.js';
-import { routeSchema } from '../lib/openapi-schema.js';
+import { routeSchema, limitQuerySchema } from '../lib/openapi-schema.js';
 
 const idParamSchema = z.object({ id: z.string() });
 const envIdParamSchema = z.object({ envId: z.string() });
 
-// Query schemas (documentation only). Runtime reads stay unchanged
-// (parseInt with fallback / raw `execute === 'true'` check), so these never reject.
-const limitQuerySchema = z.object({
-  limit: z.coerce.number().min(0).optional(),
-});
+// Query schema (documentation only). Runtime read stays unchanged
+// (raw `execute === 'true'` check), so this never rejects.
 const createPlanQuerySchema = z.object({
   execute: z.string().optional(),
 });

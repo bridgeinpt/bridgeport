@@ -20,7 +20,7 @@ import { RegistryFactory } from '../lib/registry.js';
 import { getRegistryCredentials } from '../services/registries.js';
 import { extractRepoName, stripRegistryPrefix, parseTagFilter, getBestTag, getDefaultTag } from '../lib/image-utils.js';
 import { safeJsonParse, validateBody, validateUpdateBody, findOrNotFound, getErrorMessage, handleUniqueConstraint, parsePaginationQuery } from '../lib/helpers.js';
-import { routeSchema } from '../lib/openapi-schema.js';
+import { routeSchema, paginationQuerySchema, limitQuerySchema } from '../lib/openapi-schema.js';
 
 const createContainerImageSchema = z.object({
   name: z.string().min(1),
@@ -46,16 +46,6 @@ const idParamsSchema = z.object({ id: z.string() });
 const envIdParamsSchema = z.object({ envId: z.string() });
 const digestParamsSchema = z.object({ id: z.string(), digestId: z.string() });
 const linkParamsSchema = z.object({ id: z.string(), serviceId: z.string() });
-
-// Query schemas (documentation only). Runtime reads stay unchanged
-// (parsePaginationQuery / parseInt with fallbacks), so these never reject.
-const paginationQuerySchema = z.object({
-  limit: z.coerce.number().min(0).optional(),
-  offset: z.coerce.number().min(0).optional(),
-});
-const limitQuerySchema = z.object({
-  limit: z.coerce.number().min(0).optional(),
-});
 
 export async function containerImageRoutes(fastify: FastifyInstance): Promise<void> {
   // List container images for environment

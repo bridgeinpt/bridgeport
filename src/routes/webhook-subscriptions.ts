@@ -31,17 +31,10 @@ import {
 import { logAudit, actorFrom } from '../services/audit.js';
 import { requireOperator } from '../plugins/authorize.js';
 import { validateBody, parsePaginationQuery, getErrorMessage } from '../lib/helpers.js';
-import { routeSchema } from '../lib/openapi-schema.js';
+import { routeSchema, paginationQuerySchema } from '../lib/openapi-schema.js';
 
 const envIdParamsSchema = z.object({ envId: z.string() });
 const webhookParamsSchema = z.object({ envId: z.string(), id: z.string() });
-
-// Query schema (documentation only). Runtime read is unchanged
-// (parsePaginationQuery with fallbacks), so this never rejects.
-const paginationQuerySchema = z.object({
-  limit: z.coerce.number().min(0).optional(),
-  offset: z.coerce.number().min(0).optional(),
-});
 
 const createSubscriptionSchema = z.object({
   url: z.string().url(),

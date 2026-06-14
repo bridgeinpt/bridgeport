@@ -24,7 +24,7 @@ import {
   type ConfigSyncTarget,
 } from '../lib/dry-run.js';
 import { getSecretsForEnv } from '../services/secrets.js';
-import { routeSchema } from '../lib/openapi-schema.js';
+import { routeSchema, paginationQuerySchema } from '../lib/openapi-schema.js';
 
 const createConfigFileSchema = z.object({
   name: z.string().min(1),
@@ -69,12 +69,6 @@ const serverIdParamsSchema = z.object({ serverId: z.string() });
 const restoreParamsSchema = z.object({ id: z.string(), historyId: z.string() });
 const serviceFileParamsSchema = z.object({ serviceId: z.string(), fileId: z.string() });
 
-// Query schema (documentation only). Runtime read is unchanged
-// (parsePaginationQuery with fallbacks), so this never rejects.
-const paginationQuerySchema = z.object({
-  limit: z.coerce.number().min(0).optional(),
-  offset: z.coerce.number().min(0).optional(),
-});
 
 /**
  * Validate `fragmentIds` payload before any write. Three failure modes the

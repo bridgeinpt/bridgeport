@@ -33,18 +33,14 @@ import {
   coerceNumeric,
 } from '../lib/helpers.js';
 import { downsampleColumnar } from '../lib/metrics-downsample.js';
-import { routeSchema } from '../lib/openapi-schema.js';
+import { routeSchema, paginationQuerySchema } from '../lib/openapi-schema.js';
 
 const idParamSchema = z.object({ id: z.string() });
 const envIdParamSchema = z.object({ envId: z.string() });
 const envIdIdParamSchema = z.object({ envId: z.string(), id: z.string() });
 
-// Query schemas (documentation only). Runtime reads stay unchanged
-// (parsePaginationQuery / parseInt with fallbacks), so these never reject.
-const paginationQuerySchema = z.object({
-  limit: z.coerce.number().min(0).optional(),
-  offset: z.coerce.number().min(0).optional(),
-});
+// Query schema (documentation only). Runtime read stays unchanged
+// (parseInt with fallbacks), so this never rejects.
 const databaseMetricsQuerySchema = z.object({
   hours: z.coerce.number().min(1).optional(),
 });

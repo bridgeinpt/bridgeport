@@ -11,7 +11,7 @@ import {
   parsePaginationQuery,
 } from '../lib/helpers.js';
 import { triggerAutoResyncForFragment } from '../services/config-file-auto-resync.js';
-import { routeSchema } from '../lib/openapi-schema.js';
+import { routeSchema, paginationQuerySchema } from '../lib/openapi-schema.js';
 
 const createFragmentSchema = z.object({
   name: z.string().min(1),
@@ -28,12 +28,6 @@ const updateFragmentSchema = z.object({
 const idParamsSchema = z.object({ id: z.string() });
 const envIdParamsSchema = z.object({ envId: z.string() });
 
-// Query schema (documentation only). Runtime read is unchanged
-// (parsePaginationQuery with fallbacks), so this never rejects.
-const paginationQuerySchema = z.object({
-  limit: z.coerce.number().min(0).optional(),
-  offset: z.coerce.number().min(0).optional(),
-});
 
 /**
  * Env-scoped CRUD for ConfigFragment — named, reusable text blocks that

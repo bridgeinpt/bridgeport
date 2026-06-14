@@ -23,7 +23,7 @@ import { HEALTH_STATUS, CONTAINER_STATUS, DISCOVERY_STATUS, HEALTH_CHECK_STATUS 
 import { validateBody, validateUpdateBody, findOrNotFound, handleUniqueConstraint, getErrorMessage, parsePaginationQuery, flattenDeploymentOntoService } from '../lib/helpers.js';
 import { isDryRun } from '../lib/dry-run.js';
 import { computeServiceDrift } from '../services/drift.js';
-import { routeSchema } from '../lib/openapi-schema.js';
+import { routeSchema, paginationQuerySchema, limitQuerySchema } from '../lib/openapi-schema.js';
 
 // --- secret sanitizers for the service-detail relations ---
 //
@@ -88,13 +88,6 @@ const depParamsSchema = z.object({ id: z.string(), depId: z.string() });
 // These document the query contract for the OpenAPI spec. Runtime reads stay
 // exactly as before (parsePaginationQuery / parseInt with fallbacks) so unknown
 // or missing params behave identically — these schemas never reject.
-const paginationQuerySchema = z.object({
-  limit: z.coerce.number().min(0).optional(),
-  offset: z.coerce.number().min(0).optional(),
-});
-const limitQuerySchema = z.object({
-  limit: z.coerce.number().min(0).optional(),
-});
 const logsQuerySchema = z.object({
   tail: z.coerce.number().min(1).optional(),
   before: z.string().optional(),
