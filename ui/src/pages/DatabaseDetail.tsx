@@ -24,8 +24,35 @@ import {
   type Server,
 } from '../lib/api';
 import { formatDistanceToNow, format } from 'date-fns';
-import Pagination from '../components/Pagination';
+import { ArrowLeft, Check, X, Download, Trash2 } from 'lucide-react';
 import { safeJsonParse } from '../lib/helpers';
+import { useConfirm } from '@/hooks/useConfirm';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Progress } from '@/components/ui/progress';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Separator } from '@/components/ui/separator';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { DataPagination } from '@/components/ui/data-pagination';
 
 
 const BACKUP_FORMATS = [
@@ -47,6 +74,14 @@ const PG_DUMP_OPTIONS = [
   { key: 'dataOnly', label: 'Data Only', description: 'Data without structure' },
 ] as const;
 
+const COLLECTION_INTERVALS = [
+  { value: 60, label: '1 minute' },
+  { value: 300, label: '5 minutes' },
+  { value: 900, label: '15 minutes' },
+  { value: 1800, label: '30 minutes' },
+  { value: 3600, label: '1 hour' },
+] as const;
+
 interface BackupError {
   message: string;
   step: 'connect' | 'dump' | 'upload';
@@ -65,6 +100,7 @@ export default function DatabaseDetail() {
   const navigate = useNavigate();
   const { selectedEnvironment, setBreadcrumbName } = useAppStore();
   const toast = useToast();
+  const confirm = useConfirm();
 
   const [database, setDatabase] = useState<Database | null>(null);
   const [backups, setBackups] = useState<DatabaseBackup[]>([]);
@@ -75,8 +111,8 @@ export default function DatabaseDetail() {
   const [saving, setSaving] = useState(false);
   const [allowDownload, setAllowDownload] = useState(false);
 
-  // Pagination
-  const [currentPage, setCurrentPage] = useState(1);
+  // Pagination (0-based, matching the rest of the app)
+  const [currentPage, setCurrentPage] = useState(0);
   const [totalBackups, setTotalBackups] = useState(0);
   const pageSize = 10;
 
@@ -179,11 +215,11 @@ export default function DatabaseDetail() {
     }
   }, [selectedEnvironment?.id]);
 
-  const loadBackups = useCallback(async (page = 1) => {
+  const loadBackups = useCallback(async (page = 0) => {
     if (!id) return;
     setLoadingBackups(true);
     try {
-      const offset = (page - 1) * pageSize;
+      const offset = page * pageSize;
       const { backups: backupList, total, allowDownload: canDownload } = await listDatabaseBackups(id, pageSize, offset);
       setBackups(backupList);
       setTotalBackups(total);
@@ -234,7 +270,7 @@ export default function DatabaseDetail() {
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
-      await Promise.all([loadDatabase(), loadBackups(1), loadSchedule(), loadServers()]);
+      await Promise.all([loadDatabase(), loadBackups(0), loadSchedule(), loadServers()]);
       setLoading(false);
     };
     loadData();
@@ -257,8 +293,8 @@ export default function DatabaseDetail() {
     try {
       await createDatabaseBackup(id);
       toast.success('Backup started');
-      await loadBackups(1);
-      setCurrentPage(1);
+      await loadBackups(0);
+      setCurrentPage(0);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Backup failed');
     } finally {
@@ -267,7 +303,12 @@ export default function DatabaseDetail() {
   };
 
   const handleDeleteBackup = async (backup: DatabaseBackup) => {
-    if (!confirm(`Delete backup "${backup.filename}"?`)) return;
+    const ok = await confirm({
+      title: `Delete backup "${backup.filename}"?`,
+      confirmText: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
     try {
       await deleteDatabaseBackup(backup.id);
       setBackups(prev => prev.filter(b => b.id !== backup.id));
@@ -380,7 +421,13 @@ export default function DatabaseDetail() {
   };
 
   const handleDeleteSchedule = async () => {
-    if (!id || !confirm('Delete backup schedule?')) return;
+    if (!id) return;
+    const ok = await confirm({
+      title: 'Delete backup schedule?',
+      confirmText: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
     try {
       await deleteBackupSchedule(id);
       setSchedule(null);
@@ -409,13 +456,11 @@ export default function DatabaseDetail() {
   if (loading) {
     return (
       <div className="p-6">
-        <div className="animate-pulse">
-          <div className="h-8 w-64 bg-slate-700 rounded mb-4"></div>
-          <div className="space-y-4">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="h-32 bg-slate-800 rounded-lg"></div>
-            ))}
-          </div>
+        <Skeleton className="h-8 w-64 mb-4" />
+        <div className="space-y-4">
+          {[1, 2, 3].map(i => (
+            <Skeleton key={i} className="h-32 w-full rounded-lg" />
+          ))}
         </div>
       </div>
     );
@@ -424,11 +469,11 @@ export default function DatabaseDetail() {
   if (!database) {
     return (
       <div className="p-6">
-        <div className="panel text-center py-12">
-          <p className="text-slate-400">Database not found</p>
-          <Link to="/databases" className="btn btn-primary mt-4">
-            Back to Databases
-          </Link>
+        <div className="rounded-lg border bg-card p-4 text-center py-12">
+          <p className="text-muted-foreground">Database not found</p>
+          <Button asChild className="mt-4">
+            <Link to="/databases">Back to Databases</Link>
+          </Button>
         </div>
       </div>
     );
@@ -441,32 +486,26 @@ export default function DatabaseDetail() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-4">
-          <Link to="/databases" className="text-slate-400 hover:text-white">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
+          <Link to="/databases" className="text-muted-foreground hover:text-foreground">
+            <ArrowLeft className="size-5" />
           </Link>
           <div>
             <div className="flex items-center gap-3">
-              <span className="text-2xl font-bold text-white">{database.name}</span>
-              <span className="badge bg-slate-700 text-slate-300">
+              <span className="text-2xl font-bold text-foreground">{database.name}</span>
+              <Badge variant="secondary">
                 {database.databaseType?.displayName || database.type}
-              </span>
+              </Badge>
             </div>
-            <p className="text-slate-400 font-mono text-sm mt-1">
+            <p className="text-muted-foreground font-mono text-sm mt-1">
               {database.host ? `${database.host}:${database.port}/${database.databaseName}` : database.filePath}
             </p>
           </div>
         </div>
         {database.databaseType?.hasBackupCommand !== false && (
         <div className="flex gap-2">
-          <button
-            onClick={handleBackup}
-            disabled={backingUp}
-            className="btn btn-primary"
-          >
+          <Button onClick={handleBackup} disabled={backingUp}>
             {backingUp ? 'Starting...' : 'Backup Now'}
-          </button>
+          </Button>
         </div>
         )}
       </div>
@@ -474,130 +513,131 @@ export default function DatabaseDetail() {
       {/* Info Cards */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         {/* Connection Info */}
-        <div className="card">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-white">Connection Info</h3>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle>Connection Info</CardTitle>
             {!editingConnection && (
-              <button
-                onClick={() => setEditingConnection(true)}
-                className="btn btn-ghost text-sm"
-              >
+              <Button variant="ghost" size="sm" onClick={() => setEditingConnection(true)}>
                 Edit
-              </button>
+              </Button>
             )}
-          </div>
+          </CardHeader>
+          <CardContent>
 
           {editingConnection ? (
             <div className="space-y-4">
-              <div>
-                <label className="label">Name</label>
-                <input
+              <div className="space-y-1.5">
+                <Label htmlFor="conn-name">Name</Label>
+                <Input
+                  id="conn-name"
                   type="text"
                   value={connectionForm.name}
                   onChange={e => setConnectionForm({ ...connectionForm, name: e.target.value })}
                   placeholder="my-database"
-                  className="input"
                 />
               </div>
               {database.type === 'sqlite' ? (
                 <>
-                  <div>
-                    <label className="label">Server</label>
-                    <select
+                  <div className="space-y-1.5">
+                    <Label>Server</Label>
+                    <Select
                       value={connectionForm.serverId || ''}
-                      onChange={e => setConnectionForm({ ...connectionForm, serverId: e.target.value || null })}
-                      className="input"
+                      onValueChange={value => setConnectionForm({ ...connectionForm, serverId: value || null })}
                     >
-                      <option value="">Select server...</option>
-                      {servers.map(server => (
-                        <option key={server.id} value={server.id}>{server.name}</option>
-                      ))}
-                    </select>
-                    <p className="help-text">Server to SSH into for SQLite backups</p>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select server..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {servers.map(server => (
+                          <SelectItem key={server.id} value={server.id}>{server.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">Server to SSH into for SQLite backups</p>
                   </div>
-                  <div>
-                    <label className="label">File Path</label>
-                    <input
+                  <div className="space-y-1.5">
+                    <Label htmlFor="conn-filepath">File Path</Label>
+                    <Input
+                      id="conn-filepath"
                       type="text"
                       value={connectionForm.filePath}
                       onChange={e => setConnectionForm({ ...connectionForm, filePath: e.target.value })}
                       placeholder="/path/to/database.db"
-                      className="input font-mono text-sm"
+                      className="font-mono text-sm"
                     />
                   </div>
                 </>
               ) : (
                 <>
                   <div className="grid grid-cols-3 gap-4">
-                    <div className="col-span-2">
-                      <label className="label">Host</label>
-                      <input
+                    <div className="col-span-2 space-y-1.5">
+                      <Label htmlFor="conn-host">Host</Label>
+                      <Input
+                        id="conn-host"
                         type="text"
                         value={connectionForm.host}
                         onChange={e => setConnectionForm({ ...connectionForm, host: e.target.value })}
                         placeholder="localhost"
-                        className="input"
                       />
                     </div>
-                    <div>
-                      <label className="label">Port</label>
-                      <input
+                    <div className="space-y-1.5">
+                      <Label htmlFor="conn-port">Port</Label>
+                      <Input
+                        id="conn-port"
                         type="number"
                         value={connectionForm.port}
                         onChange={e => setConnectionForm({ ...connectionForm, port: parseInt(e.target.value) })}
-                        className="input"
                       />
                     </div>
                   </div>
-                  <div>
-                    <label className="label">Database Name</label>
-                    <input
+                  <div className="space-y-1.5">
+                    <Label htmlFor="conn-dbname">Database Name</Label>
+                    <Input
+                      id="conn-dbname"
                       type="text"
                       value={connectionForm.databaseName}
                       onChange={e => setConnectionForm({ ...connectionForm, databaseName: e.target.value })}
                       placeholder="mydb"
-                      className="input"
                     />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="label">Username</label>
-                      <input
+                    <div className="space-y-1.5">
+                      <Label htmlFor="conn-username">Username</Label>
+                      <Input
+                        id="conn-username"
                         type="text"
                         value={connectionForm.username}
                         onChange={e => setConnectionForm({ ...connectionForm, username: e.target.value })}
-                        className="input"
                         placeholder={database.hasCredentials ? '(unchanged)' : ''}
                       />
                     </div>
-                    <div>
-                      <label className="label">Password</label>
-                      <input
+                    <div className="space-y-1.5">
+                      <Label htmlFor="conn-password">Password</Label>
+                      <Input
+                        id="conn-password"
                         type="password"
                         value={connectionForm.password}
                         onChange={e => setConnectionForm({ ...connectionForm, password: e.target.value })}
-                        className="input"
                         placeholder={database.hasCredentials ? '(unchanged)' : ''}
                       />
                     </div>
                   </div>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
+                  <Label className="text-sm font-normal">
+                    <Checkbox
                       checked={connectionForm.useSsl}
-                      onChange={e => setConnectionForm({ ...connectionForm, useSsl: e.target.checked })}
-                      className="rounded bg-slate-700 border-slate-600 text-primary-500"
+                      onCheckedChange={checked => setConnectionForm({ ...connectionForm, useSsl: checked === true })}
                     />
-                    <span className="text-white">Use SSL/TLS</span>
-                    <span className="text-slate-500">- Required for managed database services</span>
-                  </label>
+                    <span className="text-foreground">Use SSL/TLS</span>
+                    <span className="text-muted-foreground">- Required for managed database services</span>
+                  </Label>
                 </>
               )}
               <div className="flex gap-2 pt-2">
-                <button onClick={handleSaveConnection} disabled={saving} className="btn btn-primary">
+                <Button onClick={handleSaveConnection} disabled={saving}>
                   {saving ? 'Saving...' : 'Save'}
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="ghost"
                   onClick={() => {
                     setEditingConnection(false);
                     setConnectionForm({
@@ -612,10 +652,9 @@ export default function DatabaseDetail() {
                       filePath: database.filePath || '',
                     });
                   }}
-                  className="btn btn-ghost"
                 >
                   Cancel
-                </button>
+                </Button>
               </div>
             </div>
           ) : (
@@ -624,107 +663,108 @@ export default function DatabaseDetail() {
                 {database.type !== 'sqlite' ? (
                   <>
                     <div className="flex justify-between">
-                      <dt className="text-slate-400">Host</dt>
-                      <dd className="text-white font-mono">{database.host || '--'}</dd>
+                      <dt className="text-muted-foreground">Host</dt>
+                      <dd className="text-foreground font-mono">{database.host || '--'}</dd>
                     </div>
                     <div className="flex justify-between">
-                      <dt className="text-slate-400">Port</dt>
-                      <dd className="text-white">{database.port || '--'}</dd>
+                      <dt className="text-muted-foreground">Port</dt>
+                      <dd className="text-foreground">{database.port || '--'}</dd>
                     </div>
                     <div className="flex justify-between">
-                      <dt className="text-slate-400">Database</dt>
-                      <dd className="text-white font-mono">{database.databaseName || '--'}</dd>
+                      <dt className="text-muted-foreground">Database</dt>
+                      <dd className="text-foreground font-mono">{database.databaseName || '--'}</dd>
                     </div>
                     <div className="flex justify-between">
-                      <dt className="text-slate-400">Credentials</dt>
-                      <dd className="text-white">{database.hasCredentials ? 'Configured' : 'Not set'}</dd>
+                      <dt className="text-muted-foreground">Credentials</dt>
+                      <dd className="text-foreground">{database.hasCredentials ? 'Configured' : 'Not set'}</dd>
                     </div>
                     <div className="flex justify-between">
-                      <dt className="text-slate-400">SSL/TLS</dt>
-                      <dd className={database.useSsl ? 'text-green-400' : 'text-slate-500'}>{database.useSsl ? 'Enabled' : 'Disabled'}</dd>
+                      <dt className="text-muted-foreground">SSL/TLS</dt>
+                      <dd className={database.useSsl ? 'text-success' : 'text-muted-foreground'}>{database.useSsl ? 'Enabled' : 'Disabled'}</dd>
                     </div>
                     <div className="flex justify-between">
-                      <dt className="text-slate-400">Server</dt>
-                      <dd className="text-slate-500">None (direct connection)</dd>
+                      <dt className="text-muted-foreground">Server</dt>
+                      <dd className="text-muted-foreground">None (direct connection)</dd>
                     </div>
                   </>
                 ) : (
                   <>
                     <div className="flex justify-between">
-                      <dt className="text-slate-400">File Path</dt>
-                      <dd className="text-white font-mono text-xs">{database.filePath || '--'}</dd>
+                      <dt className="text-muted-foreground">File Path</dt>
+                      <dd className="text-foreground font-mono text-xs">{database.filePath || '--'}</dd>
                     </div>
                     <div className="flex justify-between">
-                      <dt className="text-slate-400">Server</dt>
-                      <dd className="text-white">
+                      <dt className="text-muted-foreground">Server</dt>
+                      <dd className="text-foreground">
                         {database.serverId
                           ? servers.find(s => s.id === database.serverId)?.name || 'Unknown'
-                          : <span className="text-yellow-400">Not configured</span>}
+                          : <span className="text-warning">Not configured</span>}
                       </dd>
                     </div>
                   </>
                 )}
               </dl>
-              <div className="pt-2 border-t border-slate-700">
-                <div className="flex items-center justify-between">
-                  <button
-                    onClick={async () => {
-                      if (!selectedEnvironment?.id || !id) return;
-                      setTestingConnection(true);
-                      setTestResult(null);
-                      try {
-                        const result = await testDatabaseConnection(selectedEnvironment.id, id);
-                        setTestResult(result);
-                      } catch (error) {
-                        setTestResult({ success: false, latencyMs: null, error: error instanceof Error ? error.message : 'Connection test failed' });
-                      } finally {
-                        setTestingConnection(false);
-                      }
-                    }}
-                    disabled={testingConnection}
-                    className="btn btn-secondary text-sm"
-                  >
-                    {testingConnection ? 'Testing...' : 'Test Connection'}
-                  </button>
-                  {testResult && (
-                    <div className="flex items-center gap-2">
-                      <span className={`w-2 h-2 rounded-full ${testResult.success ? 'bg-green-400' : 'bg-red-400'}`} />
-                      {testResult.success ? (
-                        <span className="text-xs text-slate-400">
-                          {testResult.latencyMs}ms
-                          {testResult.serverVersion && (
-                            <span className="ml-1 text-slate-500">({testResult.serverVersion.split(' ').slice(0, 2).join(' ')})</span>
-                          )}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-red-400">{testResult.error}</span>
-                      )}
-                    </div>
-                  )}
-                </div>
+              <Separator />
+              <div className="flex items-center justify-between">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={async () => {
+                    if (!selectedEnvironment?.id || !id) return;
+                    setTestingConnection(true);
+                    setTestResult(null);
+                    try {
+                      const result = await testDatabaseConnection(selectedEnvironment.id, id);
+                      setTestResult(result);
+                    } catch (error) {
+                      setTestResult({ success: false, latencyMs: null, error: error instanceof Error ? error.message : 'Connection test failed' });
+                    } finally {
+                      setTestingConnection(false);
+                    }
+                  }}
+                  disabled={testingConnection}
+                >
+                  {testingConnection ? 'Testing...' : 'Test Connection'}
+                </Button>
+                {testResult && (
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${testResult.success ? 'bg-success' : 'bg-destructive'}`} />
+                    {testResult.success ? (
+                      <span className="text-xs text-muted-foreground">
+                        {testResult.latencyMs}ms
+                        {testResult.serverVersion && (
+                          <span className="ml-1 text-muted-foreground">({testResult.serverVersion.split(' ').slice(0, 2).join(' ')})</span>
+                        )}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-destructive">{testResult.error}</span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
-        </div>
+          </CardContent>
+        </Card>
 
         {/* Monitoring Card */}
-        <div className="card">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-white">Monitoring</h3>
-            <Link
-              to="/monitoring/databases"
-              className="btn btn-ghost text-sm"
-            >
-              View Metrics
-            </Link>
-          </div>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle>Monitoring</CardTitle>
+            <Button asChild variant="ghost" size="sm">
+              <Link to="/monitoring/databases">View Metrics</Link>
+            </Button>
+          </CardHeader>
+          <CardContent>
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-white">Enable Monitoring</p>
-                <p className="text-xs text-slate-500">Collect database metrics on a schedule</p>
+                <p className="text-sm text-foreground">Enable Monitoring</p>
+                <p className="text-xs text-muted-foreground">Collect database metrics on a schedule</p>
               </div>
-              <button
+              <Button
+                variant={monitoringEnabled ? 'default' : 'secondary'}
+                size="sm"
                 onClick={async () => {
                   if (!selectedEnvironment?.id || !id) return;
                   setSavingMonitoring(true);
@@ -739,22 +779,17 @@ export default function DatabaseDetail() {
                   }
                 }}
                 disabled={savingMonitoring}
-                className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-                  monitoringEnabled
-                    ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
-                    : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
-                }`}
               >
                 {monitoringEnabled ? 'Enabled' : 'Disabled'}
-              </button>
+              </Button>
             </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">Collection Interval</label>
-              <select
-                value={collectionInterval}
-                onChange={async (e) => {
+            <div className="space-y-1.5">
+              <Label>Collection Interval</Label>
+              <Select
+                value={String(collectionInterval)}
+                onValueChange={async (value) => {
                   if (!selectedEnvironment?.id || !id) return;
-                  const newInterval = parseInt(e.target.value);
+                  const newInterval = parseInt(value);
                   setSavingMonitoring(true);
                   try {
                     await updateDatabaseMonitoring(selectedEnvironment.id, id, { collectionIntervalSec: newInterval });
@@ -767,92 +802,106 @@ export default function DatabaseDetail() {
                   }
                 }}
                 disabled={savingMonitoring}
-                className="input w-48"
               >
-                <option value={60}>1 minute</option>
-                <option value={300}>5 minutes</option>
-                <option value={900}>15 minutes</option>
-                <option value={1800}>30 minutes</option>
-                <option value={3600}>1 hour</option>
-              </select>
+                <SelectTrigger className="w-48">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {COLLECTION_INTERVALS.map(opt => (
+                    <SelectItem key={opt.value} value={String(opt.value)}>{opt.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
-        </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Backup Configuration + Schedule Row */}
       {database.databaseType?.hasBackupCommand !== false && (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
         {/* Backup Configuration */}
-        <div className="card">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-white">Backup Configuration</h3>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle>Backup Configuration</CardTitle>
             {!editingConfig && (
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => {
                   setEditingConfig(true);
                   if (configForm.backupStorageType === 'spaces') loadBuckets();
                 }}
-                className="btn btn-ghost text-sm"
               >
                 Edit
-              </button>
+              </Button>
             )}
-          </div>
+          </CardHeader>
+          <CardContent>
 
           {editingConfig ? (
             <div className="space-y-4">
               {/* Storage */}
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Storage</label>
-                <select
+              <div className="space-y-1.5">
+                <Label>Storage</Label>
+                <Select
                   value={configForm.backupStorageType}
-                  onChange={e => {
-                    const newType = e.target.value as 'local' | 'spaces';
+                  onValueChange={value => {
+                    const newType = value as 'local' | 'spaces';
                     setConfigForm({ ...configForm, backupStorageType: newType });
                     if (newType === 'spaces') loadBuckets();
                   }}
-                  className="input"
                 >
-                  <option value="local">Local Storage</option>
-                  <option value="spaces">DO Spaces</option>
-                </select>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="local">Local Storage</SelectItem>
+                    <SelectItem value="spaces">DO Spaces</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               {configForm.backupStorageType === 'local' ? (
-                <div>
-                  <label className="block text-sm text-slate-400 mb-1">Local Path</label>
-                  <input
+                <div className="space-y-1.5">
+                  <Label htmlFor="config-localpath">Local Path</Label>
+                  <Input
+                    id="config-localpath"
                     type="text"
                     value={configForm.backupLocalPath}
                     onChange={e => setConfigForm({ ...configForm, backupLocalPath: e.target.value })}
-                    className="input font-mono text-sm"
+                    className="font-mono text-sm"
                   />
                 </div>
               ) : (
                 <>
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-1">Bucket</label>
-                    <select
+                  <div className="space-y-1.5">
+                    <Label>Bucket</Label>
+                    <Select
                       value={configForm.backupSpacesBucket}
-                      onChange={e => setConfigForm({ ...configForm, backupSpacesBucket: e.target.value })}
-                      className="input"
+                      onValueChange={value => setConfigForm({ ...configForm, backupSpacesBucket: value })}
                       disabled={loadingBuckets}
                     >
-                      <option value="">Select bucket...</option>
-                      {spacesBuckets.map(bucket => (
-                        <option key={bucket} value={bucket}>{bucket}</option>
-                      ))}
-                    </select>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select bucket..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {spacesBuckets.map(bucket => (
+                          <SelectItem key={bucket} value={bucket}>{bucket}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-1">Prefix</label>
-                    <input
+                  <div className="space-y-1.5">
+                    <Label htmlFor="config-prefix">Prefix</Label>
+                    <Input
+                      id="config-prefix"
                       type="text"
                       value={configForm.backupSpacesPrefix}
                       onChange={e => setConfigForm({ ...configForm, backupSpacesPrefix: e.target.value })}
                       placeholder="{environment}/{name}/"
-                      className="input font-mono text-sm"
+                      className="font-mono text-sm"
                     />
                   </div>
                 </>
@@ -860,45 +909,53 @@ export default function DatabaseDetail() {
 
               {/* Format (Postgres only) */}
               {database.type === 'postgres' && (
-                <div>
-                  <label className="block text-sm text-slate-400 mb-1">Format</label>
-                  <select
+                <div className="space-y-1.5">
+                  <Label>Format</Label>
+                  <Select
                     value={configForm.backupFormat}
-                    onChange={e => setConfigForm({ ...configForm, backupFormat: e.target.value as 'plain' | 'custom' | 'tar' })}
-                    className="input"
+                    onValueChange={value => setConfigForm({ ...configForm, backupFormat: value as 'plain' | 'custom' | 'tar' })}
                   >
-                    {BACKUP_FORMATS.map(f => (
-                      <option key={f.value} value={f.value}>{f.label}</option>
-                    ))}
-                  </select>
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {BACKUP_FORMATS.map(f => (
+                        <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               )}
 
               {/* Compression (for plain format) */}
               {(database.type !== 'postgres' || configForm.backupFormat === 'plain') && (
                 <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm text-slate-400 mb-1">Compression</label>
-                    <select
+                  <div className="space-y-1.5">
+                    <Label>Compression</Label>
+                    <Select
                       value={configForm.backupCompression}
-                      onChange={e => setConfigForm({ ...configForm, backupCompression: e.target.value as 'none' | 'gzip' })}
-                      className="input"
+                      onValueChange={value => setConfigForm({ ...configForm, backupCompression: value as 'none' | 'gzip' })}
                     >
-                      {COMPRESSION_OPTIONS.map(c => (
-                        <option key={c.value} value={c.value}>{c.label}</option>
-                      ))}
-                    </select>
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {COMPRESSION_OPTIONS.map(c => (
+                          <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   {configForm.backupCompression === 'gzip' && (
-                    <div>
-                      <label className="block text-sm text-slate-400 mb-1">Level (1-9)</label>
-                      <input
+                    <div className="space-y-1.5">
+                      <Label htmlFor="config-complevel">Level (1-9)</Label>
+                      <Input
+                        id="config-complevel"
                         type="number"
                         min={1}
                         max={9}
                         value={configForm.backupCompressionLevel}
                         onChange={e => setConfigForm({ ...configForm, backupCompressionLevel: parseInt(e.target.value) || 6 })}
-                        className="input"
                       />
                     </div>
                   )}
@@ -908,25 +965,23 @@ export default function DatabaseDetail() {
               {/* pg_dump options (Postgres only) */}
               {database.type === 'postgres' && (
                 <div>
-                  <label className="block text-sm text-slate-400 mb-2">pg_dump Options</label>
+                  <Label className="mb-2">pg_dump Options</Label>
                   <div className="space-y-2">
                     {PG_DUMP_OPTIONS.map(opt => (
-                      <label key={opt.key} className="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
+                      <Label key={opt.key} className="text-sm font-normal">
+                        <Checkbox
                           checked={!!configForm.pgDumpOptions[opt.key as keyof PgDumpOptions]}
-                          onChange={e => setConfigForm({
+                          onCheckedChange={checked => setConfigForm({
                             ...configForm,
                             pgDumpOptions: {
                               ...configForm.pgDumpOptions,
-                              [opt.key]: e.target.checked,
+                              [opt.key]: checked === true,
                             },
                           })}
-                          className="rounded bg-slate-700 border-slate-600 text-primary-500"
                         />
-                        <span className="text-white">{opt.label}</span>
-                        <span className="text-slate-500">- {opt.description}</span>
-                      </label>
+                        <span className="text-foreground">{opt.label}</span>
+                        <span className="text-muted-foreground">- {opt.description}</span>
+                      </Label>
                     ))}
                   </div>
                 </div>
@@ -934,340 +989,317 @@ export default function DatabaseDetail() {
 
               {/* Backup Timeout (Postgres only) */}
               {database.type === 'postgres' && (
-                <div>
-                  <label className="block text-sm text-slate-400 mb-1">
-                    Backup Timeout <span className="text-slate-500">(seconds)</span>
-                  </label>
-                  <input
+                <div className="space-y-1.5">
+                  <Label htmlFor="config-timeout">
+                    Backup Timeout <span className="text-muted-foreground">(seconds)</span>
+                  </Label>
+                  <Input
+                    id="config-timeout"
                     type="number"
                     min={30}
                     max={3600}
                     value={configForm.pgDumpTimeoutSec}
                     onChange={e => setConfigForm({ ...configForm, pgDumpTimeoutSec: parseInt(e.target.value) || 300 })}
-                    className="input w-32"
+                    className="w-32"
                   />
-                  <p className="text-xs text-slate-500 mt-1">
+                  <p className="text-xs text-muted-foreground">
                     Max time for pg_dump execution (default: 300s / 5 min)
                   </p>
                 </div>
               )}
 
               <div className="flex gap-2 pt-2">
-                <button onClick={handleSaveConfig} disabled={saving} className="btn btn-primary">
+                <Button onClick={handleSaveConfig} disabled={saving}>
                   {saving ? 'Saving...' : 'Save'}
-                </button>
-                <button onClick={() => setEditingConfig(false)} className="btn btn-ghost">
-                  Cancel
-                </button>
+                </Button>
+                <Button variant="ghost" onClick={() => setEditingConfig(false)}>Cancel</Button>
               </div>
             </div>
           ) : (
             <dl className="space-y-3 text-sm">
               <div className="flex justify-between">
-                <dt className="text-slate-400">Storage</dt>
-                <dd className="text-white">
+                <dt className="text-muted-foreground">Storage</dt>
+                <dd className="text-foreground">
                   {database.backupStorageType === 'local' ? 'Local' : 'DO Spaces'}
                 </dd>
               </div>
               {database.backupStorageType === 'local' ? (
                 <div className="flex justify-between">
-                  <dt className="text-slate-400">Path</dt>
-                  <dd className="text-white font-mono text-xs">{database.backupLocalPath || '/var/backups'}</dd>
+                  <dt className="text-muted-foreground">Path</dt>
+                  <dd className="text-foreground font-mono text-xs">{database.backupLocalPath || '/var/backups'}</dd>
                 </div>
               ) : (
                 <>
                   <div className="flex justify-between">
-                    <dt className="text-slate-400">Bucket</dt>
-                    <dd className="text-white font-mono">{database.backupSpacesBucket || '--'}</dd>
+                    <dt className="text-muted-foreground">Bucket</dt>
+                    <dd className="text-foreground font-mono">{database.backupSpacesBucket || '--'}</dd>
                   </div>
                   <div className="flex justify-between">
-                    <dt className="text-slate-400">Prefix</dt>
-                    <dd className="text-white font-mono text-xs">{database.backupSpacesPrefix || '(root)'}</dd>
+                    <dt className="text-muted-foreground">Prefix</dt>
+                    <dd className="text-foreground font-mono text-xs">{database.backupSpacesPrefix || '(root)'}</dd>
                   </div>
                 </>
               )}
               {database.type === 'postgres' && (
                 <div className="flex justify-between">
-                  <dt className="text-slate-400">Format</dt>
-                  <dd className="text-white">
+                  <dt className="text-muted-foreground">Format</dt>
+                  <dd className="text-foreground">
                     {BACKUP_FORMATS.find(f => f.value === database.backupFormat)?.label || 'Plain SQL'}
                   </dd>
                 </div>
               )}
               <div className="flex justify-between">
-                <dt className="text-slate-400">Compression</dt>
-                <dd className="text-white">
+                <dt className="text-muted-foreground">Compression</dt>
+                <dd className="text-foreground">
                   {database.backupCompression === 'gzip' ? `Gzip (level ${database.backupCompressionLevel})` : 'None'}
                 </dd>
               </div>
               {database.type === 'postgres' && database.pgDumpOptions && Object.keys(database.pgDumpOptions).some(k => database.pgDumpOptions![k as keyof PgDumpOptions]) && (
                 <div>
-                  <dt className="text-slate-400 mb-1">pg_dump Options</dt>
+                  <dt className="text-muted-foreground mb-1">pg_dump Options</dt>
                   <dd className="flex flex-wrap gap-1">
                     {PG_DUMP_OPTIONS.filter(opt => database.pgDumpOptions![opt.key as keyof PgDumpOptions]).map(opt => (
-                      <span key={opt.key} className="px-2 py-0.5 bg-slate-700 rounded text-xs text-white">
+                      <Badge key={opt.key} variant="secondary" className="text-xs">
                         {opt.label}
-                      </span>
+                      </Badge>
                     ))}
                   </dd>
                 </div>
               )}
               {database.type === 'postgres' && (
                 <div className="flex justify-between">
-                  <dt className="text-slate-400">Backup Timeout</dt>
-                  <dd className="text-white">{Math.round(database.pgDumpTimeoutMs / 1000)}s</dd>
+                  <dt className="text-muted-foreground">Backup Timeout</dt>
+                  <dd className="text-foreground">{Math.round(database.pgDumpTimeoutMs / 1000)}s</dd>
                 </div>
               )}
             </dl>
           )}
-        </div>
+          </CardContent>
+        </Card>
 
         {/* Schedule Card */}
-        <div className="card">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-white">Backup Schedule</h3>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle>Backup Schedule</CardTitle>
             {!editingSchedule && (
-              <button
-                onClick={() => setEditingSchedule(true)}
-                className="btn btn-ghost text-sm"
-              >
+              <Button variant="ghost" size="sm" onClick={() => setEditingSchedule(true)}>
                 {schedule ? 'Edit' : 'Set Schedule'}
-              </button>
+              </Button>
             )}
-          </div>
+          </CardHeader>
+          <CardContent>
 
           {editingSchedule ? (
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Cron Expression</label>
-                <input
+              <div className="space-y-1.5">
+                <Label htmlFor="schedule-cron">Cron Expression</Label>
+                <Input
+                  id="schedule-cron"
                   type="text"
                   value={scheduleForm.cronExpression}
                   onChange={e => setScheduleForm({ ...scheduleForm, cronExpression: e.target.value })}
                   placeholder="0 2 * * *"
-                  className="input font-mono"
+                  className="font-mono"
                 />
-                <p className="text-xs text-slate-500 mt-1">e.g., "0 2 * * *" = daily at 2am</p>
+                <p className="text-xs text-muted-foreground">e.g., "0 2 * * *" = daily at 2am</p>
               </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Retention Days</label>
-                <input
+              <div className="space-y-1.5">
+                <Label htmlFor="schedule-retention">Retention Days</Label>
+                <Input
+                  id="schedule-retention"
                   type="number"
                   min={1}
                   max={365}
                   value={scheduleForm.retentionDays}
                   onChange={e => setScheduleForm({ ...scheduleForm, retentionDays: parseInt(e.target.value) || 7 })}
-                  className="input"
                 />
               </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
+              <Label htmlFor="scheduleEnabled" className="text-sm font-normal">
+                <Checkbox
                   id="scheduleEnabled"
                   checked={scheduleForm.enabled}
-                  onChange={e => setScheduleForm({ ...scheduleForm, enabled: e.target.checked })}
-                  className="rounded bg-slate-700 border-slate-600 text-primary-500"
+                  onCheckedChange={checked => setScheduleForm({ ...scheduleForm, enabled: checked === true })}
                 />
-                <label htmlFor="scheduleEnabled" className="text-sm text-slate-300">Enabled</label>
-              </div>
+                <span className="text-foreground">Enabled</span>
+              </Label>
               <div className="flex gap-2">
-                <button onClick={handleSaveSchedule} disabled={saving} className="btn btn-primary">
+                <Button onClick={handleSaveSchedule} disabled={saving}>
                   {saving ? 'Saving...' : 'Save'}
-                </button>
-                <button onClick={() => setEditingSchedule(false)} className="btn btn-ghost">
-                  Cancel
-                </button>
+                </Button>
+                <Button variant="ghost" onClick={() => setEditingSchedule(false)}>Cancel</Button>
                 {schedule && (
-                  <button onClick={handleDeleteSchedule} className="btn btn-ghost text-red-400 hover:text-red-300">
+                  <Button variant="ghost" onClick={handleDeleteSchedule} className="text-destructive hover:text-destructive">
                     Delete Schedule
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>
           ) : schedule ? (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-slate-400 text-sm">Status</span>
-                <button
+                <span className="text-muted-foreground text-sm">Status</span>
+                <Button
+                  variant={schedule.enabled ? 'default' : 'secondary'}
+                  size="sm"
                   onClick={handleToggleSchedule}
-                  className={`px-3 py-1.5 rounded text-sm font-medium transition-colors ${
-                    schedule.enabled
-                      ? 'bg-green-500/20 text-green-400 hover:bg-green-500/30'
-                      : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
-                  }`}
                 >
                   {schedule.enabled ? 'Enabled' : 'Disabled'}
-                </button>
+                </Button>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-slate-400">Cron</span>
-                <code className="font-mono text-white bg-slate-800 px-2 py-0.5 rounded text-xs">
+                <span className="text-muted-foreground">Cron</span>
+                <code className="font-mono text-foreground bg-muted px-2 py-0.5 rounded text-xs">
                   {schedule.cronExpression}
                 </code>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-slate-400">Retention</span>
-                <span className="text-white">{schedule.retentionDays} days</span>
+                <span className="text-muted-foreground">Retention</span>
+                <span className="text-foreground">{schedule.retentionDays} days</span>
               </div>
               {schedule.lastRunAt && (
                 <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">Last run</span>
-                  <span className="text-white">{formatDistanceToNow(new Date(schedule.lastRunAt), { addSuffix: true })}</span>
+                  <span className="text-muted-foreground">Last run</span>
+                  <span className="text-foreground">{formatDistanceToNow(new Date(schedule.lastRunAt), { addSuffix: true })}</span>
                 </div>
               )}
               {schedule.nextRunAt && (
                 <div className="flex justify-between text-sm">
-                  <span className="text-slate-400">Next run</span>
-                  <span className="text-white">{formatDistanceToNow(new Date(schedule.nextRunAt), { addSuffix: true })}</span>
+                  <span className="text-muted-foreground">Next run</span>
+                  <span className="text-foreground">{formatDistanceToNow(new Date(schedule.nextRunAt), { addSuffix: true })}</span>
                 </div>
               )}
             </div>
           ) : (
-            <p className="text-slate-400 text-sm">No schedule configured</p>
+            <p className="text-muted-foreground text-sm">No schedule configured</p>
           )}
-        </div>
+          </CardContent>
+        </Card>
       </div>
       )}
 
       {/* Backups Table */}
       {database.databaseType?.hasBackupCommand !== false && (
-      <div className="card">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white">
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>
             Backups
-            {totalBackups > 0 && <span className="text-slate-400 font-normal ml-2">({totalBackups})</span>}
-          </h3>
-          {loadingBackups && <span className="text-slate-400 text-sm">Refreshing...</span>}
-        </div>
+            {totalBackups > 0 && <span className="text-muted-foreground font-normal ml-2">({totalBackups})</span>}
+          </CardTitle>
+          {loadingBackups && <span className="text-muted-foreground text-sm">Refreshing...</span>}
+        </CardHeader>
+        <CardContent>
 
         {backups.length === 0 ? (
           <div className="text-center py-8">
-            <p className="text-slate-400">No backups yet</p>
-            <button onClick={handleBackup} disabled={backingUp} className="btn btn-primary mt-4">
+            <p className="text-muted-foreground">No backups yet</p>
+            <Button onClick={handleBackup} disabled={backingUp} className="mt-4">
               Create First Backup
-            </button>
+            </Button>
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-slate-400 border-b border-slate-700">
-                    <th className="pb-3 font-medium">Filename</th>
-                    <th className="pb-3 font-medium">Size</th>
-                    <th className="pb-3 font-medium">Status</th>
-                    <th className="pb-3 font-medium">Duration</th>
-                    <th className="pb-3 font-medium">Date</th>
-                    <th className="pb-3 font-medium">Type</th>
-                    <th className="pb-3 font-medium"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800">
-                  {backups.map(backup => {
-                    const parsedError = parseBackupError(backup.error);
-                    const isStructuredError = parsedError && typeof parsedError === 'object';
-                    const isInProgress = backup.status === 'in_progress' || backup.status === 'pending';
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Filename</TableHead>
+                  <TableHead>Size</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Duration</TableHead>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {backups.map(backup => {
+                  const parsedError = parseBackupError(backup.error);
+                  const isStructuredError = parsedError && typeof parsedError === 'object';
+                  const isInProgress = backup.status === 'in_progress' || backup.status === 'pending';
 
-                    return (
-                      <tr key={backup.id} className="text-white">
-                        <td className="py-3 font-mono text-xs">{backup.filename}</td>
-                        <td className="py-3">
-                          {backup.status === 'completed' ? formatBytes(backup.size) : '--'}
-                        </td>
-                        <td className="py-3">
-                          {isInProgress ? (
-                            <div className="flex items-center gap-2">
-                              <div className="w-24 h-2 bg-slate-700 rounded-full overflow-hidden">
-                                <div
-                                  className="h-full bg-primary-500 transition-all duration-300"
-                                  style={{ width: `${backup.progress}%` }}
-                                />
-                              </div>
-                              <span className="text-xs text-slate-400">{backup.progress}%</span>
-                            </div>
-                          ) : (
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${
-                              backup.status === 'completed'
-                                ? 'bg-green-500/20 text-green-400'
-                                : backup.status === 'failed'
-                                ? 'bg-red-500/20 text-red-400'
-                                : 'bg-slate-500/20 text-slate-400'
-                            }`}>
-                              {backup.status === 'completed' && (
-                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                </svg>
-                              )}
-                              {backup.status === 'failed' && (
-                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                              )}
-                              {backup.status}
-                            </span>
-                          )}
-                          {parsedError && (
-                            <div className="mt-1">
-                              {isStructuredError ? (
-                                <details className="text-xs">
-                                  <summary className="text-red-400 cursor-pointer hover:text-red-300">
-                                    {parsedError.step}: {parsedError.message.substring(0, 50)}...
-                                  </summary>
-                                  <pre className="mt-1 p-2 bg-slate-900 rounded text-red-300 overflow-x-auto max-h-32">
-                                    {parsedError.stderr || parsedError.message}
-                                  </pre>
-                                </details>
-                              ) : (
-                                <span className="text-xs text-red-400">{parsedError}</span>
-                              )}
-                            </div>
-                          )}
-                        </td>
-                        <td className="py-3 text-slate-400">{formatDuration(backup.duration)}</td>
-                        <td className="py-3 text-slate-400">
-                          {format(new Date(backup.createdAt), 'MMM d, yyyy h:mm a')}
-                        </td>
-                        <td className="py-3">
-                          <span className={`px-2 py-0.5 rounded text-xs ${
-                            backup.type === 'manual' ? 'bg-slate-700 text-slate-300' : 'bg-primary-500/20 text-primary-400'
-                          }`}>
-                            {backup.type}
-                          </span>
-                        </td>
-                        <td className="py-3">
-                          <div className="flex items-center gap-2 justify-end">
-                            {allowDownload && backup.status === 'completed' && (
-                              <button
-                                onClick={() => handleDownload(backup)}
-                                className="btn btn-ghost text-xs text-primary-400 hover:text-primary-300"
-                                title="Download"
-                              >
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                                </svg>
-                              </button>
-                            )}
-                            <button
-                              onClick={() => handleDeleteBackup(backup)}
-                              className="btn btn-ghost text-xs text-red-400 hover:text-red-300"
-                              title="Delete"
-                            >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                              </svg>
-                            </button>
+                  return (
+                    <TableRow key={backup.id}>
+                      <TableCell className="font-mono text-xs">{backup.filename}</TableCell>
+                      <TableCell>
+                        {backup.status === 'completed' ? formatBytes(backup.size) : '--'}
+                      </TableCell>
+                      <TableCell>
+                        {isInProgress ? (
+                          <div className="flex items-center gap-2">
+                            <Progress value={backup.progress} className="w-24" />
+                            <span className="text-xs text-muted-foreground">{backup.progress}%</span>
                           </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                        ) : (
+                          <StatusBadge
+                            kind="backup"
+                            value={backup.status}
+                            label={
+                              <span className="inline-flex items-center gap-1">
+                                {backup.status === 'completed' && <Check className="size-3" />}
+                                {backup.status === 'failed' && <X className="size-3" />}
+                                {backup.status}
+                              </span>
+                            }
+                          />
+                        )}
+                        {parsedError && (
+                          <div className="mt-1">
+                            {isStructuredError ? (
+                              <details className="text-xs">
+                                <summary className="text-destructive cursor-pointer hover:text-destructive/80">
+                                  {parsedError.step}: {parsedError.message.substring(0, 50)}...
+                                </summary>
+                                <pre className="mt-1 p-2 bg-muted rounded text-destructive overflow-x-auto max-h-32">
+                                  {parsedError.stderr || parsedError.message}
+                                </pre>
+                              </details>
+                            ) : (
+                              <span className="text-xs text-destructive">{parsedError}</span>
+                            )}
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">{formatDuration(backup.duration)}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {format(new Date(backup.createdAt), 'MMM d, yyyy h:mm a')}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={backup.type === 'manual' ? 'secondary' : 'info'} className="text-xs">
+                          {backup.type}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2 justify-end">
+                          {allowDownload && backup.status === 'completed' && (
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => handleDownload(backup)}
+                              className="text-primary hover:text-primary/80"
+                              title="Download"
+                            >
+                              <Download className="size-4" />
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() => handleDeleteBackup(backup)}
+                            className="text-destructive hover:text-destructive/80"
+                            title="Delete"
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
 
             {totalPages > 1 && (
               <div className="mt-4">
-                <Pagination
+                <DataPagination
                   currentPage={currentPage}
                   totalPages={totalPages}
                   totalItems={totalBackups}
@@ -1276,13 +1308,13 @@ export default function DatabaseDetail() {
                     setCurrentPage(page);
                     loadBackups(page);
                   }}
-                  onPageSizeChange={() => {}}
                 />
               </div>
             )}
           </>
         )}
-      </div>
+        </CardContent>
+      </Card>
       )}
     </div>
   );
