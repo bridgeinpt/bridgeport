@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '../../test/render';
 import { useAppStore } from '../lib/store';
+import { ConfirmProvider } from '@/hooks/useConfirm';
 
 // Mock Toast
 vi.mock('../components/Toast', () => ({
@@ -67,28 +68,44 @@ describe('Databases', () => {
   });
 
   it('should display database name after loading', async () => {
-    renderWithProviders(<Databases />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <Databases />
+      </ConfirmProvider>
+    );
     await waitFor(() => {
       expect(screen.getByText('Main DB')).toBeInTheDocument();
     });
   });
 
   it('should display database type', async () => {
-    renderWithProviders(<Databases />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <Databases />
+      </ConfirmProvider>
+    );
     await waitFor(() => {
       expect(screen.getByText(/PostgreSQL/)).toBeInTheDocument();
     });
   });
 
   it('should display connection info', async () => {
-    renderWithProviders(<Databases />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <Databases />
+      </ConfirmProvider>
+    );
     await waitFor(() => {
       expect(screen.getByText('db.example.com:5432/app_production')).toBeInTheDocument();
     });
   });
 
   it('should link database name to detail page', async () => {
-    renderWithProviders(<Databases />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <Databases />
+      </ConfirmProvider>
+    );
     await waitFor(() => {
       const link = screen.getByText('Main DB').closest('a');
       expect(link).toHaveAttribute('href', '/databases/db-1');

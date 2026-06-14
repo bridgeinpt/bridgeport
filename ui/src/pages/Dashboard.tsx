@@ -23,12 +23,37 @@ import {
   type ServiceWithServerName,
 } from '../lib/api';
 import { formatDistanceToNow } from 'date-fns';
-import { Modal } from '../components/Modal';
-import { CheckIcon, WarningIcon, RefreshIcon, ServerIcon, CubeIcon, DatabaseIcon } from '../components/Icons';
 import { useToast } from '../components/Toast';
 import { TopologyDiagram } from '../components/topology';
 import { useAuthStore } from '../lib/store';
 import { safeJsonParse } from '../lib/helpers';
+import {
+  X,
+  CircleDot,
+  TriangleAlert,
+  RefreshCw,
+  Server as ServerIcon,
+  Box as CubeIcon,
+  Database as DatabaseIcon,
+  Check,
+  HeartPulse,
+  HardDriveDownload,
+  Info,
+} from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { Alert as AlertBox, AlertTitle, AlertDescription } from '@/components/ui/alert';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { SpinnerIcon } from '../components/Icons';
+import { cn } from '@/lib/utils';
 
 interface DeployAllResult {
   serviceId: string;
@@ -410,9 +435,11 @@ export default function Dashboard() {
   if (!selectedEnvironment?.id) {
     return (
       <div className="p-6">
-        <div className="panel text-center py-12">
-          <p className="text-slate-400">No environment selected</p>
-        </div>
+        <Card>
+          <CardContent className="py-12 text-center">
+            <p className="text-muted-foreground">No environment selected</p>
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -434,79 +461,67 @@ export default function Dashboard() {
     <div className="p-6">
       {/* Alerts & Warnings - Moved to top */}
       {(alerts.length > 0 || dismissedAlerts.length > 0) && (
-        <div className="panel mb-5">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-white">
-              Alerts & Warnings
-              <span className="ml-2 text-sm font-normal text-slate-400">({alerts.length})</span>
-            </h2>
+        <Card className="mb-5">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="text-lg">
+              Alerts &amp; Warnings
+              <span className="ml-2 text-sm font-normal text-muted-foreground">({alerts.length})</span>
+            </CardTitle>
             {dismissedAlerts.length > 0 && (
-              <button
-                onClick={clearDismissedAlerts}
-                className="text-sm text-slate-400 hover:text-white"
-              >
+              <Button variant="ghost" size="sm" onClick={clearDismissedAlerts}>
                 Show {dismissedAlerts.length} dismissed
-              </button>
+              </Button>
             )}
-          </div>
-          {alerts.length > 0 ? (
-            <div className="space-y-3">
-              {alerts.map((alert) => (
-                <div
-                  key={alert.id}
-                  className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg border border-slate-700"
-                >
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                        alert.severity === 'error'
-                          ? 'bg-red-900/50 text-red-400'
-                          : 'bg-yellow-900/50 text-yellow-400'
-                      }`}
-                    >
+          </CardHeader>
+          <CardContent>
+            {alerts.length > 0 ? (
+              <div className="space-y-3">
+                {alerts.map((alert) => (
+                  <AlertBox
+                    key={alert.id}
+                    variant={alert.severity === 'error' ? 'destructive' : 'warning'}
+                    className="flex items-center justify-between"
+                  >
+                    <div className="flex items-center gap-3">
                       {alert.type === 'failed_deploy' ? (
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
+                        <X className="size-4 shrink-0" />
                       ) : alert.type === 'unhealthy' ? (
-                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                          <circle cx="12" cy="12" r="5" />
-                        </svg>
+                        <CircleDot className="size-4 shrink-0" />
                       ) : (
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                        </svg>
+                        <TriangleAlert className="size-4 shrink-0" />
                       )}
+                      <div>
+                        <AlertTitle>{alert.title}</AlertTitle>
+                        <AlertDescription>{alert.description}</AlertDescription>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-white">{alert.title}</p>
-                      <p className="text-xs text-slate-400">{alert.description}</p>
+                    <div className="flex items-center gap-2">
+                      <Button asChild variant="secondary" size="sm">
+                        <Link to={alert.link}>View</Link>
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => dismissAlert(alert.id)}
+                        title="Dismiss"
+                        aria-label="Dismiss"
+                      >
+                        <X className="size-4" />
+                      </Button>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Link
-                      to={alert.link}
-                      className="btn btn-sm btn-secondary"
-                    >
-                      View
-                    </Link>
-                    <button
-                      onClick={() => dismissAlert(alert.id)}
-                      className="p-1 text-slate-400 hover:text-white"
-                      title="Dismiss"
-                    >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-slate-400 text-sm">All alerts dismissed. <button onClick={clearDismissedAlerts} className="text-primary-400 hover:text-primary-300">Show again</button></p>
-          )}
-        </div>
+                  </AlertBox>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                All alerts dismissed.{' '}
+                <button onClick={clearDismissedAlerts} className="text-primary hover:underline">
+                  Show again
+                </button>
+              </p>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       {/* Service Topology Diagram. Renders a placeholder while the underlying
@@ -515,10 +530,12 @@ export default function Dashboard() {
           topology renders without DBs and they appear when their fetch
           completes — so we don't gate on databasesLoading here. */}
       {serversLoading || servicesLoading ? (
-        <div className="panel mb-5 animate-pulse">
-          <div className="h-7 w-48 bg-slate-700 rounded mb-4"></div>
-          <div className="h-64 bg-slate-800 rounded-lg"></div>
-        </div>
+        <Card className="mb-5">
+          <CardContent className="space-y-4 pt-6">
+            <Skeleton className="h-7 w-48" />
+            <Skeleton className="h-64 w-full" />
+          </CardContent>
+        </Card>
       ) : servers.length > 0 ? (
         <div className="mb-5">
           <TopologyDiagram
@@ -531,463 +548,500 @@ export default function Dashboard() {
       ) : null}
 
       {/* Deploy All Results Modal */}
-      <Modal
-        isOpen={showDeployAllResults}
-        onClose={() => {
-          setShowDeployAllResults(false);
-          setDeployAllResults(null);
+      <Dialog
+        open={showDeployAllResults}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShowDeployAllResults(false);
+            setDeployAllResults(null);
+          }
         }}
-        title="Deploy All Updates"
-        size="md"
       >
-        {deployAllResults === null ? (
-          <div className="flex flex-col items-center justify-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500 mb-4"></div>
-            <p className="text-slate-400">Deploying {servicesWithUpdates.length} services...</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {/* Summary */}
-            <div className={`p-3 rounded-lg ${
-              deployAllResults.every(r => r.success)
-                ? 'bg-green-500/10 border border-green-500/30'
-                : deployAllResults.some(r => r.success)
-                ? 'bg-yellow-500/10 border border-yellow-500/30'
-                : 'bg-red-500/10 border border-red-500/30'
-            }`}>
-              <div className="flex items-center gap-2">
-                {deployAllResults.every(r => r.success) ? (
-                  <CheckIcon className="w-5 h-5 text-green-400" />
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Deploy All Updates</DialogTitle>
+          </DialogHeader>
+          {deployAllResults === null ? (
+            <div className="flex flex-col items-center justify-center py-8">
+              <SpinnerIcon className="mb-4 size-8 text-primary" />
+              <p className="text-muted-foreground">Deploying {servicesWithUpdates.length} services...</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Summary */}
+              <AlertBox
+                variant={
+                  deployAllResults.every((r) => r.success)
+                    ? 'success'
+                    : deployAllResults.some((r) => r.success)
+                    ? 'warning'
+                    : 'destructive'
+                }
+              >
+                {deployAllResults.every((r) => r.success) ? (
+                  <Check className="size-4" />
                 ) : (
-                  <WarningIcon className="w-5 h-5 text-yellow-400" />
+                  <TriangleAlert className="size-4" />
                 )}
-                <span className={
-                  deployAllResults.every(r => r.success) ? 'text-green-400' :
-                  deployAllResults.some(r => r.success) ? 'text-yellow-400' : 'text-red-400'
-                }>
-                  {deployAllResults.filter(r => r.success).length} of {deployAllResults.length} deployed successfully
-                </span>
+                <AlertTitle>
+                  {deployAllResults.filter((r) => r.success).length} of {deployAllResults.length} deployed
+                  successfully
+                </AlertTitle>
+              </AlertBox>
+
+              {/* Results List */}
+              <div className="max-h-64 space-y-2 overflow-y-auto">
+                {deployAllResults.map((result) => (
+                  <div
+                    key={result.serviceId}
+                    className={cn(
+                      'rounded-lg p-2 text-sm',
+                      result.success ? 'bg-muted' : 'bg-destructive/10'
+                    )}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-foreground">{result.serviceName}</span>
+                        <span className="mx-2 text-muted-foreground">on</span>
+                        <span className="text-muted-foreground">{result.serverName}</span>
+                        <span className="mx-2 text-muted-foreground">&rarr;</span>
+                        <span className="font-mono text-primary">{result.imageTag}</span>
+                      </div>
+                      {result.success ? (
+                        <Check className="size-4 text-success" />
+                      ) : (
+                        <TriangleAlert className="size-4 text-destructive" />
+                      )}
+                    </div>
+                    {result.error && <p className="mt-1 text-xs text-destructive">{result.error}</p>}
+                  </div>
+                ))}
               </div>
             </div>
-
-            {/* Results List */}
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {deployAllResults.map((result) => (
-                <div
-                  key={result.serviceId}
-                  className={`p-2 rounded-lg text-sm ${
-                    result.success ? 'bg-slate-800/50' : 'bg-red-500/10'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <span className="text-white">{result.serviceName}</span>
-                      <span className="text-slate-500 mx-2">on</span>
-                      <span className="text-slate-400">{result.serverName}</span>
-                      <span className="text-slate-500 mx-2">→</span>
-                      <span className="font-mono text-primary-400">{result.imageTag}</span>
-                    </div>
-                    {result.success ? (
-                      <CheckIcon className="w-4 h-4 text-green-400" />
-                    ) : (
-                      <WarningIcon className="w-4 h-4 text-red-400" />
-                    )}
-                  </div>
-                  {result.error && (
-                    <p className="text-red-400 text-xs mt-1">{result.error}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            <div className="flex justify-end">
-              <button
+          )}
+          {deployAllResults !== null && (
+            <DialogFooter>
+              <Button
                 onClick={() => {
                   setShowDeployAllResults(false);
                   setDeployAllResults(null);
                 }}
-                className="btn btn-primary"
               >
                 Done
-              </button>
-            </div>
-          </div>
-        )}
-      </Modal>
+              </Button>
+            </DialogFooter>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Available Updates */}
       {servicesWithUpdates.length > 0 && (
-        <div className="panel mb-5">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-white">
+        <Card className="mb-5">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="text-lg">
               Available Updates
-              <span className="ml-2 text-sm font-normal text-slate-400">
+              <span className="ml-2 text-sm font-normal text-muted-foreground">
                 ({servicesWithUpdates.length})
               </span>
-            </h2>
+            </CardTitle>
             <div className="flex items-center gap-2">
-              <button
+              <Button
+                size="sm"
                 onClick={handleDeployAll}
                 disabled={deployingAll || deploying !== null}
-                className="btn btn-sm btn-primary flex items-center gap-2"
               >
-                <RefreshIcon className={`w-4 h-4 ${deployingAll ? 'animate-spin' : ''}`} />
+                <RefreshCw className={cn('size-4', deployingAll && 'animate-spin')} />
                 {deployingAll ? 'Deploying...' : 'Deploy All'}
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
                 onClick={handleCheckAllUpdates}
                 disabled={checkingUpdates}
-                className="btn btn-sm btn-secondary"
               >
                 {checkingUpdates ? (
                   <>
-                    <svg className="animate-spin -ml-1 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
+                    <SpinnerIcon className="size-4" />
                     Checking...
                   </>
                 ) : (
                   'Check Now'
                 )}
-              </button>
+              </Button>
             </div>
-          </div>
-          <div className="space-y-3">
-            {servicesWithUpdates.map((service) => (
-              <div
-                key={service.id}
-                className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg border border-slate-700"
-              >
-                <div className="flex items-center gap-4">
-                  <div className="w-8 h-8 bg-primary-900/50 rounded-lg flex items-center justify-center">
-                    <svg className="w-4 h-4 text-primary-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-white">{service.name}</p>
-                    <p className="text-xs text-slate-400">
-                      <span className="font-mono">{service.imageTag}</span>
-                      <span className="mx-2 text-slate-500">&rarr;</span>
-                      <span className="font-mono text-primary-400">{service.targetTag}</span>
-                    </p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => handleDeploy(service.id, service.targetTag)}
-                  disabled={deploying === service.id}
-                  className="btn btn-sm btn-primary"
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {servicesWithUpdates.map((service) => (
+                <div
+                  key={service.id}
+                  className="flex items-center justify-between rounded-lg border bg-muted/50 p-3"
                 >
-                  {deploying === service.id ? (
-                    <>
-                      <svg className="animate-spin -ml-1 mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                      </svg>
-                      Deploying...
-                    </>
-                  ) : (
-                    'Deploy'
-                  )}
-                </button>
-              </div>
-            ))}
-          </div>
-          {services.some((svc) => svc.containerImage?.lastCheckedAt) && (
-            <p className="text-xs text-slate-500 mt-3">
-              Last checked:{' '}
-              {formatDistanceToNow(
-                new Date(
-                  Math.max(
-                    ...services
-                      .filter((svc) => svc.containerImage?.lastCheckedAt)
-                      .map((svc) => new Date(svc.containerImage!.lastCheckedAt!).getTime())
-                  )
-                ),
-                { addSuffix: true }
-              )}
-            </p>
-          )}
-        </div>
+                  <div className="flex items-center gap-4">
+                    <div className="flex size-8 items-center justify-center rounded-lg bg-primary/15 text-primary">
+                      <RefreshCw className="size-4" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-foreground">{service.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        <span className="font-mono">{service.imageTag}</span>
+                        <span className="mx-2 text-muted-foreground">&rarr;</span>
+                        <span className="font-mono text-primary">{service.targetTag}</span>
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() => handleDeploy(service.id, service.targetTag)}
+                    disabled={deploying === service.id}
+                  >
+                    {deploying === service.id ? (
+                      <>
+                        <SpinnerIcon className="size-4" />
+                        Deploying...
+                      </>
+                    ) : (
+                      'Deploy'
+                    )}
+                  </Button>
+                </div>
+              ))}
+            </div>
+            {services.some((svc) => svc.containerImage?.lastCheckedAt) && (
+              <p className="mt-3 text-xs text-muted-foreground">
+                Last checked:{' '}
+                {formatDistanceToNow(
+                  new Date(
+                    Math.max(
+                      ...services
+                        .filter((svc) => svc.containerImage?.lastCheckedAt)
+                        .map((svc) => new Date(svc.containerImage!.lastCheckedAt!).getTime())
+                    )
+                  ),
+                  { addSuffix: true }
+                )}
+              </p>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       {/* Servers Health Grid */}
       {serversLoading ? (
-        <div className="panel mb-5 animate-pulse">
-          <div className="h-6 w-40 bg-slate-700 rounded mb-4"></div>
-          <div className="flex flex-wrap gap-2">
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="h-9 w-28 bg-slate-800 rounded-lg"></div>
-            ))}
-          </div>
-        </div>
+        <Card className="mb-5">
+          <CardContent className="space-y-4 pt-6">
+            <Skeleton className="h-6 w-40" />
+            <div className="flex flex-wrap gap-2">
+              {[1, 2, 3, 4].map((i) => (
+                <Skeleton key={i} className="h-9 w-28" />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       ) : servers.length > 0 ? (
-        <div className="panel mb-5">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-              <ServerIcon className="w-5 h-5 text-blue-400" />
+        <Card className="mb-5">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <ServerIcon className="size-5 text-info" />
               Servers Health
-              <span className="text-sm font-normal text-slate-400">
+              <span className="text-sm font-normal text-muted-foreground">
                 ({healthyServers}/{serverCount} healthy{serversTruncated ? `, ${servers.length} loaded` : ''})
               </span>
-            </h2>
-            <Link to="/servers" className="text-sm text-primary-400 hover:text-primary-300">
+            </CardTitle>
+            <Link to="/servers" className="text-sm text-primary hover:underline">
               View All
             </Link>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {servers.map((server) => {
-              const isHealthy = server.status === 'healthy';
-              const isWarning = server.status === 'unknown';
-              const statusColor = isHealthy ? 'bg-green-500' : isWarning ? 'bg-yellow-500' : 'bg-red-500';
-              return (
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {servers.map((server) => (
                 <Link
                   key={server.id}
                   to={`/servers/${server.id}`}
-                  className="flex items-center gap-2 px-3 py-2 bg-slate-800/50 rounded-lg border border-slate-700 hover:border-slate-600 transition-colors"
                   title={`${server.name} - ${server.status}`}
                 >
-                  <span className={`w-2 h-2 rounded-full ${statusColor}`} />
-                  <span className="text-sm text-white">{server.name}</span>
+                  <StatusBadge
+                    kind="server"
+                    value={server.status}
+                    label={server.name}
+                    dot
+                    className="px-3 py-2 text-sm"
+                  />
                 </Link>
-              );
-            })}
-          </div>
-        </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       ) : null}
 
       {/* Services Health Grid */}
       {servicesLoading ? (
-        <div className="panel mb-5 animate-pulse">
-          <div className="h-6 w-40 bg-slate-700 rounded mb-4"></div>
-          <div className="flex flex-wrap gap-2">
-            {[1, 2, 3, 4, 5].map((i) => (
-              <div key={i} className="h-9 w-28 bg-slate-800 rounded-lg"></div>
-            ))}
-          </div>
-        </div>
+        <Card className="mb-5">
+          <CardContent className="space-y-4 pt-6">
+            <Skeleton className="h-6 w-40" />
+            <div className="flex flex-wrap gap-2">
+              {[1, 2, 3, 4, 5].map((i) => (
+                <Skeleton key={i} className="h-9 w-28" />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       ) : allServices.length > 0 ? (
-        <div className="panel mb-5">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-              <CubeIcon className="w-5 h-5 text-green-400" />
+        <Card className="mb-5">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <CubeIcon className="size-5 text-success" />
               Services Health
-              <span className="text-sm font-normal text-slate-400">
+              <span className="text-sm font-normal text-muted-foreground">
                 ({serviceHealthCounts.healthy}/{serviceTotal} healthy{servicesTruncated ? `, ${serviceHealthCounts.total} loaded` : ''})
               </span>
-            </h2>
-            <Link to="/services" className="text-sm text-primary-400 hover:text-primary-300">
+            </CardTitle>
+            <Link to="/services" className="text-sm text-primary hover:underline">
               View All
             </Link>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {allServices.map((service) => {
-              const isHealthy = service.healthStatus === 'healthy' || service.status === 'running' || service.status === 'healthy';
-              const isWarning = service.healthStatus === 'degraded' || service.status === 'unknown';
-              const statusColor = isHealthy ? 'bg-green-500' : isWarning ? 'bg-yellow-500' : 'bg-red-500';
-              return (
-                <Link
-                  key={service.id}
-                  to={`/services/${service.id}`}
-                  className="flex items-center gap-2 px-3 py-2 bg-slate-800/50 rounded-lg border border-slate-700 hover:border-slate-600 transition-colors"
-                  title={`${service.name} on ${service.serverName} - ${service.healthStatus || service.status}`}
-                >
-                  <span className={`w-2 h-2 rounded-full ${statusColor}`} />
-                  <span className="text-sm text-white">{service.name}</span>
-                </Link>
-              );
-            })}
-          </div>
-        </div>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {allServices.map((service) => {
+                // Collapse the runtime/health signal into an overall status the
+                // shared statusVariant() can map (preserves the prior 3-state dot).
+                const overall =
+                  service.healthStatus === 'healthy' || service.status === 'running' || service.status === 'healthy'
+                    ? 'healthy'
+                    : service.healthStatus === 'degraded' || service.status === 'unknown'
+                    ? 'unknown'
+                    : 'unhealthy';
+                return (
+                  <Link
+                    key={service.id}
+                    to={`/services/${service.id}`}
+                    title={`${service.name} on ${service.serverName} - ${service.healthStatus || service.status}`}
+                  >
+                    <StatusBadge
+                      kind="overall"
+                      value={overall}
+                      label={service.name}
+                      dot
+                      className="px-3 py-2 text-sm"
+                    />
+                  </Link>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
       ) : null}
 
       {/* Databases Health Grid. Backup status is derived from the batched
           backup-summary endpoint via backupSummaryById. */}
       {databasesLoading ? (
-        <div className="panel mb-5 animate-pulse">
-          <div className="h-6 w-40 bg-slate-700 rounded mb-4"></div>
-          <div className="flex flex-wrap gap-2">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="h-9 w-28 bg-slate-800 rounded-lg"></div>
-            ))}
-          </div>
-        </div>
+        <Card className="mb-5">
+          <CardContent className="space-y-4 pt-6">
+            <Skeleton className="h-6 w-40" />
+            <div className="flex flex-wrap gap-2">
+              {[1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-9 w-28" />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       ) : databases.length > 0 ? (
-        <div className="panel mb-5">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-              <DatabaseIcon className="w-5 h-5 text-purple-400" />
+        <Card className="mb-5">
+          <CardHeader className="flex flex-row items-center justify-between">
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <DatabaseIcon className="size-5 text-primary" />
               Databases Health
               {!backupSummaryLoading && backupSummary.some((s) => s.supportsBackup) && (
-                <span className="text-sm font-normal text-slate-400">
+                <span className="text-sm font-normal text-muted-foreground">
                   ({backupSummary.filter((s) => s.supportsBackup && s.lastBackup !== null).length}/{backupSummary.filter((s) => s.supportsBackup).length} backed up)
                 </span>
               )}
-            </h2>
-            <Link to="/databases" className="text-sm text-primary-400 hover:text-primary-300">
+            </CardTitle>
+            <Link to="/databases" className="text-sm text-primary hover:underline">
               View All
             </Link>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {databases.map((db) => {
-              const summary = backupSummaryById.get(db.id);
-              // Fall back to the Database row's hasBackupCommand flag while the
-              // batched summary is still loading.
-              const supportsBackup = summary?.supportsBackup ?? (db.databaseType?.hasBackupCommand !== false);
-              const hasBackup = summary?.lastBackup != null;
-              const hasSchedule = summary?.schedule?.enabled === true;
-              const statusColor = !supportsBackup
-                ? 'bg-slate-500'
-                : backupSummaryLoading
-                ? 'bg-slate-600 animate-pulse'
-                : hasBackup
-                ? 'bg-green-500'
-                : hasSchedule
-                ? 'bg-yellow-500'
-                : 'bg-red-500';
-              const statusTitle = !supportsBackup
-                ? 'Backups not supported'
-                : backupSummaryLoading
-                ? 'Loading backup status...'
-                : hasBackup
-                ? 'Backed up'
-                : hasSchedule
-                ? 'Scheduled, no backup yet'
-                : 'No backup';
-              return (
-                <Link
-                  key={db.id}
-                  to={`/databases/${db.id}`}
-                  className="flex items-center gap-2 px-3 py-2 bg-slate-800/50 rounded-lg border border-slate-700 hover:border-slate-600 transition-colors"
-                  title={`${db.name} - ${statusTitle}`}
-                >
-                  <span className={`w-2 h-2 rounded-full ${statusColor}`} />
-                  <span className="text-sm text-white">{db.name}</span>
-                </Link>
-              );
-            })}
-          </div>
-        </div>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {databases.map((db) => {
+                const summary = backupSummaryById.get(db.id);
+                // Fall back to the Database row's hasBackupCommand flag while the
+                // batched summary is still loading.
+                const supportsBackup = summary?.supportsBackup ?? (db.databaseType?.hasBackupCommand !== false);
+                const hasBackup = summary?.lastBackup != null;
+                const hasSchedule = summary?.schedule?.enabled === true;
+                // Map backup readiness onto a backup-domain status the shared
+                // statusVariant() understands (success / warning / destructive /
+                // neutral), preserving the prior dot colors.
+                const backupValue = !supportsBackup
+                  ? 'none'
+                  : backupSummaryLoading
+                  ? 'running'
+                  : hasBackup
+                  ? 'completed'
+                  : hasSchedule
+                  ? 'pending'
+                  : 'failed';
+                const backupVariant = !supportsBackup
+                  ? ('neutral' as const)
+                  : backupSummaryLoading
+                  ? ('info' as const)
+                  : hasBackup
+                  ? ('success' as const)
+                  : hasSchedule
+                  ? ('warning' as const)
+                  : ('destructive' as const);
+                const statusTitle = !supportsBackup
+                  ? 'Backups not supported'
+                  : backupSummaryLoading
+                  ? 'Loading backup status...'
+                  : hasBackup
+                  ? 'Backed up'
+                  : hasSchedule
+                  ? 'Scheduled, no backup yet'
+                  : 'No backup';
+                return (
+                  <Link
+                    key={db.id}
+                    to={`/databases/${db.id}`}
+                    title={`${db.name} - ${statusTitle}`}
+                  >
+                    <StatusBadge
+                      kind="backup"
+                      value={backupValue}
+                      variant={backupVariant}
+                      label={db.name}
+                      dot
+                      className={cn('px-3 py-2 text-sm', backupSummaryLoading && 'animate-pulse')}
+                    />
+                  </Link>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
       ) : null}
 
       {/* Recent Activity & Database Backups - Side by side */}
       {(recentActivity.length > 0 || databases.length > 0 || backupSummaryLoading) && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
+        <div className="mb-5 grid grid-cols-1 gap-5 md:grid-cols-2">
           {/* Recent Activity */}
           {recentActivity.length > 0 && (
-            <div className="panel">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-white">Recent Activity</h2>
-                <Link to="/activity" className="text-sm text-primary-400 hover:text-primary-300">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle className="text-lg">Recent Activity</CardTitle>
+                <Link to="/activity" className="text-sm text-primary hover:underline">
                   View All
                 </Link>
-              </div>
-              <div className="space-y-3">
-                {recentActivity.map((log) => (
-                  <div
-                    key={log.id}
-                    className="flex items-center justify-between py-2 border-b border-slate-700/50 last:border-0"
-                  >
-                    <div className="flex items-center gap-3">
-                      <ActivityIcon action={log.action} success={log.success} />
-                      <div>
-                        <p className="text-sm text-white">
-                          <span className="capitalize">{formatAction(log.action)}</span>
-                          {log.resourceName && (
-                            <span className="text-slate-400"> {log.resourceName}</span>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {recentActivity.map((log) => (
+                    <div
+                      key={log.id}
+                      className="flex items-center justify-between border-b border-border/50 py-2 last:border-0"
+                    >
+                      <div className="flex items-center gap-3">
+                        <ActivityIcon action={log.action} success={log.success} />
+                        <div>
+                          <p className="text-sm text-foreground">
+                            <span className="capitalize">{formatAction(log.action)}</span>
+                            {log.resourceName && (
+                              <span className="text-muted-foreground"> {log.resourceName}</span>
+                            )}
+                            {log.details && (
+                              <span className="ml-1 text-xs text-muted-foreground">
+                                ({formatDetails(log.details)})
+                              </span>
+                            )}
+                          </p>
+                          {log.user && (
+                            <p className="text-xs text-muted-foreground">by {log.user.name || log.user.email}</p>
                           )}
-                          {log.details && (
-                            <span className="text-slate-500 text-xs ml-1">
-                              ({formatDetails(log.details)})
-                            </span>
-                          )}
-                        </p>
-                        {log.user && (
-                          <p className="text-xs text-slate-500">by {log.user.name || log.user.email}</p>
-                        )}
+                        </div>
                       </div>
+                      <span className="ml-2 whitespace-nowrap text-xs text-muted-foreground">
+                        {formatDistanceToNow(new Date(log.createdAt), { addSuffix: true })}
+                      </span>
                     </div>
-                    <span className="text-xs text-slate-500 whitespace-nowrap ml-2">
-                      {formatDistanceToNow(new Date(log.createdAt), { addSuffix: true })}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
           )}
 
           {/* Database Backups */}
           {backupSummaryLoading ? (
-            <div className="panel animate-pulse">
-              <div className="h-6 w-40 bg-slate-700 rounded mb-4"></div>
-              <div className="space-y-3">
-                {[1, 2, 3].map((i) => (
-                  <div key={i} className="h-16 bg-slate-800 rounded-lg"></div>
-                ))}
-              </div>
-            </div>
+            <Card>
+              <CardContent className="space-y-4 pt-6">
+                <Skeleton className="h-6 w-40" />
+                <div className="space-y-3">
+                  {[1, 2, 3].map((i) => (
+                    <Skeleton key={i} className="h-16 w-full" />
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
           ) : backupSummary.some((s) => s.supportsBackup) ? (
-            <div className="panel">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-white">Database Backups</h2>
-                <Link to="/databases" className="text-sm text-primary-400 hover:text-primary-300">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle className="text-lg">Database Backups</CardTitle>
+                <Link to="/databases" className="text-sm text-primary hover:underline">
                   Manage
                 </Link>
-              </div>
-              <div className="space-y-4">
-                {backupSummary.filter((s) => s.supportsBackup).map((s) => (
-                  <div
-                    key={s.databaseId}
-                    className="p-3 bg-slate-800/50 rounded-lg border border-slate-700"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium text-white">{s.name}</p>
-                        <div className="flex items-center gap-4 mt-1">
-                          <p className="text-xs text-slate-400">
-                            Last backup:{' '}
-                            {s.lastBackup ? (
-                              <span className="text-slate-300">
-                                {formatDistanceToNow(new Date(s.lastBackup.completedAt || s.lastBackup.createdAt), {
-                                  addSuffix: true,
-                                })}
-                              </span>
-                            ) : (
-                              <span className="text-yellow-400">Never</span>
-                            )}
-                          </p>
-                          {s.schedule?.enabled && s.schedule.nextRunAt && (
-                            <p className="text-xs text-slate-400">
-                              Next:{' '}
-                              <span className="text-slate-300">
-                                {formatDistanceToNow(new Date(s.schedule.nextRunAt), { addSuffix: true })}
-                              </span>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {backupSummary.filter((s) => s.supportsBackup).map((s) => (
+                    <div
+                      key={s.databaseId}
+                      className="rounded-lg border bg-muted/50 p-3"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-foreground">{s.name}</p>
+                          <div className="mt-1 flex items-center gap-4">
+                            <p className="text-xs text-muted-foreground">
+                              Last backup:{' '}
+                              {s.lastBackup ? (
+                                <span className="text-foreground">
+                                  {formatDistanceToNow(new Date(s.lastBackup.completedAt || s.lastBackup.createdAt), {
+                                    addSuffix: true,
+                                  })}
+                                </span>
+                              ) : (
+                                <span className="text-warning">Never</span>
+                              )}
                             </p>
+                            {s.schedule?.enabled && s.schedule.nextRunAt && (
+                              <p className="text-xs text-muted-foreground">
+                                Next:{' '}
+                                <span className="text-foreground">
+                                  {formatDistanceToNow(new Date(s.schedule.nextRunAt), { addSuffix: true })}
+                                </span>
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {!s.schedule?.enabled && (
+                            <Link
+                              to={`/databases/${s.databaseId}`}
+                              className="text-xs text-warning hover:underline"
+                            >
+                              Configure schedule
+                            </Link>
                           )}
+                          <Button asChild variant="secondary" size="sm">
+                            <Link to={`/databases/${s.databaseId}`}>Backup Now</Link>
+                          </Button>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        {!s.schedule?.enabled && (
-                          <Link
-                            to={`/databases/${s.databaseId}`}
-                            className="text-xs text-yellow-400 hover:text-yellow-300"
-                          >
-                            Configure schedule
-                          </Link>
-                        )}
-                        <Link
-                          to={`/databases/${s.databaseId}`}
-                          className="btn btn-sm btn-secondary"
-                        >
-                          Backup Now
-                        </Link>
-                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
           ) : null}
         </div>
       )}
@@ -999,59 +1053,47 @@ export default function Dashboard() {
 function ActivityIcon({ action, success }: { action: string; success: boolean }) {
   if (!success) {
     return (
-      <div className="w-6 h-6 rounded-full bg-red-900/50 flex items-center justify-center">
-        <svg className="w-3 h-3 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-        </svg>
+      <div className="flex size-6 items-center justify-center rounded-full bg-destructive/15 text-destructive">
+        <X className="size-3" />
       </div>
     );
   }
 
   if (action.includes('deploy')) {
     return (
-      <div className="w-6 h-6 rounded-full bg-green-900/50 flex items-center justify-center">
-        <svg className="w-3 h-3 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-        </svg>
+      <div className="flex size-6 items-center justify-center rounded-full bg-success/15 text-success">
+        <Check className="size-3" />
       </div>
     );
   }
 
   if (action.includes('restart')) {
     return (
-      <div className="w-6 h-6 rounded-full bg-blue-900/50 flex items-center justify-center">
-        <svg className="w-3 h-3 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-        </svg>
+      <div className="flex size-6 items-center justify-center rounded-full bg-info/15 text-info">
+        <RefreshCw className="size-3" />
       </div>
     );
   }
 
   if (action.includes('health')) {
     return (
-      <div className="w-6 h-6 rounded-full bg-purple-900/50 flex items-center justify-center">
-        <svg className="w-3 h-3 text-purple-400" fill="currentColor" viewBox="0 0 24 24">
-          <circle cx="12" cy="12" r="4" />
-        </svg>
+      <div className="flex size-6 items-center justify-center rounded-full bg-primary/15 text-primary">
+        <HeartPulse className="size-3" />
       </div>
     );
   }
 
   if (action.includes('backup')) {
     return (
-      <div className="w-6 h-6 rounded-full bg-yellow-900/50 flex items-center justify-center">
-        <svg className="w-3 h-3 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
-        </svg>
+      <div className="flex size-6 items-center justify-center rounded-full bg-warning/15 text-warning">
+        <HardDriveDownload className="size-3" />
       </div>
     );
   }
 
   return (
-    <div className="w-6 h-6 rounded-full bg-slate-700 flex items-center justify-center">
-      <svg className="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
+    <div className="flex size-6 items-center justify-center rounded-full bg-muted text-muted-foreground">
+      <Info className="size-3" />
     </div>
   );
 }
