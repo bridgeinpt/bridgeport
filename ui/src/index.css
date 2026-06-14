@@ -7,18 +7,65 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * ── Deep Slate theme tokens (shadcn/ui semantic layer) ─────────────────────
- * Shell #0a0e14 — ~25% darker than the prior #0f172a, keeps the blue-slate
- * tint. Dark-only for now: `:root, .dark` share the dark values. The light
- * theme + switcher (#255) splits these into separate `:root` (light) and
- * `.dark` (dark) blocks.
+ * ── Theme tokens (shadcn/ui semantic layer) ────────────────────────────────
+ * `:root` is the LIGHT palette (default); `.dark` is the DEEP SLATE dark
+ * palette (shell #0a0e14). The ThemeProvider (#255) toggles the `dark` class on
+ * <html>; the no-FOUC script in index.html sets it before first paint.
  *
- * Accent mapping (no collisions):
+ * Accent mapping is shared by both palettes (no collisions):
  *   --primary     sky      #0284c7   (default actions, focus ring, links)
  *   --destructive red      #dc2626   (delete / danger)
  *   --brand       burgundy #cc0000   (nav / admin / identity)
+ * Both palettes target WCAG AA on the key surfaces.
  */
-:root,
+:root {
+  --background: oklch(0.985 0.002 248);       /* ~#f8fafc near-white */
+  --foreground: oklch(0.22 0.03 256);         /* slate-900 */
+  --card: oklch(1 0 0);                        /* white */
+  --card-foreground: oklch(0.22 0.03 256);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.22 0.03 256);
+  --primary: oklch(0.585 0.142 234);          /* #0284c7 sky */
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.962 0.005 248);        /* slate-100 */
+  --secondary-foreground: oklch(0.30 0.03 256);
+  --muted: oklch(0.962 0.005 248);            /* slate-100 */
+  --muted-foreground: oklch(0.50 0.02 256);   /* slate-500/600 — AA on white */
+  --accent: oklch(0.94 0.006 248);            /* slate-150 hover */
+  --accent-foreground: oklch(0.30 0.03 256);
+  --destructive: oklch(0.58 0.21 27);         /* #dc2626 red */
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.91 0.006 248);            /* slate-200 */
+  --input: oklch(0.91 0.006 248);
+  --ring: oklch(0.585 0.142 234);             /* sky focus ring */
+
+  --brand: oklch(0.53 0.21 28);               /* #cc0000 burgundy */
+  --brand-foreground: oklch(0.985 0 0);
+  --success: oklch(0.56 0.13 155);            /* darker green — AA on light */
+  --success-foreground: oklch(0.985 0 0);
+  --warning: oklch(0.60 0.13 72);             /* darker amber — AA on light */
+  --warning-foreground: oklch(0.985 0 0);
+  --info: oklch(0.55 0.13 234);
+  --info-foreground: oklch(0.985 0 0);
+
+  --chart-1: oklch(0.55 0.15 234);            /* sky */
+  --chart-2: oklch(0.60 0.15 155);            /* green */
+  --chart-3: oklch(0.70 0.15 72);             /* amber */
+  --chart-4: oklch(0.55 0.20 305);            /* purple */
+  --chart-5: oklch(0.58 0.19 25);             /* coral */
+
+  --sidebar: oklch(0.97 0.003 248);
+  --sidebar-foreground: oklch(0.30 0.03 256);
+  --sidebar-primary: oklch(0.53 0.21 28);     /* burgundy active stripe */
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.94 0.006 248);
+  --sidebar-accent-foreground: oklch(0.30 0.03 256);
+  --sidebar-border: oklch(0.91 0.006 248);
+  --sidebar-ring: oklch(0.585 0.142 234);
+
+  --radius: 0.625rem;
+}
+
 .dark {
   --background: oklch(0.165 0.013 252);       /* #0a0e14 */
   --foreground: oklch(0.968 0.007 248);       /* #f1f5f9 */
