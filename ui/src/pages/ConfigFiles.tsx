@@ -22,16 +22,46 @@ import {
   type ConfigFragment,
 } from '../lib/api.js';
 import { formatDistanceToNow, format } from 'date-fns';
-import { Modal } from '../components/Modal.js';
-import { ConfirmDialog } from '../components/ConfirmDialog.js';
-import { getSyncStatusColor } from '../lib/status.js';
-import { RefreshIcon } from '../components/Icons.js';
-import Pagination from '../components/Pagination.js';
-import { LoadingSkeleton } from '../components/LoadingSkeleton.js';
-import { EmptyState } from '../components/EmptyState.js';
+import {
+  Eye,
+  History,
+  RefreshCw,
+  Trash2,
+  FileText,
+  ArrowUp,
+  ArrowDown,
+  X,
+  Loader2,
+} from 'lucide-react';
+import { useConfirm } from '@/hooks/useConfirm';
 import { OperationResultsModal, type OperationResult, type OperationStatus } from '../components/OperationResultsModal.js';
 import { ConfigFileEditor, SUPPORTED_LANGUAGES } from '../components/ConfigFileEditor.js';
 import { useToast } from '../components/Toast.js';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Skeleton } from '@/components/ui/skeleton';
+import { CopyButton } from '@/components/ui/copy-button';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { EmptyState } from '@/components/ui/empty-state';
+import { DataPagination } from '@/components/ui/data-pagination';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 interface ServiceOption {
   id: string;
@@ -39,8 +69,33 @@ interface ServiceOption {
   serverName: string;
 }
 
+/**
+ * Full sync-status union surfaced for both the per-file card badge and the
+ * per-service attachment row (B8). The API types narrow these unions in places,
+ * but the renderer must handle every value consistently — label + variant.
+ */
+type SyncStatusValue = 'synced' | 'pending' | 'outdated' | 'never' | 'not_attached';
+
+/** Human label for a sync status, aligned with the StatusBadge variant. */
+function syncStatusLabel(status: SyncStatusValue): string {
+  switch (status) {
+    case 'synced':
+      return 'Synced';
+    case 'pending':
+      return 'Pending';
+    case 'outdated':
+      return 'Outdated';
+    case 'not_attached':
+      return 'Not attached';
+    case 'never':
+    default:
+      return 'Never synced';
+  }
+}
+
 export default function ConfigFiles() {
   const toast = useToast();
+  const confirm = useConfirm();
   const {
     selectedEnvironment,
     configFilesAttachedFilter,
@@ -116,7 +171,6 @@ export default function ConfigFiles() {
   // Tracks the terminal sync status returned by the backend (issue #127).
   // `no_targets` triggers a yellow "did nothing" banner in the modal.
   const [syncStatus, setSyncStatus] = useState<OperationStatus | undefined>(undefined);
-  const [deleteConfirm, setDeleteConfirm] = useState<ConfigFile | null>(null);
 
   // Fragments: env-scoped list (loaded once per env). The create/edit modals
   // surface an ordered selector so users can include shared fragments before
@@ -228,10 +282,15 @@ export default function ConfigFiles() {
     }
   };
 
-  const handleDelete = async () => {
-    if (!deleteConfirm) return;
-    await deleteConfigFile(deleteConfirm.id);
-    setDeleteConfirm(null);
+  const handleDelete = async (file: ConfigFile) => {
+    const ok = await confirm({
+      title: 'Delete Config File',
+      description: `Are you sure you want to delete "${file.name}"? This action cannot be undone.`,
+      confirmText: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
+    await deleteConfigFile(file.id);
     reload();
   };
 
@@ -346,17 +405,21 @@ export default function ConfigFiles() {
     }
   };
 
-  const [restoreConfirm, setRestoreConfirm] = useState<FileHistoryEntry | null>(null);
+  const handleRestore = async (entry: FileHistoryEntry) => {
+    if (!historyFile) return;
+    const ok = await confirm({
+      title: 'Restore Version',
+      description:
+        'Are you sure you want to restore this version? The current content will be saved to history.',
+      confirmText: 'Restore',
+    });
+    if (!ok) return;
 
-  const handleRestore = async () => {
-    if (!historyFile || !restoreConfirm) return;
-
-    await restoreConfigFile(historyFile.id, restoreConfirm.id);
+    await restoreConfigFile(historyFile.id, entry.id);
     // Reload history to show the new entry
     const { history: updatedHistory } = await getConfigFileHistory(historyFile.id);
     setHistory(updatedHistory);
     setSelectedHistoryEntry(null);
-    setRestoreConfirm(null);
     reload();
   };
 
@@ -413,638 +476,660 @@ export default function ConfigFiles() {
   if (!selectedEnvironment) {
     return (
       <div className="p-6">
-        <div className="panel text-center py-12">
-          <p className="text-slate-400">Please select an environment</p>
+        <div className="rounded-lg border bg-card text-center py-12">
+          <p className="text-muted-foreground">Please select an environment</p>
         </div>
       </div>
     );
   }
 
   if (loading) {
-    return <LoadingSkeleton rows={3} rowHeight="h-24" headerWidth="w-48" />;
+    return (
+      <div className="p-6 space-y-4">
+        <Skeleton className="h-8 w-48" />
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-24 w-full" />
+          ))}
+        </div>
+      </div>
+    );
   }
 
   return (
     <div className="p-6">
       <div className="flex items-center justify-end mb-5">
         <div className="flex gap-2">
-          <button onClick={() => setShowUpload(true)} className="btn btn-secondary">
+          <Button variant="secondary" onClick={() => setShowUpload(true)}>
             Upload Asset
-          </button>
-          <button onClick={() => setShowCreate(true)} className="btn btn-primary">
-            New Config File
-          </button>
+          </Button>
+          <Button onClick={() => setShowCreate(true)}>New Config File</Button>
         </div>
       </div>
 
       {/* Create Modal */}
-      <Modal
-        isOpen={showCreate}
-        onClose={() => {
-          setShowCreate(false);
-          resetCreateForm();
+      <Dialog
+        open={showCreate}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShowCreate(false);
+            resetCreateForm();
+          }
         }}
-        title="New Config File"
-        size="lg"
       >
-        <form onSubmit={handleCreate} className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">Display Name</label>
-              <input
-                type="text"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                placeholder="gateway-compose"
-                className="input"
-                required
-              />
-              <p className="text-xs text-slate-500 mt-1">
-                Human-readable name (e.g., gateway-compose, cloudflare-cert)
-              </p>
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">Filename</label>
-              <input
-                type="text"
-                value={newFilename}
-                onChange={(e) => setNewFilename(e.target.value)}
-                placeholder="docker-compose.yml"
-                className="input"
-                required
-              />
-              <p className="text-xs text-slate-500 mt-1">
-                Target filename on server
-              </p>
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm text-slate-400 mb-1">Description (optional)</label>
-            <input
-              type="text"
-              value={newDescription}
-              onChange={(e) => setNewDescription(e.target.value)}
-              placeholder="Docker Compose file for gateway service"
-              className="input"
-            />
-          </div>
-          <div>
-            <div className="flex items-end justify-between mb-1 gap-3">
-              <label className="block text-sm text-slate-400">Content</label>
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-slate-500" htmlFor="new-language">
-                  Language
-                </label>
-                <select
-                  id="new-language"
-                  value={newLanguage}
-                  onChange={(e) => {
-                    setNewLanguage(e.target.value);
-                    setNewLanguageDirty(true);
-                  }}
-                  className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-white"
-                >
-                  {SUPPORTED_LANGUAGES.map((lang) => (
-                    <option key={lang} value={lang}>
-                      {lang}
-                    </option>
-                  ))}
-                </select>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>New Config File</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleCreate} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="new-name">Display Name</Label>
+                <Input
+                  id="new-name"
+                  type="text"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="gateway-compose"
+                  className="mt-1"
+                  required
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Human-readable name (e.g., gateway-compose, cloudflare-cert)
+                </p>
+              </div>
+              <div>
+                <Label htmlFor="new-filename">Filename</Label>
+                <Input
+                  id="new-filename"
+                  type="text"
+                  value={newFilename}
+                  onChange={(e) => setNewFilename(e.target.value)}
+                  placeholder="docker-compose.yml"
+                  className="mt-1"
+                  required
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Target filename on server
+                </p>
               </div>
             </div>
-            <ConfigFileEditor
-              value={newContent}
-              onChange={setNewContent}
-              language={newLanguage}
-              height="22rem"
-            />
-            {!newLanguageDirty && (
-              <p className="text-xs text-slate-500 mt-1">
-                Language is auto-detected from the filename on save.
-              </p>
-            )}
-          </div>
-          <FragmentSelector
-            label="Included Fragments"
-            available={availableFragments}
-            selectedIds={newFragmentIds}
-            onChange={setNewFragmentIds}
-          />
-          <div>
-            <label className="flex items-center gap-2 text-sm text-slate-300">
-              <input
-                type="checkbox"
-                checked={newAutoResync}
-                onChange={(e) => setNewAutoResync(e.target.checked)}
-              />
-              <span>Auto re-sync when referenced values change</span>
-            </label>
-            <p className="text-xs text-slate-500 mt-1 ml-6">
-              When a secret or variable referenced as <code>{'${KEY}'}</code> is updated, BRIDGEPORT will re-sync this file to all attached services.
-            </p>
-          </div>
-          <div className="flex gap-2 justify-end">
-            <button
-              type="button"
-              onClick={() => {
-                setShowCreate(false);
-                resetCreateForm();
-              }}
-              className="btn btn-ghost"
-            >
-              Cancel
-            </button>
-            <button type="submit" disabled={creating} className="btn btn-primary">
-              {creating ? 'Creating...' : 'Create'}
-            </button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Upload Asset Modal */}
-      <Modal
-        isOpen={showUpload}
-        onClose={() => {
-          setShowUpload(false);
-          setUploadFile(null);
-          setUploadName('');
-          setUploadFilename('');
-          setUploadDescription('');
-        }}
-        title="Upload Asset File"
-        size="md"
-      >
-        <form onSubmit={handleUpload} className="space-y-4">
-          <div>
-            <label className="block text-sm text-slate-400 mb-1">File</label>
-            <input
-              type="file"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) {
-                  setUploadFile(file);
-                  if (!uploadName) {
-                    const nameWithoutExt = file.name.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9-_]/g, '-');
-                    setUploadName(nameWithoutExt);
-                  }
-                  if (!uploadFilename) {
-                    setUploadFilename(file.name);
-                  }
-                }
-              }}
-              className="block w-full text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:bg-slate-700 file:text-white hover:file:bg-slate-600"
-              required
-            />
-            {uploadFile && (
-              <p className="text-xs text-slate-500 mt-1">
-                {formatFileSize(uploadFile.size)} • {uploadFile.type || 'unknown type'}
-              </p>
-            )}
-          </div>
-          <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm text-slate-400 mb-1">Display Name</label>
-              <input
+              <Label htmlFor="new-description">Description (optional)</Label>
+              <Input
+                id="new-description"
                 type="text"
-                value={uploadName}
-                onChange={(e) => setUploadName(e.target.value)}
-                placeholder="cloudflare-cert"
-                className="input"
-                required
+                value={newDescription}
+                onChange={(e) => setNewDescription(e.target.value)}
+                placeholder="Docker Compose file for gateway service"
+                className="mt-1"
               />
             </div>
             <div>
-              <label className="block text-sm text-slate-400 mb-1">Filename</label>
-              <input
-                type="text"
-                value={uploadFilename}
-                onChange={(e) => setUploadFilename(e.target.value)}
-                placeholder="cert.pem"
-                className="input"
-              />
-              <p className="text-xs text-slate-500 mt-1">Defaults to uploaded filename</p>
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm text-slate-400 mb-1">Description (optional)</label>
-            <input
-              type="text"
-              value={uploadDescription}
-              onChange={(e) => setUploadDescription(e.target.value)}
-              placeholder="Cloudflare origin certificate"
-              className="input"
-            />
-          </div>
-          <div className="flex gap-2 justify-end">
-            <button
-              type="button"
-              onClick={() => {
-                setShowUpload(false);
-                setUploadFile(null);
-                setUploadName('');
-                setUploadFilename('');
-                setUploadDescription('');
-              }}
-              className="btn btn-ghost"
-            >
-              Cancel
-            </button>
-            <button type="submit" disabled={uploading} className="btn btn-primary">
-              {uploading ? 'Uploading...' : 'Upload'}
-            </button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Edit Modal */}
-      <Modal
-        isOpen={!!editingFile}
-        onClose={() => {
-          setEditingFile(null);
-          setEditContent('');
-          setEditDescription('');
-          setEditReplaceFile(null);
-        }}
-        title={`Edit: ${editingFile?.name || ''}`}
-        size="3xl"
-      >
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm text-slate-400 mb-1">Description</label>
-            <input
-              type="text"
-              value={editDescription}
-              onChange={(e) => setEditDescription(e.target.value)}
-              placeholder="Description"
-              className="input"
-            />
-          </div>
-          <div>
-            <div className="flex items-end justify-between mb-1 gap-3">
-              <label className="block text-sm text-slate-400">Content</label>
-              {!editingFile?.isBinary && (
+              <div className="flex items-end justify-between mb-1 gap-3">
+                <Label>Content</Label>
                 <div className="flex items-center gap-2">
-                  <label className="text-xs text-slate-500" htmlFor="edit-language">
+                  <Label className="text-xs text-muted-foreground" htmlFor="new-language">
                     Language
-                  </label>
-                  <select
-                    id="edit-language"
-                    value={editLanguage}
-                    onChange={(e) => setEditLanguage(e.target.value)}
-                    className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-white"
+                  </Label>
+                  <Select
+                    value={newLanguage}
+                    onValueChange={(value) => {
+                      setNewLanguage(value);
+                      setNewLanguageDirty(true);
+                    }}
                   >
-                    {SUPPORTED_LANGUAGES.map((lang) => (
-                      <option key={lang} value={lang}>
-                        {lang}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
-            {editingFile?.isBinary ? (
-              <div className="p-4 bg-slate-800/50 rounded-lg border border-slate-700 space-y-3">
-                <div className="flex items-center gap-3 text-slate-400">
-                  <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  <div>
-                    <p className="text-white font-medium">Binary File</p>
-                    <p className="text-sm text-slate-500">
-                      {formatFileSize(editingFile.fileSize)} • {editingFile.mimeType || 'Unknown type'}
-                    </p>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Binary files cannot be edited inline. Choose a replacement file below — it
-                      replaces the content on save (history is kept for rollback).
-                    </p>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm text-slate-400 mb-1">Replace file</label>
-                  <input
-                    type="file"
-                    onChange={(e) => setEditReplaceFile(e.target.files?.[0] || null)}
-                    className="input"
-                  />
-                  {editReplaceFile && (
-                    <p className="text-xs text-slate-500 mt-1">
-                      Will replace with: {editReplaceFile.name} (
-                      {formatFileSize(editReplaceFile.size)})
-                    </p>
-                  )}
+                    <SelectTrigger size="sm" id="new-language" className="w-[140px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SUPPORTED_LANGUAGES.map((lang) => (
+                        <SelectItem key={lang} value={lang}>
+                          {lang}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
-            ) : (
               <ConfigFileEditor
-                value={editContent}
-                onChange={setEditContent}
-                language={editLanguage}
-                height="28rem"
-                autoFocus
+                value={newContent}
+                onChange={setNewContent}
+                language={newLanguage}
+                height="22rem"
               />
-            )}
-          </div>
-          {!editingFile?.isBinary && (
-            <FragmentSelector
-              label="Included Fragments"
-              available={availableFragments}
-              selectedIds={editFragmentIds}
-              onChange={setEditFragmentIds}
-            />
-          )}
-          {!editingFile?.isBinary && (
-            <div className="border border-slate-700 rounded-lg p-3 bg-slate-800/30">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-slate-400">
-                  Rendered preview (fragments + content + placeholders)
-                </span>
-                <button
-                  type="button"
-                  onClick={handlePreview}
-                  disabled={previewLoading}
-                  className="btn btn-secondary text-xs py-1 px-2"
-                >
-                  {previewLoading ? 'Rendering…' : 'Preview'}
-                </button>
-              </div>
-              {previewError && (
-                <p className="text-xs text-yellow-400 mb-2">{previewError}</p>
-              )}
-              {previewContent !== null && (
-                <pre className="bg-slate-950 rounded p-2 text-xs text-slate-200 font-mono whitespace-pre-wrap max-h-64 overflow-auto">
-                  {previewContent}
-                </pre>
-              )}
-              {previewContent === null && !previewError && (
-                <p className="text-xs text-slate-500">
-                  Click Preview to render this ConfigFile&apos;s fragments + content with
-                  <code className="mx-1">{'${KEY}'}</code> placeholders resolved.
+              {!newLanguageDirty && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Language is auto-detected from the filename on save.
                 </p>
               )}
             </div>
-          )}
-          <div>
-            <label className="flex items-center gap-2 text-sm text-slate-300">
-              <input
-                type="checkbox"
-                checked={editAutoResync}
-                onChange={(e) => setEditAutoResync(e.target.checked)}
+            <FragmentSelector
+              label="Included Fragments"
+              available={availableFragments}
+              selectedIds={newFragmentIds}
+              onChange={setNewFragmentIds}
+            />
+            <div>
+              <label className="flex items-center gap-2 text-sm text-foreground">
+                <Checkbox
+                  checked={newAutoResync}
+                  onCheckedChange={(checked) => setNewAutoResync(checked === true)}
+                />
+                <span>Auto re-sync when referenced values change</span>
+              </label>
+              <p className="text-xs text-muted-foreground mt-1 ml-6">
+                When a secret or variable referenced as <code>{'${KEY}'}</code> is updated, BRIDGEPORT will re-sync this file to all attached services.
+              </p>
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setShowCreate(false);
+                  resetCreateForm();
+                }}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={creating}>
+                {creating ? 'Creating...' : 'Create'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Upload Asset Modal */}
+      <Dialog
+        open={showUpload}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShowUpload(false);
+            setUploadFile(null);
+            setUploadName('');
+            setUploadFilename('');
+            setUploadDescription('');
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Upload Asset File</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleUpload} className="space-y-4">
+            <div>
+              <Label htmlFor="upload-file">File</Label>
+              <Input
+                id="upload-file"
+                type="file"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    setUploadFile(file);
+                    if (!uploadName) {
+                      const nameWithoutExt = file.name.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9-_]/g, '-');
+                      setUploadName(nameWithoutExt);
+                    }
+                    if (!uploadFilename) {
+                      setUploadFilename(file.name);
+                    }
+                  }
+                }}
+                className="mt-1"
+                required
               />
-              <span>Auto re-sync when referenced values change</span>
-            </label>
-            <p className="text-xs text-slate-500 mt-1 ml-6">
-              When a secret or variable referenced as <code>{'${KEY}'}</code> is updated, BRIDGEPORT will re-sync this file to all attached services.
-            </p>
+              {uploadFile && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  {formatFileSize(uploadFile.size)} • {uploadFile.type || 'unknown type'}
+                </p>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="upload-name">Display Name</Label>
+                <Input
+                  id="upload-name"
+                  type="text"
+                  value={uploadName}
+                  onChange={(e) => setUploadName(e.target.value)}
+                  placeholder="cloudflare-cert"
+                  className="mt-1"
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="upload-filename">Filename</Label>
+                <Input
+                  id="upload-filename"
+                  type="text"
+                  value={uploadFilename}
+                  onChange={(e) => setUploadFilename(e.target.value)}
+                  placeholder="cert.pem"
+                  className="mt-1"
+                />
+                <p className="text-xs text-muted-foreground mt-1">Defaults to uploaded filename</p>
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="upload-description">Description (optional)</Label>
+              <Input
+                id="upload-description"
+                type="text"
+                value={uploadDescription}
+                onChange={(e) => setUploadDescription(e.target.value)}
+                placeholder="Cloudflare origin certificate"
+                className="mt-1"
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setShowUpload(false);
+                  setUploadFile(null);
+                  setUploadName('');
+                  setUploadFilename('');
+                  setUploadDescription('');
+                }}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={uploading}>
+                {uploading ? 'Uploading...' : 'Upload'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Modal */}
+      <Dialog
+        open={!!editingFile}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingFile(null);
+            setEditContent('');
+            setEditDescription('');
+            setEditReplaceFile(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{`Edit: ${editingFile?.name || ''}`}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="edit-description">Description</Label>
+              <Input
+                id="edit-description"
+                type="text"
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                placeholder="Description"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <div className="flex items-end justify-between mb-1 gap-3">
+                <Label>Content</Label>
+                {!editingFile?.isBinary && (
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs text-muted-foreground" htmlFor="edit-language">
+                      Language
+                    </Label>
+                    <Select
+                      value={editLanguage}
+                      onValueChange={(value) => setEditLanguage(value)}
+                    >
+                      <SelectTrigger size="sm" id="edit-language" className="w-[140px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SUPPORTED_LANGUAGES.map((lang) => (
+                          <SelectItem key={lang} value={lang}>
+                            {lang}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+              {editingFile?.isBinary ? (
+                <div className="p-4 bg-muted/50 rounded-lg border space-y-3">
+                  <div className="flex items-center gap-3 text-muted-foreground">
+                    <FileText className="w-8 h-8" />
+                    <div>
+                      <p className="text-foreground font-medium">Binary File</p>
+                      <p className="text-sm text-muted-foreground">
+                        {formatFileSize(editingFile.fileSize)} • {editingFile.mimeType || 'Unknown type'}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Binary files cannot be edited inline. Choose a replacement file below — it
+                        replaces the content on save (history is kept for rollback).
+                      </p>
+                    </div>
+                  </div>
+                  <div>
+                    <Label htmlFor="edit-replace-file">Replace file</Label>
+                    <Input
+                      id="edit-replace-file"
+                      type="file"
+                      onChange={(e) => setEditReplaceFile(e.target.files?.[0] || null)}
+                      className="mt-1"
+                    />
+                    {editReplaceFile && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Will replace with: {editReplaceFile.name} (
+                        {formatFileSize(editReplaceFile.size)})
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <ConfigFileEditor
+                  value={editContent}
+                  onChange={setEditContent}
+                  language={editLanguage}
+                  height="28rem"
+                  autoFocus
+                />
+              )}
+            </div>
+            {!editingFile?.isBinary && (
+              <FragmentSelector
+                label="Included Fragments"
+                available={availableFragments}
+                selectedIds={editFragmentIds}
+                onChange={setEditFragmentIds}
+              />
+            )}
+            {!editingFile?.isBinary && (
+              <div className="border rounded-lg p-3 bg-muted/30">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm text-muted-foreground">
+                    Rendered preview (fragments + content + placeholders)
+                  </span>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={handlePreview}
+                    disabled={previewLoading}
+                  >
+                    {previewLoading ? 'Rendering…' : 'Preview'}
+                  </Button>
+                </div>
+                {previewError && (
+                  <p className="text-xs text-warning mb-2">{previewError}</p>
+                )}
+                {previewContent !== null && (
+                  <div className="relative">
+                    <CopyButton value={previewContent} className="absolute top-1 right-1 z-10" />
+                    <pre className="bg-muted rounded p-2 text-xs text-foreground font-mono whitespace-pre-wrap max-h-64 overflow-auto">
+                      {previewContent}
+                    </pre>
+                  </div>
+                )}
+                {previewContent === null && !previewError && (
+                  <p className="text-xs text-muted-foreground">
+                    Click Preview to render this ConfigFile&apos;s fragments + content with
+                    <code className="mx-1">{'${KEY}'}</code> placeholders resolved.
+                  </p>
+                )}
+              </div>
+            )}
+            <div>
+              <label className="flex items-center gap-2 text-sm text-foreground">
+                <Checkbox
+                  checked={editAutoResync}
+                  onCheckedChange={(checked) => setEditAutoResync(checked === true)}
+                />
+                <span>Auto re-sync when referenced values change</span>
+              </label>
+              <p className="text-xs text-muted-foreground mt-1 ml-6">
+                When a secret or variable referenced as <code>{'${KEY}'}</code> is updated, BRIDGEPORT will re-sync this file to all attached services.
+              </p>
+            </div>
+            <DialogFooter>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setEditingFile(null);
+                  setEditContent('');
+                  setEditDescription('');
+                  setEditReplaceFile(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button onClick={handleEdit} disabled={savingEdit}>
+                {savingEdit ? 'Saving...' : 'Save Changes'}
+              </Button>
+            </DialogFooter>
           </div>
-          <div className="flex gap-2 justify-end">
-            <button
-              onClick={() => {
-                setEditingFile(null);
-                setEditContent('');
-                setEditDescription('');
-                setEditReplaceFile(null);
-              }}
-              className="btn btn-ghost"
-            >
-              Cancel
-            </button>
-            <button onClick={handleEdit} disabled={savingEdit} className="btn btn-primary">
-              {savingEdit ? 'Saving...' : 'Save Changes'}
-            </button>
-          </div>
-        </div>
-      </Modal>
+        </DialogContent>
+      </Dialog>
 
       {/* View Modal */}
-      <Modal
-        isOpen={!!viewingFile}
-        onClose={() => setViewingFile(null)}
-        title={viewingFile?.name || ''}
-        size="3xl"
+      <Dialog
+        open={!!viewingFile}
+        onOpenChange={(open) => {
+          if (!open) setViewingFile(null);
+        }}
       >
-        {viewingFile && (
-          <div className="flex flex-col" style={{ maxHeight: 'calc(90vh - 120px)' }}>
-            <p className="text-sm text-slate-400 mb-4">
-              {viewingFile.filename}
-              {viewingFile.description && ` - ${viewingFile.description}`}
-            </p>
+        <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{viewingFile?.name || ''}</DialogTitle>
+          </DialogHeader>
+          {viewingFile && (
+            <div className="flex flex-col" style={{ maxHeight: 'calc(90vh - 120px)' }}>
+              <p className="text-sm text-muted-foreground mb-4">
+                {viewingFile.filename}
+                {viewingFile.description && ` - ${viewingFile.description}`}
+              </p>
 
-            {/* Attached Services with Sync Status */}
-            {viewingFile.services.length > 0 && (
-              <div className="mb-4 p-3 bg-slate-800/50 rounded-lg">
-                <p className="text-sm text-slate-400 mb-2">Attached to services:</p>
-                <div className="space-y-1">
-                  {viewingFile.services.map((sf) => {
-                    const serverName =
-                      sf.serviceDeployment?.server.name ??
-                      sf.service.serviceDeployments?.[0]?.server.name ??
-                      '—';
-                    return (
-                    <div key={sf.id} className="flex items-center gap-2 text-sm">
-                      <span className="text-white">{serverName}</span>
-                      <span className="text-slate-500">/</span>
-                      <Link
-                        to={`/services/${sf.service.id}`}
-                        className="text-primary-400 hover:text-primary-300 hover:underline"
-                      >
-                        {sf.service.name}
-                      </Link>
-                      <span className="text-slate-500">→</span>
-                      <code className="text-green-400 text-xs">{sf.targetPath}</code>
-                      {sf.syncStatus && (
-                        <span className={`ml-auto px-1.5 py-0.5 text-xs rounded ${getSyncStatusColor(sf.syncStatus)}`}>
-                          {sf.syncStatus === 'synced' ? 'Synced' : sf.syncStatus === 'pending' ? 'Pending' : 'Never synced'}
-                        </span>
-                      )}
-                    </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Included Fragments (display-only, in position order) */}
-            {viewingFile.includedFragments && viewingFile.includedFragments.length > 0 && (
-              <div className="mb-4 p-3 bg-slate-800/50 rounded-lg">
-                <p className="text-sm text-slate-400 mb-2">Included fragments:</p>
-                <ol className="space-y-1 list-decimal list-inside">
-                  {[...viewingFile.includedFragments]
-                    .sort((a, b) => a.position - b.position)
-                    .map((inc) => (
-                      <li key={inc.id} className="text-sm">
-                        <span className="font-mono text-white">{inc.fragment.name}</span>
-                        {inc.fragment.description && (
-                          <span className="text-slate-500"> — {inc.fragment.description}</span>
+              {/* Attached Services with Sync Status */}
+              {viewingFile.services.length > 0 && (
+                <div className="mb-4 p-3 bg-muted/50 rounded-lg">
+                  <p className="text-sm text-muted-foreground mb-2">Attached to services:</p>
+                  <div className="space-y-1">
+                    {viewingFile.services.map((sf) => {
+                      const serverName =
+                        sf.serviceDeployment?.server.name ??
+                        sf.service.serviceDeployments?.[0]?.server.name ??
+                        '—';
+                      const status = (sf.syncStatus ?? undefined) as SyncStatusValue | undefined;
+                      return (
+                      <div key={sf.id} className="flex items-center gap-2 text-sm">
+                        <span className="text-foreground">{serverName}</span>
+                        <span className="text-muted-foreground">/</span>
+                        <Link
+                          to={`/services/${sf.service.id}`}
+                          className="text-primary hover:text-primary/80 hover:underline"
+                        >
+                          {sf.service.name}
+                        </Link>
+                        <span className="text-muted-foreground">→</span>
+                        <code className="text-success text-xs">{sf.targetPath}</code>
+                        {status && (
+                          <StatusBadge
+                            kind="sync"
+                            value={status}
+                            label={syncStatusLabel(status)}
+                            className="ml-auto"
+                          />
                         )}
-                      </li>
-                    ))}
-                </ol>
-              </div>
-            )}
-
-            {viewingFile.isBinary ? (
-              <div className="flex-1 flex items-center justify-center p-8 bg-slate-950 rounded-lg">
-                <div className="text-center">
-                  <svg className="w-16 h-16 text-slate-500 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  <p className="text-white font-medium mb-1">Binary File</p>
-                  <p className="text-slate-400 text-sm">
-                    {formatFileSize(viewingFile.fileSize)} • {viewingFile.mimeType || 'Unknown type'}
-                  </p>
-                  <p className="text-slate-500 text-xs mt-2">
-                    Binary file content cannot be displayed
-                  </p>
+                      </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <ConfigFileEditor
-                value={viewingFile.content || ''}
-                language={viewingFile.language || 'plaintext'}
-                readOnly
-                height="60vh"
-                className="flex-1"
-              />
-            )}
-
-            <div className="mt-4 flex justify-end gap-2">
-              {!viewingFile.isBinary && viewingFile.content && (
-                <button
-                  onClick={() => navigator.clipboard.writeText(viewingFile.content!)}
-                  className="btn btn-secondary"
-                >
-                  Copy Content
-                </button>
               )}
-              <button
-                onClick={() => {
-                  startEdit(viewingFile);
-                  setViewingFile(null);
-                }}
-                className="btn btn-secondary"
-              >
-                Edit
-              </button>
-              <button onClick={() => setViewingFile(null)} className="btn btn-ghost">
-                Close
-              </button>
+
+              {/* Included Fragments (display-only, in position order) */}
+              {viewingFile.includedFragments && viewingFile.includedFragments.length > 0 && (
+                <div className="mb-4 p-3 bg-muted/50 rounded-lg">
+                  <p className="text-sm text-muted-foreground mb-2">Included fragments:</p>
+                  <ol className="space-y-1 list-decimal list-inside">
+                    {[...viewingFile.includedFragments]
+                      .sort((a, b) => a.position - b.position)
+                      .map((inc) => (
+                        <li key={inc.id} className="text-sm">
+                          <span className="font-mono text-foreground">{inc.fragment.name}</span>
+                          {inc.fragment.description && (
+                            <span className="text-muted-foreground"> — {inc.fragment.description}</span>
+                          )}
+                        </li>
+                      ))}
+                  </ol>
+                </div>
+              )}
+
+              {viewingFile.isBinary ? (
+                <div className="flex-1 flex items-center justify-center p-8 bg-muted rounded-lg">
+                  <div className="text-center">
+                    <FileText className="w-16 h-16 text-muted-foreground mx-auto mb-4" />
+                    <p className="text-foreground font-medium mb-1">Binary File</p>
+                    <p className="text-muted-foreground text-sm">
+                      {formatFileSize(viewingFile.fileSize)} • {viewingFile.mimeType || 'Unknown type'}
+                    </p>
+                    <p className="text-muted-foreground text-xs mt-2">
+                      Binary file content cannot be displayed
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <ConfigFileEditor
+                  value={viewingFile.content || ''}
+                  language={viewingFile.language || 'plaintext'}
+                  readOnly
+                  height="60vh"
+                  className="flex-1"
+                />
+              )}
+
+              <DialogFooter className="mt-4">
+                {!viewingFile.isBinary && viewingFile.content && (
+                  <CopyButton value={viewingFile.content} label="Copy Content" variant="secondary" />
+                )}
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    startEdit(viewingFile);
+                    setViewingFile(null);
+                  }}
+                >
+                  Edit
+                </Button>
+                <Button variant="ghost" onClick={() => setViewingFile(null)}>
+                  Close
+                </Button>
+              </DialogFooter>
             </div>
-          </div>
-        )}
-      </Modal>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* History Modal */}
-      <Modal
-        isOpen={!!historyFile}
-        onClose={() => {
-          setHistoryFile(null);
-          setHistory([]);
-          setSelectedHistoryEntry(null);
+      <Dialog
+        open={!!historyFile}
+        onOpenChange={(open) => {
+          if (!open) {
+            setHistoryFile(null);
+            setHistory([]);
+            setSelectedHistoryEntry(null);
+          }
         }}
-        title={`History: ${historyFile?.name || ''}`}
-        size="xl"
       >
-        <p className="text-sm text-slate-400 mb-4">
-          {history.length} previous version{history.length !== 1 ? 's' : ''}
-        </p>
+        <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{`History: ${historyFile?.name || ''}`}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground mb-4">
+            {history.length} previous version{history.length !== 1 ? 's' : ''}
+          </p>
 
-        {loadingHistory ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
-          </div>
-        ) : history.length === 0 ? (
-          <div className="flex items-center justify-center text-slate-400 py-12">
-            No edit history available
-          </div>
-        ) : (
-          <div className="flex gap-4" style={{ height: '60vh' }}>
-            {/* History List */}
-            <div className="w-64 flex-shrink-0 overflow-y-auto space-y-2">
-              {history.map((entry) => (
-                <button
-                  key={entry.id}
-                  onClick={() => setSelectedHistoryEntry(entry)}
-                  className={`w-full text-left p-3 rounded-lg border transition-colors ${
-                    selectedHistoryEntry?.id === entry.id
-                      ? 'bg-primary-900/30 border-primary-500'
-                      : 'bg-slate-800/50 border-slate-700 hover:border-slate-600'
-                  }`}
-                >
-                  <p className="text-sm text-white">
-                    {format(new Date(entry.editedAt), 'MMM d, yyyy')}
-                  </p>
-                  <p className="text-xs text-slate-400">
-                    {format(new Date(entry.editedAt), 'h:mm a')}
-                  </p>
-                  {entry.editedBy && (
-                    <p className="text-xs text-slate-500 mt-1 truncate">
-                      by {entry.editedBy.name || entry.editedBy.email}
-                    </p>
-                  )}
-                </button>
-              ))}
+          {loadingHistory ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
-
-            {/* Content Preview */}
-            <div className="flex-1 flex flex-col overflow-hidden">
-              {selectedHistoryEntry ? (
-                <>
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-sm text-slate-400">
-                      Content at {format(new Date(selectedHistoryEntry.editedAt), 'MMM d, yyyy h:mm a')}
+          ) : history.length === 0 ? (
+            <div className="flex items-center justify-center text-muted-foreground py-12">
+              No edit history available
+            </div>
+          ) : (
+            <div className="flex gap-4" style={{ height: '60vh' }}>
+              {/* History List */}
+              <div className="w-64 flex-shrink-0 overflow-y-auto space-y-2">
+                {history.map((entry) => (
+                  <button
+                    key={entry.id}
+                    onClick={() => setSelectedHistoryEntry(entry)}
+                    className={`w-full text-left p-3 rounded-lg border transition-colors ${
+                      selectedHistoryEntry?.id === entry.id
+                        ? 'bg-primary/10 border-primary'
+                        : 'bg-muted/50 hover:border-ring'
+                    }`}
+                  >
+                    <p className="text-sm text-foreground">
+                      {format(new Date(entry.editedAt), 'MMM d, yyyy')}
                     </p>
-                    <button
-                      onClick={() => setRestoreConfirm(selectedHistoryEntry)}
-                      className="btn btn-primary text-sm"
-                    >
-                      Restore This Version
-                    </button>
-                  </div>
-                  {historyFile?.isBinary ? (
-                    <div className="flex-1 flex items-center justify-center p-8 bg-slate-950 rounded-lg text-slate-400">
-                      Binary file — content not available
+                    <p className="text-xs text-muted-foreground">
+                      {format(new Date(entry.editedAt), 'h:mm a')}
+                    </p>
+                    {entry.editedBy && (
+                      <p className="text-xs text-muted-foreground mt-1 truncate">
+                        by {entry.editedBy.name || entry.editedBy.email}
+                      </p>
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              {/* Content Preview */}
+              <div className="flex-1 flex flex-col overflow-hidden">
+                {selectedHistoryEntry ? (
+                  <>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-sm text-muted-foreground">
+                        Content at {format(new Date(selectedHistoryEntry.editedAt), 'MMM d, yyyy h:mm a')}
+                      </p>
+                      <Button
+                        size="sm"
+                        onClick={() => handleRestore(selectedHistoryEntry)}
+                      >
+                        Restore This Version
+                      </Button>
                     </div>
-                  ) : (
-                    <ConfigFileEditor
-                      value={selectedHistoryEntry.content || ''}
-                      language={historyFile?.language || 'plaintext'}
-                      readOnly
-                      height="100%"
-                      className="flex-1"
-                    />
-                  )}
-                </>
-              ) : (
-                <div className="flex-1 flex items-center justify-center text-slate-400">
-                  Select a version to preview
-                </div>
-              )}
+                    {historyFile?.isBinary ? (
+                      <div className="flex-1 flex items-center justify-center p-8 bg-muted rounded-lg text-muted-foreground">
+                        Binary file — content not available
+                      </div>
+                    ) : (
+                      <ConfigFileEditor
+                        value={selectedHistoryEntry.content || ''}
+                        language={historyFile?.language || 'plaintext'}
+                        readOnly
+                        height="100%"
+                        className="flex-1"
+                      />
+                    )}
+                  </>
+                ) : (
+                  <div className="flex-1 flex items-center justify-center text-muted-foreground">
+                    Select a version to preview
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        )}
-      </Modal>
-
-      {/* Restore Confirmation */}
-      <ConfirmDialog
-        isOpen={!!restoreConfirm}
-        onClose={() => setRestoreConfirm(null)}
-        onConfirm={handleRestore}
-        title="Restore Version"
-        message="Are you sure you want to restore this version? The current content will be saved to history."
-        confirmText="Restore"
-        variant="warning"
-      />
-
-      {/* Delete Confirmation */}
-      <ConfirmDialog
-        isOpen={!!deleteConfirm}
-        onClose={() => setDeleteConfirm(null)}
-        onConfirm={handleDelete}
-        title="Delete Config File"
-        message={`Are you sure you want to delete "${deleteConfirm?.name}"? This action cannot be undone.`}
-        confirmText="Delete"
-        variant="danger"
-      />
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Sync Results Modal */}
       <OperationResultsModal
@@ -1063,33 +1148,35 @@ export default function ConfigFiles() {
 
       {/* Filters */}
       <div className="mb-5 flex items-center gap-6 flex-wrap">
-        <label className="flex items-center gap-2 text-sm text-slate-400">
-          <input
-            type="checkbox"
+        <label className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Checkbox
             checked={configFilesAttachedFilter}
-            onChange={(e) => setConfigFilesAttachedFilter(e.target.checked)}
-            className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-primary-600 focus:ring-primary-500"
+            onCheckedChange={(checked) => setConfigFilesAttachedFilter(checked === true)}
           />
           Only show files attached to services
         </label>
         {allServices.length > 0 && (
           <div className="flex items-center gap-2">
-            <span className="text-sm text-slate-400">Service:</span>
-            <select
-              value={configFilesServiceFilter || ''}
-              onChange={(e) => setConfigFilesServiceFilter(e.target.value || null)}
-              className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white"
+            <span className="text-sm text-muted-foreground">Service:</span>
+            <Select
+              value={configFilesServiceFilter || 'all'}
+              onValueChange={(value) => setConfigFilesServiceFilter(value === 'all' ? null : value)}
             >
-              <option value="">All Services</option>
-              {allServices.map((service) => (
-                <option key={service.id} value={service.id}>
-                  {service.serverName} / {service.name}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger size="sm" aria-label="Service" className="w-[220px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Services</SelectItem>
+                {allServices.map((service) => (
+                  <SelectItem key={service.id} value={service.id}>
+                    {service.serverName} / {service.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         )}
-        <span className="text-sm text-slate-500">
+        <span className="text-sm text-muted-foreground">
           ({filteredConfigFiles.length} of {configFiles.length} files)
         </span>
       </div>
@@ -1097,108 +1184,114 @@ export default function ConfigFiles() {
       {/* Config Files Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredConfigFiles.map((file) => (
-          <div key={file.id} className="panel hover:border-slate-600 transition-colors">
-            <div className="flex items-start justify-between mb-2">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-medium text-white truncate">{file.name}</h3>
-                  {file.isBinary && (
-                    <span className="px-1.5 py-0.5 text-xs bg-purple-900/30 text-purple-400 rounded" title={file.mimeType || 'Binary file'}>
-                      binary
-                    </span>
-                  )}
-                  {!file.isBinary &&
-                    file.language &&
-                    file.language !== 'text' &&
-                    file.language !== 'plaintext' && (
-                      <span className="px-1.5 py-0.5 text-xs bg-blue-900/30 text-blue-400 rounded" title={`Language: ${file.language}`}>
-                        {file.language}
-                      </span>
+          <Card key={file.id} className="gap-0 py-4 transition-colors hover:border-ring">
+            <div className="px-4">
+              <div className="flex items-start justify-between mb-2">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-medium text-foreground truncate">{file.name}</h3>
+                    {file.isBinary && (
+                      <Badge variant="secondary" title={file.mimeType || 'Binary file'}>
+                        binary
+                      </Badge>
                     )}
+                    {!file.isBinary &&
+                      file.language &&
+                      file.language !== 'text' &&
+                      file.language !== 'plaintext' && (
+                        <Badge variant="info" title={`Language: ${file.language}`}>
+                          {file.language}
+                        </Badge>
+                      )}
+                  </div>
+                  <p className="text-sm text-muted-foreground truncate font-mono">{file.filename}</p>
+                  {file.isBinary && file.fileSize && (
+                    <p className="text-xs text-muted-foreground">{formatFileSize(file.fileSize)}</p>
+                  )}
                 </div>
-                <p className="text-sm text-slate-400 truncate font-mono">{file.filename}</p>
-                {file.isBinary && file.fileSize && (
-                  <p className="text-xs text-slate-500">{formatFileSize(file.fileSize)}</p>
-                )}
-              </div>
-              <div className="flex gap-1 ml-2">
-                <button
-                  onClick={() => handleView(file)}
-                  className="p-1 text-slate-400 hover:text-white"
-                  title="View"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                  </svg>
-                </button>
-                <button
-                  onClick={() => handleViewHistory(file)}
-                  className="p-1 text-slate-400 hover:text-white"
-                  title="History"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                  </svg>
-                </button>
-                {file._count && file._count.services > 0 && (
-                  <button
-                    onClick={() => handleSyncAll(file)}
-                    className="p-1 text-slate-400 hover:text-primary-400"
-                    title="Sync to all services"
+                <div className="flex gap-1 ml-2">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => handleView(file)}
+                    title="View"
                   >
-                    <RefreshIcon className="w-4 h-4" />
-                  </button>
-                )}
-                <button
-                  onClick={() => setDeleteConfirm(file)}
-                  className="p-1 text-slate-400 hover:text-red-400"
-                  title="Delete"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                </button>
+                    <Eye className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => handleViewHistory(file)}
+                    title="History"
+                  >
+                    <History className="w-4 h-4" />
+                  </Button>
+                  {file._count && file._count.services > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => handleSyncAll(file)}
+                      className="hover:text-primary"
+                      title="Sync to all services"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                    </Button>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => handleDelete(file)}
+                    className="hover:text-destructive"
+                    title="Delete"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+              {file.description && (
+                <p className="text-xs text-muted-foreground mb-2">{file.description}</p>
+              )}
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>
+                  Updated {formatDistanceToNow(new Date(file.updatedAt), { addSuffix: true })}
+                </span>
+                <div className="flex items-center gap-2">
+                  {/* Sync Status Badge */}
+                  {file.syncStatus && file.syncStatus !== 'not_attached' && (
+                    <StatusBadge
+                      kind="sync"
+                      value={file.syncStatus}
+                      label={
+                        file.syncStatus === 'pending'
+                          ? `${file.syncCounts?.pending || 0} pending`
+                          : syncStatusLabel(file.syncStatus as SyncStatusValue)
+                      }
+                    />
+                  )}
+                  {file._count && file._count.services > 0 && (
+                    <Badge variant="info">
+                      {file._count.services} service{file._count.services !== 1 ? 's' : ''}
+                    </Badge>
+                  )}
+                </div>
               </div>
             </div>
-            {file.description && (
-              <p className="text-xs text-slate-500 mb-2">{file.description}</p>
-            )}
-            <div className="flex items-center justify-between text-xs text-slate-500">
-              <span>
-                Updated {formatDistanceToNow(new Date(file.updatedAt), { addSuffix: true })}
-              </span>
-              <div className="flex items-center gap-2">
-                {/* Sync Status Badge */}
-                {file.syncStatus && file.syncStatus !== 'not_attached' && (
-                  <span className={`px-1.5 py-0.5 rounded ${getSyncStatusColor(file.syncStatus)}`}>
-                    {file.syncStatus === 'synced' ? 'Synced' :
-                     file.syncStatus === 'pending' ? `${file.syncCounts?.pending || 0} pending` :
-                     'Never synced'}
-                  </span>
-                )}
-                {file._count && file._count.services > 0 && (
-                  <span className="px-2 py-0.5 bg-primary-900/30 text-primary-400 rounded">
-                    {file._count.services} service{file._count.services !== 1 ? 's' : ''}
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
+          </Card>
         ))}
 
         {filteredConfigFiles.length === 0 && configFiles.length > 0 && (
-          <div className="col-span-full panel text-center py-12">
-            <p className="text-slate-400">No config files match the filter</p>
-            <button
+          <div className="col-span-full rounded-lg border bg-card text-center py-12">
+            <p className="text-muted-foreground">No config files match the filter</p>
+            <Button
+              variant="ghost"
+              className="mt-4"
               onClick={() => {
                 setConfigFilesAttachedFilter(false);
                 setConfigFilesServiceFilter(null);
               }}
-              className="btn btn-ghost mt-4"
             >
               Clear Filters
-            </button>
+            </Button>
           </div>
         )}
 
@@ -1213,7 +1306,7 @@ export default function ConfigFiles() {
         )}
       </div>
       {total > 0 && (
-        <Pagination
+        <DataPagination
           currentPage={currentPage}
           totalPages={totalPages}
           totalItems={total}
@@ -1267,9 +1360,9 @@ function FragmentSelector({ label, available, selectedIds, onChange }: FragmentS
 
   return (
     <div>
-      <label className="block text-sm text-slate-400 mb-1">{label}</label>
+      <Label className="mb-1 block">{label}</Label>
       {selectedIds.length === 0 ? (
-        <p className="text-xs text-slate-500 mb-2">
+        <p className="text-xs text-muted-foreground mb-2">
           No fragments included. Add one below to prepend its content before this
           ConfigFile&apos;s own content at render time.
         </p>
@@ -1280,46 +1373,50 @@ function FragmentSelector({ label, available, selectedIds, onChange }: FragmentS
             return (
               <li
                 key={id}
-                className="flex items-center gap-2 bg-slate-800/50 border border-slate-700 rounded px-2 py-1.5"
+                className="flex items-center gap-2 bg-muted/50 border rounded px-2 py-1.5"
               >
-                <span className="text-xs text-slate-500 font-mono w-6 text-right">
+                <span className="text-xs text-muted-foreground font-mono w-6 text-right">
                   {index + 1}.
                 </span>
-                <span className="text-sm font-mono text-white flex-1">
+                <span className="text-sm font-mono text-foreground flex-1">
                   {fragment?.name ?? `(missing fragment ${id})`}
                 </span>
                 {fragment?.description && (
-                  <span className="text-xs text-slate-500 truncate">
+                  <span className="text-xs text-muted-foreground truncate">
                     {fragment.description}
                   </span>
                 )}
                 <div className="flex gap-1">
-                  <button
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="icon-xs"
                     onClick={() => move(index, -1)}
                     disabled={index === 0}
-                    className="text-slate-500 hover:text-slate-200 disabled:opacity-30 px-1"
                     title="Move up"
                   >
-                    ↑
-                  </button>
-                  <button
+                    <ArrowUp className="w-3 h-3" />
+                  </Button>
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="icon-xs"
                     onClick={() => move(index, 1)}
                     disabled={index === selectedIds.length - 1}
-                    className="text-slate-500 hover:text-slate-200 disabled:opacity-30 px-1"
                     title="Move down"
                   >
-                    ↓
-                  </button>
-                  <button
+                    <ArrowDown className="w-3 h-3" />
+                  </Button>
+                  <Button
                     type="button"
+                    variant="ghost"
+                    size="icon-xs"
                     onClick={() => remove(index)}
-                    className="text-slate-500 hover:text-red-400 px-1"
+                    className="hover:text-destructive"
                     title="Remove"
                   >
-                    ×
-                  </button>
+                    <X className="w-3 h-3" />
+                  </Button>
                 </div>
               </li>
             );
@@ -1327,27 +1424,26 @@ function FragmentSelector({ label, available, selectedIds, onChange }: FragmentS
         </ul>
       )}
       {remaining.length > 0 ? (
-        <select
+        <Select
           value=""
-          onChange={(e) => {
-            add(e.target.value);
-            // Reset to placeholder so the select can be used multiple times.
-            e.target.value = '';
-          }}
-          className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-sm text-white"
+          onValueChange={(value) => add(value)}
         >
-          <option value="">Add fragment…</option>
-          {remaining.map((f) => (
-            <option key={f.id} value={f.id}>
-              {f.name}
-              {f.description ? ` — ${f.description}` : ''}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger size="sm" aria-label="Add fragment" className="w-full">
+            <SelectValue placeholder="Add fragment…" />
+          </SelectTrigger>
+          <SelectContent>
+            {remaining.map((f) => (
+              <SelectItem key={f.id} value={f.id}>
+                {f.name}
+                {f.description ? ` — ${f.description}` : ''}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       ) : available.length > 0 ? (
-        <p className="text-xs text-slate-500">All fragments are already included.</p>
+        <p className="text-xs text-muted-foreground">All fragments are already included.</p>
       ) : (
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-muted-foreground">
           No fragments defined in this environment yet — create one from the Fragments page.
         </p>
       )}

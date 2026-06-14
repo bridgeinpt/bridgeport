@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '../../test/render';
 import { useAppStore } from '../lib/store';
+import { ConfirmProvider } from '@/hooks/useConfirm';
 
 // Mock Toast
 vi.mock('../components/Toast', () => ({
@@ -9,6 +10,7 @@ vi.mock('../components/Toast', () => ({
     success: vi.fn(),
     error: vi.fn(),
   }),
+  toast: { success: vi.fn(), error: vi.fn() },
 }));
 
 // Mock API
@@ -59,21 +61,21 @@ describe('Registries', () => {
   });
 
   it('should display registry name after loading', async () => {
-    renderWithProviders(<Registries />);
+    renderWithProviders(<ConfirmProvider><Registries /></ConfirmProvider>);
     await waitFor(() => {
       expect(screen.getByText('My Registry')).toBeInTheDocument();
     });
   });
 
   it('should display registry type', async () => {
-    renderWithProviders(<Registries />);
+    renderWithProviders(<ConfirmProvider><Registries /></ConfirmProvider>);
     await waitFor(() => {
       expect(screen.getByText('DigitalOcean')).toBeInTheDocument();
     });
   });
 
   it('should show default badge for default registry', async () => {
-    renderWithProviders(<Registries />);
+    renderWithProviders(<ConfirmProvider><Registries /></ConfirmProvider>);
     await waitFor(() => {
       expect(screen.getByText('Default')).toBeInTheDocument();
     });

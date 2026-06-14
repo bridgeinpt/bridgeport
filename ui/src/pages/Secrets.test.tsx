@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '../../test/render';
 import { useAppStore } from '../lib/store';
+import { ConfirmProvider } from '@/hooks/useConfirm';
 
 // Mock API
 vi.mock('../lib/api', async () => {
@@ -58,7 +59,7 @@ describe('Secrets', () => {
   });
 
   it('should display secret keys after loading', async () => {
-    renderWithProviders(<Secrets />);
+    renderWithProviders(<ConfirmProvider><Secrets /></ConfirmProvider>);
     await waitFor(() => {
       expect(screen.getByText('DATABASE_URL')).toBeInTheDocument();
       expect(screen.getByText('API_KEY')).toBeInTheDocument();
@@ -66,14 +67,14 @@ describe('Secrets', () => {
   });
 
   it('should display secret description', async () => {
-    renderWithProviders(<Secrets />);
+    renderWithProviders(<ConfirmProvider><Secrets /></ConfirmProvider>);
     await waitFor(() => {
       expect(screen.getByText(/Main database connection/)).toBeInTheDocument();
     });
   });
 
   it('should display neverReveal badge', async () => {
-    renderWithProviders(<Secrets />);
+    renderWithProviders(<ConfirmProvider><Secrets /></ConfirmProvider>);
     await waitFor(() => {
       // API_KEY should have some indication of never reveal
       expect(screen.getByText('API_KEY')).toBeInTheDocument();
