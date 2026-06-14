@@ -9,7 +9,7 @@
 export default function RefreshingDot() {
   return (
     <span
-      className="inline-block w-3 h-3 border-2 border-slate-600 border-t-brand-400 rounded-full animate-spin"
+      className="inline-block w-3 h-3 border-2 border-muted border-t-brand rounded-full animate-spin"
       aria-label="Refreshing"
       role="status"
     />

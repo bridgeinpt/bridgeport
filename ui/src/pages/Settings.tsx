@@ -242,7 +242,7 @@ export default function Settings() {
               className={cn(
                 'pb-3 text-sm font-medium border-b-2 transition-colors',
                 activeTab === tab.key
-                  ? 'border-brand-600 text-foreground'
+                  ? 'border-brand text-foreground'
                   : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'
               )}
             >

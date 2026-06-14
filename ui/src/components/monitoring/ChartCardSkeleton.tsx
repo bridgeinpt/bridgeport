@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import { Card } from '@/components/ui/card';
 import RefreshingDot from './RefreshingDot';
 
 /**
@@ -17,17 +18,17 @@ export interface ChartCardSkeletonProps {
 
 const ChartCardSkeleton = memo(function ChartCardSkeleton({ title, refreshing }: ChartCardSkeletonProps) {
   return (
-    <div className="card relative" data-testid="chart-card-skeleton">
+    <Card className="relative p-4" data-testid="chart-card-skeleton">
       <div className="flex items-center justify-between mb-4">
         {title ? (
-          <h3 className="text-sm font-medium text-white">{title}</h3>
+          <h3 className="text-sm font-medium text-foreground">{title}</h3>
         ) : (
-          <div className="h-4 w-24 bg-slate-700 rounded animate-pulse" />
+          <div className="h-4 w-24 bg-muted rounded animate-pulse" />
         )}
         {refreshing && <RefreshingDot />}
       </div>
-      <div className="h-56 animate-pulse bg-slate-800/50 rounded" />
-    </div>
+      <div className="h-56 animate-pulse bg-muted/50 rounded" />
+    </Card>
   );
 });
 

@@ -60,7 +60,7 @@ import {
   deleteServerCluster,
 } from '../../lib/api';
 import { inferConnections, mergeConnections, aggregateCollapsedEdges, type TopologyEdge } from '../../lib/topology';
-import { EmptyState } from '../EmptyState';
+import { EmptyState } from '@/components/ui/empty-state';
 import { useToast } from '../Toast';
 import { toPng } from 'html-to-image';
 import { safeJsonParse, getErrorMessage } from '../../lib/helpers';

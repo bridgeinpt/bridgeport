@@ -1,5 +1,14 @@
 import { useEffect, useState } from 'react';
-import { Modal } from './Modal';
+import { Download, Terminal } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { CopyButton } from '@/components/ui/copy-button';
 import { getCliDownloads, getCliDownloadUrl, type CliDownload } from '../lib/api';
 
 function formatBytes(bytes: number): string {
@@ -8,42 +17,6 @@ function formatBytes(bytes: number): string {
   const sizes = ['B', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-}
-
-function DownloadIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-      />
-    </svg>
-  );
-}
-
-function TerminalIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      className={className}
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-      />
-    </svg>
-  );
 }
 
 interface CLIModalProps {
@@ -129,106 +102,92 @@ export function CLIModal({ isOpen, onClose }: CLIModalProps) {
   const { steps } = platformInstructions(platform, platformFilename);
 
   return (
-    <Modal
-      isOpen={isOpen}
-      onClose={onClose}
-      title="BRIDGEPORT CLI"
-      subtitle={cliVersion ? `Version ${cliVersion}` : undefined}
-      size="lg"
-    >
-      {loading ? (
-        <div className="animate-pulse">
-          <div className="h-32 bg-slate-800 rounded-lg"></div>
-        </div>
-      ) : (
-        <>
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-12 h-12 bg-primary-900/50 rounded-lg flex items-center justify-center">
-              <TerminalIcon className="w-6 h-6 text-primary-400" />
-            </div>
-            <div>
-              <p className="text-slate-400 text-sm">
-                Download the CLI to manage your infrastructure from the terminal
-              </p>
-            </div>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>BRIDGEPORT CLI</DialogTitle>
+          {cliVersion && <DialogDescription>Version {cliVersion}</DialogDescription>}
+        </DialogHeader>
+
+        {loading ? (
+          <div className="animate-pulse">
+            <div className="h-32 bg-muted rounded-lg"></div>
           </div>
-
-          {cliDownloads.length > 0 ? (
-            <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
-                {cliDownloads.map((download) => (
-                  <a
-                    key={`${download.os}-${download.arch}`}
-                    href={getCliDownloadUrl(download.os, download.arch)}
-                    className="flex items-center justify-between p-4 rounded-lg bg-slate-800 hover:bg-slate-700 transition-colors group border border-slate-700 hover:border-slate-600"
-                  >
-                    <div className="flex items-center gap-3">
-                      <DownloadIcon className="w-5 h-5 text-slate-400 group-hover:text-primary-400 transition-colors" />
-                      <div>
-                        <p className="text-white font-medium">{download.label}</p>
-                        <p className="text-slate-500 text-sm">{formatBytes(download.size)}</p>
-                      </div>
-                    </div>
-                  </a>
-                ))}
+        ) : (
+          <>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-12 h-12 bg-primary/15 rounded-lg flex items-center justify-center">
+                <Terminal className="w-6 h-6 text-primary" />
               </div>
+              <div>
+                <p className="text-muted-foreground text-sm">
+                  Download the CLI to manage your infrastructure from the terminal
+                </p>
+              </div>
+            </div>
 
-              <div className="border-t border-slate-700 pt-4">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-medium text-slate-300">Installation</h3>
-                  <div className="flex gap-1 bg-slate-800/50 rounded-lg p-0.5">
-                    <button
-                      type="button"
-                      onClick={() => setPlatform('macos')}
-                      className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                        platform === 'macos'
-                          ? 'bg-slate-700 text-white'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
+            {cliDownloads.length > 0 ? (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-2">
+                  {cliDownloads.map((download) => (
+                    <a
+                      key={`${download.os}-${download.arch}`}
+                      href={getCliDownloadUrl(download.os, download.arch)}
+                      className="flex items-center justify-between p-4 rounded-lg bg-muted hover:bg-accent transition-colors group border border-border hover:border-border/80"
                     >
-                      macOS
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPlatform('linux')}
-                      className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                        platform === 'linux'
-                          ? 'bg-slate-700 text-white'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      Linux
-                    </button>
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  {steps.map((step, idx) => (
-                    <div key={idx}>
-                      <p className="text-xs text-slate-500 mb-1">
-                        {idx + 1}. {step.label}
-                      </p>
-                      <code className="block bg-slate-800 px-3 py-2 rounded text-sm text-slate-300 font-mono">
-                        {step.code}
-                      </code>
-                      {step.hint && (
-                        <p className="text-xs text-slate-500 mt-1 italic">{step.hint}</p>
-                      )}
-                    </div>
+                      <div className="flex items-center gap-3">
+                        <Download className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                        <div>
+                          <p className="text-foreground font-medium">{download.label}</p>
+                          <p className="text-muted-foreground text-sm">{formatBytes(download.size)}</p>
+                        </div>
+                      </div>
+                    </a>
                   ))}
                 </div>
+
+                <div className="border-t border-border pt-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-medium text-foreground">Installation</h3>
+                    <Tabs value={platform} onValueChange={(v) => setPlatform(v as Platform)}>
+                      <TabsList>
+                        <TabsTrigger value="macos">macOS</TabsTrigger>
+                        <TabsTrigger value="linux">Linux</TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                  </div>
+                  <div className="space-y-3">
+                    {steps.map((step, idx) => (
+                      <div key={idx}>
+                        <p className="text-xs text-muted-foreground mb-1">
+                          {idx + 1}. {step.label}
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <code className="block flex-1 bg-muted px-3 py-2 rounded text-sm text-muted-foreground font-mono">
+                            {step.code}
+                          </code>
+                          <CopyButton value={step.code} variant="outline" />
+                        </div>
+                        {step.hint && (
+                          <p className="text-xs text-muted-foreground mt-1 italic">{step.hint}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-muted-foreground">CLI downloads not available</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  CLI binaries may not be bundled in this deployment
+                </p>
               </div>
-            </>
-          ) : (
-            <div className="text-center py-8">
-              <p className="text-slate-400">CLI downloads not available</p>
-              <p className="text-sm text-slate-500 mt-1">
-                CLI binaries may not be bundled in this deployment
-              </p>
-            </div>
-          )}
-        </>
-      )}
-    </Modal>
+            )}
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 
