@@ -1,6 +1,6 @@
 import { useMemo, type ReactElement } from 'react';
 import CodeMirror, { type Extension } from '@uiw/react-codemirror';
-import { dracula } from '@uiw/codemirror-theme-dracula';
+import { slateCodeMirrorTheme } from './codemirror-theme';
 import { yaml } from '@codemirror/lang-yaml';
 import { json } from '@codemirror/lang-json';
 import { sql } from '@codemirror/lang-sql';
@@ -95,7 +95,7 @@ export function ConfigFileEditor({
       <CodeMirror
         value={value}
         height={height}
-        theme={dracula}
+        theme={slateCodeMirrorTheme}
         extensions={extensions}
         editable={!readOnly}
         readOnly={readOnly}

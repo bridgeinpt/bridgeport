@@ -1,28 +1,34 @@
 import { Link } from 'react-router-dom';
+import { ArrowUp, HeartPulse, Loader2, Undo2 } from 'lucide-react';
 import type {
   DeploymentPlan,
   DeploymentPlanStep,
-  DeploymentPlanStatus,
   DeploymentStepStatus,
 } from '../lib/api';
+import { Badge } from '@/components/ui/badge';
+import { Card } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
+import { StatusBadge } from '@/components/ui/status-badge';
+import type { StatusVariant } from '@/lib/status';
+import { cn } from '@/lib/utils';
 
-const STATUS_COLORS: Record<DeploymentPlanStatus, { bg: string; text: string }> = {
-  pending: { bg: 'bg-slate-500/20', text: 'text-slate-400' },
-  running: { bg: 'bg-blue-500/20', text: 'text-blue-400' },
-  completed: { bg: 'bg-green-500/20', text: 'text-green-400' },
-  failed: { bg: 'bg-red-500/20', text: 'text-red-400' },
-  cancelled: { bg: 'bg-yellow-500/20', text: 'text-yellow-400' },
-  rolled_back: { bg: 'bg-orange-500/20', text: 'text-orange-400' },
-};
-
-const STEP_STATUS_COLORS: Record<DeploymentStepStatus, { bg: string; text: string }> = {
-  pending: { bg: 'bg-slate-700', text: 'text-slate-400' },
-  running: { bg: 'bg-blue-500/20', text: 'text-blue-400' },
-  success: { bg: 'bg-green-500/20', text: 'text-green-400' },
-  failed: { bg: 'bg-red-500/20', text: 'text-red-400' },
-  skipped: { bg: 'bg-slate-700', text: 'text-slate-500' },
-  rolled_back: { bg: 'bg-orange-500/20', text: 'text-orange-400' },
-};
+/** Map a step status to a semantic Badge variant (mirrors statusVariant's domains). */
+function stepVariant(status: DeploymentStepStatus): StatusVariant {
+  switch (status) {
+    case 'success':
+      return 'success';
+    case 'failed':
+      return 'destructive';
+    case 'running':
+      return 'info';
+    case 'rolled_back':
+      return 'warning';
+    case 'pending':
+    case 'skipped':
+    default:
+      return 'neutral';
+  }
+}
 
 interface DeploymentProgressProps {
   plan: DeploymentPlan;
@@ -30,7 +36,6 @@ interface DeploymentProgressProps {
 }
 
 export function DeploymentProgress({ plan, compact = false }: DeploymentProgressProps) {
-  const statusColor = STATUS_COLORS[plan.status] || STATUS_COLORS.pending;
   const completedSteps = plan.steps.filter((s) => s.status === 'success').length;
   const progress = plan.steps.length > 0 ? (completedSteps / plan.steps.length) * 100 : 0;
 
@@ -38,25 +43,27 @@ export function DeploymentProgress({ plan, compact = false }: DeploymentProgress
     return (
       <Link
         to={`/deployment-plans/${plan.id}`}
-        className="flex items-center gap-3 p-2 bg-slate-800/50 rounded hover:bg-slate-800 transition-colors"
+        className="flex items-center gap-3 rounded p-2 bg-muted/50 transition-colors hover:bg-muted"
       >
         {plan.status === 'running' && (
-          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary-400"></div>
+          <Loader2 className="size-4 animate-spin text-primary" />
         )}
-        <div className="flex-1 min-w-0">
-          <p className="text-sm text-white truncate">{plan.name}</p>
-          <div className="flex items-center gap-2 text-xs text-slate-500">
-            <span className={statusColor.text}>{plan.status}</span>
-            <span>{completedSteps}/{plan.steps.length}</span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm text-foreground">{plan.name}</p>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <StatusBadge
+              kind="deployment"
+              value={plan.status}
+              label={plan.status}
+              className="px-1.5 py-0"
+            />
+            <span>
+              {completedSteps}/{plan.steps.length}
+            </span>
           </div>
         </div>
         {plan.status === 'running' && (
-          <div className="w-16 h-1.5 bg-slate-700 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-primary-500 transition-all"
-              style={{ width: `${progress}%` }}
-            ></div>
-          </div>
+          <Progress value={progress} className="h-1.5 w-16 bg-muted" />
         )}
       </Link>
     );
@@ -68,16 +75,20 @@ export function DeploymentProgress({ plan, compact = false }: DeploymentProgress
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           {plan.status === 'running' && (
-            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-primary-400"></div>
+            <Loader2 className="size-5 animate-spin text-primary" />
           )}
-          <div>
-            <h3 className="text-white font-medium">{plan.name}</h3>
-            <span className={`text-xs ${statusColor.text}`}>{plan.status.replace('_', ' ')}</span>
+          <div className="space-y-1">
+            <h3 className="font-medium text-foreground">{plan.name}</h3>
+            <StatusBadge
+              kind="deployment"
+              value={plan.status}
+              label={plan.status.replace('_', ' ')}
+            />
           </div>
         </div>
         <Link
           to={`/deployment-plans/${plan.id}`}
-          className="text-sm text-primary-400 hover:text-primary-300"
+          className="text-sm text-primary hover:text-primary/80"
         >
           View Details →
         </Link>
@@ -85,22 +96,22 @@ export function DeploymentProgress({ plan, compact = false }: DeploymentProgress
 
       {/* Progress bar */}
       <div>
-        <div className="flex justify-between text-xs text-slate-500 mb-1">
+        <div className="mb-1 flex justify-between text-xs text-muted-foreground">
           <span>Progress</span>
-          <span>{completedSteps} / {plan.steps.length} steps</span>
+          <span>
+            {completedSteps} / {plan.steps.length} steps
+          </span>
         </div>
-        <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
-          <div
-            className={`h-full transition-all ${
-              plan.status === 'failed'
-                ? 'bg-red-500'
-                : plan.status === 'completed'
-                ? 'bg-green-500'
-                : 'bg-primary-500'
-            }`}
-            style={{ width: `${progress}%` }}
-          ></div>
-        </div>
+        <Progress
+          value={progress}
+          className={cn(
+            plan.status === 'failed'
+              ? '[&_[data-slot=progress-indicator]]:bg-destructive'
+              : plan.status === 'completed'
+                ? '[&_[data-slot=progress-indicator]]:bg-success'
+                : '[&_[data-slot=progress-indicator]]:bg-primary'
+          )}
+        />
       </div>
 
       {/* Steps */}
@@ -109,36 +120,30 @@ export function DeploymentProgress({ plan, compact = false }: DeploymentProgress
           <StepBadge key={step.id} step={step} />
         ))}
         {plan.steps.length > 8 && (
-          <span className="text-xs text-slate-500">
-            +{plan.steps.length - 8} more
-          </span>
+          <span className="text-xs text-muted-foreground">+{plan.steps.length - 8} more</span>
         )}
       </div>
 
       {/* Error */}
-      {plan.error && (
-        <p className="text-sm text-red-400 truncate">{plan.error}</p>
-      )}
+      {plan.error && <p className="truncate text-sm text-destructive">{plan.error}</p>}
     </div>
   );
 }
 
 function StepBadge({ step }: { step: DeploymentPlanStep }) {
-  const statusColor = STEP_STATUS_COLORS[step.status] || STEP_STATUS_COLORS.pending;
   const isRunning = step.status === 'running';
+  const ActionIcon =
+    step.action === 'deploy' ? ArrowUp : step.action === 'health_check' ? HeartPulse : Undo2;
 
   return (
-    <div
-      className={`flex items-center gap-1.5 px-2 py-1 rounded text-xs ${statusColor.bg} ${statusColor.text}`}
-    >
-      {isRunning && (
-        <div className="animate-spin rounded-full h-2 w-2 border-b border-current"></div>
+    <Badge variant={stepVariant(step.status)} className="gap-1.5">
+      {isRunning ? (
+        <Loader2 className="size-2.5 animate-spin" />
+      ) : (
+        <ActionIcon className="size-3" />
       )}
-      <span>
-        {step.action === 'deploy' ? '↑' : step.action === 'health_check' ? '♥' : '↩'}
-      </span>
       <span>{step.service?.name || 'Unknown'}</span>
-    </div>
+    </Badge>
   );
 }
 
@@ -154,13 +159,13 @@ export function ActiveDeployments({ plans }: ActiveDeploymentsProps) {
   }
 
   return (
-    <div className="card">
-      <h3 className="text-white font-medium mb-4">Active Deployments</h3>
+    <Card className="gap-4 p-6">
+      <h3 className="font-medium text-foreground">Active Deployments</h3>
       <div className="space-y-3">
         {activePlans.map((plan) => (
           <DeploymentProgress key={plan.id} plan={plan} />
         ))}
       </div>
-    </div>
+    </Card>
   );
 }

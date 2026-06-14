@@ -14,6 +14,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Link } from 'react-router-dom';
+import { Workflow } from 'lucide-react';
 import type { DependencyGraphNode, DependencyGraphEdge } from '../lib/api';
 import { getContainerStatusColor, getHealthStatusColor } from '../lib/status';
 
@@ -26,13 +27,13 @@ interface DependencyFlowProps {
 // Custom node component for services
 function ServiceNode({ data }: { data: DependencyGraphNode & { level: number } }) {
   return (
-    <div className="bg-slate-800 border border-slate-600 rounded-lg p-3 min-w-[180px] shadow-lg">
-      <Handle type="target" position={Position.Top} className="!bg-primary-500" />
+    <div className="bg-card border border-border rounded-lg p-3 min-w-[180px] shadow-md">
+      <Handle type="target" position={Position.Top} className="!bg-primary" />
 
       <div className="flex items-center justify-between mb-2">
         <Link
           to={`/services/${data.id}`}
-          className="text-white font-medium hover:text-primary-400 truncate"
+          className="text-foreground font-medium hover:text-primary truncate"
         >
           {data.name}
         </Link>
@@ -44,30 +45,30 @@ function ServiceNode({ data }: { data: DependencyGraphNode & { level: number } }
         </div>
       </div>
 
-      <div className="text-xs text-slate-400 mb-1">
+      <div className="text-xs text-muted-foreground mb-1">
         {data.server}
       </div>
 
       {data.containerImage && (
-        <div className="text-xs text-primary-400 font-mono truncate">
+        <div className="text-xs text-primary font-mono truncate">
           {data.containerImage.name.split('/').pop()}
         </div>
       )}
 
       <div className="flex gap-2 mt-2 text-xs">
         {data.dependencyCount > 0 && (
-          <span className="text-green-400" title="Dependencies (services this depends on)">
+          <span className="text-success" title="Dependencies (services this depends on)">
             ↑{data.dependencyCount}
           </span>
         )}
         {data.dependentCount > 0 && (
-          <span className="text-blue-400" title="Dependents (services that depend on this)">
+          <span className="text-info" title="Dependents (services that depend on this)">
             ↓{data.dependentCount}
           </span>
         )}
       </div>
 
-      <Handle type="source" position={Position.Bottom} className="!bg-primary-500" />
+      <Handle type="source" position={Position.Bottom} className="!bg-primary" />
     </div>
   );
 }
@@ -178,12 +179,10 @@ export function DependencyFlow({ nodes, edges, deploymentOrder }: DependencyFlow
 
   if (nodesWithDeps.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-96 text-slate-400">
-        <svg className="w-16 h-16 mb-4 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-        </svg>
+      <div className="flex flex-col items-center justify-center h-96 text-muted-foreground">
+        <Workflow className="w-16 h-16 mb-4 text-muted-foreground/60" aria-hidden="true" />
         <p className="text-lg font-medium mb-1">No Dependencies Configured</p>
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-muted-foreground">
           Add dependencies between services to see the deployment flow
         </p>
       </div>
@@ -191,7 +190,7 @@ export function DependencyFlow({ nodes, edges, deploymentOrder }: DependencyFlow
   }
 
   return (
-    <div className="h-[600px] bg-slate-900 rounded-lg border border-slate-700">
+    <div className="h-[600px] bg-background rounded-lg border border-border">
       <ReactFlow
         nodes={reactNodes}
         edges={reactEdges}
@@ -211,19 +210,19 @@ export function DependencyFlow({ nodes, edges, deploymentOrder }: DependencyFlow
       </ReactFlow>
 
       {/* Legend */}
-      <div className="absolute bottom-4 left-4 bg-slate-800/90 backdrop-blur rounded-lg p-3 text-xs">
+      <div className="absolute bottom-4 left-4 bg-card/90 backdrop-blur rounded-lg border border-border p-3 text-xs">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-0.5 bg-green-500" style={{ position: 'relative' }}>
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-0 h-0 border-l-4 border-l-green-500 border-y-2 border-y-transparent" />
+            <div className="w-8 h-0.5 bg-success" style={{ position: 'relative' }}>
+              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-0 h-0 border-l-4 border-l-success border-y-2 border-y-transparent" />
             </div>
-            <span className="text-slate-400">waits for healthy</span>
+            <span className="text-muted-foreground">waits for healthy</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-8 h-0.5 bg-blue-500" style={{ position: 'relative' }}>
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-0 h-0 border-l-4 border-l-blue-500 border-y-2 border-y-transparent" />
+            <div className="w-8 h-0.5 bg-info" style={{ position: 'relative' }}>
+              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-0 h-0 border-l-4 border-l-info border-y-2 border-y-transparent" />
             </div>
-            <span className="text-slate-400">deploys after</span>
+            <span className="text-muted-foreground">deploys after</span>
           </div>
         </div>
       </div>
