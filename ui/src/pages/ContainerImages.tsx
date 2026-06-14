@@ -20,12 +20,41 @@ import {
   type RegistryConnection,
 } from '../lib/api';
 import { formatDistanceToNow } from 'date-fns';
-import { PencilIcon, TrashIcon, RefreshIcon, LinkIcon } from '../components/Icons';
-import Pagination from '../components/Pagination';
+import { Pencil, Trash2, RefreshCw, Link as LinkIcon, Image as ImageIcon } from 'lucide-react';
+import { useConfirm } from '@/hooks/useConfirm';
+import { formatDigestShort } from '@/lib/image-utils';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
+import { Skeleton } from '@/components/ui/skeleton';
+import { CopyButton } from '@/components/ui/copy-button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { EmptyState } from '@/components/ui/empty-state';
+import { DataPagination } from '@/components/ui/data-pagination';
+
+const REGISTRY_NONE = '__none__';
 
 export default function ContainerImages() {
   const { selectedEnvironment } = useAppStore();
   const toast = useToast();
+  const confirm = useConfirm();
   const { items: images, total, loading, currentPage, pageSize, totalPages, setCurrentPage, setPageSize, reload } =
     usePaginatedFetch<ContainerImage>({
       fetcher: ({ limit, offset }) =>
@@ -130,7 +159,13 @@ export default function ContainerImages() {
   const handleDelete = async (id: string) => {
     const image = images.find((i) => i.id === id);
     if (!image) return;
-    if (!confirm(`Delete container image "${image.name}"? Services linked to this image cannot be deleted.`)) return;
+    const ok = await confirm({
+      title: `Delete container image "${image.name}"?`,
+      description: 'Services linked to this image cannot be deleted.',
+      confirmText: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
 
     try {
       await deleteContainerImage(id);
@@ -214,91 +249,85 @@ export default function ContainerImages() {
   if (!selectedEnvironment) {
     return (
       <div className="p-6">
-        <div className="panel text-center py-12">
-          <p className="text-slate-400">Select an environment to view container images</p>
+        <div className="rounded-lg border bg-card p-4 text-center py-12">
+          <p className="text-muted-foreground">Select an environment to view container images</p>
         </div>
       </div>
     );
   }
 
+  const deployDigestShort = deployingImage?.latestDigest
+    ? formatDigestShort(deployingImage.latestDigest.manifestDigest)
+    : '';
+
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-5">
-        <p className="text-slate-400">
+        <p className="text-muted-foreground">
           Central image management for orchestrated deployments
         </p>
-        <button onClick={openCreate} className="btn btn-primary">
-          Add Container Image
-        </button>
+        <Button onClick={openCreate}>Add Container Image</Button>
       </div>
 
       {loading ? (
-        <div className="panel">
-          <div className="animate-pulse space-y-4">
-            <div className="h-12 bg-slate-700 rounded"></div>
-            <div className="h-12 bg-slate-700 rounded"></div>
-          </div>
+        <div className="rounded-lg border bg-card p-4 space-y-4">
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-12 w-full" />
         </div>
       ) : total === 0 ? (
-        <div className="panel text-center py-12">
-          <ImageIcon className="w-12 h-12 text-slate-500 mx-auto mb-4" />
-          <p className="text-slate-400 mb-4">No container images configured</p>
-          <p className="text-slate-500 text-sm mb-4">
-            Create container images to deploy the same image to multiple services with orchestration
-          </p>
-          <button onClick={openCreate} className="btn btn-primary">
-            Add Your First Container Image
-          </button>
-        </div>
+        <EmptyState
+          icon={ImageIcon}
+          message="No container images configured"
+          description="Create container images to deploy the same image to multiple services with orchestration"
+          action={{ label: 'Add Your First Container Image', onClick: openCreate }}
+        />
       ) : (
         <div className="space-y-4">
           {images.map((image) => (
-            <div key={image.id} className="panel">
+            <div key={image.id} className="rounded-lg border bg-card p-4">
               <div className="flex items-start justify-between">
                 <div className="flex items-start gap-4">
-                  <div className="p-3 bg-slate-800 rounded-lg">
-                    <ImageIcon className="w-6 h-6 text-primary-400" />
+                  <div className="p-3 bg-muted rounded-lg">
+                    <ImageIcon className="w-6 h-6 text-primary" />
                   </div>
                   <div>
                     <div className="flex items-center gap-2">
-                      <Link to={`/container-images/${image.id}`} className="text-lg font-semibold text-white hover:text-primary-400">
+                      <Link to={`/container-images/${image.id}`} className="text-lg font-semibold text-foreground hover:text-primary">
                         {image.name}
                       </Link>
                       {image.latestDigest?.tags && image.latestDigest.tags.length > 0 ? (
                         <>
                           {image.latestDigest.tags.slice(0, 3).map((tag) => (
-                            <span key={tag} className="badge bg-slate-700 text-slate-300 text-xs font-mono">
+                            <Badge key={tag} variant="secondary" className="font-mono">
                               {tag}
-                            </span>
+                            </Badge>
                           ))}
                           {image.latestDigest.tags.length > 3 && (
-                            <span className="text-slate-500 text-xs">+{image.latestDigest.tags.length - 3}</span>
+                            <span className="text-muted-foreground text-xs">+{image.latestDigest.tags.length - 3}</span>
                           )}
                         </>
                       ) : (
-                        <span className="badge bg-slate-700 text-slate-300 text-xs font-mono">
+                        <Badge variant="secondary" className="font-mono">
                           {image.bestTag || image.tagFilter}
-                        </span>
+                        </Badge>
                       )}
                       {image.updateAvailable && (
-                        <span className="badge bg-yellow-500/20 text-yellow-400 text-xs">
-                          update available
-                        </span>
+                        <Badge variant="warning">update available</Badge>
                       )}
                     </div>
-                    <p className="text-slate-400 text-sm mt-1 font-mono">{image.imageName}</p>
-                    <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
+                    <p className="text-muted-foreground text-sm mt-1 font-mono">{image.imageName}</p>
+                    <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground">
                       <span>
                         {image.services.length} service{image.services.length !== 1 ? 's' : ''} linked
                       </span>
                       {image.registryConnection && (
-                        <span className="text-primary-400">
+                        <span className="text-primary">
                           Registry: {image.registryConnection.name}
                         </span>
                       )}
                       {image.autoUpdate && (
-                        <span className="text-green-400 flex items-center gap-1">
-                          <RefreshIcon className="w-3 h-3" />
+                        <span className="text-success flex items-center gap-1">
+                          <RefreshCw className="w-3 h-3" />
                           Auto-update enabled
                         </span>
                       )}
@@ -307,7 +336,7 @@ export default function ContainerImages() {
                           Deployed {formatDistanceToNow(new Date(image.lastDeployedAt), { addSuffix: true })}
                         </span>
                       ) : (
-                        <span className="text-slate-600">Never deployed</span>
+                        <span>Never deployed</span>
                       )}
                       {image.lastCheckedAt && (
                         <span>
@@ -322,11 +351,11 @@ export default function ContainerImages() {
                         {image.services.map((service) => (
                           <div
                             key={service.id}
-                            className="flex items-center gap-1 px-2 py-1 bg-slate-800/50 rounded text-xs"
+                            className="flex items-center gap-1 px-2 py-1 bg-muted/50 rounded text-xs"
                           >
                             <Link
                               to={`/services/${service.id}`}
-                              className="text-slate-300 hover:text-primary-400"
+                              className="text-foreground hover:text-primary"
                             >
                               {service.name}
                             </Link>
@@ -338,44 +367,46 @@ export default function ContainerImages() {
                 </div>
                 <div className="flex items-center gap-2">
                   {image.services.length > 0 && image.latestDigest && (
-                    <button
-                      onClick={() => openDeployModal(image)}
-                      className="btn btn-primary text-sm"
-                    >
+                    <Button size="sm" onClick={() => openDeployModal(image)}>
                       {image.updateAvailable ? 'Deploy Update' : 'Deploy Latest'}
-                    </button>
+                    </Button>
                   )}
                   {image.registryConnectionId && (
-                    <button
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
                       onClick={() => handleCheckUpdates(image.id)}
                       disabled={checkingUpdatesId === image.id}
-                      className="p-1.5 text-slate-400 hover:text-white rounded"
                       title="Check for updates"
                     >
-                      <RefreshIcon className={`w-4 h-4 ${checkingUpdatesId === image.id ? 'animate-spin' : ''}`} />
-                    </button>
+                      <RefreshCw className={`w-4 h-4 ${checkingUpdatesId === image.id ? 'animate-spin' : ''}`} />
+                    </Button>
                   )}
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
                     onClick={() => openLinkModal(image)}
-                    className="p-1.5 text-slate-400 hover:text-white rounded"
                     title="Link services"
                   >
                     <LinkIcon className="w-4 h-4" />
-                  </button>
-                  <button
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
                     onClick={() => openEdit(image)}
-                    className="p-1.5 text-slate-400 hover:text-white rounded"
                     title="Edit"
                   >
-                    <PencilIcon className="w-4 h-4" />
-                  </button>
-                  <button
+                    <Pencil className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
                     onClick={() => handleDelete(image.id)}
-                    className="p-1.5 text-slate-400 hover:text-red-400 rounded"
                     title="Delete"
+                    className="hover:text-destructive"
                   >
-                    <TrashIcon className="w-4 h-4" />
-                  </button>
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
                 </div>
               </div>
 
@@ -384,7 +415,7 @@ export default function ContainerImages() {
         </div>
       )}
       {total > 0 && (
-        <Pagination
+        <DataPagination
           currentPage={currentPage}
           totalPages={totalPages}
           totalItems={total}
@@ -395,158 +426,165 @@ export default function ContainerImages() {
       )}
 
       {/* Create/Edit Modal */}
-      {showCreate && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-lg p-6">
-            <h3 className="text-lg font-semibold text-white mb-4">
-              {editingId ? 'Edit Container Image' : 'Add Container Image'}
-            </h3>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Display Name</label>
-                <input
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="BIOS Backend"
-                  className="input"
-                  required
-                />
-              </div>
+      <Dialog
+        open={showCreate}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShowCreate(false);
+            resetForm();
+            setEditingId(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingId ? 'Edit Container Image' : 'Add Container Image'}</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="ci-name">Display Name</Label>
+              <Input
+                id="ci-name"
+                type="text"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                placeholder="BIOS Backend"
+                required
+              />
+            </div>
 
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Image Name</label>
-                <input
-                  type="text"
-                  value={formData.imageName}
-                  onChange={(e) => setFormData({ ...formData, imageName: e.target.value })}
-                  placeholder="ghcr.io/my-org/my-app"
-                  className="input font-mono text-sm"
-                  required
-                />
-              </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ci-image-name">Image Name</Label>
+              <Input
+                id="ci-image-name"
+                type="text"
+                value={formData.imageName}
+                onChange={(e) => setFormData({ ...formData, imageName: e.target.value })}
+                placeholder="ghcr.io/my-org/my-app"
+                className="font-mono text-sm"
+                required
+              />
+            </div>
 
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Tag Filter</label>
-                <input
-                  type="text"
-                  value={formData.tagFilter}
-                  onChange={(e) => setFormData({ ...formData, tagFilter: e.target.value })}
-                  placeholder="latest, v*"
-                  className="input font-mono text-sm"
-                  required
-                />
-                <p className="text-xs text-slate-500 mt-1">Comma-separated glob patterns (e.g., latest, v*, *-alpine)</p>
-              </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ci-tag-filter">Tag Filter</Label>
+              <Input
+                id="ci-tag-filter"
+                type="text"
+                value={formData.tagFilter}
+                onChange={(e) => setFormData({ ...formData, tagFilter: e.target.value })}
+                placeholder="latest, v*"
+                className="font-mono text-sm"
+                required
+              />
+              <p className="text-xs text-muted-foreground">Comma-separated glob patterns (e.g., latest, v*, *-alpine)</p>
+            </div>
 
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Registry Connection</label>
-                <select
-                  value={formData.registryConnectionId || ''}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      registryConnectionId: e.target.value || null,
-                    })
-                  }
-                  className="input"
-                >
-                  <option value="">None</option>
+            <div className="space-y-1.5">
+              <Label>Registry Connection</Label>
+              <Select
+                value={formData.registryConnectionId || REGISTRY_NONE}
+                onValueChange={(value) =>
+                  setFormData({
+                    ...formData,
+                    registryConnectionId: value === REGISTRY_NONE ? null : value,
+                  })
+                }
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={REGISTRY_NONE}>None</SelectItem>
                   {registries.map((r) => (
-                    <option key={r.id} value={r.id}>
+                    <SelectItem key={r.id} value={r.id}>
                       {r.name}
-                    </option>
+                    </SelectItem>
                   ))}
-                </select>
-              </div>
+                </SelectContent>
+              </Select>
+            </div>
 
-              {/* Auto-update toggle - only shown when editing and has registry */}
-              {editingId && formData.registryConnectionId && (
-                <div className="flex items-center justify-between pt-2">
-                  <div>
-                    <label className="block text-sm text-white font-medium">Auto-update</label>
-                    <p className="text-xs text-slate-400">
-                      Automatically deploy when new tags are detected
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setEditAutoUpdate(!editAutoUpdate)}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                      editAutoUpdate ? 'bg-primary-600' : 'bg-slate-600'
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                        editAutoUpdate ? 'translate-x-6' : 'translate-x-1'
-                      }`}
-                    />
-                  </button>
+            {/* Auto-update toggle - only shown when editing and has registry */}
+            {editingId && formData.registryConnectionId && (
+              <div className="flex items-center justify-between pt-2">
+                <div>
+                  <Label htmlFor="ci-auto-update" className="text-foreground font-medium">Auto-update</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Automatically deploy when new tags are detected
+                  </p>
                 </div>
-              )}
-
-              <div className="flex gap-2 justify-end pt-4">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowCreate(false);
-                    resetForm();
-                    setEditingId(null);
-                  }}
-                  className="btn btn-ghost"
-                >
-                  Cancel
-                </button>
-                <button type="submit" disabled={saving} className="btn btn-primary">
-                  {saving ? 'Saving...' : editingId ? 'Update' : 'Create'}
-                </button>
+                <Switch
+                  id="ci-auto-update"
+                  checked={editAutoUpdate}
+                  onCheckedChange={setEditAutoUpdate}
+                />
               </div>
-            </form>
-          </div>
-        </div>
-      )}
+            )}
+
+            <DialogFooter className="pt-4">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setShowCreate(false);
+                  resetForm();
+                  setEditingId(null);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={saving}>
+                {saving ? 'Saving...' : editingId ? 'Update' : 'Create'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Deploy Modal */}
-      {deployingImage && deployingImage.latestDigest && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-lg p-6">
-            <h3 className="text-lg font-semibold text-white mb-1">
-              Deploy {deployingImage.name}
-            </h3>
-            <p className="text-slate-500 text-sm mb-4">
-              Deploy latest digest to {deployingImage.services.length} linked service
-              {deployingImage.services.length !== 1 ? 's' : ''} in dependency order.
-            </p>
+      <Dialog
+        open={!!(deployingImage && deployingImage.latestDigest)}
+        onOpenChange={(open) => {
+          if (!open) setDeployingImage(null);
+        }}
+      >
+        {deployingImage && deployingImage.latestDigest && (
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Deploy {deployingImage.name}</DialogTitle>
+              <DialogDescription>
+                Deploy latest digest to {deployingImage.services.length} linked service
+                {deployingImage.services.length !== 1 ? 's' : ''} in dependency order.
+              </DialogDescription>
+            </DialogHeader>
 
             <div className="space-y-4">
-              <div className="bg-slate-800/50 rounded p-3">
-                <div className="text-sm text-slate-400 mb-1">Digest</div>
-                <div className="font-mono text-white text-sm">
-                  {deployingImage.latestDigest.manifestDigest.startsWith('sha256:')
-                    ? deployingImage.latestDigest.manifestDigest.slice(7, 19)
-                    : deployingImage.latestDigest.manifestDigest.slice(0, 12)}
+              <div className="bg-muted/50 rounded p-3">
+                <div className="text-sm text-muted-foreground mb-1">Digest</div>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-foreground text-sm">{deployDigestShort}</span>
+                  <CopyButton value={deployingImage.latestDigest.manifestDigest} size="icon-xs" />
                 </div>
                 {deployingImage.latestDigest.tags.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-2">
                     {deployingImage.latestDigest.tags.map((tag) => (
-                      <span key={tag} className="badge bg-slate-700 text-slate-300 text-xs">
-                        {tag}
-                      </span>
+                      <Badge key={tag} variant="secondary">{tag}</Badge>
                     ))}
                   </div>
                 )}
               </div>
 
               <div>
-                <div className="text-sm text-slate-400 mb-2">
+                <div className="text-sm text-muted-foreground mb-2">
                   Services to update ({deployingImage.services.length}):
                 </div>
                 <div className="space-y-1">
                   {deployingImage.services.map((s: any) => (
-                    <div key={s.id} className="flex items-center gap-2 p-2 bg-slate-800/50 rounded text-sm">
-                      <span className="text-white">{s.name}</span>
+                    <div key={s.id} className="flex items-center gap-2 p-2 bg-muted/50 rounded text-sm">
+                      <span className="text-foreground">{s.name}</span>
                       {s.server?.name && (
-                        <span className="text-slate-500">on {s.server.name}</span>
+                        <span className="text-muted-foreground">on {s.server.name}</span>
                       )}
                     </div>
                   ))}
@@ -554,56 +592,52 @@ export default function ContainerImages() {
               </div>
 
               <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
+                <Checkbox
                   id="autoRollback"
                   checked={deployAutoRollback}
-                  onChange={(e) => setDeployAutoRollback(e.target.checked)}
-                  className="rounded bg-slate-700 border-slate-600 text-primary-500 focus:ring-primary-500"
+                  onCheckedChange={(checked) => setDeployAutoRollback(checked === true)}
                 />
-                <label htmlFor="autoRollback" className="text-sm text-slate-300">
+                <Label htmlFor="autoRollback" className="text-muted-foreground">
                   Auto-rollback on failure
-                </label>
-              </div>
-
-              <div className="flex gap-2 justify-end pt-4">
-                <button
-                  type="button"
-                  onClick={() => setDeployingImage(null)}
-                  className="btn btn-ghost"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleDeploy}
-                  disabled={deploying}
-                  className="btn btn-primary"
-                >
-                  {deploying ? 'Starting Deploy...' : 'Deploy'}
-                </button>
+                </Label>
               </div>
             </div>
-          </div>
-        </div>
-      )}
+
+            <DialogFooter className="pt-4">
+              <Button type="button" variant="ghost" onClick={() => setDeployingImage(null)}>
+                Cancel
+              </Button>
+              <Button onClick={handleDeploy} disabled={deploying}>
+                {deploying ? 'Starting Deploy...' : 'Deploy'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
 
       {/* Link Services Modal */}
-      {linkingImage && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-lg p-6">
-            <h3 className="text-lg font-semibold text-white mb-4">
-              Link Services to {linkingImage.name}
-            </h3>
-            <p className="text-slate-400 text-sm mb-4">
-              Services that can be linked to this container image
-            </p>
+      <Dialog
+        open={!!linkingImage}
+        onOpenChange={(open) => {
+          if (!open) {
+            setLinkingImage(null);
+            setLinkableServices([]);
+          }
+        }}
+      >
+        {linkingImage && (
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Link Services to {linkingImage.name}</DialogTitle>
+              <DialogDescription>
+                Services that can be linked to this container image
+              </DialogDescription>
+            </DialogHeader>
 
             {loadingLinkable ? (
-              <div className="animate-pulse space-y-2">
-                <div className="h-10 bg-slate-700 rounded"></div>
-              </div>
+              <Skeleton className="h-10 w-full" />
             ) : linkableServices.length === 0 ? (
-              <p className="text-slate-500 text-sm">
+              <p className="text-muted-foreground text-sm">
                 No services available to link.
               </p>
             ) : (
@@ -611,53 +645,36 @@ export default function ContainerImages() {
                 {linkableServices.map((service) => (
                   <div
                     key={service.id}
-                    className="flex items-center justify-between p-3 bg-slate-800/50 rounded"
+                    className="flex items-center justify-between p-3 bg-muted/50 rounded"
                   >
                     <div>
-                      <span className="text-white">{service.name}</span>
-                      <span className="text-slate-500 text-sm ml-2">
+                      <span className="text-foreground">{service.name}</span>
+                      <span className="text-muted-foreground text-sm ml-2">
                         on {(service as Service & { server: { name: string } }).server?.name}
                       </span>
                     </div>
-                    <button
-                      onClick={() => handleLinkService(service.id)}
-                      className="btn btn-sm btn-primary"
-                    >
+                    <Button size="sm" onClick={() => handleLinkService(service.id)}>
                       Link
-                    </button>
+                    </Button>
                   </div>
                 ))}
               </div>
             )}
 
-            <div className="flex gap-2 justify-end pt-4">
-              <button
+            <DialogFooter className="pt-4">
+              <Button
+                variant="ghost"
                 onClick={() => {
                   setLinkingImage(null);
                   setLinkableServices([]);
                 }}
-                className="btn btn-ghost"
               >
                 Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        )}
+      </Dialog>
     </div>
   );
 }
-
-function ImageIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={2}
-        d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-      />
-    </svg>
-  );
-}
-

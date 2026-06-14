@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '../../test/render';
 import { useAppStore } from '../lib/store';
+import { ConfirmProvider } from '@/hooks/useConfirm';
 
 // Mock Toast
 vi.mock('../components/Toast', () => ({
@@ -73,28 +74,44 @@ describe('ContainerImages', () => {
   });
 
   it('should display container image name', async () => {
-    renderWithProviders(<ContainerImages />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <ContainerImages />
+      </ConfirmProvider>
+    );
     await waitFor(() => {
       expect(screen.getByText('API Service')).toBeInTheDocument();
     });
   });
 
   it('should display image name', async () => {
-    renderWithProviders(<ContainerImages />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <ContainerImages />
+      </ConfirmProvider>
+    );
     await waitFor(() => {
       expect(screen.getByText('myrepo/api')).toBeInTheDocument();
     });
   });
 
   it('should display best tag', async () => {
-    renderWithProviders(<ContainerImages />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <ContainerImages />
+      </ConfirmProvider>
+    );
     await waitFor(() => {
       expect(screen.getByText('v1.3.0')).toBeInTheDocument();
     });
   });
 
   it('should show linked service count', async () => {
-    renderWithProviders(<ContainerImages />);
+    renderWithProviders(
+      <ConfirmProvider>
+        <ContainerImages />
+      </ConfirmProvider>
+    );
     await waitFor(() => {
       expect(screen.getByText(/1 service/i)).toBeInTheDocument();
     });
