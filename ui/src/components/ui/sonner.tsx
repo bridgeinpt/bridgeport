@@ -6,16 +6,17 @@ import {
   TriangleAlertIcon,
 } from "lucide-react"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
+import { useTheme } from "@/components/theme-provider"
 
 /**
- * App-wide toast surface. Dark-only for now (Deep Slate); the light theme +
- * switcher (#255) will pass the resolved theme here instead of the hardcoded
- * "dark". Colors come from the theme tokens via the CSS custom properties below.
+ * App-wide toast surface. Follows the resolved app theme (#255); colors come
+ * from the theme tokens via the CSS custom properties below.
  */
 const Toaster = ({ ...props }: ToasterProps) => {
+  const { resolvedTheme } = useTheme()
   return (
     <Sonner
-      theme="dark"
+      theme={resolvedTheme}
       className="toaster group"
       icons={{
         success: <CircleCheckIcon className="size-4" />,

@@ -11,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { ThemeMenuItems } from '@/components/ui/theme-switcher';
 import NotificationBell from './NotificationBell';
 import Breadcrumbs from './Breadcrumbs';
 
@@ -60,6 +61,8 @@ export default function AdminTopBar({ onOpenAccount, onOpenCLI }: AdminTopBarPro
               <User className="size-4" />
               My Account
             </DropdownMenuItem>
+            <ThemeMenuItems />
+            <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={() => {
                 logout();
