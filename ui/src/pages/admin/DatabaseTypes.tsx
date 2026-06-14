@@ -1,4 +1,8 @@
 import { useEffect, useState } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { ChevronRight, Pencil, Trash2, Database } from 'lucide-react';
 import { useAuthStore, isAdmin } from '../../lib/store';
 import {
   listDatabaseTypes,
@@ -14,36 +18,82 @@ import {
   type DatabaseTypeField,
 } from '../../lib/api';
 import { useToast } from '../../components/Toast';
-import { safeJsonParse } from '../../lib/helpers';
+import { safeJsonParse, getErrorMessage } from '../../lib/helpers';
+import { useConfirm } from '@/hooks/useConfirm';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
+import { PageHeader } from '@/components/ui/page-header';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form';
+
+const typeSchema = z.object({
+  name: z.string().min(1, 'Name is required'),
+  displayName: z.string().min(1, 'Display name is required'),
+  defaultPort: z.string().optional(),
+  connectionFields: z.string().optional(),
+  backupCommand: z.string().optional(),
+  restoreCommand: z.string().optional(),
+});
+type TypeValues = z.infer<typeof typeSchema>;
+
+const commandSchema = z.object({
+  name: z.string().min(1, 'Name is required'),
+  displayName: z.string().min(1, 'Display name is required'),
+  command: z.string().min(1, 'Command is required'),
+  description: z.string().optional(),
+});
+type CommandValues = z.infer<typeof commandSchema>;
 
 export default function DatabaseTypes() {
   const { user } = useAuthStore();
   const toast = useToast();
+  const confirm = useConfirm();
   const [databaseTypes, setDatabaseTypes] = useState<DatabaseTypeRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedType, setExpandedType] = useState<string | null>(null);
 
   // Create type modal
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [newTypeName, setNewTypeName] = useState('');
-  const [newTypeDisplayName, setNewTypeDisplayName] = useState('');
-  const [newTypeDefaultPort, setNewTypeDefaultPort] = useState('');
-  const [newTypeConnectionFields, setNewTypeConnectionFields] = useState('');
-  const [newTypeBackupCommand, setNewTypeBackupCommand] = useState('');
-  const [newTypeRestoreCommand, setNewTypeRestoreCommand] = useState('');
-  const [creating, setCreating] = useState(false);
 
-  // Create command modal
+  // Create/edit command modal
   const [showCommandModal, setShowCommandModal] = useState(false);
   const [editingCommand, setEditingCommand] = useState<DatabaseTypeCommand | null>(null);
   const [commandTypeId, setCommandTypeId] = useState<string | null>(null);
-  const [commandForm, setCommandForm] = useState({
-    name: '',
-    displayName: '',
-    command: '',
-    description: '',
+
+  const typeForm = useForm<TypeValues>({
+    resolver: zodResolver(typeSchema),
+    defaultValues: {
+      name: '',
+      displayName: '',
+      defaultPort: '',
+      connectionFields: '',
+      backupCommand: '',
+      restoreCommand: '',
+    },
   });
-  const [savingCommand, setSavingCommand] = useState(false);
+
+  const commandForm = useForm<CommandValues>({
+    resolver: zodResolver(commandSchema),
+    defaultValues: { name: '', displayName: '', command: '', description: '' },
+  });
 
   useEffect(() => {
     loadDatabaseTypes();
@@ -65,15 +115,22 @@ export default function DatabaseTypes() {
     return safeJsonParse(jsonStr, [] as DatabaseTypeField[]);
   };
 
-  const handleCreateType = async () => {
-    if (!newTypeName || !newTypeDisplayName) {
-      toast.error('Please fill in name and display name');
-      return;
-    }
+  const openCreateModal = () => {
+    typeForm.reset({
+      name: '',
+      displayName: '',
+      defaultPort: '',
+      connectionFields: '',
+      backupCommand: '',
+      restoreCommand: '',
+    });
+    setShowCreateModal(true);
+  };
 
+  const handleCreateType = async (values: TypeValues) => {
     let connectionFields: DatabaseTypeField[] = [];
-    if (newTypeConnectionFields.trim()) {
-      const parsed = safeJsonParse(newTypeConnectionFields, null);
+    if (values.connectionFields && values.connectionFields.trim()) {
+      const parsed = safeJsonParse(values.connectionFields, null);
       if (parsed === null) {
         toast.error('Invalid JSON for connection fields');
         return;
@@ -85,51 +142,54 @@ export default function DatabaseTypes() {
       connectionFields = parsed;
     }
 
-    setCreating(true);
     try {
       await createDatabaseType({
-        name: newTypeName,
-        displayName: newTypeDisplayName,
-        defaultPort: newTypeDefaultPort ? parseInt(newTypeDefaultPort, 10) : undefined,
+        name: values.name,
+        displayName: values.displayName,
+        defaultPort: values.defaultPort ? parseInt(values.defaultPort, 10) : undefined,
         connectionFields,
-        backupCommand: newTypeBackupCommand || undefined,
-        restoreCommand: newTypeRestoreCommand || undefined,
+        backupCommand: values.backupCommand || undefined,
+        restoreCommand: values.restoreCommand || undefined,
       });
       toast.success('Database type created');
       setShowCreateModal(false);
-      setNewTypeName('');
-      setNewTypeDisplayName('');
-      setNewTypeDefaultPort('');
-      setNewTypeConnectionFields('');
-      setNewTypeBackupCommand('');
-      setNewTypeRestoreCommand('');
       loadDatabaseTypes();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to create database type');
-    } finally {
-      setCreating(false);
+      toast.error(getErrorMessage(error, 'Failed to create database type'));
     }
   };
 
   const handleDeleteType = async (typeId: string, typeName: string) => {
-    if (!confirm(`Delete database type "${typeName}"? This cannot be undone.`)) return;
+    const ok = await confirm({
+      title: 'Delete database type',
+      description: `Delete database type "${typeName}"? This cannot be undone.`,
+      confirmText: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
     try {
       await deleteDatabaseType(typeId);
       toast.success('Database type deleted');
       loadDatabaseTypes();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to delete database type');
+      toast.error(getErrorMessage(error, 'Failed to delete database type'));
     }
   };
 
   const handleResetDefaults = async (typeId: string, typeName: string) => {
-    if (!confirm(`Reset "${typeName}" to plugin defaults? Any customizations will be lost.`)) return;
+    const ok = await confirm({
+      title: 'Reset to defaults',
+      description: `Reset "${typeName}" to plugin defaults? Any customizations will be lost.`,
+      confirmText: 'Reset',
+      destructive: true,
+    });
+    if (!ok) return;
     try {
       await resetDatabaseTypeDefaults(typeId);
       toast.success('Database type reset to defaults');
       loadDatabaseTypes();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to reset database type');
+      toast.error(getErrorMessage(error, 'Failed to reset database type'));
     }
   };
 
@@ -142,14 +202,14 @@ export default function DatabaseTypes() {
         toast.error(result.error || 'Failed to export database type');
       }
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to export database type');
+      toast.error(getErrorMessage(error, 'Failed to export database type'));
     }
   };
 
   const openCommandModal = (typeId: string, command?: DatabaseTypeCommand) => {
     setCommandTypeId(typeId);
     setEditingCommand(command || null);
-    setCommandForm({
+    commandForm.reset({
       name: command?.name || '',
       displayName: command?.displayName || '',
       command: command?.command || '',
@@ -158,109 +218,106 @@ export default function DatabaseTypes() {
     setShowCommandModal(true);
   };
 
-  const handleSaveCommand = async () => {
+  const handleSaveCommand = async (values: CommandValues) => {
     if (!commandTypeId) return;
-    if (!commandForm.name || !commandForm.displayName || !commandForm.command) {
-      toast.error('Please fill in all required fields');
-      return;
-    }
-    setSavingCommand(true);
     try {
       if (editingCommand) {
         await updateDatabaseTypeCommand(commandTypeId, editingCommand.id, {
-          displayName: commandForm.displayName,
-          command: commandForm.command,
-          description: commandForm.description || undefined,
+          displayName: values.displayName,
+          command: values.command,
+          description: values.description || undefined,
         });
         toast.success('Command updated');
       } else {
-        await addDatabaseTypeCommand(commandTypeId, commandForm);
+        await addDatabaseTypeCommand(commandTypeId, {
+          name: values.name,
+          displayName: values.displayName,
+          command: values.command,
+          description: values.description || undefined,
+        });
         toast.success('Command added');
       }
       setShowCommandModal(false);
       loadDatabaseTypes();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to save command');
-    } finally {
-      setSavingCommand(false);
+      toast.error(getErrorMessage(error, 'Failed to save command'));
     }
   };
 
   const handleDeleteCommand = async (typeId: string, commandId: string, commandName: string) => {
-    if (!confirm(`Delete command "${commandName}"?`)) return;
+    const ok = await confirm({
+      title: 'Delete command',
+      description: `Delete command "${commandName}"?`,
+      confirmText: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
     try {
       await deleteDatabaseTypeCommand(typeId, commandId);
       toast.success('Command deleted');
       loadDatabaseTypes();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to delete command');
+      toast.error(getErrorMessage(error, 'Failed to delete command'));
     }
   };
 
   if (loading) {
     return (
-      <div className="p-6">
-        <div className="animate-pulse">
-          <div className="h-8 w-48 bg-slate-700 rounded mb-6"></div>
-          <div className="space-y-4">
-            {[1, 2, 3].map((i) => (
-              <div key={i} className="h-20 bg-slate-800 rounded-xl"></div>
-            ))}
-          </div>
+      <div className="space-y-4 p-6">
+        <Skeleton className="h-8 w-48" />
+        <div className="space-y-4">
+          {[1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-20 rounded-xl" />
+          ))}
         </div>
       </div>
     );
   }
 
   return (
-    <div className="p-6">
-      <div className="flex items-center justify-end mb-5">
-        {isAdmin(user) && (
-          <button onClick={() => setShowCreateModal(true)} className="btn btn-primary">
-            Add Database Type
-          </button>
-        )}
-      </div>
+    <div className="space-y-5 p-6">
+      <PageHeader
+        title="Database Types"
+        actions={
+          isAdmin(user) ? (
+            <Button onClick={openCreateModal}>Add Database Type</Button>
+          ) : undefined
+        }
+      />
 
       {databaseTypes.length === 0 ? (
-        <div className="card text-center py-12">
-          <p className="text-slate-400 mb-4">No database types configured</p>
-          {isAdmin(user) && (
-            <button onClick={() => setShowCreateModal(true)} className="btn btn-primary">
-              Add Database Type
-            </button>
-          )}
-        </div>
+        <EmptyState
+          icon={Database}
+          message="No database types configured"
+          action={
+            isAdmin(user)
+              ? { label: 'Add Database Type', onClick: openCreateModal }
+              : undefined
+          }
+        />
       ) : (
         <div className="space-y-4">
           {databaseTypes.map((type) => {
             const connectionFields = parseConnectionFields(type.connectionFields);
             return (
-              <div key={type.id} className="card">
+              <Card key={type.id} className="gap-0 p-4">
                 <div
-                  className="flex items-center justify-between cursor-pointer"
+                  className="flex cursor-pointer items-center justify-between"
                   onClick={() => setExpandedType(expandedType === type.id ? null : type.id)}
                 >
                   <div className="flex items-center gap-3">
-                    <svg
-                      className={`w-5 h-5 text-slate-400 transition-transform ${
+                    <ChevronRight
+                      className={`size-5 text-muted-foreground transition-transform ${
                         expandedType === type.id ? 'rotate-90' : ''
                       }`}
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
+                    />
                     <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="font-medium text-white">{type.displayName}</h3>
-                        <span className="badge bg-slate-700 text-slate-300 text-xs">{type.source}</span>
-                        {type.isCustomized && (
-                          <span className="badge bg-yellow-500/20 text-yellow-400 text-xs">customized</span>
-                        )}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-medium text-foreground">{type.displayName}</h3>
+                        <Badge variant="neutral">{type.source}</Badge>
+                        {type.isCustomized && <Badge variant="warning">customized</Badge>}
                       </div>
-                      <p className="text-sm text-slate-400">
+                      <p className="text-sm text-muted-foreground">
                         {connectionFields.length} field{connectionFields.length !== 1 ? 's' : ''} |{' '}
                         {type.commands.length} command{type.commands.length !== 1 ? 's' : ''} |{' '}
                         {type._count?.databases || 0} database{(type._count?.databases || 0) !== 1 ? 's' : ''}
@@ -269,35 +326,32 @@ export default function DatabaseTypes() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      onClick={() => handleExportJson(type.id)}
-                      className="btn btn-ghost text-sm"
-                    >
+                    <Button variant="ghost" size="sm" onClick={() => handleExportJson(type.id)}>
                       Export as JSON
-                    </button>
+                    </Button>
                     {isAdmin(user) && (
                       <>
                         {type.source === 'plugin' && type.isCustomized && (
-                          <button
+                          <Button
+                            variant="ghost"
+                            size="sm"
                             onClick={() => handleResetDefaults(type.id, type.displayName)}
-                            className="btn btn-ghost text-sm"
                           >
                             Reset to Defaults
-                          </button>
+                          </Button>
                         )}
-                        <button
-                          onClick={() => openCommandModal(type.id)}
-                          className="btn btn-ghost text-sm"
-                        >
+                        <Button variant="ghost" size="sm" onClick={() => openCommandModal(type.id)}>
                           Add Command
-                        </button>
+                        </Button>
                         {(type._count?.databases || 0) === 0 && (
-                          <button
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive hover:text-destructive"
                             onClick={() => handleDeleteType(type.id, type.name)}
-                            className="btn btn-ghost text-red-400 hover:text-red-300 text-sm"
                           >
                             Delete
-                          </button>
+                          </Button>
                         )}
                       </>
                     )}
@@ -305,33 +359,33 @@ export default function DatabaseTypes() {
                 </div>
 
                 {expandedType === type.id && (
-                  <div className="mt-4 pt-4 border-t border-slate-700">
+                  <div className="mt-4 border-t pt-4">
                     {/* Connection Fields Section */}
                     <div className="mb-6">
-                      <h4 className="text-sm font-medium text-slate-300 mb-3">Connection Fields</h4>
+                      <h4 className="mb-3 text-sm font-medium text-foreground">Connection Fields</h4>
                       {connectionFields.length === 0 ? (
-                        <p className="text-slate-500 text-sm">No connection fields configured</p>
+                        <p className="text-sm text-muted-foreground">No connection fields configured</p>
                       ) : (
                         <div className="space-y-2">
                           {connectionFields.map((field, idx) => (
                             <div
                               key={idx}
-                              className="flex items-center justify-between p-3 bg-slate-800 rounded-lg"
+                              className="flex items-center justify-between rounded-lg bg-muted/50 p-3"
                             >
                               <div className="flex items-center gap-4">
                                 <div>
                                   <div className="flex items-center gap-2">
-                                    <span className="font-medium text-white">{field.label}</span>
-                                    <code className="text-xs bg-slate-700 px-2 py-0.5 rounded text-slate-300">
+                                    <span className="font-medium text-foreground">{field.label}</span>
+                                    <Badge variant="neutral" className="rounded font-mono">
                                       {field.name}
-                                    </code>
-                                    <span className="text-xs bg-slate-700 px-2 py-0.5 rounded text-slate-300">
+                                    </Badge>
+                                    <Badge variant="neutral" className="rounded">
                                       {field.type}
-                                    </span>
+                                    </Badge>
                                     {field.required && (
-                                      <span className="text-xs bg-red-500/20 px-2 py-0.5 rounded text-red-400">
+                                      <Badge variant="destructive" className="rounded">
                                         required
-                                      </span>
+                                      </Badge>
                                     )}
                                   </div>
                                 </div>
@@ -345,20 +399,26 @@ export default function DatabaseTypes() {
                     {/* Backup & Restore Commands */}
                     {(type.backupCommand || type.restoreCommand) && (
                       <div className="mb-6">
-                        <h4 className="text-sm font-medium text-slate-300 mb-3">Backup & Restore Templates</h4>
+                        <h4 className="mb-3 text-sm font-medium text-foreground">
+                          Backup & Restore Templates
+                        </h4>
                         <div className="space-y-2">
                           {type.backupCommand && (
-                            <div className="p-3 bg-slate-800 rounded-lg">
-                              <span className="text-xs text-slate-400 block mb-1">Backup Command</span>
-                              <code className="text-sm text-primary-400 font-mono whitespace-pre-wrap">
+                            <div className="rounded-lg bg-muted/50 p-3">
+                              <span className="mb-1 block text-xs text-muted-foreground">
+                                Backup Command
+                              </span>
+                              <code className="font-mono text-sm whitespace-pre-wrap text-primary">
                                 {type.backupCommand}
                               </code>
                             </div>
                           )}
                           {type.restoreCommand && (
-                            <div className="p-3 bg-slate-800 rounded-lg">
-                              <span className="text-xs text-slate-400 block mb-1">Restore Command</span>
-                              <code className="text-sm text-primary-400 font-mono whitespace-pre-wrap">
+                            <div className="rounded-lg bg-muted/50 p-3">
+                              <span className="mb-1 block text-xs text-muted-foreground">
+                                Restore Command
+                              </span>
+                              <code className="font-mono text-sm whitespace-pre-wrap text-primary">
                                 {type.restoreCommand}
                               </code>
                             </div>
@@ -369,46 +429,47 @@ export default function DatabaseTypes() {
 
                     {/* Commands Section */}
                     <div>
-                      <h4 className="text-sm font-medium text-slate-300 mb-3">Commands</h4>
+                      <h4 className="mb-3 text-sm font-medium text-foreground">Commands</h4>
                       {type.commands.length === 0 ? (
-                        <p className="text-slate-500 text-sm">No commands configured</p>
+                        <p className="text-sm text-muted-foreground">No commands configured</p>
                       ) : (
                         <div className="space-y-2">
                           {type.commands.map((cmd) => (
                             <div
                               key={cmd.id}
-                              className="flex items-center justify-between p-3 bg-slate-800 rounded-lg"
+                              className="flex items-center justify-between rounded-lg bg-muted/50 p-3"
                             >
                               <div>
                                 <div className="flex items-center gap-2">
-                                  <span className="font-medium text-white">{cmd.displayName}</span>
-                                  <code className="text-xs bg-slate-700 px-2 py-0.5 rounded text-slate-300">
+                                  <span className="font-medium text-foreground">{cmd.displayName}</span>
+                                  <Badge variant="neutral" className="rounded font-mono">
                                     {cmd.name}
-                                  </code>
+                                  </Badge>
                                 </div>
-                                <code className="text-sm text-primary-400">{cmd.command}</code>
+                                <code className="text-sm text-primary">{cmd.command}</code>
                                 {cmd.description && (
-                                  <p className="text-sm text-slate-400 mt-1">{cmd.description}</p>
+                                  <p className="mt-1 text-sm text-muted-foreground">{cmd.description}</p>
                                 )}
                               </div>
                               {isAdmin(user) && (
-                                <div className="flex items-center gap-2">
-                                  <button
+                                <div className="flex items-center gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    aria-label="Edit command"
                                     onClick={() => openCommandModal(type.id, cmd)}
-                                    className="text-slate-400 hover:text-white"
                                   >
-                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                    </svg>
-                                  </button>
-                                  <button
+                                    <Pencil className="size-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    aria-label="Delete command"
+                                    className="text-muted-foreground hover:text-destructive"
                                     onClick={() => handleDeleteCommand(type.id, cmd.id, cmd.name)}
-                                    className="text-slate-400 hover:text-red-400"
                                   >
-                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                    </svg>
-                                  </button>
+                                    <Trash2 className="size-4" />
+                                  </Button>
                                 </div>
                               )}
                             </div>
@@ -418,152 +479,220 @@ export default function DatabaseTypes() {
                     </div>
                   </div>
                 )}
-              </div>
+              </Card>
             );
           })}
         </div>
       )}
 
       {/* Create Type Modal */}
-      {showCreateModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-md p-5 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-lg font-semibold text-white mb-4">Create Database Type</h3>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Name (lowercase, no spaces)</label>
-                <input
-                  type="text"
-                  value={newTypeName}
-                  onChange={(e) => setNewTypeName(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
-                  placeholder="e.g., postgresql, mysql, redis"
-                  className="input"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Display Name</label>
-                <input
-                  type="text"
-                  value={newTypeDisplayName}
-                  onChange={(e) => setNewTypeDisplayName(e.target.value)}
-                  placeholder="e.g., PostgreSQL, MySQL, Redis"
-                  className="input"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Default Port</label>
-                <input
-                  type="number"
-                  value={newTypeDefaultPort}
-                  onChange={(e) => setNewTypeDefaultPort(e.target.value)}
-                  placeholder="e.g., 5432"
-                  className="input"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Connection Fields (JSON array)</label>
-                <textarea
-                  value={newTypeConnectionFields}
-                  onChange={(e) => setNewTypeConnectionFields(e.target.value)}
-                  placeholder={'[\n  { "name": "host", "label": "Host", "type": "text", "required": true },\n  { "name": "password", "label": "Password", "type": "password", "required": true }\n]'}
-                  className="input font-mono text-sm"
-                  rows={5}
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Backup Command (optional)</label>
-                <textarea
-                  value={newTypeBackupCommand}
-                  onChange={(e) => setNewTypeBackupCommand(e.target.value)}
-                  placeholder="e.g., pg_dump -h {{host}} -p {{port}} -U {{user}} {{database}}"
-                  className="input font-mono text-sm"
-                  rows={3}
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Restore Command (optional)</label>
-                <textarea
-                  value={newTypeRestoreCommand}
-                  onChange={(e) => setNewTypeRestoreCommand(e.target.value)}
-                  placeholder="e.g., psql -h {{host}} -p {{port}} -U {{user}} {{database}} < {{file}}"
-                  className="input font-mono text-sm"
-                  rows={3}
-                />
-              </div>
-              <div className="flex gap-2 justify-end">
-                <button onClick={() => setShowCreateModal(false)} className="btn btn-ghost">
+      <Dialog open={showCreateModal} onOpenChange={setShowCreateModal}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create Database Type</DialogTitle>
+          </DialogHeader>
+          <Form {...typeForm}>
+            <form onSubmit={typeForm.handleSubmit(handleCreateType)} className="space-y-4">
+              <FormField
+                control={typeForm.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Name (lowercase, no spaces)</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="e.g., postgresql, mysql, redis"
+                        {...field}
+                        onChange={(e) =>
+                          field.onChange(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))
+                        }
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={typeForm.control}
+                name="displayName"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Display Name</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g., PostgreSQL, MySQL, Redis" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={typeForm.control}
+                name="defaultPort"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Default Port</FormLabel>
+                    <FormControl>
+                      <Input type="number" placeholder="e.g., 5432" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={typeForm.control}
+                name="connectionFields"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Connection Fields (JSON array)</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        className="font-mono text-sm"
+                        rows={5}
+                        placeholder={
+                          '[\n  { "name": "host", "label": "Host", "type": "text", "required": true },\n  { "name": "password", "label": "Password", "type": "password", "required": true }\n]'
+                        }
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={typeForm.control}
+                name="backupCommand"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Backup Command (optional)</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        className="font-mono text-sm"
+                        rows={3}
+                        placeholder="e.g., pg_dump -h {{host}} -p {{port}} -U {{user}} {{database}}"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={typeForm.control}
+                name="restoreCommand"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Restore Command (optional)</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        className="font-mono text-sm"
+                        rows={3}
+                        placeholder="e.g., psql -h {{host}} -p {{port}} -U {{user}} {{database}} < {{file}}"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <DialogFooter>
+                <Button type="button" variant="ghost" onClick={() => setShowCreateModal(false)}>
                   Cancel
-                </button>
-                <button onClick={handleCreateType} disabled={creating} className="btn btn-primary">
-                  {creating ? 'Creating...' : 'Create'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+                </Button>
+                <Button type="submit" disabled={typeForm.formState.isSubmitting}>
+                  {typeForm.formState.isSubmitting ? 'Creating...' : 'Create'}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
 
       {/* Command Modal */}
-      {showCommandModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-md p-5">
-            <h3 className="text-lg font-semibold text-white mb-4">
-              {editingCommand ? 'Edit Command' : 'Add Command'}
-            </h3>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Name (lowercase, no spaces)</label>
-                <input
-                  type="text"
-                  value={commandForm.name}
-                  onChange={(e) => setCommandForm({ ...commandForm, name: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') })}
-                  placeholder="e.g., shell, dump, restore"
-                  className="input"
-                  disabled={!!editingCommand}
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Display Name</label>
-                <input
-                  type="text"
-                  value={commandForm.displayName}
-                  onChange={(e) => setCommandForm({ ...commandForm, displayName: e.target.value })}
-                  placeholder="e.g., Database Shell, Dump Database"
-                  className="input"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Command</label>
-                <input
-                  type="text"
-                  value={commandForm.command}
-                  onChange={(e) => setCommandForm({ ...commandForm, command: e.target.value })}
-                  placeholder="e.g., psql -U postgres"
-                  className="input font-mono"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Description (optional)</label>
-                <input
-                  type="text"
-                  value={commandForm.description}
-                  onChange={(e) => setCommandForm({ ...commandForm, description: e.target.value })}
-                  placeholder="Brief description of what this command does"
-                  className="input"
-                />
-              </div>
-              <div className="flex gap-2 justify-end">
-                <button onClick={() => setShowCommandModal(false)} className="btn btn-ghost">
+      <Dialog open={showCommandModal} onOpenChange={setShowCommandModal}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingCommand ? 'Edit Command' : 'Add Command'}</DialogTitle>
+          </DialogHeader>
+          <Form {...commandForm}>
+            <form onSubmit={commandForm.handleSubmit(handleSaveCommand)} className="space-y-4">
+              <FormField
+                control={commandForm.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Name (lowercase, no spaces)</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="e.g., shell, dump, restore"
+                        disabled={!!editingCommand}
+                        {...field}
+                        onChange={(e) =>
+                          field.onChange(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))
+                        }
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={commandForm.control}
+                name="displayName"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Display Name</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g., Database Shell, Dump Database" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={commandForm.control}
+                name="command"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Command</FormLabel>
+                    <FormControl>
+                      <Input className="font-mono" placeholder="e.g., psql -U postgres" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={commandForm.control}
+                name="description"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Description (optional)</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder="Brief description of what this command does"
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <DialogFooter>
+                <Button type="button" variant="ghost" onClick={() => setShowCommandModal(false)}>
                   Cancel
-                </button>
-                <button onClick={handleSaveCommand} disabled={savingCommand} className="btn btn-primary">
-                  {savingCommand ? 'Saving...' : editingCommand ? 'Update' : 'Add'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+                </Button>
+                <Button type="submit" disabled={commandForm.formState.isSubmitting}>
+                  {commandForm.formState.isSubmitting
+                    ? 'Saving...'
+                    : editingCommand
+                    ? 'Update'
+                    : 'Add'}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

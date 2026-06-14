@@ -1,25 +1,47 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { Terminal, Cpu, SlidersHorizontal, Clock, Link2, Database, AlertTriangle } from 'lucide-react';
 import { getSystemSettings, updateSystemSettings, resetSystemSettings } from '../../lib/api';
+import { toast } from '../../components/Toast';
+import { getErrorMessage } from '@/lib/helpers';
+import { useConfirm } from '@/hooks/useConfirm';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form';
 
-interface FormData {
-  sshCommandTimeoutSec: number;
-  sshReadyTimeoutSec: number;
-  maxUploadSizeMb: number;
-  pgDumpTimeoutSec: number;
-  activeUserWindowMin: number;
-  registryMaxTags: number;
-  defaultLogLines: number;
-  publicUrl: string;
-  agentCallbackUrl: string;
-  agentStaleThresholdSec: number;
-  agentOfflineThresholdSec: number;
-  auditLogRetentionDays: number;
-  databaseMetricsRetentionDays: number;
-  notificationRetentionDays: number;
-  healthLogRetentionDays: number;
-  webhookDeliveryRetentionDays: number;
-  imageDigestRetentionDays: number;
-}
+const settingsSchema = z.object({
+  sshCommandTimeoutSec: z.number().int().min(1).max(600),
+  sshReadyTimeoutSec: z.number().int().min(1).max(120),
+  maxUploadSizeMb: z.number().int().min(1).max(500),
+  pgDumpTimeoutSec: z.number().int().min(30).max(3600),
+  activeUserWindowMin: z.number().int().min(1).max(1440),
+  registryMaxTags: z.number().int().min(10).max(500),
+  defaultLogLines: z.number().int().min(10).max(10000),
+  publicUrl: z.string(),
+  agentCallbackUrl: z.string(),
+  agentStaleThresholdSec: z.number().int().min(60).max(600),
+  agentOfflineThresholdSec: z.number().int().min(120).max(900),
+  auditLogRetentionDays: z.number().int().min(0).max(3650),
+  databaseMetricsRetentionDays: z.number().int().min(1).max(365),
+  notificationRetentionDays: z.number().int().min(1).max(365),
+  healthLogRetentionDays: z.number().int().min(1).max(365),
+  webhookDeliveryRetentionDays: z.number().int().min(1).max(365),
+  imageDigestRetentionDays: z.number().int().min(1).max(3650),
+});
+
+type FormData = z.infer<typeof settingsSchema>;
 
 interface Defaults {
   sshCommandTimeoutMs: number;
@@ -47,586 +69,591 @@ function secToMs(sec: number): number {
   return sec * 1000;
 }
 
-// Settings section component - always expanded, cleaner UI
+const DEFAULT_FORM: FormData = {
+  sshCommandTimeoutSec: 60,
+  sshReadyTimeoutSec: 10,
+  maxUploadSizeMb: 50,
+  pgDumpTimeoutSec: 300,
+  activeUserWindowMin: 15,
+  registryMaxTags: 50,
+  defaultLogLines: 50,
+  publicUrl: '',
+  agentCallbackUrl: '',
+  agentStaleThresholdSec: 180,
+  agentOfflineThresholdSec: 300,
+  auditLogRetentionDays: 90,
+  databaseMetricsRetentionDays: 30,
+  notificationRetentionDays: 30,
+  healthLogRetentionDays: 30,
+  webhookDeliveryRetentionDays: 30,
+  imageDigestRetentionDays: 90,
+};
+
+// Map an API settings payload to the seconds/string form shape.
+function settingsToForm(settings: Awaited<ReturnType<typeof getSystemSettings>>['settings']): FormData {
+  return {
+    sshCommandTimeoutSec: msToSec(settings.sshCommandTimeoutMs),
+    sshReadyTimeoutSec: msToSec(settings.sshReadyTimeoutMs),
+    maxUploadSizeMb: settings.maxUploadSizeMb,
+    pgDumpTimeoutSec: msToSec(settings.pgDumpTimeoutMs),
+    activeUserWindowMin: settings.activeUserWindowMin,
+    registryMaxTags: settings.registryMaxTags,
+    defaultLogLines: settings.defaultLogLines,
+    publicUrl: settings.publicUrl || '',
+    agentCallbackUrl: settings.agentCallbackUrl || '',
+    agentStaleThresholdSec: msToSec(settings.agentStaleThresholdMs),
+    agentOfflineThresholdSec: msToSec(settings.agentOfflineThresholdMs),
+    auditLogRetentionDays: settings.auditLogRetentionDays,
+    databaseMetricsRetentionDays: settings.databaseMetricsRetentionDays ?? 30,
+    notificationRetentionDays: settings.notificationRetentionDays ?? 30,
+    healthLogRetentionDays: settings.healthLogRetentionDays ?? 30,
+    webhookDeliveryRetentionDays: settings.webhookDeliveryRetentionDays ?? 30,
+    imageDigestRetentionDays: settings.imageDigestRetentionDays ?? 90,
+  };
+}
+
+/** Number-input helper: empty → 0, else the parsed numeric value. */
+const toNumber = (value: string) => (value === '' ? 0 : Number(value));
+
 function SettingsSection({
   title,
-  icon,
+  icon: Icon,
   children,
 }: {
   title: string;
-  icon: React.ReactNode;
+  icon: React.ComponentType<{ className?: string }>;
   children: React.ReactNode;
 }) {
   return (
-    <section className="card">
-      <div className="flex items-center gap-3 mb-4">
-        <div className="text-slate-400">{icon}</div>
-        <h2 className="text-base font-semibold text-white">{title}</h2>
-      </div>
-      <div>{children}</div>
-    </section>
-  );
-}
-
-// Icons
-function SSHIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className || "w-5 h-5"} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-    </svg>
-  );
-}
-
-function AgentIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className || "w-5 h-5"} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
-    </svg>
-  );
-}
-
-function LimitsIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className || "w-5 h-5"} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
-    </svg>
-  );
-}
-
-function RetentionIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className || "w-5 h-5"} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-  );
-}
-
-function LinkIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className || "w-5 h-5"} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-    </svg>
-  );
-}
-
-function DatabaseIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className || "w-5 h-5"} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4" />
-    </svg>
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-3 text-base">
+          <Icon className="size-5 text-muted-foreground" />
+          {title}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>{children}</CardContent>
+    </Card>
   );
 }
 
 export default function SystemSettings() {
+  const confirm = useConfirm();
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
   const [defaults, setDefaults] = useState<Defaults | null>(null);
-  const [formData, setFormData] = useState<FormData>({
-    sshCommandTimeoutSec: 60,
-    sshReadyTimeoutSec: 10,
-    maxUploadSizeMb: 50,
-    pgDumpTimeoutSec: 300,
-    activeUserWindowMin: 15,
-    registryMaxTags: 50,
-    defaultLogLines: 50,
-    publicUrl: '',
-    agentCallbackUrl: '',
-    agentStaleThresholdSec: 180,
-    agentOfflineThresholdSec: 300,
-    auditLogRetentionDays: 90,
-    databaseMetricsRetentionDays: 30,
-    notificationRetentionDays: 30,
-    healthLogRetentionDays: 30,
-    webhookDeliveryRetentionDays: 30,
-    imageDigestRetentionDays: 90,
+
+  const form = useForm<FormData>({
+    resolver: zodResolver(settingsSchema),
+    defaultValues: DEFAULT_FORM,
   });
 
   useEffect(() => {
     loadSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadSettings = async () => {
     try {
       setLoading(true);
-      setError(null);
       const { settings, defaults } = await getSystemSettings();
       setDefaults(defaults);
-      setFormData({
-        sshCommandTimeoutSec: msToSec(settings.sshCommandTimeoutMs),
-        sshReadyTimeoutSec: msToSec(settings.sshReadyTimeoutMs),
-        maxUploadSizeMb: settings.maxUploadSizeMb,
-        pgDumpTimeoutSec: msToSec(settings.pgDumpTimeoutMs),
-        activeUserWindowMin: settings.activeUserWindowMin,
-        registryMaxTags: settings.registryMaxTags,
-        defaultLogLines: settings.defaultLogLines,
-        publicUrl: settings.publicUrl || '',
-        agentCallbackUrl: settings.agentCallbackUrl || '',
-        agentStaleThresholdSec: msToSec(settings.agentStaleThresholdMs),
-        agentOfflineThresholdSec: msToSec(settings.agentOfflineThresholdMs),
-        auditLogRetentionDays: settings.auditLogRetentionDays,
-        databaseMetricsRetentionDays: settings.databaseMetricsRetentionDays ?? 30,
-        notificationRetentionDays: settings.notificationRetentionDays ?? 30,
-        healthLogRetentionDays: settings.healthLogRetentionDays ?? 30,
-        webhookDeliveryRetentionDays: settings.webhookDeliveryRetentionDays ?? 30,
-        imageDigestRetentionDays: settings.imageDigestRetentionDays ?? 90,
-      });
+      form.reset(settingsToForm(settings));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load settings');
+      toast.error(getErrorMessage(err, 'Failed to load settings'));
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const onSubmit = async (values: FormData) => {
     try {
-      setSaving(true);
-      setError(null);
-      setSuccess(null);
-
       const updateData: Parameters<typeof updateSystemSettings>[0] = {
-        sshCommandTimeoutMs: secToMs(formData.sshCommandTimeoutSec),
-        sshReadyTimeoutMs: secToMs(formData.sshReadyTimeoutSec),
-        maxUploadSizeMb: formData.maxUploadSizeMb,
-        pgDumpTimeoutMs: secToMs(formData.pgDumpTimeoutSec),
-        activeUserWindowMin: formData.activeUserWindowMin,
-        registryMaxTags: formData.registryMaxTags,
-        defaultLogLines: formData.defaultLogLines,
-        publicUrl: formData.publicUrl || null,
-        agentCallbackUrl: formData.agentCallbackUrl || null,
-        agentStaleThresholdMs: secToMs(formData.agentStaleThresholdSec),
-        agentOfflineThresholdMs: secToMs(formData.agentOfflineThresholdSec),
-        auditLogRetentionDays: formData.auditLogRetentionDays,
-        databaseMetricsRetentionDays: formData.databaseMetricsRetentionDays,
-        notificationRetentionDays: formData.notificationRetentionDays,
-        healthLogRetentionDays: formData.healthLogRetentionDays,
-        webhookDeliveryRetentionDays: formData.webhookDeliveryRetentionDays,
-        imageDigestRetentionDays: formData.imageDigestRetentionDays,
+        sshCommandTimeoutMs: secToMs(values.sshCommandTimeoutSec),
+        sshReadyTimeoutMs: secToMs(values.sshReadyTimeoutSec),
+        maxUploadSizeMb: values.maxUploadSizeMb,
+        pgDumpTimeoutMs: secToMs(values.pgDumpTimeoutSec),
+        activeUserWindowMin: values.activeUserWindowMin,
+        registryMaxTags: values.registryMaxTags,
+        defaultLogLines: values.defaultLogLines,
+        publicUrl: values.publicUrl || null,
+        agentCallbackUrl: values.agentCallbackUrl || null,
+        agentStaleThresholdMs: secToMs(values.agentStaleThresholdSec),
+        agentOfflineThresholdMs: secToMs(values.agentOfflineThresholdSec),
+        auditLogRetentionDays: values.auditLogRetentionDays,
+        databaseMetricsRetentionDays: values.databaseMetricsRetentionDays,
+        notificationRetentionDays: values.notificationRetentionDays,
+        healthLogRetentionDays: values.healthLogRetentionDays,
+        webhookDeliveryRetentionDays: values.webhookDeliveryRetentionDays,
+        imageDigestRetentionDays: values.imageDigestRetentionDays,
       };
       await updateSystemSettings(updateData);
-
-      setSuccess('Settings saved successfully');
+      // Reset to the just-saved values so the form is no longer dirty.
+      form.reset(values);
+      toast.success('Settings saved successfully');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save settings');
-    } finally {
-      setSaving(false);
+      toast.error(getErrorMessage(err, 'Failed to save settings'));
     }
   };
 
   const handleReset = async () => {
-    if (!confirm('Are you sure you want to reset all settings to defaults?')) {
-      return;
-    }
+    const confirmed = await confirm({
+      title: 'Reset settings',
+      description: 'Are you sure you want to reset all settings to defaults?',
+      confirmText: 'Reset to Defaults',
+      destructive: true,
+    });
+    if (!confirmed) return;
 
     try {
       setResetting(true);
-      setError(null);
-      setSuccess(null);
-
       const { settings } = await resetSystemSettings();
-      setFormData({
-        sshCommandTimeoutSec: msToSec(settings.sshCommandTimeoutMs),
-        sshReadyTimeoutSec: msToSec(settings.sshReadyTimeoutMs),
-        maxUploadSizeMb: settings.maxUploadSizeMb,
-        pgDumpTimeoutSec: msToSec(settings.pgDumpTimeoutMs),
-        activeUserWindowMin: settings.activeUserWindowMin,
-        registryMaxTags: settings.registryMaxTags,
-        defaultLogLines: settings.defaultLogLines,
-        publicUrl: settings.publicUrl || '',
-        agentCallbackUrl: settings.agentCallbackUrl || '',
-        agentStaleThresholdSec: msToSec(settings.agentStaleThresholdMs),
-        agentOfflineThresholdSec: msToSec(settings.agentOfflineThresholdMs),
-        auditLogRetentionDays: settings.auditLogRetentionDays,
-        databaseMetricsRetentionDays: settings.databaseMetricsRetentionDays ?? 30,
-        notificationRetentionDays: settings.notificationRetentionDays ?? 30,
-        healthLogRetentionDays: settings.healthLogRetentionDays ?? 30,
-        webhookDeliveryRetentionDays: settings.webhookDeliveryRetentionDays ?? 30,
-        imageDigestRetentionDays: settings.imageDigestRetentionDays ?? 90,
-      });
-
-      setSuccess('Settings reset to defaults');
+      form.reset(settingsToForm(settings));
+      toast.success('Settings reset to defaults');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to reset settings');
+      toast.error(getErrorMessage(err, 'Failed to reset settings'));
     } finally {
       setResetting(false);
     }
   };
 
-  const updateField = <K extends keyof FormData>(field: K, value: FormData[K]) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-  };
-
   if (loading) {
     return (
-      <div className="p-6">
-        <div className="text-slate-400">Loading settings...</div>
+      <div className="space-y-4 p-6">
+        <Skeleton className="h-40 w-full" />
+        <Skeleton className="h-40 w-full" />
+        <Skeleton className="h-40 w-full" />
       </div>
     );
   }
 
+  const saving = form.formState.isSubmitting;
+  const isDirty = form.formState.isDirty;
+
   return (
     <div className="p-6">
-      {error && (
-        <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
-          <p className="text-red-400">{error}</p>
-        </div>
-      )}
-
-      {success && (
-        <div className="mb-6 p-4 bg-green-500/10 border border-green-500/30 rounded-lg">
-          <p className="text-green-400">{success}</p>
-        </div>
-      )}
-
-      <form onSubmit={handleSubmit} className="space-y-4">
-        {/* SSH Configuration */}
-        <SettingsSection title="SSH Configuration" icon={<SSHIcon />}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">
-                Command Timeout
-                <span className="text-slate-500 ml-1">(seconds)</span>
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={600}
-                value={formData.sshCommandTimeoutSec}
-                onChange={(e) => updateField('sshCommandTimeoutSec', parseInt(e.target.value) || 60)}
-                className="input w-full"
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          {/* SSH Configuration */}
+          <SettingsSection title="SSH Configuration" icon={Terminal}>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <FormField
+                control={form.control}
+                name="sshCommandTimeoutSec"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Command Timeout (seconds)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={600}
+                        {...field}
+                        onChange={(e) => field.onChange(toNumber(e.target.value))}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Max time for SSH command execution (default: {defaults ? msToSec(defaults.sshCommandTimeoutMs) : 60}s)
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
               />
-              <p className="text-xs text-slate-500 mt-1">
-                Max time for SSH command execution (default: {defaults ? msToSec(defaults.sshCommandTimeoutMs) : 60}s)
-              </p>
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">
-                Connection Timeout
-                <span className="text-slate-500 ml-1">(seconds)</span>
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={120}
-                value={formData.sshReadyTimeoutSec}
-                onChange={(e) => updateField('sshReadyTimeoutSec', parseInt(e.target.value) || 10)}
-                className="input w-full"
+              <FormField
+                control={form.control}
+                name="sshReadyTimeoutSec"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Connection Timeout (seconds)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={120}
+                        {...field}
+                        onChange={(e) => field.onChange(toNumber(e.target.value))}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      SSH connection establishment timeout (default: {defaults ? msToSec(defaults.sshReadyTimeoutMs) : 10}s)
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
               />
-              <p className="text-xs text-slate-500 mt-1">
-                SSH connection establishment timeout (default: {defaults ? msToSec(defaults.sshReadyTimeoutMs) : 10}s)
-              </p>
             </div>
+          </SettingsSection>
+
+          {/* URLs */}
+          <SettingsSection title="URLs" icon={Link2}>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <FormField
+                control={form.control}
+                name="publicUrl"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Public URL</FormLabel>
+                    <FormControl>
+                      <Input type="text" placeholder="https://deploy.example.com" {...field} />
+                    </FormControl>
+                    <FormDescription>Public URL for links in email and Slack notifications</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="agentCallbackUrl"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>
+                      Agent Callback URL <span className="text-amber-500">*</span>
+                    </FormLabel>
+                    <FormControl>
+                      <Input type="text" placeholder="http://10.30.10.5:3000" {...field} />
+                    </FormControl>
+                    <FormDescription>
+                      Internal URL for agents to reach BRIDGEPORT (VPC IP).
+                      <span className="font-medium text-amber-500"> Required for agent deployment.</span>
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+          </SettingsSection>
+
+          {/* Agent Configuration */}
+          <SettingsSection title="Agent Configuration" icon={Cpu}>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <FormField
+                control={form.control}
+                name="agentStaleThresholdSec"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Stale Threshold (seconds)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min={60}
+                        max={600}
+                        {...field}
+                        onChange={(e) => field.onChange(toNumber(e.target.value))}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Mark agent as "stale" after no push for this time (default: {defaults ? msToSec(defaults.agentStaleThresholdMs) : 180}s)
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="agentOfflineThresholdSec"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Offline Threshold (seconds)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min={120}
+                        max={900}
+                        {...field}
+                        onChange={(e) => field.onChange(toNumber(e.target.value))}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Mark agent as "offline" and alert after no push for this time (default: {defaults ? msToSec(defaults.agentOfflineThresholdMs) : 300}s)
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+          </SettingsSection>
+
+          {/* Limits */}
+          <SettingsSection title="Limits" icon={SlidersHorizontal}>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <FormField
+                control={form.control}
+                name="maxUploadSizeMb"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Max Upload Size (MB)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={500}
+                        {...field}
+                        onChange={(e) => field.onChange(toNumber(e.target.value))}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Maximum file upload size (default: {defaults?.maxUploadSizeMb || 50} MB)
+                    </FormDescription>
+                    <p className="mt-1 flex items-center gap-1 text-xs text-amber-500">
+                      <AlertTriangle className="size-3" />
+                      Requires server restart to take effect
+                    </p>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="activeUserWindowMin"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Active User Window (minutes)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={1440}
+                        {...field}
+                        onChange={(e) => field.onChange(toNumber(e.target.value))}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Window for "active user" status (default: {defaults?.activeUserWindowMin || 15} min)
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="registryMaxTags"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Registry Max Tags</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min={10}
+                        max={500}
+                        {...field}
+                        onChange={(e) => field.onChange(toNumber(e.target.value))}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Maximum tags to fetch from registry (default: {defaults?.registryMaxTags || 50})
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="defaultLogLines"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Default Log Lines</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min={10}
+                        max={10000}
+                        {...field}
+                        onChange={(e) => field.onChange(toNumber(e.target.value))}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Default tail lines for container logs (default: {defaults?.defaultLogLines || 50})
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+          </SettingsSection>
+
+          {/* Database & Backup */}
+          <SettingsSection title="Database & Backup" icon={Database}>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <FormField
+                control={form.control}
+                name="pgDumpTimeoutSec"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>pg_dump Timeout (seconds)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min={30}
+                        max={3600}
+                        {...field}
+                        onChange={(e) => field.onChange(toNumber(e.target.value))}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Global default timeout for PostgreSQL backup dumps (30–3600s, default: {defaults ? msToSec(defaults.pgDumpTimeoutMs) : 300}s).
+                      Per-database settings override this value.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+          </SettingsSection>
+
+          {/* Retention */}
+          <SettingsSection title="Retention" icon={Clock}>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <FormField
+                control={form.control}
+                name="auditLogRetentionDays"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Audit Log Retention (days)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={3650}
+                        {...field}
+                        onChange={(e) => field.onChange(toNumber(e.target.value))}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Days to keep audit logs (default: {defaults?.auditLogRetentionDays || 90} days, 0 = keep forever)
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="databaseMetricsRetentionDays"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Database Metrics Retention (days)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={365}
+                        {...field}
+                        onChange={(e) => field.onChange(toNumber(e.target.value))}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Days to keep database monitoring metrics (default: {defaults?.databaseMetricsRetentionDays || 30} days)
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="notificationRetentionDays"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Notification Retention (days)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={365}
+                        {...field}
+                        onChange={(e) => field.onChange(toNumber(e.target.value))}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Days to keep delivered in-app notifications (default: {defaults?.notificationRetentionDays || 30} days)
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="healthLogRetentionDays"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Health Check Log Retention (days)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={365}
+                        {...field}
+                        onChange={(e) => field.onChange(toNumber(e.target.value))}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Days to keep server and service health check logs (default: {defaults?.healthLogRetentionDays || 30} days)
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="webhookDeliveryRetentionDays"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Webhook Delivery Retention (days)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={365}
+                        {...field}
+                        onChange={(e) => field.onChange(toNumber(e.target.value))}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Days to keep webhook delivery attempt history (default: {defaults?.webhookDeliveryRetentionDays || 30} days)
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="imageDigestRetentionDays"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Image Digest Retention (days)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={3650}
+                        {...field}
+                        onChange={(e) => field.onChange(toNumber(e.target.value))}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      Days to keep container image digest history (default: {defaults?.imageDigestRetentionDays || 90} days)
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+          </SettingsSection>
+
+          {/* Actions */}
+          <div className="flex items-center justify-between pt-4">
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleReset}
+              disabled={resetting || saving}
+            >
+              {resetting ? 'Resetting...' : 'Reset to Defaults'}
+            </Button>
+            <Button type="submit" disabled={saving || resetting || !isDirty}>
+              {saving ? 'Saving...' : 'Save Changes'}
+            </Button>
           </div>
-        </SettingsSection>
-
-        {/* URLs */}
-        <SettingsSection title="URLs" icon={<LinkIcon />}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">
-                Public URL
-              </label>
-              <input
-                type="text"
-                value={formData.publicUrl}
-                onChange={(e) => updateField('publicUrl', e.target.value)}
-                placeholder="https://deploy.example.com"
-                className="input w-full"
-              />
-              <p className="text-xs text-slate-500 mt-1">
-                Public URL for links in email and Slack notifications
-              </p>
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">
-                Agent Callback URL
-                <span className="text-amber-500 ml-1">*</span>
-              </label>
-              <input
-                type="text"
-                value={formData.agentCallbackUrl}
-                onChange={(e) => updateField('agentCallbackUrl', e.target.value)}
-                placeholder="http://10.30.10.5:3000"
-                className="input w-full"
-              />
-              <p className="text-xs text-slate-500 mt-1">
-                Internal URL for agents to reach BRIDGEPORT (VPC IP).
-                <span className="text-amber-500 font-medium"> Required for agent deployment.</span>
-              </p>
-            </div>
-          </div>
-        </SettingsSection>
-
-        {/* Agent Configuration */}
-        <SettingsSection title="Agent Configuration" icon={<AgentIcon />}>
-          <div className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">
-                  Stale Threshold
-                  <span className="text-slate-500 ml-1">(seconds)</span>
-                </label>
-                <input
-                  type="number"
-                  min={60}
-                  max={600}
-                  value={formData.agentStaleThresholdSec}
-                  onChange={(e) => updateField('agentStaleThresholdSec', parseInt(e.target.value) || 180)}
-                  className="input w-full"
-                />
-                <p className="text-xs text-slate-500 mt-1">
-                  Mark agent as "stale" after no push for this time (default: {defaults ? msToSec(defaults.agentStaleThresholdMs) : 180}s)
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">
-                  Offline Threshold
-                  <span className="text-slate-500 ml-1">(seconds)</span>
-                </label>
-                <input
-                  type="number"
-                  min={120}
-                  max={900}
-                  value={formData.agentOfflineThresholdSec}
-                  onChange={(e) => updateField('agentOfflineThresholdSec', parseInt(e.target.value) || 300)}
-                  className="input w-full"
-                />
-                <p className="text-xs text-slate-500 mt-1">
-                  Mark agent as "offline" and alert after no push for this time (default: {defaults ? msToSec(defaults.agentOfflineThresholdMs) : 300}s)
-                </p>
-              </div>
-            </div>
-          </div>
-        </SettingsSection>
-
-        {/* Limits */}
-        <SettingsSection title="Limits" icon={<LimitsIcon />}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">
-                Max Upload Size
-                <span className="text-slate-500 ml-1">(MB)</span>
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={500}
-                value={formData.maxUploadSizeMb}
-                onChange={(e) => updateField('maxUploadSizeMb', parseInt(e.target.value) || 50)}
-                className="input w-full"
-              />
-              <p className="text-xs text-slate-500 mt-1">
-                Maximum file upload size (default: {defaults?.maxUploadSizeMb || 50} MB)
-              </p>
-              <p className="text-xs text-amber-500 mt-1 flex items-center gap-1">
-                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                </svg>
-                Requires server restart to take effect
-              </p>
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">
-                Active User Window
-                <span className="text-slate-500 ml-1">(minutes)</span>
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={1440}
-                value={formData.activeUserWindowMin}
-                onChange={(e) => updateField('activeUserWindowMin', parseInt(e.target.value) || 15)}
-                className="input w-full"
-              />
-              <p className="text-xs text-slate-500 mt-1">
-                Window for "active user" status (default: {defaults?.activeUserWindowMin || 15} min)
-              </p>
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">Registry Max Tags</label>
-              <input
-                type="number"
-                min={10}
-                max={500}
-                value={formData.registryMaxTags}
-                onChange={(e) => updateField('registryMaxTags', parseInt(e.target.value) || 50)}
-                className="input w-full"
-              />
-              <p className="text-xs text-slate-500 mt-1">
-                Maximum tags to fetch from registry (default: {defaults?.registryMaxTags || 50})
-              </p>
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">Default Log Lines</label>
-              <input
-                type="number"
-                min={10}
-                max={10000}
-                value={formData.defaultLogLines}
-                onChange={(e) => updateField('defaultLogLines', parseInt(e.target.value) || 50)}
-                className="input w-full"
-              />
-              <p className="text-xs text-slate-500 mt-1">
-                Default tail lines for container logs (default: {defaults?.defaultLogLines || 50})
-              </p>
-            </div>
-          </div>
-        </SettingsSection>
-
-        {/* Database & Backup */}
-        <SettingsSection title="Database & Backup" icon={<DatabaseIcon />}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">
-                pg_dump Timeout
-                <span className="text-slate-500 ml-1">(seconds)</span>
-              </label>
-              <input
-                type="number"
-                min={30}
-                max={3600}
-                value={formData.pgDumpTimeoutSec}
-                onChange={(e) => updateField('pgDumpTimeoutSec', parseInt(e.target.value) || 300)}
-                className="input w-full"
-              />
-              <p className="text-xs text-slate-500 mt-1">
-                Global default timeout for PostgreSQL backup dumps (30–3600s, default: {defaults ? msToSec(defaults.pgDumpTimeoutMs) : 300}s).
-                Per-database settings override this value.
-              </p>
-            </div>
-          </div>
-        </SettingsSection>
-
-        {/* Retention */}
-        <SettingsSection title="Retention" icon={<RetentionIcon />}>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">
-                Audit Log Retention
-                <span className="text-slate-500 ml-1">(days)</span>
-              </label>
-              <input
-                type="number"
-                min={0}
-                max={3650}
-                value={formData.auditLogRetentionDays}
-                onChange={(e) => updateField('auditLogRetentionDays', parseInt(e.target.value) || 90)}
-                className="input w-full"
-              />
-              <p className="text-xs text-slate-500 mt-1">
-                Days to keep audit logs (default: {defaults?.auditLogRetentionDays || 90} days, 0 = keep forever)
-              </p>
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">
-                Database Metrics Retention
-                <span className="text-slate-500 ml-1">(days)</span>
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={365}
-                value={formData.databaseMetricsRetentionDays}
-                onChange={(e) => updateField('databaseMetricsRetentionDays', parseInt(e.target.value) || 30)}
-                className="input w-full"
-              />
-              <p className="text-xs text-slate-500 mt-1">
-                Days to keep database monitoring metrics (default: {defaults?.databaseMetricsRetentionDays || 30} days)
-              </p>
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">
-                Notification Retention
-                <span className="text-slate-500 ml-1">(days)</span>
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={365}
-                value={formData.notificationRetentionDays}
-                onChange={(e) => updateField('notificationRetentionDays', parseInt(e.target.value) || 30)}
-                className="input w-full"
-              />
-              <p className="text-xs text-slate-500 mt-1">
-                Days to keep delivered in-app notifications (default: {defaults?.notificationRetentionDays || 30} days)
-              </p>
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">
-                Health Check Log Retention
-                <span className="text-slate-500 ml-1">(days)</span>
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={365}
-                value={formData.healthLogRetentionDays}
-                onChange={(e) => updateField('healthLogRetentionDays', parseInt(e.target.value) || 30)}
-                className="input w-full"
-              />
-              <p className="text-xs text-slate-500 mt-1">
-                Days to keep server and service health check logs (default: {defaults?.healthLogRetentionDays || 30} days)
-              </p>
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">
-                Webhook Delivery Retention
-                <span className="text-slate-500 ml-1">(days)</span>
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={365}
-                value={formData.webhookDeliveryRetentionDays}
-                onChange={(e) => updateField('webhookDeliveryRetentionDays', parseInt(e.target.value) || 30)}
-                className="input w-full"
-              />
-              <p className="text-xs text-slate-500 mt-1">
-                Days to keep webhook delivery attempt history (default: {defaults?.webhookDeliveryRetentionDays || 30} days)
-              </p>
-            </div>
-            <div>
-              <label className="block text-sm text-slate-400 mb-1">
-                Image Digest Retention
-                <span className="text-slate-500 ml-1">(days)</span>
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={3650}
-                value={formData.imageDigestRetentionDays}
-                onChange={(e) => updateField('imageDigestRetentionDays', parseInt(e.target.value) || 90)}
-                className="input w-full"
-              />
-              <p className="text-xs text-slate-500 mt-1">
-                Days to keep container image digest history (default: {defaults?.imageDigestRetentionDays || 90} days)
-              </p>
-            </div>
-          </div>
-        </SettingsSection>
-
-        {/* Actions */}
-        <div className="flex items-center justify-between pt-4">
-          <button
-            type="button"
-            onClick={handleReset}
-            disabled={resetting || saving}
-            className="btn btn-secondary"
-          >
-            {resetting ? 'Resetting...' : 'Reset to Defaults'}
-          </button>
-          <button
-            type="submit"
-            disabled={saving || resetting}
-            className="btn btn-primary"
-          >
-            {saving ? 'Saving...' : 'Save Changes'}
-          </button>
-        </div>
-      </form>
+        </form>
+      </Form>
     </div>
   );
 }

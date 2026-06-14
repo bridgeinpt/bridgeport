@@ -1,4 +1,8 @@
 import { useEffect, useState } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { Plus, Trash2 } from 'lucide-react';
 import { useAuthStore, isAdmin } from '../../lib/store';
 import {
   getSmtpConfig,
@@ -35,9 +39,45 @@ import {
   type SentryStatus,
 } from '../../lib/api';
 import { useToast } from '../../components/Toast';
-import { PlusIcon, TrashIcon } from '../../components/Icons';
-import { safeJsonParse } from '../../lib/helpers';
+import { getErrorMessage, safeJsonParse } from '../../lib/helpers';
 import { useSentryInitialized } from '../../lib/sentry';
+import { useConfirm } from '@/hooks/useConfirm';
+import { statusVariant } from '@/lib/status';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
+import { Separator } from '@/components/ui/separator';
+import { Skeleton } from '@/components/ui/skeleton';
+import { EmptyState } from '@/components/ui/empty-state';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form';
 
 type TabType = 'smtp' | 'webhooks' | 'slack' | 'sentry' | 'types';
 
@@ -95,9 +135,31 @@ function validateDelaysSec(delaysSec: string): { error: string | null; preview: 
   return { error: null, preview: values.map((v) => `${v}s`).join(', ') };
 }
 
+const webhookSchema = z.object({
+  name: z.string().min(1, 'Name is required'),
+  url: z.string().min(1, 'URL is required').url('Enter a valid URL'),
+  secret: z.string().optional(),
+  enabled: z.boolean(),
+});
+type WebhookFormValues = z.infer<typeof webhookSchema>;
+
+const slackChannelSchema = z.object({
+  name: z.string().min(1, 'Display name is required'),
+  slackChannelName: z.string().optional(),
+  webhookUrl: z.string().optional(),
+  isDefault: z.boolean(),
+  enabled: z.boolean(),
+});
+type SlackChannelFormValues = z.infer<typeof slackChannelSchema>;
+
+function SeverityBadge({ severity }: { severity: string }) {
+  return <Badge variant={statusVariant('severity', severity)}>{severity}</Badge>;
+}
+
 export default function NotificationSettings() {
   const { user } = useAuthStore();
   const toast = useToast();
+  const confirm = useConfirm();
   const sentryReady = useSentryInitialized();
   const [activeTab, setActiveTab] = useState<TabType>('smtp');
   const [loading, setLoading] = useState(true);
@@ -121,30 +183,33 @@ export default function NotificationSettings() {
   // Webhooks state
   const [webhooks, setWebhooks] = useState<WebhookConfig[]>([]);
   const [editingWebhook, setEditingWebhook] = useState<WebhookConfig | null>(null);
-  const [webhookForm, setWebhookForm] = useState<WebhookConfigInput>({
-    name: '',
-    url: '',
-    secret: '',
-    enabled: true,
-  });
   const [webhookSaving, setWebhookSaving] = useState(false);
   const [showWebhookModal, setShowWebhookModal] = useState(false);
   const [testingWebhook, setTestingWebhook] = useState<string | null>(null);
+
+  const webhookFormCtx = useForm<WebhookFormValues>({
+    resolver: zodResolver(webhookSchema),
+    defaultValues: { name: '', url: '', secret: '', enabled: true },
+  });
 
   // Slack state
   const [slackChannels, setSlackChannels] = useState<SlackChannel[]>([]);
   const [slackRoutings, setSlackRoutings] = useState<SlackRouting[]>([]);
   const [editingSlackChannel, setEditingSlackChannel] = useState<SlackChannel | null>(null);
-  const [slackChannelForm, setSlackChannelForm] = useState<SlackChannelInput>({
-    name: '',
-    slackChannelName: '',
-    webhookUrl: '',
-    isDefault: false,
-    enabled: true,
-  });
   const [slackChannelSaving, setSlackChannelSaving] = useState(false);
   const [showSlackChannelModal, setShowSlackChannelModal] = useState(false);
   const [testingSlackChannel, setTestingSlackChannel] = useState<string | null>(null);
+
+  const slackChannelFormCtx = useForm<SlackChannelFormValues>({
+    resolver: zodResolver(slackChannelSchema),
+    defaultValues: {
+      name: '',
+      slackChannelName: '',
+      webhookUrl: '',
+      isDefault: false,
+      enabled: true,
+    },
+  });
 
   // Notification types state
   const [notificationTypes, setNotificationTypes] = useState<NotificationType[]>([]);
@@ -172,6 +237,7 @@ export default function NotificationSettings() {
   useEffect(() => {
     if (!isAdmin(user)) return;
     loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   const loadData = async () => {
@@ -217,6 +283,10 @@ export default function NotificationSettings() {
         webhookRetryDelaysSec: parseDelaysMs(systemRes.settings.webhookRetryDelaysMs),
       });
       setDeliverySettingsDefaults(systemRes.defaults);
+    } catch (error) {
+      // B7: surface load failures instead of leaving the page stuck on the
+      // loading skeleton with no feedback.
+      toast.error(getErrorMessage(error, 'Failed to load notification settings'));
     } finally {
       setLoading(false);
     }
@@ -231,7 +301,7 @@ export default function NotificationSettings() {
       setSmtpConfig(result.config);
       toast.success('SMTP configuration saved');
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to save SMTP configuration');
+      toast.error(getErrorMessage(error, 'Failed to save SMTP configuration'));
     } finally {
       setSmtpSaving(false);
     }
@@ -243,7 +313,7 @@ export default function NotificationSettings() {
       const result = await testSmtpConnection(testEmail || undefined);
       toast.success(result.message);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'SMTP test failed');
+      toast.error(getErrorMessage(error, 'SMTP test failed'));
     } finally {
       setSmtpTesting(false);
     }
@@ -253,44 +323,56 @@ export default function NotificationSettings() {
   const openWebhookModal = (webhook?: WebhookConfig) => {
     if (webhook) {
       setEditingWebhook(webhook);
-      setWebhookForm({
+      webhookFormCtx.reset({
         name: webhook.name,
         url: webhook.url,
         secret: '',
         enabled: webhook.enabled,
-        typeFilter: safeJsonParse(webhook.typeFilter, undefined),
-        environmentIds: safeJsonParse(webhook.environmentIds, undefined),
       });
     } else {
       setEditingWebhook(null);
-      setWebhookForm({ name: '', url: '', secret: '', enabled: true });
+      webhookFormCtx.reset({ name: '', url: '', secret: '', enabled: true });
     }
     setShowWebhookModal(true);
   };
 
-  const handleSaveWebhook = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveWebhook = async (values: WebhookFormValues) => {
     setWebhookSaving(true);
     try {
+      const payload: WebhookConfigInput = {
+        name: values.name,
+        url: values.url,
+        secret: values.secret,
+        enabled: values.enabled,
+      };
       if (editingWebhook) {
-        const result = await updateWebhook(editingWebhook.id, webhookForm);
+        // Preserve existing typeFilter/environmentIds, which aren't edited here.
+        payload.typeFilter = safeJsonParse(editingWebhook.typeFilter, undefined);
+        payload.environmentIds = safeJsonParse(editingWebhook.environmentIds, undefined);
+        const result = await updateWebhook(editingWebhook.id, payload);
         setWebhooks((prev) => prev.map((w) => (w.id === editingWebhook.id ? result.webhook : w)));
         toast.success('Webhook updated');
       } else {
-        const result = await createWebhook(webhookForm);
+        const result = await createWebhook(payload);
         setWebhooks((prev) => [...prev, result.webhook]);
         toast.success('Webhook created');
       }
       setShowWebhookModal(false);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to save webhook');
+      toast.error(getErrorMessage(error, 'Failed to save webhook'));
     } finally {
       setWebhookSaving(false);
     }
   };
 
   const handleDeleteWebhook = async (id: string) => {
-    if (!confirm('Delete this webhook?')) return;
+    const ok = await confirm({
+      title: 'Delete webhook?',
+      description: 'Delete this webhook?',
+      confirmText: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
     try {
       await deleteWebhook(id);
       setWebhooks((prev) => prev.filter((w) => w.id !== id));
@@ -310,7 +392,7 @@ export default function NotificationSettings() {
         prev.map((w) => (w.id === id ? { ...w, lastTriggeredAt: new Date().toISOString() } : w))
       );
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Webhook test failed');
+      toast.error(getErrorMessage(error, 'Webhook test failed'));
     } finally {
       setTestingWebhook(null);
     }
@@ -320,7 +402,7 @@ export default function NotificationSettings() {
   const openSlackChannelModal = (channel?: SlackChannel) => {
     if (channel) {
       setEditingSlackChannel(channel);
-      setSlackChannelForm({
+      slackChannelFormCtx.reset({
         name: channel.name,
         slackChannelName: channel.slackChannelName || '',
         webhookUrl: '',
@@ -329,7 +411,7 @@ export default function NotificationSettings() {
       });
     } else {
       setEditingSlackChannel(null);
-      setSlackChannelForm({
+      slackChannelFormCtx.reset({
         name: '',
         slackChannelName: '',
         webhookUrl: '',
@@ -340,44 +422,55 @@ export default function NotificationSettings() {
     setShowSlackChannelModal(true);
   };
 
-  const handleSaveSlackChannel = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveSlackChannel = async (values: SlackChannelFormValues) => {
     setSlackChannelSaving(true);
     try {
       if (editingSlackChannel) {
         // Only include webhookUrl if provided (for updates)
         const updateData: Partial<SlackChannelInput> = {
-          name: slackChannelForm.name,
-          slackChannelName: slackChannelForm.slackChannelName || undefined,
-          isDefault: slackChannelForm.isDefault,
-          enabled: slackChannelForm.enabled,
+          name: values.name,
+          slackChannelName: values.slackChannelName || undefined,
+          isDefault: values.isDefault,
+          enabled: values.enabled,
         };
-        if (slackChannelForm.webhookUrl) {
-          updateData.webhookUrl = slackChannelForm.webhookUrl;
+        if (values.webhookUrl) {
+          updateData.webhookUrl = values.webhookUrl;
         }
         const result = await updateSlackChannel(editingSlackChannel.id, updateData);
         setSlackChannels((prev) => prev.map((c) => (c.id === editingSlackChannel.id ? result.channel : c)));
         toast.success('Slack channel updated');
       } else {
-        if (!slackChannelForm.webhookUrl) {
+        if (!values.webhookUrl) {
           toast.error('Webhook URL is required');
           setSlackChannelSaving(false);
           return;
         }
-        const result = await createSlackChannel(slackChannelForm);
+        const result = await createSlackChannel({
+          name: values.name,
+          slackChannelName: values.slackChannelName || undefined,
+          webhookUrl: values.webhookUrl,
+          isDefault: values.isDefault,
+          enabled: values.enabled,
+        });
         setSlackChannels((prev) => [...prev, result.channel]);
         toast.success('Slack channel created');
       }
       setShowSlackChannelModal(false);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to save Slack channel');
+      toast.error(getErrorMessage(error, 'Failed to save Slack channel'));
     } finally {
       setSlackChannelSaving(false);
     }
   };
 
   const handleDeleteSlackChannel = async (id: string) => {
-    if (!confirm('Delete this Slack channel? All routing rules for this channel will also be removed.')) return;
+    const ok = await confirm({
+      title: 'Delete Slack channel?',
+      description: 'Delete this Slack channel? All routing rules for this channel will also be removed.',
+      confirmText: 'Delete',
+      destructive: true,
+    });
+    if (!ok) return;
     try {
       await deleteSlackChannel(id);
       setSlackChannels((prev) => prev.filter((c) => c.id !== id));
@@ -398,7 +491,7 @@ export default function NotificationSettings() {
         prev.map((c) => (c.id === id ? { ...c, lastTestedAt: new Date().toISOString() } : c))
       );
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Slack test failed');
+      toast.error(getErrorMessage(error, 'Slack test failed'));
     } finally {
       setTestingSlackChannel(null);
     }
@@ -420,7 +513,7 @@ export default function NotificationSettings() {
       // Update local state
       setSlackRoutings((prev) => [...prev.filter((r) => r.typeId !== typeId), ...result.routings]);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to update routing');
+      toast.error(getErrorMessage(error, 'Failed to update routing'));
     }
   };
 
@@ -445,7 +538,7 @@ export default function NotificationSettings() {
       const result = await testBackendSentry();
       toast.success(result.message);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Backend Sentry test failed');
+      toast.error(getErrorMessage(error, 'Backend Sentry test failed'));
     } finally {
       setSentryTestingBackend(false);
     }
@@ -483,7 +576,7 @@ export default function NotificationSettings() {
       });
       toast.success('Delivery settings saved');
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to save delivery settings');
+      toast.error(getErrorMessage(error, 'Failed to save delivery settings'));
     } finally {
       setDeliverySaving(false);
     }
@@ -492,20 +585,20 @@ export default function NotificationSettings() {
   if (!isAdmin(user)) {
     return (
       <div className="p-8">
-        <div className="card text-center py-12">
-          <p className="text-slate-400">Admin access required</p>
-        </div>
+        <Card>
+          <CardContent>
+            <p className="text-center text-muted-foreground py-6">Admin access required</p>
+          </CardContent>
+        </Card>
       </div>
     );
   }
 
   if (loading) {
     return (
-      <div className="p-8">
-        <div className="animate-pulse space-y-4">
-          <div className="h-8 w-48 bg-slate-700 rounded"></div>
-          <div className="h-64 bg-slate-800 rounded-xl"></div>
-        </div>
+      <div className="p-8 space-y-4">
+        <Skeleton className="h-8 w-48" />
+        <Skeleton className="h-64 w-full rounded-xl" />
       </div>
     );
   }
@@ -518,900 +611,863 @@ export default function NotificationSettings() {
 
   return (
     <div className="p-6">
-      {/* Tabs */}
-      <div className="flex border-b border-slate-700 mb-6">
-        {[
-          { id: 'smtp', label: 'Email (SMTP)' },
-          { id: 'webhooks', label: 'Webhooks' },
-          { id: 'slack', label: 'Slack' },
-          { id: 'sentry', label: 'Sentry' },
-          { id: 'types', label: 'Notification Types' },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id as TabType)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px ${
-              activeTab === tab.id
-                ? 'border-brand-600 text-white'
-                : 'border-transparent text-slate-400 hover:text-white'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabType)} className="gap-6">
+        <TabsList>
+          <TabsTrigger value="smtp">Email (SMTP)</TabsTrigger>
+          <TabsTrigger value="webhooks">Webhooks</TabsTrigger>
+          <TabsTrigger value="slack">Slack</TabsTrigger>
+          <TabsTrigger value="sentry">Sentry</TabsTrigger>
+          <TabsTrigger value="types">Notification Types</TabsTrigger>
+        </TabsList>
 
-      {/* SMTP Tab */}
-      {activeTab === 'smtp' && (
-        <div className="card">
-          <h3 className="text-lg font-semibold text-white mb-4">SMTP Configuration</h3>
-          <form onSubmit={handleSaveSmtp} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">SMTP Host</label>
-                <input
-                  type="text"
-                  value={smtpForm.host}
-                  onChange={(e) => setSmtpForm({ ...smtpForm, host: e.target.value })}
-                  placeholder="smtp.example.com"
-                  className="input"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Port</label>
-                <input
-                  type="number"
-                  value={smtpForm.port}
-                  onChange={(e) => setSmtpForm({ ...smtpForm, port: parseInt(e.target.value) || 587 })}
-                  className="input"
-                  required
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Username</label>
-                <input
-                  type="text"
-                  value={smtpForm.username}
-                  onChange={(e) => setSmtpForm({ ...smtpForm, username: e.target.value })}
-                  placeholder="Optional"
-                  className="input"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Password</label>
-                <input
-                  type="password"
-                  value={smtpForm.password}
-                  onChange={(e) => setSmtpForm({ ...smtpForm, password: e.target.value })}
-                  placeholder={smtpConfig?.hasPassword ? '••••••••' : 'Optional'}
-                  className="input"
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">From Address</label>
-                <input
-                  type="email"
-                  value={smtpForm.fromAddress}
-                  onChange={(e) => setSmtpForm({ ...smtpForm, fromAddress: e.target.value })}
-                  placeholder="noreply@example.com"
-                  className="input"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">From Name</label>
-                <input
-                  type="text"
-                  value={smtpForm.fromName}
-                  onChange={(e) => setSmtpForm({ ...smtpForm, fromName: e.target.value })}
-                  placeholder="BRIDGEPORT"
-                  className="input"
-                />
-              </div>
-            </div>
-            <div className="flex items-center gap-4">
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={smtpForm.secure}
-                  onChange={(e) => setSmtpForm({ ...smtpForm, secure: e.target.checked })}
-                  className="rounded bg-slate-800 border-slate-600 text-primary-500"
-                />
-                <span className="text-sm text-slate-300">Use TLS/SSL</span>
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={smtpForm.enabled}
-                  onChange={(e) => setSmtpForm({ ...smtpForm, enabled: e.target.checked })}
-                  className="rounded bg-slate-800 border-slate-600 text-primary-500"
-                />
-                <span className="text-sm text-slate-300">Enabled</span>
-              </label>
-            </div>
-            <div className="flex items-center gap-2 pt-2">
-              <button type="submit" disabled={smtpSaving} className="btn btn-primary">
-                {smtpSaving ? 'Saving...' : 'Save Configuration'}
-              </button>
-            </div>
-          </form>
-
-          {smtpConfig && (
-            <div className="mt-6 pt-6 border-t border-slate-700">
-              <h4 className="text-sm font-medium text-white mb-3">Test SMTP</h4>
-              <div className="flex items-center gap-2">
-                <input
-                  type="email"
-                  value={testEmail}
-                  onChange={(e) => setTestEmail(e.target.value)}
-                  placeholder="test@example.com (optional)"
-                  className="input flex-1"
-                />
-                <button
-                  onClick={handleTestSmtp}
-                  disabled={smtpTesting}
-                  className="btn btn-secondary"
-                >
-                  {smtpTesting ? 'Testing...' : testEmail ? 'Send Test Email' : 'Test Connection'}
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Webhooks Tab */}
-      {activeTab === 'webhooks' && (
-        <div className="space-y-6">
-          <div className="card">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-white">Outgoing Webhooks</h3>
-              <button onClick={() => openWebhookModal()} className="btn btn-primary">
-                <PlusIcon className="w-4 h-4 mr-2" />
-                Add Webhook
-              </button>
-            </div>
-
-            {webhooks.length === 0 ? (
-              <p className="text-slate-400 text-center py-8">No webhooks configured</p>
-            ) : (
-              <div className="space-y-3">
-                {webhooks.map((webhook) => (
-                  <div key={webhook.id} className="p-4 bg-slate-800 rounded-lg">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h4 className="font-medium text-white">{webhook.name}</h4>
-                          <span
-                            className={`text-xs px-2 py-0.5 rounded ${
-                              webhook.enabled ? 'bg-green-500/20 text-green-400' : 'bg-slate-700 text-slate-400'
-                            }`}
-                          >
-                            {webhook.enabled ? 'Enabled' : 'Disabled'}
-                          </span>
-                          {webhook.hasSecret && (
-                            <span className="text-xs px-2 py-0.5 rounded bg-primary-500/20 text-primary-400">
-                              Signed
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-sm text-slate-400 mt-1 font-mono">{webhook.url}</p>
-                        <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
-                          <span>Success: {webhook.successCount}</span>
-                          <span>Failed: {webhook.failureCount}</span>
-                          {webhook.lastTriggeredAt && (
-                            <span>Last: {new Date(webhook.lastTriggeredAt).toLocaleString()}</span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => handleTestWebhook(webhook.id)}
-                          disabled={testingWebhook === webhook.id}
-                          className="btn btn-secondary text-xs"
-                          title="Send test notification"
-                        >
-                          {testingWebhook === webhook.id ? 'Testing...' : 'Test'}
-                        </button>
-                        <button
-                          onClick={() => openWebhookModal(webhook)}
-                          className="btn btn-ghost text-xs"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => handleDeleteWebhook(webhook.id)}
-                          className="btn btn-ghost text-xs text-red-400 hover:text-red-300"
-                        >
-                          <TrashIcon className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
+        {/* SMTP Tab */}
+        <TabsContent value="smtp">
+          <Card>
+            <CardHeader>
+              <CardTitle>SMTP Configuration</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleSaveSmtp} className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <Label htmlFor="smtp-host">SMTP Host</Label>
+                    <Input
+                      id="smtp-host"
+                      type="text"
+                      value={smtpForm.host}
+                      onChange={(e) => setSmtpForm({ ...smtpForm, host: e.target.value })}
+                      placeholder="smtp.example.com"
+                      required
+                    />
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Delivery Settings */}
-          <div className="card">
-            <h3 className="text-base font-semibold text-white mb-4">Delivery Settings</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Max Retries</label>
-                <input
-                  type="number"
-                  min={0}
-                  max={10}
-                  value={deliverySettings.webhookMaxRetries}
-                  onChange={(e) =>
-                    setDeliverySettings({
-                      ...deliverySettings,
-                      webhookMaxRetries: parseInt(e.target.value) || 3,
-                    })
-                  }
-                  className="input w-full"
-                />
-                <p className="text-xs text-slate-500 mt-1">
-                  Retry attempts for failed webhooks (default: {deliverySettingsDefaults?.webhookMaxRetries || 3})
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">
-                  Request Timeout <span className="text-slate-500">(seconds)</span>
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  max={300}
-                  value={deliverySettings.webhookTimeoutSec}
-                  onChange={(e) =>
-                    setDeliverySettings({
-                      ...deliverySettings,
-                      webhookTimeoutSec: parseInt(e.target.value) || 30,
-                    })
-                  }
-                  className="input w-full"
-                />
-                <p className="text-xs text-slate-500 mt-1">
-                  HTTP timeout for webhook delivery (default:{' '}
-                  {deliverySettingsDefaults ? msToSec(deliverySettingsDefaults.webhookTimeoutMs) : 30}s)
-                </p>
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">
-                  Retry Delays <span className="text-slate-500">(seconds, comma-separated)</span>
-                </label>
-                <input
-                  type="text"
-                  value={deliverySettings.webhookRetryDelaysSec}
-                  onChange={(e) =>
-                    setDeliverySettings({
-                      ...deliverySettings,
-                      webhookRetryDelaysSec: e.target.value,
-                    })
-                  }
-                  placeholder="1, 5, 15"
-                  className={`input w-full ${delaysValidation.error ? 'border-red-500/50' : ''}`}
-                  aria-invalid={delaysValidation.error ? true : undefined}
-                />
-                {delaysValidation.error ? (
-                  <p className="text-xs text-red-400 mt-1">{delaysValidation.error}</p>
-                ) : (
-                  <p className="text-xs text-slate-500 mt-1">
-                    Parsed: {delaysValidation.preview}
-                  </p>
-                )}
-                <p className="text-xs text-slate-500 mt-1">
-                  Backoff delays between retries (default:{' '}
-                  {deliverySettingsDefaults ? parseDelaysMs(deliverySettingsDefaults.webhookRetryDelaysMs) : '1, 5, 15'})
-                </p>
-              </div>
-            </div>
-            <div className="mt-4 pt-4 border-t border-slate-700">
-              <button
-                onClick={handleSaveDeliverySettings}
-                disabled={deliverySaving || !!delaysValidation.error}
-                className="btn btn-primary"
-              >
-                {deliverySaving ? 'Saving...' : 'Save Delivery Settings'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Slack Tab */}
-      {activeTab === 'slack' && (
-        <div className="space-y-6">
-          {/* Slack Channels */}
-          <div className="card">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="text-lg font-semibold text-white">Slack Channels</h3>
-                <p className="text-sm text-slate-400 mt-1">
-                  Configure Slack incoming webhook URLs. Create a webhook in your Slack workspace and paste the URL here.
-                </p>
-              </div>
-              <button onClick={() => openSlackChannelModal()} className="btn btn-primary">
-                <PlusIcon className="w-4 h-4 mr-2" />
-                Add Channel
-              </button>
-            </div>
-
-            {slackChannels.length === 0 ? (
-              <div className="text-center py-8">
-                <p className="text-slate-400 mb-2">No Slack channels configured</p>
-                <p className="text-sm text-slate-500">
-                  Add a Slack incoming webhook to start receiving notifications in Slack.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {slackChannels.map((channel) => (
-                  <div key={channel.id} className="p-4 bg-slate-800 rounded-lg">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h4 className="font-medium text-white">{channel.name}</h4>
-                          {channel.slackChannelName && (
-                            <span className="text-sm text-slate-400">{channel.slackChannelName}</span>
-                          )}
-                          <span
-                            className={`text-xs px-2 py-0.5 rounded ${
-                              channel.enabled ? 'bg-green-500/20 text-green-400' : 'bg-slate-700 text-slate-400'
-                            }`}
-                          >
-                            {channel.enabled ? 'Enabled' : 'Disabled'}
-                          </span>
-                          {channel.isDefault && (
-                            <span className="text-xs px-2 py-0.5 rounded bg-primary-500/20 text-primary-400">
-                              Default
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
-                          {channel.hasWebhookUrl && <span>Webhook configured</span>}
-                          {channel.lastTestedAt && (
-                            <span>Last tested: {new Date(channel.lastTestedAt).toLocaleString()}</span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => handleTestSlackChannel(channel.id)}
-                          disabled={testingSlackChannel === channel.id}
-                          className="btn btn-secondary text-xs"
-                          title="Send test message to Slack"
-                        >
-                          {testingSlackChannel === channel.id ? 'Testing...' : 'Test'}
-                        </button>
-                        <button
-                          onClick={() => openSlackChannelModal(channel)}
-                          className="btn btn-ghost text-xs"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => handleDeleteSlackChannel(channel.id)}
-                          className="btn btn-ghost text-xs text-red-400 hover:text-red-300"
-                        >
-                          <TrashIcon className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="smtp-port">Port</Label>
+                    <Input
+                      id="smtp-port"
+                      type="number"
+                      value={smtpForm.port}
+                      onChange={(e) => setSmtpForm({ ...smtpForm, port: parseInt(e.target.value) || 587 })}
+                      required
+                    />
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Slack Routing */}
-          {slackChannels.length > 0 && (
-            <div className="card">
-              <h3 className="text-lg font-semibold text-white mb-2">Channel Routing</h3>
-              <p className="text-sm text-slate-400 mb-4">
-                Route notification types to specific Slack channels. Unrouted notifications use the default channel.
-              </p>
-
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-slate-700">
-                      <th className="text-left text-sm font-medium text-slate-400 pb-3 pr-4">
-                        Notification Type
-                      </th>
-                      {slackChannels.map((channel) => (
-                        <th
-                          key={channel.id}
-                          className="text-center text-sm font-medium text-slate-400 pb-3 px-2"
-                        >
-                          <div className="flex flex-col items-center">
-                            <span>{channel.name}</span>
-                            {channel.isDefault && (
-                              <span className="text-xs text-primary-400">(default)</span>
-                            )}
-                          </div>
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {systemTypes.map((type) => {
-                      const typeRoutings = slackRoutings.filter((r) => r.typeId === type.id);
-                      return (
-                        <tr key={type.id} className="border-b border-slate-800">
-                          <td className="py-3 pr-4">
-                            <div className="flex items-center gap-2">
-                              <span className="text-white">{type.name}</span>
-                              <span
-                                className={`text-xs px-1.5 py-0.5 rounded ${
-                                  type.severity === 'critical'
-                                    ? 'bg-red-500/20 text-red-400'
-                                    : type.severity === 'warning'
-                                      ? 'bg-yellow-500/20 text-yellow-400'
-                                      : 'bg-slate-700 text-slate-400'
-                                }`}
-                              >
-                                {type.severity}
-                              </span>
-                            </div>
-                          </td>
-                          {slackChannels.map((channel) => {
-                            const isRouted = typeRoutings.some((r) => r.channelId === channel.id);
-                            return (
-                              <td key={channel.id} className="py-3 px-2 text-center">
-                                <input
-                                  type="checkbox"
-                                  checked={isRouted}
-                                  onChange={(e) => handleRoutingChange(type.id, channel.id, e.target.checked)}
-                                  className="rounded bg-slate-700 border-slate-600 text-primary-500"
-                                />
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Sentry Tab */}
-      {activeTab === 'sentry' && (
-        <div className="card">
-          <div className="mb-6">
-            <h3 className="text-lg font-semibold text-white">Error Monitoring (Sentry)</h3>
-            <p className="text-sm text-slate-400 mt-1">
-              Sentry captures unhandled errors from the backend (Node) and frontend (React). Configure DSNs as environment variables and restart the container; values are picked up at runtime.
-            </p>
-          </div>
-
-          <div className="space-y-4">
-            {/* Backend status */}
-            <div className="p-4 bg-slate-800 rounded-lg">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h4 className="font-medium text-white">Backend (Node)</h4>
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded ${
-                        sentryStatus?.backendConfigured
-                          ? 'bg-green-500/20 text-green-400'
-                          : 'bg-slate-700 text-slate-400'
-                      }`}
-                    >
-                      {sentryStatus?.backendConfigured ? 'Configured' : 'Not configured'}
-                    </span>
-                  </div>
-                  {sentryStatus?.backendConfigured ? (
-                    <p className="text-sm text-slate-400 mt-1">
-                      Environment: <span className="text-slate-300">{sentryStatus.environment}</span>
-                    </p>
-                  ) : (
-                    <p className="text-sm text-slate-400 mt-1">
-                      Set <code className="text-xs px-1 py-0.5 bg-slate-900 rounded text-slate-300">SENTRY_BACKEND_DSN</code> and restart the container.
-                    </p>
-                  )}
                 </div>
-                {sentryStatus?.backendConfigured && (
-                  <button
-                    onClick={handleTestBackendSentry}
-                    disabled={sentryTestingBackend}
-                    className="btn btn-secondary text-xs"
-                    title="Capture a synthetic exception via the backend SDK"
-                  >
-                    {sentryTestingBackend ? 'Sending...' : 'Send test error'}
-                  </button>
-                )}
-              </div>
-            </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <Label htmlFor="smtp-username">Username</Label>
+                    <Input
+                      id="smtp-username"
+                      type="text"
+                      value={smtpForm.username}
+                      onChange={(e) => setSmtpForm({ ...smtpForm, username: e.target.value })}
+                      placeholder="Optional"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="smtp-password">Password</Label>
+                    <Input
+                      id="smtp-password"
+                      type="password"
+                      value={smtpForm.password}
+                      onChange={(e) => setSmtpForm({ ...smtpForm, password: e.target.value })}
+                      placeholder={smtpConfig?.hasPassword ? '••••••••' : 'Optional'}
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <Label htmlFor="smtp-from-address">From Address</Label>
+                    <Input
+                      id="smtp-from-address"
+                      type="email"
+                      value={smtpForm.fromAddress}
+                      onChange={(e) => setSmtpForm({ ...smtpForm, fromAddress: e.target.value })}
+                      placeholder="noreply@example.com"
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="smtp-from-name">From Name</Label>
+                    <Input
+                      id="smtp-from-name"
+                      type="text"
+                      value={smtpForm.fromName}
+                      onChange={(e) => setSmtpForm({ ...smtpForm, fromName: e.target.value })}
+                      placeholder="BRIDGEPORT"
+                    />
+                  </div>
+                </div>
+                <div className="flex items-center gap-6">
+                  <Label className="flex items-center gap-2">
+                    <Checkbox
+                      checked={smtpForm.secure}
+                      onCheckedChange={(checked) => setSmtpForm({ ...smtpForm, secure: checked === true })}
+                    />
+                    <span className="text-sm">Use TLS/SSL</span>
+                  </Label>
+                  <Label className="flex items-center gap-2">
+                    <Checkbox
+                      checked={smtpForm.enabled}
+                      onCheckedChange={(checked) => setSmtpForm({ ...smtpForm, enabled: checked === true })}
+                    />
+                    <span className="text-sm">Enabled</span>
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2 pt-2">
+                  <Button type="submit" disabled={smtpSaving}>
+                    {smtpSaving ? 'Saving...' : 'Save Configuration'}
+                  </Button>
+                </div>
+              </form>
 
-            {/* Frontend status */}
-            <div className="p-4 bg-slate-800 rounded-lg">
-              <div className="flex items-start justify-between gap-4">
-                <div>
+              {smtpConfig && (
+                <div className="mt-6">
+                  <Separator className="mb-6" />
+                  <h4 className="text-sm font-medium text-foreground mb-3">Test SMTP</h4>
                   <div className="flex items-center gap-2">
-                    <h4 className="font-medium text-white">Frontend (React)</h4>
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded ${
-                        sentryStatus?.frontendConfigured
-                          ? 'bg-green-500/20 text-green-400'
-                          : 'bg-slate-700 text-slate-400'
-                      }`}
-                    >
-                      {sentryStatus?.frontendConfigured ? 'Configured' : 'Not configured'}
-                    </span>
-                    {sentryStatus?.frontendConfigured && !sentryReady && (
-                      <span className="text-xs px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-400">
-                        Initializing…
-                      </span>
+                    <Input
+                      type="email"
+                      value={testEmail}
+                      onChange={(e) => setTestEmail(e.target.value)}
+                      placeholder="test@example.com (optional)"
+                      className="flex-1"
+                    />
+                    <Button variant="secondary" onClick={handleTestSmtp} disabled={smtpTesting}>
+                      {smtpTesting ? 'Testing...' : testEmail ? 'Send Test Email' : 'Test Connection'}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Webhooks Tab */}
+        <TabsContent value="webhooks">
+          <div className="space-y-6">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle>Outgoing Webhooks</CardTitle>
+                <Button onClick={() => openWebhookModal()}>
+                  <Plus className="size-4" />
+                  Add Webhook
+                </Button>
+              </CardHeader>
+              <CardContent>
+                {webhooks.length === 0 ? (
+                  <EmptyState message="No webhooks configured" />
+                ) : (
+                  <div className="space-y-3">
+                    {webhooks.map((webhook) => (
+                      <div key={webhook.id} className="p-4 bg-muted/40 rounded-lg">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-medium text-foreground">{webhook.name}</h4>
+                              <Badge variant={webhook.enabled ? 'success' : 'neutral'}>
+                                {webhook.enabled ? 'Enabled' : 'Disabled'}
+                              </Badge>
+                              {webhook.hasSecret && <Badge variant="info">Signed</Badge>}
+                            </div>
+                            <p className="text-sm text-muted-foreground mt-1 font-mono">{webhook.url}</p>
+                            <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground/70">
+                              <span>Success: {webhook.successCount}</span>
+                              <span>Failed: {webhook.failureCount}</span>
+                              {webhook.lastTriggeredAt && (
+                                <span>Last: {new Date(webhook.lastTriggeredAt).toLocaleString()}</span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => handleTestWebhook(webhook.id)}
+                              disabled={testingWebhook === webhook.id}
+                              title="Send test notification"
+                            >
+                              {testingWebhook === webhook.id ? 'Testing...' : 'Test'}
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => openWebhookModal(webhook)}>
+                              Edit
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              className="text-destructive hover:text-destructive"
+                              onClick={() => handleDeleteWebhook(webhook.id)}
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Delivery Settings */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Delivery Settings</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-1">
+                    <Label htmlFor="webhook-max-retries">Max Retries</Label>
+                    <Input
+                      id="webhook-max-retries"
+                      type="number"
+                      min={0}
+                      max={10}
+                      value={deliverySettings.webhookMaxRetries}
+                      onChange={(e) =>
+                        setDeliverySettings({
+                          ...deliverySettings,
+                          webhookMaxRetries: parseInt(e.target.value) || 3,
+                        })
+                      }
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Retry attempts for failed webhooks (default: {deliverySettingsDefaults?.webhookMaxRetries || 3})
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="webhook-timeout">
+                      Request Timeout <span className="text-muted-foreground/70">(seconds)</span>
+                    </Label>
+                    <Input
+                      id="webhook-timeout"
+                      type="number"
+                      min={1}
+                      max={300}
+                      value={deliverySettings.webhookTimeoutSec}
+                      onChange={(e) =>
+                        setDeliverySettings({
+                          ...deliverySettings,
+                          webhookTimeoutSec: parseInt(e.target.value) || 30,
+                        })
+                      }
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      HTTP timeout for webhook delivery (default:{' '}
+                      {deliverySettingsDefaults ? msToSec(deliverySettingsDefaults.webhookTimeoutMs) : 30}s)
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="webhook-retry-delays">
+                      Retry Delays <span className="text-muted-foreground/70">(seconds, comma-separated)</span>
+                    </Label>
+                    <Input
+                      id="webhook-retry-delays"
+                      type="text"
+                      value={deliverySettings.webhookRetryDelaysSec}
+                      onChange={(e) =>
+                        setDeliverySettings({
+                          ...deliverySettings,
+                          webhookRetryDelaysSec: e.target.value,
+                        })
+                      }
+                      placeholder="1, 5, 15"
+                      aria-invalid={delaysValidation.error ? true : undefined}
+                    />
+                    {delaysValidation.error ? (
+                      <p className="text-xs text-destructive">{delaysValidation.error}</p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Parsed: {delaysValidation.preview}
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      Backoff delays between retries (default:{' '}
+                      {deliverySettingsDefaults ? parseDelaysMs(deliverySettingsDefaults.webhookRetryDelaysMs) : '1, 5, 15'})
+                    </p>
+                  </div>
+                </div>
+                <Separator className="my-4" />
+                <Button
+                  onClick={handleSaveDeliverySettings}
+                  disabled={deliverySaving || !!delaysValidation.error}
+                >
+                  {deliverySaving ? 'Saving...' : 'Save Delivery Settings'}
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* Slack Tab */}
+        <TabsContent value="slack">
+          <div className="space-y-6">
+            {/* Slack Channels */}
+            <Card>
+              <CardHeader className="flex flex-row items-start justify-between">
+                <div className="space-y-1">
+                  <CardTitle>Slack Channels</CardTitle>
+                  <CardDescription>
+                    Configure Slack incoming webhook URLs. Create a webhook in your Slack workspace and paste the URL here.
+                  </CardDescription>
+                </div>
+                <Button onClick={() => openSlackChannelModal()}>
+                  <Plus className="size-4" />
+                  Add Channel
+                </Button>
+              </CardHeader>
+              <CardContent>
+                {slackChannels.length === 0 ? (
+                  <EmptyState
+                    message="No Slack channels configured"
+                    description="Add a Slack incoming webhook to start receiving notifications in Slack."
+                  />
+                ) : (
+                  <div className="space-y-3">
+                    {slackChannels.map((channel) => (
+                      <div key={channel.id} className="p-4 bg-muted/40 rounded-lg">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-medium text-foreground">{channel.name}</h4>
+                              {channel.slackChannelName && (
+                                <span className="text-sm text-muted-foreground">{channel.slackChannelName}</span>
+                              )}
+                              <Badge variant={channel.enabled ? 'success' : 'neutral'}>
+                                {channel.enabled ? 'Enabled' : 'Disabled'}
+                              </Badge>
+                              {channel.isDefault && <Badge variant="info">Default</Badge>}
+                            </div>
+                            <div className="flex items-center gap-4 mt-2 text-xs text-muted-foreground/70">
+                              {channel.hasWebhookUrl && <span>Webhook configured</span>}
+                              {channel.lastTestedAt && (
+                                <span>Last tested: {new Date(channel.lastTestedAt).toLocaleString()}</span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => handleTestSlackChannel(channel.id)}
+                              disabled={testingSlackChannel === channel.id}
+                              title="Send test message to Slack"
+                            >
+                              {testingSlackChannel === channel.id ? 'Testing...' : 'Test'}
+                            </Button>
+                            <Button variant="ghost" size="sm" onClick={() => openSlackChannelModal(channel)}>
+                              Edit
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              className="text-destructive hover:text-destructive"
+                              onClick={() => handleDeleteSlackChannel(channel.id)}
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Slack Routing */}
+            {slackChannels.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Channel Routing</CardTitle>
+                  <CardDescription>
+                    Route notification types to specific Slack channels. Unrouted notifications use the default channel.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Notification Type</TableHead>
+                        {slackChannels.map((channel) => (
+                          <TableHead key={channel.id} className="text-center">
+                            <div className="flex flex-col items-center">
+                              <span>{channel.name}</span>
+                              {channel.isDefault && (
+                                <span className="text-xs text-info">(default)</span>
+                              )}
+                            </div>
+                          </TableHead>
+                        ))}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {systemTypes.map((type) => {
+                        const typeRoutings = slackRoutings.filter((r) => r.typeId === type.id);
+                        return (
+                          <TableRow key={type.id}>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <span className="text-foreground">{type.name}</span>
+                                <SeverityBadge severity={type.severity} />
+                              </div>
+                            </TableCell>
+                            {slackChannels.map((channel) => {
+                              const isRouted = typeRoutings.some((r) => r.channelId === channel.id);
+                              return (
+                                <TableCell key={channel.id} className="text-center">
+                                  <Checkbox
+                                    checked={isRouted}
+                                    onCheckedChange={(checked) =>
+                                      handleRoutingChange(type.id, channel.id, checked === true)
+                                    }
+                                    aria-label={`Route ${type.name} to ${channel.name}`}
+                                  />
+                                </TableCell>
+                              );
+                            })}
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </TabsContent>
+
+        {/* Sentry Tab */}
+        <TabsContent value="sentry">
+          <Card>
+            <CardHeader>
+              <CardTitle>Error Monitoring (Sentry)</CardTitle>
+              <CardDescription>
+                Sentry captures unhandled errors from the backend (Node) and frontend (React). Configure DSNs as environment variables and restart the container; values are picked up at runtime.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {/* Backend status */}
+                <div className="p-4 bg-muted/40 rounded-lg">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-medium text-foreground">Backend (Node)</h4>
+                        <Badge variant={sentryStatus?.backendConfigured ? 'success' : 'neutral'}>
+                          {sentryStatus?.backendConfigured ? 'Configured' : 'Not configured'}
+                        </Badge>
+                      </div>
+                      {sentryStatus?.backendConfigured ? (
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Environment: <span className="text-foreground">{sentryStatus.environment}</span>
+                        </p>
+                      ) : (
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Set <code className="text-xs px-1 py-0.5 bg-background rounded text-foreground">SENTRY_BACKEND_DSN</code> and restart the container.
+                        </p>
+                      )}
+                    </div>
+                    {sentryStatus?.backendConfigured && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={handleTestBackendSentry}
+                        disabled={sentryTestingBackend}
+                        title="Capture a synthetic exception via the backend SDK"
+                      >
+                        {sentryTestingBackend ? 'Sending...' : 'Send test error'}
+                      </Button>
                     )}
                   </div>
-                  {sentryStatus?.frontendConfigured ? (
-                    <p className="text-sm text-slate-400 mt-1">
-                      The DSN is served at runtime via <code className="text-xs px-1 py-0.5 bg-slate-900 rounded text-slate-300">GET /api/client-config</code>; the SDK initializes on app load.
-                    </p>
-                  ) : (
-                    <p className="text-sm text-slate-400 mt-1">
-                      Set <code className="text-xs px-1 py-0.5 bg-slate-900 rounded text-slate-300">SENTRY_FRONTEND_DSN</code> and restart the container.
-                    </p>
-                  )}
                 </div>
-                {sentryStatus?.frontendConfigured && (
-                  <button
-                    onClick={handleTestFrontendSentry}
-                    disabled={sentryTestingFrontend || !sentryReady}
-                    className="btn btn-secondary text-xs"
-                    title="Throw an uncaught error so the global handler reports it"
-                  >
-                    {sentryTestingFrontend ? 'Throwing...' : 'Send test error'}
-                  </button>
-                )}
-              </div>
-            </div>
 
-            {/* Setup help (only shown when neither DSN is set) */}
-            {sentryStatus && !sentryStatus.backendConfigured && !sentryStatus.frontendConfigured && (
-              <div className="p-4 border border-slate-700 rounded-lg bg-slate-900/50">
-                <h4 className="text-sm font-medium text-white mb-2">How to set up</h4>
-                <ol className="text-sm text-slate-400 space-y-2 list-decimal list-inside">
-                  <li>Create a Sentry project for the backend (platform: Node.js, framework: Vanilla) and copy the DSN.</li>
-                  <li>Create a second Sentry project for the frontend (platform: React) and copy that DSN.</li>
-                  <li>
-                    Add both to <code className="text-xs px-1 py-0.5 bg-slate-900 rounded text-slate-300">.env</code> (or <code className="text-xs px-1 py-0.5 bg-slate-900 rounded text-slate-300">docker/.env</code> in Docker deployments):
-                    <pre className="mt-2 p-2 bg-slate-950 rounded text-xs text-slate-300 overflow-x-auto">{`SENTRY_BACKEND_DSN=https://<key>@<org>.ingest.sentry.io/<project1>
-SENTRY_FRONTEND_DSN=https://<key>@<org>.ingest.sentry.io/<project2>
-SENTRY_ENVIRONMENT=production`}</pre>
-                  </li>
-                  <li>Restart the BRIDGEPORT container. The values are picked up at startup; no rebuild needed.</li>
-                  <li>Come back here and use the test buttons to confirm events reach Sentry.</li>
-                </ol>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Notification Types Tab */}
-      {activeTab === 'types' && (
-        <div className="space-y-6">
-          {/* System Notifications */}
-          <div className="card">
-            <h3 className="text-lg font-semibold text-white mb-2">System Notifications</h3>
-            <p className="text-sm text-slate-400 mb-4">
-              Configure which system notifications are enabled. Disabled notifications will not be sent.
-            </p>
-            <div className="space-y-3">
-              {notificationTypes.filter((t) => t.category === 'system').map((type) => {
-                const channels = safeJsonParse(type.defaultChannels, [] as string[]);
-                return (
-                  <div key={type.id} className={`p-4 bg-slate-800 rounded-lg ${!type.enabled ? 'opacity-60' : ''}`}>
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2">
-                          <h4 className="font-medium text-white">{type.name}</h4>
-                          <span
-                            className={`text-xs px-2 py-0.5 rounded ${
-                              type.severity === 'critical'
-                                ? 'bg-red-500/20 text-red-400'
-                                : type.severity === 'warning'
-                                  ? 'bg-yellow-500/20 text-yellow-400'
-                                  : 'bg-primary-500/20 text-primary-400'
-                            }`}
-                          >
-                            {type.severity}
-                          </span>
-                        </div>
-                        <p className="text-sm text-slate-400 mt-1">{type.description}</p>
-                        {type.enabled && (
-                          <div className="flex items-center gap-2 mt-2">
-                            {channels.map((ch) => (
-                              <span key={ch} className="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300">
-                                {ch}
-                              </span>
-                            ))}
-                          </div>
+                {/* Frontend status */}
+                <div className="p-4 bg-muted/40 rounded-lg">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-medium text-foreground">Frontend (React)</h4>
+                        <Badge variant={sentryStatus?.frontendConfigured ? 'success' : 'neutral'}>
+                          {sentryStatus?.frontendConfigured ? 'Configured' : 'Not configured'}
+                        </Badge>
+                        {sentryStatus?.frontendConfigured && !sentryReady && (
+                          <Badge variant="warning">Initializing…</Badge>
                         )}
                       </div>
-                      <div className="flex flex-col items-end gap-3">
-                        {/* Enable/Disable Toggle */}
-                        <button
-                          onClick={() => handleUpdateType(type.id, { enabled: !type.enabled })}
-                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                            type.enabled ? 'bg-brand-600' : 'bg-slate-600'
-                          }`}
-                          title={type.enabled ? 'Disable notification' : 'Enable notification'}
-                        >
-                          <span
-                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                              type.enabled ? 'translate-x-6' : 'translate-x-1'
-                            }`}
-                          />
-                        </button>
+                      {sentryStatus?.frontendConfigured ? (
+                        <p className="text-sm text-muted-foreground mt-1">
+                          The DSN is served at runtime via <code className="text-xs px-1 py-0.5 bg-background rounded text-foreground">GET /api/client-config</code>; the SDK initializes on app load.
+                        </p>
+                      ) : (
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Set <code className="text-xs px-1 py-0.5 bg-background rounded text-foreground">SENTRY_FRONTEND_DSN</code> and restart the container.
+                        </p>
+                      )}
+                    </div>
+                    {sentryStatus?.frontendConfigured && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={handleTestFrontendSentry}
+                        disabled={sentryTestingFrontend || !sentryReady}
+                        title="Throw an uncaught error so the global handler reports it"
+                      >
+                        {sentryTestingFrontend ? 'Throwing...' : 'Send test error'}
+                      </Button>
+                    )}
+                  </div>
+                </div>
 
-                        {/* Bounce Settings (only shown when enabled) */}
-                        {type.enabled && (
-                          <div className="text-sm">
-                            <label className="flex items-center gap-2 mb-2">
-                              <input
-                                type="checkbox"
-                                checked={type.bounceEnabled}
-                                onChange={(e) => handleUpdateType(type.id, { bounceEnabled: e.target.checked })}
-                                className="rounded bg-slate-700 border-slate-600 text-primary-500"
-                              />
-                              <span className="text-slate-300 text-xs">Bounce logic</span>
-                            </label>
-                            {type.bounceEnabled && (
-                              <div className="flex items-center gap-2 text-xs text-slate-400">
-                                <span>Threshold:</span>
-                                <input
-                                  type="number"
-                                  value={type.bounceThreshold}
-                                  onChange={(e) =>
-                                    handleUpdateType(type.id, { bounceThreshold: parseInt(e.target.value) || 3 })
-                                  }
-                                  className="w-14 px-2 py-1 bg-slate-700 border border-slate-600 rounded text-white text-xs"
-                                  min={1}
-                                  max={100}
-                                />
-                                <span>Cooldown:</span>
-                                <input
-                                  type="number"
-                                  value={type.bounceCooldown}
-                                  onChange={(e) =>
-                                    handleUpdateType(type.id, { bounceCooldown: parseInt(e.target.value) || 900 })
-                                  }
-                                  className="w-16 px-2 py-1 bg-slate-700 border border-slate-600 rounded text-white text-xs"
-                                  min={60}
-                                  max={86400}
-                                />
-                                <span>s</span>
+                {/* Setup help (only shown when neither DSN is set) */}
+                {sentryStatus && !sentryStatus.backendConfigured && !sentryStatus.frontendConfigured && (
+                  <div className="p-4 border rounded-lg bg-muted/20">
+                    <h4 className="text-sm font-medium text-foreground mb-2">How to set up</h4>
+                    <ol className="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
+                      <li>Create a Sentry project for the backend (platform: Node.js, framework: Vanilla) and copy the DSN.</li>
+                      <li>Create a second Sentry project for the frontend (platform: React) and copy that DSN.</li>
+                      <li>
+                        Add both to <code className="text-xs px-1 py-0.5 bg-background rounded text-foreground">.env</code> (or <code className="text-xs px-1 py-0.5 bg-background rounded text-foreground">docker/.env</code> in Docker deployments):
+                        <pre className="mt-2 p-2 bg-background rounded text-xs text-foreground overflow-x-auto">{`SENTRY_BACKEND_DSN=https://<key>@<org>.ingest.sentry.io/<project1>
+SENTRY_FRONTEND_DSN=https://<key>@<org>.ingest.sentry.io/<project2>
+SENTRY_ENVIRONMENT=production`}</pre>
+                      </li>
+                      <li>Restart the BRIDGEPORT container. The values are picked up at startup; no rebuild needed.</li>
+                      <li>Come back here and use the test buttons to confirm events reach Sentry.</li>
+                    </ol>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Notification Types Tab */}
+        <TabsContent value="types">
+          <div className="space-y-6">
+            {/* System Notifications */}
+            <Card>
+              <CardHeader>
+                <CardTitle>System Notifications</CardTitle>
+                <CardDescription>
+                  Configure which system notifications are enabled. Disabled notifications will not be sent.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {notificationTypes.filter((t) => t.category === 'system').map((type) => {
+                    const channels = safeJsonParse(type.defaultChannels, [] as string[]);
+                    return (
+                      <div
+                        key={type.id}
+                        className={`p-4 bg-muted/40 rounded-lg ${!type.enabled ? 'opacity-60' : ''}`}
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-medium text-foreground">{type.name}</h4>
+                              <SeverityBadge severity={type.severity} />
+                            </div>
+                            <p className="text-sm text-muted-foreground mt-1">{type.description}</p>
+                            {type.enabled && (
+                              <div className="flex items-center gap-2 mt-2">
+                                {channels.map((ch) => (
+                                  <Badge key={ch} variant="neutral">{ch}</Badge>
+                                ))}
                               </div>
                             )}
                           </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+                          <div className="flex flex-col items-end gap-3">
+                            {/* Enable/Disable Toggle */}
+                            <Switch
+                              checked={type.enabled}
+                              onCheckedChange={(checked) => handleUpdateType(type.id, { enabled: checked })}
+                              title={type.enabled ? 'Disable notification' : 'Enable notification'}
+                              aria-label={type.enabled ? 'Disable notification' : 'Enable notification'}
+                            />
 
-          {/* Account Notifications */}
-          <div className="card">
-            <h3 className="text-lg font-semibold text-white mb-2">Account Notifications</h3>
-            <p className="text-sm text-slate-400 mb-4">
-              These notifications are controlled by individual users in their account settings.
-            </p>
-            <div className="space-y-3">
-              {notificationTypes.filter((t) => t.category === 'user').map((type) => {
-                const channels = safeJsonParse(type.defaultChannels, [] as string[]);
-                return (
-                  <div key={type.id} className="p-4 bg-slate-800 rounded-lg">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h4 className="font-medium text-white">{type.name}</h4>
-                          <span
-                            className={`text-xs px-2 py-0.5 rounded ${
-                              type.severity === 'critical'
-                                ? 'bg-red-500/20 text-red-400'
-                                : type.severity === 'warning'
-                                  ? 'bg-yellow-500/20 text-yellow-400'
-                                  : 'bg-primary-500/20 text-primary-400'
-                            }`}
-                          >
-                            {type.severity}
-                          </span>
-                        </div>
-                        <p className="text-sm text-slate-400 mt-1">{type.description}</p>
-                        <div className="flex items-center gap-2 mt-2">
-                          {channels.map((ch) => (
-                            <span key={ch} className="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300">
-                              {ch}
-                            </span>
-                          ))}
+                            {/* Bounce Settings (only shown when enabled) */}
+                            {type.enabled && (
+                              <div className="text-sm">
+                                <Label className="flex items-center gap-2 mb-2">
+                                  <Checkbox
+                                    checked={type.bounceEnabled}
+                                    onCheckedChange={(checked) =>
+                                      handleUpdateType(type.id, { bounceEnabled: checked === true })
+                                    }
+                                  />
+                                  <span className="text-foreground text-xs">Bounce logic</span>
+                                </Label>
+                                {type.bounceEnabled && (
+                                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                    <span>Threshold:</span>
+                                    <Input
+                                      type="number"
+                                      value={type.bounceThreshold}
+                                      onChange={(e) =>
+                                        handleUpdateType(type.id, { bounceThreshold: parseInt(e.target.value) || 3 })
+                                      }
+                                      className="w-14 h-8 text-xs"
+                                      min={1}
+                                      max={100}
+                                    />
+                                    <span>Cooldown:</span>
+                                    <Input
+                                      type="number"
+                                      value={type.bounceCooldown}
+                                      onChange={(e) =>
+                                        handleUpdateType(type.id, { bounceCooldown: parseInt(e.target.value) || 900 })
+                                      }
+                                      className="w-16 h-8 text-xs"
+                                      min={60}
+                                      max={86400}
+                                    />
+                                    <span>s</span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
-                      <span className="text-xs px-2 py-1 rounded bg-slate-700 text-slate-400">
-                        User-controlled
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Account Notifications */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Account Notifications</CardTitle>
+                <CardDescription>
+                  These notifications are controlled by individual users in their account settings.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {notificationTypes.filter((t) => t.category === 'user').map((type) => {
+                    const channels = safeJsonParse(type.defaultChannels, [] as string[]);
+                    return (
+                      <div key={type.id} className="p-4 bg-muted/40 rounded-lg">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h4 className="font-medium text-foreground">{type.name}</h4>
+                              <SeverityBadge severity={type.severity} />
+                            </div>
+                            <p className="text-sm text-muted-foreground mt-1">{type.description}</p>
+                            <div className="flex items-center gap-2 mt-2">
+                              {channels.map((ch) => (
+                                <Badge key={ch} variant="neutral">{ch}</Badge>
+                              ))}
+                            </div>
+                          </div>
+                          <Badge variant="neutral">User-controlled</Badge>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
           </div>
-        </div>
-      )}
+        </TabsContent>
+      </Tabs>
 
       {/* Webhook Modal */}
-      {showWebhookModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-lg p-6">
-            <h3 className="text-lg font-semibold text-white mb-4">
-              {editingWebhook ? 'Edit Webhook' : 'Add Webhook'}
-            </h3>
-            <form onSubmit={handleSaveWebhook} className="space-y-4">
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Name</label>
-                <input
-                  type="text"
-                  value={webhookForm.name}
-                  onChange={(e) => setWebhookForm({ ...webhookForm, name: e.target.value })}
-                  placeholder="My Webhook"
-                  className="input"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">URL</label>
-                <input
-                  type="url"
-                  value={webhookForm.url}
-                  onChange={(e) => setWebhookForm({ ...webhookForm, url: e.target.value })}
-                  placeholder="https://example.com/webhook"
-                  className="input"
-                  required
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">
-                  Secret (for HMAC signing)
-                </label>
-                <input
-                  type="password"
-                  value={webhookForm.secret}
-                  onChange={(e) => setWebhookForm({ ...webhookForm, secret: e.target.value })}
-                  placeholder={editingWebhook?.hasSecret ? '••••••••' : 'Optional'}
-                  className="input"
-                />
-              </div>
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={webhookForm.enabled}
-                  onChange={(e) => setWebhookForm({ ...webhookForm, enabled: e.target.checked })}
-                  className="rounded bg-slate-800 border-slate-600 text-primary-500"
-                />
-                <span className="text-sm text-slate-300">Enabled</span>
-              </label>
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowWebhookModal(false)}
-                  className="btn btn-ghost"
-                >
+      <Dialog open={showWebhookModal} onOpenChange={setShowWebhookModal}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{editingWebhook ? 'Edit Webhook' : 'Add Webhook'}</DialogTitle>
+          </DialogHeader>
+          <Form {...webhookFormCtx}>
+            <form onSubmit={webhookFormCtx.handleSubmit(handleSaveWebhook)} className="space-y-4">
+              <FormField
+                control={webhookFormCtx.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Name</FormLabel>
+                    <FormControl>
+                      <Input placeholder="My Webhook" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={webhookFormCtx.control}
+                name="url"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>URL</FormLabel>
+                    <FormControl>
+                      <Input type="url" placeholder="https://example.com/webhook" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={webhookFormCtx.control}
+                name="secret"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Secret (for HMAC signing)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="password"
+                        placeholder={editingWebhook?.hasSecret ? '••••••••' : 'Optional'}
+                        {...field}
+                        value={field.value ?? ''}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={webhookFormCtx.control}
+                name="enabled"
+                render={({ field }) => (
+                  <FormItem>
+                    <Label className="flex items-center gap-2">
+                      <FormControl>
+                        <Checkbox
+                          checked={field.value}
+                          onCheckedChange={(checked) => field.onChange(checked === true)}
+                        />
+                      </FormControl>
+                      <span className="text-sm">Enabled</span>
+                    </Label>
+                  </FormItem>
+                )}
+              />
+              <DialogFooter>
+                <Button type="button" variant="ghost" onClick={() => setShowWebhookModal(false)}>
                   Cancel
-                </button>
-                <button type="submit" disabled={webhookSaving} className="btn btn-primary">
+                </Button>
+                <Button type="submit" disabled={webhookSaving}>
                   {webhookSaving ? 'Saving...' : 'Save'}
-                </button>
-              </div>
+                </Button>
+              </DialogFooter>
             </form>
-          </div>
-        </div>
-      )}
+          </Form>
+        </DialogContent>
+      </Dialog>
 
       {/* Slack Channel Modal */}
-      {showSlackChannelModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-slate-900 rounded-xl border border-slate-700 w-full max-w-lg p-6">
-            <h3 className="text-lg font-semibold text-white mb-4">
-              {editingSlackChannel ? 'Edit Slack Channel' : 'Add Slack Channel'}
-            </h3>
-            <form onSubmit={handleSaveSlackChannel} className="space-y-4">
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Display Name</label>
-                <input
-                  type="text"
-                  value={slackChannelForm.name}
-                  onChange={(e) => setSlackChannelForm({ ...slackChannelForm, name: e.target.value })}
-                  placeholder="e.g., Alerts, Deployments"
-                  className="input"
-                  required
+      <Dialog open={showSlackChannelModal} onOpenChange={setShowSlackChannelModal}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{editingSlackChannel ? 'Edit Slack Channel' : 'Add Slack Channel'}</DialogTitle>
+          </DialogHeader>
+          <Form {...slackChannelFormCtx}>
+            <form onSubmit={slackChannelFormCtx.handleSubmit(handleSaveSlackChannel)} className="space-y-4">
+              <FormField
+                control={slackChannelFormCtx.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Display Name</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g., Alerts, Deployments" {...field} />
+                    </FormControl>
+                    <FormDescription>A friendly name for this channel configuration</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={slackChannelFormCtx.control}
+                name="slackChannelName"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Slack Channel Name (optional)</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g., #alerts" {...field} value={field.value ?? ''} />
+                    </FormControl>
+                    <FormDescription>The actual Slack channel name (for reference)</FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={slackChannelFormCtx.control}
+                name="webhookUrl"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>
+                      Webhook URL {!editingSlackChannel && <span className="text-destructive">*</span>}
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        type="url"
+                        placeholder={editingSlackChannel ? 'Leave empty to keep current URL' : 'https://hooks.slack.com/services/...'}
+                        required={!editingSlackChannel}
+                        {...field}
+                        value={field.value ?? ''}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {editingSlackChannel
+                        ? 'Leave empty to keep the current webhook URL'
+                        : 'Create an incoming webhook in your Slack workspace'}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <div className="flex items-center gap-6">
+                <FormField
+                  control={slackChannelFormCtx.control}
+                  name="isDefault"
+                  render={({ field }) => (
+                    <FormItem>
+                      <Label className="flex items-center gap-2">
+                        <FormControl>
+                          <Checkbox
+                            checked={field.value}
+                            onCheckedChange={(checked) => field.onChange(checked === true)}
+                          />
+                        </FormControl>
+                        <span className="text-sm">Default channel</span>
+                      </Label>
+                    </FormItem>
+                  )}
                 />
-                <p className="text-xs text-slate-500 mt-1">A friendly name for this channel configuration</p>
-              </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">Slack Channel Name (optional)</label>
-                <input
-                  type="text"
-                  value={slackChannelForm.slackChannelName || ''}
-                  onChange={(e) => setSlackChannelForm({ ...slackChannelForm, slackChannelName: e.target.value })}
-                  placeholder="e.g., #alerts"
-                  className="input"
+                <FormField
+                  control={slackChannelFormCtx.control}
+                  name="enabled"
+                  render={({ field }) => (
+                    <FormItem>
+                      <Label className="flex items-center gap-2">
+                        <FormControl>
+                          <Checkbox
+                            checked={field.value}
+                            onCheckedChange={(checked) => field.onChange(checked === true)}
+                          />
+                        </FormControl>
+                        <span className="text-sm">Enabled</span>
+                      </Label>
+                    </FormItem>
+                  )}
                 />
-                <p className="text-xs text-slate-500 mt-1">The actual Slack channel name (for reference)</p>
               </div>
-              <div>
-                <label className="block text-sm text-slate-400 mb-1">
-                  Webhook URL {!editingSlackChannel && <span className="text-red-400">*</span>}
-                </label>
-                <input
-                  type="url"
-                  value={slackChannelForm.webhookUrl}
-                  onChange={(e) => setSlackChannelForm({ ...slackChannelForm, webhookUrl: e.target.value })}
-                  placeholder={editingSlackChannel ? 'Leave empty to keep current URL' : 'https://hooks.slack.com/services/...'}
-                  className="input"
-                  required={!editingSlackChannel}
-                />
-                <p className="text-xs text-slate-500 mt-1">
-                  {editingSlackChannel
-                    ? 'Leave empty to keep the current webhook URL'
-                    : 'Create an incoming webhook in your Slack workspace'}
-                </p>
-              </div>
-              <div className="flex items-center gap-4">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={slackChannelForm.isDefault}
-                    onChange={(e) => setSlackChannelForm({ ...slackChannelForm, isDefault: e.target.checked })}
-                    className="rounded bg-slate-800 border-slate-600 text-primary-500"
-                  />
-                  <span className="text-sm text-slate-300">Default channel</span>
-                </label>
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={slackChannelForm.enabled}
-                    onChange={(e) => setSlackChannelForm({ ...slackChannelForm, enabled: e.target.checked })}
-                    className="rounded bg-slate-800 border-slate-600 text-primary-500"
-                  />
-                  <span className="text-sm text-slate-300">Enabled</span>
-                </label>
-              </div>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-muted-foreground">
                 The default channel receives all notifications that don&apos;t have specific routing rules.
               </p>
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowSlackChannelModal(false)}
-                  className="btn btn-ghost"
-                >
+              <DialogFooter>
+                <Button type="button" variant="ghost" onClick={() => setShowSlackChannelModal(false)}>
                   Cancel
-                </button>
-                <button type="submit" disabled={slackChannelSaving} className="btn btn-primary">
+                </Button>
+                <Button type="submit" disabled={slackChannelSaving}>
                   {slackChannelSaving ? 'Saving...' : 'Save'}
-                </button>
-              </div>
+                </Button>
+              </DialogFooter>
             </form>
-          </div>
-        </div>
-      )}
+          </Form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

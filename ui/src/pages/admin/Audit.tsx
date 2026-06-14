@@ -1,14 +1,34 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { useAppStore } from '../../lib/store';
 import { getAuditLogs, listEnvironments, type AuditLog, type Environment } from '../../lib/api';
 import { usePaginatedFetch } from '../../hooks/usePaginatedFetch.js';
 import { formatDistanceToNow } from 'date-fns';
-import { ChevronDownIcon } from '../../components/Icons';
-import { LoadingSkeleton } from '../../components/LoadingSkeleton';
+import { ChevronDown } from 'lucide-react';
 import { safeJsonParse } from '../../lib/helpers';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { StatusBadge } from '@/components/ui/status-badge';
+import type { StatusVariant } from '@/lib/status';
+import { DataPagination } from '@/components/ui/data-pagination';
+import { TableSkeleton } from '@/components/ui/table-skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 const RESOURCE_TYPES = [
-  { value: '', label: 'All Types' },
+  { value: 'all', label: 'All Types' },
   { value: 'service', label: 'Service' },
   { value: 'server', label: 'Server' },
   { value: 'secret', label: 'Secret' },
@@ -16,17 +36,20 @@ const RESOURCE_TYPES = [
   { value: 'env_template', label: 'Env Template' },
 ];
 
-const ACTION_COLORS: Record<string, string> = {
-  create: 'bg-green-500/20 text-green-400',
-  update: 'bg-blue-500/20 text-blue-400',
-  delete: 'bg-red-500/20 text-red-400',
-  deploy: 'bg-purple-500/20 text-purple-400',
-  restart: 'bg-yellow-500/20 text-yellow-400',
-  health_check: 'bg-cyan-500/20 text-cyan-400',
-  access: 'bg-orange-500/20 text-orange-400',
-  webhook_deploy: 'bg-pink-500/20 text-pink-400',
-  discover: 'bg-indigo-500/20 text-indigo-400',
-  import: 'bg-teal-500/20 text-teal-400',
+// Maps each audit action to a Badge variant, preserving the legacy color intent
+// (create=green/success, update/discover=blue/info, delete=red/destructive,
+// the remaining accent colors collapse to the closest semantic variant).
+const ACTION_VARIANTS: Record<string, StatusVariant> = {
+  create: 'success',
+  update: 'info',
+  delete: 'destructive',
+  deploy: 'info',
+  restart: 'warning',
+  health_check: 'info',
+  access: 'warning',
+  webhook_deploy: 'info',
+  discover: 'info',
+  import: 'success',
 };
 
 export default function Audit() {
@@ -58,185 +81,176 @@ export default function Audit() {
   }, []);
 
   if (loading) {
-    return <LoadingSkeleton rows={5} rowHeight="h-16" headerWidth="w-48" />;
+    return (
+      <div className="p-6">
+        <TableSkeleton rows={5} columns={6} />
+      </div>
+    );
   }
 
   return (
     <div className="p-6">
       {/* Filters */}
-      <div className="flex items-center gap-4 mb-6">
-        <select
-          value={selectedEnvironmentId}
-          onChange={(e) => {
-            setSelectedEnvironmentId(e.target.value);
-          }}
-          className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white"
+      <div className="mb-6 flex items-center gap-4">
+        <Select
+          value={selectedEnvironmentId || 'all'}
+          onValueChange={(value) => setSelectedEnvironmentId(value === 'all' ? '' : value)}
         >
-          <option value="">All Environments</option>
-          {environments.map((env) => (
-            <option key={env.id} value={env.id}>
-              {env.name}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger className="w-[200px]" aria-label="Filter by environment">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Environments</SelectItem>
+            {environments.map((env) => (
+              <SelectItem key={env.id} value={env.id}>
+                {env.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
-        <select
-          value={activityResourceTypeFilter}
-          onChange={(e) => {
-            setActivityResourceTypeFilter(e.target.value);
-          }}
-          className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white"
+        <Select
+          value={activityResourceTypeFilter || 'all'}
+          onValueChange={(value) => setActivityResourceTypeFilter(value === 'all' ? '' : value)}
         >
-          {RESOURCE_TYPES.map((type) => (
-            <option key={type.value} value={type.value}>
-              {type.label}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger className="w-[180px]" aria-label="Filter by resource type">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {RESOURCE_TYPES.map((type) => (
+              <SelectItem key={type.value} value={type.value}>
+                {type.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
-      <div className="card">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="text-left text-slate-400 text-sm border-b border-slate-700">
-                <th className="pb-3 font-medium">Time</th>
-                <th className="pb-3 font-medium">User</th>
-                <th className="pb-3 font-medium">Environment</th>
-                <th className="pb-3 font-medium">Action</th>
-                <th className="pb-3 font-medium">Resource</th>
-                <th className="pb-3 font-medium">Status</th>
-                <th className="pb-3 font-medium"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-700">
-              {logs.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="py-8 text-center text-slate-400">
-                    No activity logs found
-                  </td>
-                </tr>
-              ) : (
-                logs.map((log) => (
-                  <>
-                    <tr key={log.id} className="text-slate-300">
-                      <td className="py-3 text-sm">
-                        <span
-                          title={new Date(log.createdAt).toLocaleString()}
-                          className="text-slate-400"
-                        >
-                          {formatDistanceToNow(new Date(log.createdAt), {
-                            addSuffix: true,
-                          })}
+      <Card>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Time</TableHead>
+              <TableHead>User</TableHead>
+              <TableHead>Environment</TableHead>
+              <TableHead>Action</TableHead>
+              <TableHead>Resource</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {logs.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                  No activity logs found
+                </TableCell>
+              </TableRow>
+            ) : (
+              logs.map((log) => (
+                <Fragment key={log.id}>
+                  <TableRow>
+                    <TableCell className="text-sm">
+                      <span
+                        title={new Date(log.createdAt).toLocaleString()}
+                        className="text-muted-foreground"
+                      >
+                        {formatDistanceToNow(new Date(log.createdAt), {
+                          addSuffix: true,
+                        })}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-foreground">{log.user?.email || 'System'}</span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-sm text-muted-foreground">
+                        {log.environment?.name || '-'}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <StatusBadge
+                        kind="severity"
+                        value={log.action}
+                        variant={ACTION_VARIANTS[log.action] ?? 'neutral'}
+                        label={log.action.replace('_', ' ')}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <div>
+                        <span className="text-xs uppercase text-muted-foreground">
+                          {log.resourceType.replace('_', ' ')}
                         </span>
-                      </td>
-                      <td className="py-3">
-                        <span className="text-white">
-                          {log.user?.email || 'System'}
-                        </span>
-                      </td>
-                      <td className="py-3">
-                        <span className="text-slate-400 text-sm">
-                          {log.environment?.name || '-'}
-                        </span>
-                      </td>
-                      <td className="py-3">
-                        <span
-                          className={`px-2 py-1 rounded text-xs font-medium ${
-                            ACTION_COLORS[log.action] || 'bg-slate-500/20 text-slate-400'
-                          }`}
-                        >
-                          {log.action.replace('_', ' ')}
-                        </span>
-                      </td>
-                      <td className="py-3">
-                        <div>
-                          <span className="text-xs text-slate-400 uppercase">
-                            {log.resourceType.replace('_', ' ')}
+                        {log.resourceName && (
+                          <span className="ml-2 font-medium text-foreground">
+                            {log.resourceName}
                           </span>
-                          {log.resourceName && (
-                            <span className="ml-2 text-white font-medium">
-                              {log.resourceName}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="py-3">
-                        {log.success ? (
-                          <span className="badge badge-success">Success</span>
-                        ) : (
-                          <span className="badge badge-error">Failed</span>
                         )}
-                      </td>
-                      <td className="py-3">
-                        {(log.details || log.error) && (
-                          <button
-                            onClick={() =>
-                              setExpandedLog(expandedLog === log.id ? null : log.id)
-                            }
-                            className="text-slate-400 hover:text-white"
-                          >
-                            <ChevronDownIcon
-                              className={`w-5 h-5 transition-transform ${
-                                expandedLog === log.id ? 'rotate-180' : ''
-                              }`}
-                            />
-                          </button>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {log.success ? (
+                        <StatusBadge kind="deployment" value="success" label="Success" />
+                      ) : (
+                        <StatusBadge kind="deployment" value="failed" label="Failed" />
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {(log.details || log.error) && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() =>
+                            setExpandedLog(expandedLog === log.id ? null : log.id)
+                          }
+                          aria-label={expandedLog === log.id ? 'Collapse details' : 'Expand details'}
+                          aria-expanded={expandedLog === log.id}
+                        >
+                          <ChevronDown
+                            className={`size-5 transition-transform ${
+                              expandedLog === log.id ? 'rotate-180' : ''
+                            }`}
+                          />
+                        </Button>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                  {expandedLog === log.id && (log.details || log.error) && (
+                    <TableRow>
+                      <TableCell colSpan={7} className="bg-muted/50 px-4 py-4">
+                        {log.error && (
+                          <div className="mb-2">
+                            <span className="font-medium text-destructive">Error: </span>
+                            <span className="text-foreground">{log.error}</span>
+                          </div>
                         )}
-                      </td>
-                    </tr>
-                    {expandedLog === log.id && (log.details || log.error) && (
-                      <tr key={`${log.id}-details`}>
-                        <td colSpan={7} className="py-4 px-4 bg-slate-800/50">
-                          {log.error && (
-                            <div className="mb-2">
-                              <span className="text-red-400 font-medium">Error: </span>
-                              <span className="text-slate-300">{log.error}</span>
-                            </div>
-                          )}
-                          {log.details && (
-                            <pre className="text-xs text-slate-400 overflow-x-auto">
-                              {JSON.stringify(safeJsonParse(log.details, {}), null, 2)}
-                            </pre>
-                          )}
-                        </td>
-                      </tr>
-                    )}
-                  </>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                        {log.details && (
+                          <pre className="overflow-x-auto text-xs text-muted-foreground">
+                            {JSON.stringify(safeJsonParse(log.details, {}), null, 2)}
+                          </pre>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </Fragment>
+              ))
+            )}
+          </TableBody>
+        </Table>
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <div className="flex items-center justify-between mt-4 pt-4 border-t border-slate-700">
-            <span className="text-sm text-slate-400">
-              Showing {currentPage * pageSize + 1}-{Math.min((currentPage + 1) * pageSize, total)} of {total}
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setCurrentPage(Math.max(0, currentPage - 1))}
-                disabled={currentPage === 0}
-                className="px-3 py-1 rounded bg-slate-700 text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-600"
-              >
-                Previous
-              </button>
-              <span className="text-slate-400">
-                Page {currentPage + 1} of {totalPages}
-              </span>
-              <button
-                onClick={() => setCurrentPage(Math.min(totalPages - 1, currentPage + 1))}
-                disabled={currentPage >= totalPages - 1}
-                className="px-3 py-1 rounded bg-slate-700 text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-600"
-              >
-                Next
-              </button>
-            </div>
+          <div className="px-4 pb-4">
+            <DataPagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              totalItems={total}
+              pageSize={pageSize}
+              onPageChange={setCurrentPage}
+            />
           </div>
         )}
-      </div>
+      </Card>
     </div>
   );
 }

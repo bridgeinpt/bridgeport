@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '../../../test/render';
+import { ConfirmProvider } from '@/hooks/useConfirm';
 import { useAuthStore } from '../../lib/store';
 
 // Mock API
@@ -49,7 +50,7 @@ describe('Users', () => {
   });
 
   it('should display user list', async () => {
-    renderWithProviders(<Users />);
+    renderWithProviders(<ConfirmProvider><Users /></ConfirmProvider>);
     await waitFor(() => {
       expect(screen.getByText('admin@test.com')).toBeInTheDocument();
       expect(screen.getByText('viewer@test.com')).toBeInTheDocument();
@@ -57,7 +58,7 @@ describe('Users', () => {
   });
 
   it('should display user roles', async () => {
-    renderWithProviders(<Users />);
+    renderWithProviders(<ConfirmProvider><Users /></ConfirmProvider>);
     await waitFor(() => {
       expect(screen.getByText('Admin')).toBeInTheDocument();
       expect(screen.getByText('Viewer')).toBeInTheDocument();
@@ -65,7 +66,7 @@ describe('Users', () => {
   });
 
   it('should display user names', async () => {
-    renderWithProviders(<Users />);
+    renderWithProviders(<ConfirmProvider><Users /></ConfirmProvider>);
     await waitFor(() => {
       // "Admin User" may appear multiple times (current user indicator)
       expect(screen.getAllByText('Admin User').length).toBeGreaterThan(0);
