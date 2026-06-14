@@ -1,201 +1,227 @@
-import { useState, useEffect } from 'react';
-import { Modal } from './Modal';
-import { Alert } from './Alert';
+import { useEffect, useState } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
 import { useAuthStore } from '../lib/store';
 import { changeUserPassword, updateUser } from '../lib/api';
+import { getErrorMessage } from '@/lib/helpers';
+import { toast } from './Toast';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from '@/components/ui/form';
 
 interface AccountModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
+const profileSchema = z.object({
+  name: z.string().max(120).optional(),
+});
+type ProfileValues = z.infer<typeof profileSchema>;
+
+const passwordSchema = z
+  .object({
+    currentPassword: z.string().min(1, 'Current password is required'),
+    newPassword: z.string().min(8, 'Password must be at least 8 characters'),
+    confirmPassword: z.string().min(1, 'Please confirm your new password'),
+  })
+  .refine((data) => data.newPassword === data.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+  });
+type PasswordValues = z.infer<typeof passwordSchema>;
+
 export function AccountModal({ isOpen, onClose }: AccountModalProps) {
   const { user, setUser } = useAuthStore();
-  const [accountTab, setAccountTab] = useState<'profile' | 'password'>('profile');
-  const [editName, setEditName] = useState('');
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [tab, setTab] = useState<'profile' | 'password'>('profile');
+  const [serverError, setServerError] = useState<string | null>(null);
 
-  // Reset form when modal opens
+  const profileForm = useForm<ProfileValues>({
+    resolver: zodResolver(profileSchema),
+    defaultValues: { name: user?.name || '' },
+  });
+  const passwordForm = useForm<PasswordValues>({
+    resolver: zodResolver(passwordSchema),
+    defaultValues: { currentPassword: '', newPassword: '', confirmPassword: '' },
+  });
+
+  // Reset both forms + state whenever the modal opens.
   useEffect(() => {
     if (isOpen) {
-      setEditName(user?.name || '');
-      setCurrentPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
-      setError(null);
-      setSuccess(null);
-      setAccountTab('profile');
+      profileForm.reset({ name: user?.name || '' });
+      passwordForm.reset({ currentPassword: '', newPassword: '', confirmPassword: '' });
+      setServerError(null);
+      setTab('profile');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, user?.name]);
 
-  const handleUpdateProfile = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const onUpdateProfile = async (values: ProfileValues) => {
     if (!user) return;
-    setSaving(true);
-    setError(null);
-    setSuccess(null);
+    setServerError(null);
     try {
-      const { user: updatedUser } = await updateUser(user.id, { name: editName || undefined });
+      const { user: updatedUser } = await updateUser(user.id, { name: values.name || undefined });
       setUser({ ...user, name: updatedUser.name });
-      setSuccess('Profile updated');
+      toast.success('Profile updated');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update profile');
-    } finally {
-      setSaving(false);
+      setServerError(getErrorMessage(err, 'Failed to update profile'));
     }
   };
 
-  const handleChangePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const onChangePassword = async (values: PasswordValues) => {
     if (!user) return;
-    if (newPassword !== confirmPassword) {
-      setError('Passwords do not match');
-      return;
-    }
-    if (newPassword.length < 8) {
-      setError('Password must be at least 8 characters');
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    setSuccess(null);
+    setServerError(null);
     try {
       await changeUserPassword(user.id, {
-        currentPassword,
-        newPassword,
+        currentPassword: values.currentPassword,
+        newPassword: values.newPassword,
       });
-      setSuccess('Password changed successfully');
-      setCurrentPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
+      toast.success('Password changed successfully');
+      passwordForm.reset({ currentPassword: '', newPassword: '', confirmPassword: '' });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to change password');
-    } finally {
-      setSaving(false);
+      setServerError(getErrorMessage(err, 'Failed to change password'));
     }
-  };
-
-  const handleTabChange = (tab: 'profile' | 'password') => {
-    setAccountTab(tab);
-    setError(null);
-    setSuccess(null);
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="My Account">
-      {/* Tabs */}
-      <div className="tabs mb-4">
-        <button
-          onClick={() => handleTabChange('profile')}
-          className={`tab ${accountTab === 'profile' ? 'tab-active' : 'tab-inactive'}`}
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>My Account</DialogTitle>
+          <DialogDescription>Manage your profile and password.</DialogDescription>
+        </DialogHeader>
+
+        <Tabs
+          value={tab}
+          onValueChange={(v) => {
+            setTab(v as 'profile' | 'password');
+            setServerError(null);
+          }}
         >
-          Profile
-        </button>
-        <button
-          onClick={() => handleTabChange('password')}
-          className={`tab ${accountTab === 'password' ? 'tab-active' : 'tab-inactive'}`}
-        >
-          Change Password
-        </button>
-      </div>
+          <TabsList className="w-full">
+            <TabsTrigger value="profile" className="flex-1">
+              Profile
+            </TabsTrigger>
+            <TabsTrigger value="password" className="flex-1">
+              Change Password
+            </TabsTrigger>
+          </TabsList>
 
-      {error && (
-        <Alert variant="error" className="mb-4">
-          {error}
-        </Alert>
-      )}
+          {serverError && (
+            <Alert variant="destructive" className="mt-4">
+              <AlertDescription>{serverError}</AlertDescription>
+            </Alert>
+          )}
 
-      {success && (
-        <Alert variant="success" className="mb-4">
-          {success}
-        </Alert>
-      )}
+          <TabsContent value="profile">
+            <Form {...profileForm}>
+              <form onSubmit={profileForm.handleSubmit(onUpdateProfile)} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="account-email">Email</Label>
+                  <Input id="account-email" type="email" value={user?.email || ''} disabled />
+                </div>
+                <FormField
+                  control={profileForm.control}
+                  name="name"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Name</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Your name" autoComplete="name" {...field} value={field.value ?? ''} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <div className="space-y-2">
+                  <Label htmlFor="account-role">Role</Label>
+                  <Input id="account-role" value={user?.role || ''} disabled className="capitalize" />
+                </div>
+                <div className="flex justify-end pt-2">
+                  <Button type="submit" disabled={profileForm.formState.isSubmitting}>
+                    {profileForm.formState.isSubmitting ? 'Saving...' : 'Save Changes'}
+                  </Button>
+                </div>
+              </form>
+            </Form>
+          </TabsContent>
 
-      {accountTab === 'profile' && (
-        <form onSubmit={handleUpdateProfile} className="space-y-4">
-          <div>
-            <label className="label">Email</label>
-            <input
-              type="email"
-              value={user?.email || ''}
-              className="input bg-slate-800"
-              disabled
-            />
-          </div>
-          <div>
-            <label className="label">Name</label>
-            <input
-              type="text"
-              value={editName}
-              onChange={(e) => setEditName(e.target.value)}
-              placeholder="Your name"
-              className="input"
-            />
-          </div>
-          <div>
-            <label className="label">Role</label>
-            <input
-              type="text"
-              value={user?.role || ''}
-              className="input bg-slate-800 capitalize"
-              disabled
-            />
-          </div>
-          <div className="flex justify-end pt-2">
-            <button type="submit" disabled={saving} className="btn btn-primary">
-              {saving ? 'Saving...' : 'Save Changes'}
-            </button>
-          </div>
-        </form>
-      )}
-
-      {accountTab === 'password' && (
-        <form onSubmit={handleChangePassword} className="space-y-4">
-          <div>
-            <label className="label">Current Password</label>
-            <input
-              type="password"
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
-              className="input"
-              required
-            />
-          </div>
-          <div>
-            <label className="label">New Password</label>
-            <input
-              type="password"
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              placeholder="Minimum 8 characters"
-              minLength={8}
-              className="input"
-              required
-            />
-          </div>
-          <div>
-            <label className="label">Confirm New Password</label>
-            <input
-              type="password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              className="input"
-              required
-            />
-          </div>
-          <div className="flex justify-end pt-2">
-            <button type="submit" disabled={saving} className="btn btn-primary">
-              {saving ? 'Changing...' : 'Change Password'}
-            </button>
-          </div>
-        </form>
-      )}
-    </Modal>
+          <TabsContent value="password">
+            <Form {...passwordForm}>
+              <form onSubmit={passwordForm.handleSubmit(onChangePassword)} className="space-y-4">
+                <FormField
+                  control={passwordForm.control}
+                  name="currentPassword"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Current Password</FormLabel>
+                      <FormControl>
+                        <Input type="password" autoComplete="current-password" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={passwordForm.control}
+                  name="newPassword"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>New Password</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="password"
+                          autoComplete="new-password"
+                          placeholder="Minimum 8 characters"
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={passwordForm.control}
+                  name="confirmPassword"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Confirm New Password</FormLabel>
+                      <FormControl>
+                        <Input type="password" autoComplete="new-password" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <div className="flex justify-end pt-2">
+                  <Button type="submit" disabled={passwordForm.formState.isSubmitting}>
+                    {passwordForm.formState.isSubmitting ? 'Changing...' : 'Change Password'}
+                  </Button>
+                </div>
+              </form>
+            </Form>
+          </TabsContent>
+        </Tabs>
+      </DialogContent>
+    </Dialog>
   );
 }
 
