@@ -83,6 +83,23 @@ const envIdParamsSchema = z.object({ envId: z.string() });
 const serverIdParamsSchema = z.object({ serverId: z.string() });
 const depParamsSchema = z.object({ id: z.string(), depId: z.string() });
 
+// --- query schemas (documentation only) ---
+//
+// These document the query contract for the OpenAPI spec. Runtime reads stay
+// exactly as before (parsePaginationQuery / parseInt with fallbacks) so unknown
+// or missing params behave identically — these schemas never reject.
+const paginationQuerySchema = z.object({
+  limit: z.coerce.number().min(0).optional(),
+  offset: z.coerce.number().min(0).optional(),
+});
+const limitQuerySchema = z.object({
+  limit: z.coerce.number().min(0).optional(),
+});
+const logsQuerySchema = z.object({
+  tail: z.coerce.number().min(1).optional(),
+  before: z.string().optional(),
+});
+
 // --- schemas ---
 
 const createServiceSchema = z.object({
@@ -184,6 +201,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['services'],
         summary: 'List service templates in an environment',
         params: envIdParamsSchema,
+        querystring: paginationQuerySchema,
         errors: [401],
       }),
     },
@@ -1032,6 +1050,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['services'],
         summary: 'Get deployment history for a service template',
         params: idParamsSchema,
+        querystring: limitQuerySchema,
         errors: [401],
       }),
     },
@@ -1074,6 +1093,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['services'],
         summary: 'Fetch recent container logs for a deployment',
         params: depParamsSchema,
+        querystring: logsQuerySchema,
         errors: [401, 500],
       }),
     },
@@ -1499,6 +1519,7 @@ export async function serviceRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['services'],
         summary: 'Get audit and deployment history for a service template',
         params: idParamsSchema,
+        querystring: limitQuerySchema,
         errors: [401, 404],
       }),
     },

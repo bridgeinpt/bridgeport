@@ -39,6 +39,16 @@ const idParamSchema = z.object({ id: z.string() });
 const envIdParamSchema = z.object({ envId: z.string() });
 const envIdIdParamSchema = z.object({ envId: z.string(), id: z.string() });
 
+// Query schemas (documentation only). Runtime reads stay unchanged
+// (parsePaginationQuery / parseInt with fallbacks), so these never reject.
+const paginationQuerySchema = z.object({
+  limit: z.coerce.number().min(0).optional(),
+  offset: z.coerce.number().min(0).optional(),
+});
+const databaseMetricsQuerySchema = z.object({
+  hours: z.coerce.number().min(1).optional(),
+});
+
 const storageTypeSchema = z.enum(['local', 'spaces']);
 const backupFormatSchema = z.enum(['plain', 'custom', 'tar']);
 const backupCompressionSchema = z.enum(['none', 'gzip']);
@@ -103,6 +113,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['monitoring'],
         summary: 'List databases for an environment',
         params: envIdParamSchema,
+        querystring: paginationQuerySchema,
         errors: [401],
       }),
     },
@@ -316,6 +327,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['monitoring'],
         summary: 'List backups for a database',
         params: idParamSchema,
+        querystring: paginationQuerySchema,
         errors: [401, 404],
       }),
     },
@@ -1010,6 +1022,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['monitoring'],
         summary: 'Get metrics history for a specific database',
         params: envIdIdParamSchema,
+        querystring: databaseMetricsQuerySchema,
         errors: [401, 404],
       }),
     },

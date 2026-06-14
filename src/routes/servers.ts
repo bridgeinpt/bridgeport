@@ -37,6 +37,17 @@ import { routeSchema } from '../lib/openapi-schema.js';
 const idParamsSchema = z.object({ id: z.string() });
 const envIdParamsSchema = z.object({ envId: z.string() });
 
+// Query schemas (documentation only). Runtime reads stay unchanged
+// (parsePaginationQuery + raw `include` string check), so these never reject.
+const listServersQuerySchema = z.object({
+  limit: z.coerce.number().min(0).optional(),
+  offset: z.coerce.number().min(0).optional(),
+  include: z.string().optional(),
+});
+const getServerQuerySchema = z.object({
+  include: z.string().optional(),
+});
+
 const createServerSchema = z.object({
   name: z.string().min(1),
   hostname: z.string().min(1),
@@ -114,6 +125,7 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['servers'],
         summary: 'List servers in an environment',
         params: envIdParamsSchema,
+        querystring: listServersQuerySchema,
         errors: [401],
       }),
     },
@@ -141,6 +153,7 @@ export async function serverRoutes(fastify: FastifyInstance): Promise<void> {
         tags: ['servers'],
         summary: 'Get a server, optionally including its services',
         params: idParamsSchema,
+        querystring: getServerQuerySchema,
         errors: [401, 404],
       }),
     },

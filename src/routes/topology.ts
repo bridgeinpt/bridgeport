@@ -8,6 +8,16 @@ import { routeSchema } from '../lib/openapi-schema.js';
 const idParams = z.object({ id: z.string() });
 const envIdParams = z.object({ envId: z.string() });
 
+// Query schemas (documentation only). `environmentId` is functionally required
+// by these handlers, but documented as optional so the spec matches the runtime
+// contract: the handlers keep their own 400-on-missing checks, so this never
+// changes validation behavior.
+const environmentIdQuerySchema = z.object({ environmentId: z.string().optional() });
+const diagramExportQuerySchema = z.object({
+  environmentId: z.string().optional(),
+  format: z.string().optional(),
+});
+
 // Connection endpoints can be services, databases, or user-placed external
 // entities. The DB columns are free-form `String` so this widening is
 // non-breaking for existing rows.
@@ -95,6 +105,7 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
       schema: routeSchema({
         tags: ['services'],
         summary: 'List topology connections for an environment',
+        querystring: environmentIdQuerySchema,
         errors: [400, 401],
       }),
     },
@@ -258,6 +269,7 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
       schema: routeSchema({
         tags: ['services'],
         summary: 'Get the saved diagram layout for an environment',
+        querystring: environmentIdQuerySchema,
         errors: [400, 401],
       }),
     },
@@ -630,6 +642,7 @@ export async function topologyRoutes(fastify: FastifyInstance): Promise<void> {
       schema: routeSchema({
         tags: ['services'],
         summary: 'Export the environment topology as a Mermaid diagram',
+        querystring: diagramExportQuerySchema,
         errors: [400, 401],
       }),
     },

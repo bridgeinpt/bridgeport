@@ -19,6 +19,15 @@ import { routeSchema } from '../lib/openapi-schema.js';
 const idParamSchema = z.object({ id: z.string() });
 const envIdParamSchema = z.object({ envId: z.string() });
 
+// Query schemas (documentation only). Runtime reads stay unchanged
+// (parseInt with fallback / raw `execute === 'true'` check), so these never reject.
+const limitQuerySchema = z.object({
+  limit: z.coerce.number().min(0).optional(),
+});
+const createPlanQuerySchema = z.object({
+  execute: z.string().optional(),
+});
+
 const createPlanSchema = z.object({
   serviceIds: z.array(z.string()).min(1),
   imageTag: z.string().min(1),
@@ -35,6 +44,7 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
         tags: ['services'],
         summary: 'List deployment plans for an environment',
         params: envIdParamSchema,
+        querystring: limitQuerySchema,
         errors: [401],
       }),
     },
@@ -56,6 +66,7 @@ export async function deploymentPlanRoutes(fastify: FastifyInstance): Promise<vo
         tags: ['services'],
         summary: 'Create (and optionally execute) a deployment plan',
         params: envIdParamSchema,
+        querystring: createPlanQuerySchema,
         body: createPlanSchema,
         errors: [400, 401],
       }),

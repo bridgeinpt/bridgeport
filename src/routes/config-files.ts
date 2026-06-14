@@ -69,6 +69,13 @@ const serverIdParamsSchema = z.object({ serverId: z.string() });
 const restoreParamsSchema = z.object({ id: z.string(), historyId: z.string() });
 const serviceFileParamsSchema = z.object({ serviceId: z.string(), fileId: z.string() });
 
+// Query schema (documentation only). Runtime read is unchanged
+// (parsePaginationQuery with fallbacks), so this never rejects.
+const paginationQuerySchema = z.object({
+  limit: z.coerce.number().min(0).optional(),
+  offset: z.coerce.number().min(0).optional(),
+});
+
 /**
  * Validate `fragmentIds` payload before any write. Three failure modes the
  * Prisma layer used to surface as 500/409 with wrong messages:
@@ -124,6 +131,7 @@ export async function configFileRoutes(fastify: FastifyInstance): Promise<void> 
         tags: ['services'],
         summary: 'List config files for an environment with sync status',
         params: envIdParamsSchema,
+        querystring: paginationQuerySchema,
         errors: [401],
       }),
     },

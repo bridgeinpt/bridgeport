@@ -47,6 +47,16 @@ const envIdParamsSchema = z.object({ envId: z.string() });
 const digestParamsSchema = z.object({ id: z.string(), digestId: z.string() });
 const linkParamsSchema = z.object({ id: z.string(), serviceId: z.string() });
 
+// Query schemas (documentation only). Runtime reads stay unchanged
+// (parsePaginationQuery / parseInt with fallbacks), so these never reject.
+const paginationQuerySchema = z.object({
+  limit: z.coerce.number().min(0).optional(),
+  offset: z.coerce.number().min(0).optional(),
+});
+const limitQuerySchema = z.object({
+  limit: z.coerce.number().min(0).optional(),
+});
+
 export async function containerImageRoutes(fastify: FastifyInstance): Promise<void> {
   // List container images for environment
   fastify.get(
@@ -57,6 +67,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
         tags: ['services'],
         summary: 'List container images for an environment',
         params: envIdParamsSchema,
+        querystring: paginationQuerySchema,
         errors: [401],
       }),
     },
@@ -364,6 +375,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
         tags: ['services'],
         summary: 'Get tag/deploy history for a container image',
         params: idParamsSchema,
+        querystring: limitQuerySchema,
         errors: [401, 404],
       }),
     },
@@ -500,6 +512,7 @@ export async function containerImageRoutes(fastify: FastifyInstance): Promise<vo
         tags: ['services'],
         summary: 'List digests for a container image (paginated)',
         params: idParamsSchema,
+        querystring: paginationQuerySchema,
         errors: [401, 404],
       }),
     },
