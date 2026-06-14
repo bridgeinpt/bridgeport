@@ -59,11 +59,12 @@ describe('TopBar', () => {
     expect(screen.queryByTitle('Admin Settings')).not.toBeInTheDocument();
   });
 
-  it('should call onOpenAccount when account button is clicked', async () => {
+  it('should call onOpenAccount from the user menu', async () => {
     const user = userEvent.setup();
     useAuthStore.setState({ user: adminUser, token: 'test' });
     renderWithProviders(<TopBar onOpenAccount={onOpenAccount} onOpenCLI={onOpenCLI} />);
-    await user.click(screen.getByTitle('My Account'));
+    await user.click(screen.getByRole('button', { name: 'User menu' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'My Account' }));
     expect(onOpenAccount).toHaveBeenCalled();
   });
 
@@ -81,10 +82,12 @@ describe('TopBar', () => {
     expect(screen.getByTestId('notification-bell')).toBeInTheDocument();
   });
 
-  it('should render logout button', () => {
+  it('should render logout in the user menu', async () => {
+    const user = userEvent.setup();
     useAuthStore.setState({ user: adminUser, token: 'test' });
     renderWithProviders(<TopBar onOpenAccount={onOpenAccount} onOpenCLI={onOpenCLI} />);
-    expect(screen.getByTitle('Logout')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'User menu' }));
+    expect(await screen.findByRole('menuitem', { name: 'Logout' })).toBeInTheDocument();
   });
 
   it('should render breadcrumbs', () => {
