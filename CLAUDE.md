@@ -264,6 +264,8 @@ Use these instead of reimplementing:
 
 ## UI/UX Guidelines
 
-Persist user preferences via Zustand, use skeleton loading states, no `<h1>` page titles (breadcrumbs handle that), use `ui/src/lib/status.ts` for status colors. Card layout for most lists, table layout for dense data.
+The UI is built on **shadcn/ui** (Radix + Tailwind v4 + CSS-variable theming), with a Deep Slate dark theme and an opt-in light theme (`ThemeProvider` + user-menu switcher, default `system`). Primitives live in `ui/src/components/ui/`; add new ones with `cd ui && pnpm dlx shadcn@latest add <component>`.
 
-> **Full guidelines** (layouts, badges, buttons, patterns): [`docs/development/ui-guidelines.md`](docs/development/ui-guidelines.md)
+Key conventions: style with **semantic tokens** (`bg-background`, `bg-card`, `bg-primary` sky, `bg-destructive` red, `bg-brand` burgundy, `bg-success/warning/info`) — never raw `slate-*`/`primary-NNN` ramps; status via `statusVariant()`/`StatusBadge` (`ui/src/lib/status.ts`); confirmations via `useConfirm()` (not `window.confirm`); modals via `Dialog`; forms via shadcn `Form` (react-hook-form + zod); toasts via Sonner (`toast`/`useToast`); icons via `lucide-react` (`components/Icons.tsx` re-exports). No `<h1>` page titles (Breadcrumb owns them); skeleton loading states; cards for most lists, `Table` for dense data. Prefer role-based test queries; Radix supplies a11y roles/focus-trap for free.
+
+> **Full guidelines** (tokens, theming, variants, composites, forms, a11y): [`docs/development/ui-guidelines.md`](docs/development/ui-guidelines.md)
