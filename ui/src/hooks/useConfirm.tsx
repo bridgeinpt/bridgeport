@@ -34,6 +34,9 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
   const resolverRef = React.useRef<((value: boolean) => void) | null>(null);
 
   const confirm = React.useCallback<ConfirmFn>((opts) => {
+    // If a prior confirm is still pending (called again before it settled),
+    // resolve it as cancelled so its awaiter never hangs.
+    resolverRef.current?.(false);
     setOptions(opts);
     return new Promise<boolean>((resolve) => {
       resolverRef.current = resolve;

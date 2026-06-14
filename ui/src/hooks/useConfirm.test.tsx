@@ -67,4 +67,31 @@ describe('useConfirm', () => {
     expect(() => render(<Bad />)).toThrow(/ConfirmProvider/);
     spy.mockRestore();
   });
+
+  it('settles a superseded confirm as false instead of leaving it hanging', async () => {
+    const user = userEvent.setup();
+    const firstResult = vi.fn();
+    function Multi() {
+      const confirm = useConfirm();
+      return (
+        <button
+          onClick={() => {
+            void confirm({ title: 'First?' }).then(firstResult); // not awaited
+            void confirm({ title: 'Second?' }); // supersedes the first
+          }}
+        >
+          go
+        </button>
+      );
+    }
+    render(
+      <ConfirmProvider>
+        <Multi />
+      </ConfirmProvider>
+    );
+
+    await user.click(screen.getByText('go'));
+    await waitFor(() => expect(firstResult).toHaveBeenCalledWith(false));
+    expect(await screen.findByText('Second?')).toBeInTheDocument();
+  });
 });
