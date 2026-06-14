@@ -18,6 +18,12 @@ const badgeVariants = cva(
           "border-border text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
         ghost: "[a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
         link: "text-primary underline-offset-4 [a&]:hover:underline",
+        // Semantic status variants (Deep Slate tokens). Consumed by StatusBadge
+        // via statusVariant(); see @/lib/status.ts.
+        success: "border-transparent bg-success/15 text-success [a&]:hover:bg-success/25",
+        warning: "border-transparent bg-warning/15 text-warning [a&]:hover:bg-warning/25",
+        info: "border-transparent bg-info/15 text-info [a&]:hover:bg-info/25",
+        neutral: "border-transparent bg-muted text-muted-foreground [a&]:hover:bg-muted/80",
       },
     },
     defaultVariants: {
