@@ -1677,7 +1677,7 @@ export default function ServerDetail() {
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={creating}>
+              <Button type="submit" disabled={creating || !newService.containerImageId}>
                 {creating ? 'Creating...' : 'Create Service'}
               </Button>
             </DialogFooter>
