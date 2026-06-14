@@ -144,3 +144,78 @@ export function getSyncStatusColor(status: 'synced' | 'pending' | 'never' | 'out
       return 'badge-warning';
   }
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * shadcn migration (#244): single source of truth for status → Badge variant.
+ *
+ * `statusVariant(kind, value)` collapses the per-domain class-returning helpers
+ * above into one mapper feeding the `success | warning | info | destructive |
+ * neutral` Badge/StatusBadge variants. The legacy `get*StatusColor` helpers stay
+ * until every page migrates off the `badge-*` classes (removed in Phase 7).
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** Badge variants used for status display. */
+export type StatusVariant = 'success' | 'warning' | 'info' | 'destructive' | 'neutral';
+
+/** Domains a status value can belong to (drives the value→variant mapping). */
+export type StatusKind =
+  | 'container'
+  | 'health'
+  | 'server'
+  | 'deployment'
+  | 'backup'
+  | 'sync'
+  | 'overall'
+  | 'severity';
+
+/**
+ * Map a status value within a domain to a semantic Badge variant.
+ * Matching is case-insensitive; unknown values fall back to `warning`
+ * (or `neutral` for severity), preserving the legacy helpers' behavior.
+ */
+export function statusVariant(kind: StatusKind, value: string | null | undefined): StatusVariant {
+  const v = (value ?? '').toLowerCase();
+  switch (kind) {
+    case 'container':
+      if (v === 'running') return 'success';
+      if (v === 'stopped' || v === 'exited' || v === 'dead') return 'destructive';
+      return 'warning'; // restarting / paused / created / unknown
+    case 'health':
+      if (v === 'healthy') return 'success';
+      if (v === 'unhealthy') return 'destructive';
+      if (v === 'none') return 'neutral';
+      return 'warning';
+    case 'server':
+      if (v === 'healthy') return 'success';
+      if (v === 'unhealthy') return 'destructive';
+      return 'warning';
+    case 'deployment':
+      if (v === 'success' || v === 'deployed') return 'success';
+      if (v === 'failed' || v === 'error') return 'destructive';
+      if (v === 'deploying' || v === 'in_progress') return 'info';
+      return 'warning';
+    case 'backup':
+      if (v === 'completed' || v === 'success') return 'success';
+      if (v === 'failed') return 'destructive';
+      if (v === 'running') return 'info';
+      return 'warning';
+    case 'sync':
+      if (v === 'synced') return 'success';
+      if (v === 'pending' || v === 'outdated') return 'warning';
+      if (v === 'never' || v === 'not_attached') return 'neutral';
+      return 'warning';
+    case 'overall':
+      if (v === 'healthy') return 'success';
+      if (v === 'running') return 'info';
+      if (v === 'unhealthy') return 'destructive';
+      return 'warning';
+    case 'severity':
+      if (v === 'critical' || v === 'error') return 'destructive';
+      if (v === 'warning' || v === 'warn') return 'warning';
+      if (v === 'info') return 'info';
+      if (v === 'success') return 'success';
+      return 'neutral';
+    default:
+      return 'neutral';
+  }
+}
