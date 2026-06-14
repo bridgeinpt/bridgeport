@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuthStore, isAdmin } from '../lib/store';
+import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
+import { Separator } from '@/components/ui/separator';
 import AdminSidebar from './AdminSidebar';
 import { AccountModal } from './AccountModal';
 import { CLIModal } from './CLIModal';
+import { CommandPalette } from './CommandPalette';
 import AdminTopBar from './AdminTopBar';
 
 interface AdminLayoutProps {
@@ -21,29 +24,21 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
   }
 
   return (
-    <div className="h-screen flex overflow-hidden">
-      {/* Admin Sidebar */}
+    <SidebarProvider>
       <AdminSidebar />
+      <SidebarInset className="h-screen overflow-hidden">
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+          <SidebarTrigger className="-ml-1" />
+          <Separator orientation="vertical" className="mr-1 h-4" />
+          <AdminTopBar onOpenAccount={() => setShowAccountModal(true)} onOpenCLI={() => setShowCLIModal(true)} />
+        </header>
 
-      {/* Main content area */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Top bar */}
-        <AdminTopBar
-          onOpenAccount={() => setShowAccountModal(true)}
-          onOpenCLI={() => setShowCLIModal(true)}
-        />
+        <main className="flex-1 overflow-auto">{children}</main>
+      </SidebarInset>
 
-        {/* Main content */}
-        <main className="flex-1 overflow-auto">
-          {children}
-        </main>
-      </div>
-
-      {/* Account Modal */}
       <AccountModal isOpen={showAccountModal} onClose={() => setShowAccountModal(false)} />
-
-      {/* CLI Modal */}
       <CLIModal isOpen={showCLIModal} onClose={() => setShowCLIModal(false)} />
-    </div>
+      <CommandPalette />
+    </SidebarProvider>
   );
 }

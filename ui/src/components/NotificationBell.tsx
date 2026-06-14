@@ -1,6 +1,11 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { BellIcon, CheckIcon } from './Icons';
+import { Bell, Check } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { StatusBadge } from '@/components/ui/status-badge';
+import { cn } from '@/lib/utils';
 import {
   getNotificationsUnreadCount,
   listNotifications,
@@ -12,7 +17,6 @@ import { useEventSource } from '../lib/useEventSource';
 
 function formatTimeAgo(date: string): string {
   const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
-
   if (seconds < 60) return 'Just now';
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
@@ -20,43 +24,30 @@ function formatTimeAgo(date: string): string {
   return new Date(date).toLocaleDateString();
 }
 
-function getSeverityColor(severity: string): string {
+/** Left accent border by severity, bound to theme tokens. */
+function severityBorder(severity: string): string {
   switch (severity) {
     case 'critical':
-      return 'border-red-500';
+      return 'border-destructive';
     case 'warning':
-      return 'border-yellow-500';
+      return 'border-warning';
     default:
-      return 'border-primary-500';
-  }
-}
-
-function getSeverityBadge(severity: string): { bg: string; text: string } {
-  switch (severity) {
-    case 'critical':
-      return { bg: 'bg-red-500/20', text: 'text-red-400' };
-    case 'warning':
-      return { bg: 'bg-yellow-500/20', text: 'text-yellow-400' };
-    default:
-      return { bg: 'bg-primary-500/20', text: 'text-primary-400' };
+      return 'border-primary';
   }
 }
 
 export default function NotificationBell() {
-  const [isOpen, setIsOpen] = useState(false);
+  const [open, setOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifications, setNotifications] = useState<NotificationWithType[]>([]);
   const [loading, setLoading] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Fetch unread count on mount
   useEffect(() => {
     getNotificationsUnreadCount()
       .then(({ count }) => setUnreadCount(count))
       .catch((error) => console.error('Failed to fetch unread count:', error));
   }, []);
 
-  // Update unread count via SSE when new notifications arrive
   const handleNotificationEvent = useCallback(() => {
     getNotificationsUnreadCount()
       .then(({ count }) => setUnreadCount(count))
@@ -65,26 +56,7 @@ export default function NotificationBell() {
 
   useEventSource('notification', handleNotificationEvent);
 
-  // Fetch notifications when dropdown opens
-  useEffect(() => {
-    if (isOpen) {
-      loadNotifications();
-    }
-  }, [isOpen]);
-
-  // Close dropdown when clicking outside
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const loadNotifications = async () => {
+  const loadNotifications = useCallback(async () => {
     setLoading(true);
     try {
       const { notifications: notifs } = await listNotifications({ limit: 10 });
@@ -94,7 +66,11 @@ export default function NotificationBell() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (open) loadNotifications();
+  }, [open, loadNotifications]);
 
   const handleMarkAsRead = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -120,82 +96,89 @@ export default function NotificationBell() {
   };
 
   return (
-    <div className="relative" ref={dropdownRef}>
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="relative text-slate-400 hover:text-white p-1"
-        title="Notifications"
-        aria-label="Notifications"
-      >
-        <BellIcon className="w-5 h-5" />
-        {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
-            {unreadCount > 99 ? '99+' : unreadCount}
-          </span>
-        )}
-      </button>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="relative"
+          title="Notifications"
+          aria-label="Notifications"
+          aria-expanded={open}
+        >
+          <Bell className="size-5" />
+          {unreadCount > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-white">
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
+          )}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-80 p-0">
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <h3 className="text-sm font-semibold">Notifications</h3>
+          {unreadCount > 0 && (
+            <button
+              onClick={handleMarkAllAsRead}
+              className="text-xs text-primary hover:text-primary/80"
+            >
+              Mark all read
+            </button>
+          )}
+        </div>
 
-      {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 bg-slate-800 border border-slate-700 rounded-lg shadow-lg z-50">
-          {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700">
-            <h3 className="text-sm font-semibold text-white">Notifications</h3>
-            {unreadCount > 0 && (
-              <button
-                onClick={handleMarkAllAsRead}
-                className="text-xs text-primary-400 hover:text-primary-300"
-              >
-                Mark all read
-              </button>
-            )}
-          </div>
-
-          {/* Notification list */}
-          <div className="max-h-96 overflow-y-auto">
+        <ScrollArea className="max-h-96">
+          <div aria-live="polite">
             {loading ? (
-              <div className="p-4 text-center text-slate-400 text-sm">Loading...</div>
+              <div className="p-4 text-center text-sm text-muted-foreground">Loading...</div>
             ) : notifications.length === 0 ? (
-              <div className="p-8 text-center text-slate-400 text-sm">No notifications</div>
+              <div className="p-8 text-center text-sm text-muted-foreground">No notifications</div>
             ) : (
               <ul>
                 {notifications.map((notification) => {
                   const isUnread = !notification.inAppReadAt;
-                  const severityColor = getSeverityColor(notification.type.severity);
-                  const badge = getSeverityBadge(notification.type.severity);
-
                   return (
                     <li
                       key={notification.id}
-                      className={`px-4 py-3 border-b border-slate-700/50 last:border-0 hover:bg-slate-750 ${
-                        isUnread ? 'bg-slate-800/80' : 'bg-transparent'
-                      }`}
+                      className={cn(
+                        'border-b px-4 py-3 last:border-0 hover:bg-accent',
+                        isUnread && 'bg-accent/40'
+                      )}
                     >
-                      <div className={`border-l-2 pl-3 ${severityColor}`}>
+                      <div className={cn('border-l-2 pl-3', severityBorder(notification.type.severity))}>
                         <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1 min-w-0">
+                          <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2">
-                              <p className={`text-sm font-medium ${isUnread ? 'text-white' : 'text-slate-300'}`}>
+                              <p
+                                className={cn(
+                                  'text-sm font-medium',
+                                  isUnread ? 'text-foreground' : 'text-muted-foreground'
+                                )}
+                              >
                                 {notification.title}
                               </p>
                               {notification.type.severity !== 'info' && (
-                                <span className={`text-[10px] px-1.5 py-0.5 rounded ${badge.bg} ${badge.text}`}>
-                                  {notification.type.severity}
-                                </span>
+                                <StatusBadge kind="severity" value={notification.type.severity} />
                               )}
                             </div>
-                            <p className="text-xs text-slate-400 mt-0.5 line-clamp-2">{notification.message}</p>
-                            <p className="text-[10px] text-slate-500 mt-1">
+                            <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                              {notification.message}
+                            </p>
+                            <p className="mt-1 text-[10px] text-muted-foreground/70">
                               {formatTimeAgo(notification.createdAt)}
                             </p>
                           </div>
                           {isUnread && (
-                            <button
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
                               onClick={(e) => handleMarkAsRead(notification.id, e)}
-                              className="text-slate-400 hover:text-white p-1 flex-shrink-0"
+                              className="shrink-0"
                               title="Mark as read"
+                              aria-label="Mark as read"
                             >
-                              <CheckIcon className="w-4 h-4" />
-                            </button>
+                              <Check className="size-4" />
+                            </Button>
                           )}
                         </div>
                       </div>
@@ -205,19 +188,18 @@ export default function NotificationBell() {
               </ul>
             )}
           </div>
+        </ScrollArea>
 
-          {/* Footer */}
-          <div className="px-4 py-2 border-t border-slate-700">
-            <Link
-              to="/notifications"
-              onClick={() => setIsOpen(false)}
-              className="block text-center text-xs text-primary-400 hover:text-primary-300"
-            >
-              View all notifications
-            </Link>
-          </div>
+        <div className="border-t px-4 py-2">
+          <Link
+            to="/notifications"
+            onClick={() => setOpen(false)}
+            className="block text-center text-xs text-primary hover:text-primary/80"
+          >
+            View all notifications
+          </Link>
         </div>
-      )}
-    </div>
+      </PopoverContent>
+    </Popover>
   );
 }
