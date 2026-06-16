@@ -85,7 +85,7 @@ jobs:
           node-version: 24
       # pnpm via npm (version pinned to package.json's packageManager):
       # pnpm/action-setup isn't on this repo's GitHub Actions allowlist.
-      - run: npm install -g pnpm@11.5.3
+      - run: npm install -g pnpm@11.7.0
       # The `allowBuilds` allowlist in pnpm-workspace.yaml lets better-sqlite3
       # compile its native binding during install (no separate rebuild step),
       # and pnpm honours the supply-chain cooldown (minimumReleaseAge) natively.

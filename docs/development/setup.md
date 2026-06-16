@@ -44,7 +44,7 @@ pnpm install
 Expected output (last few lines of `pnpm install`):
 
 ```
-Done in 8s using pnpm v11.5.3
+Done in 8s using pnpm v11.7.0
 ```
 
 > [!NOTE]
