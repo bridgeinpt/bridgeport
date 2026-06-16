@@ -46,8 +46,8 @@
   "author": "BRIDGE IN <https://bridgein.pt>",
   "license": "Apache-2.0",
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1063.0",
-    "@aws-sdk/s3-request-presigner": "^3.1063.0",
+    "@aws-sdk/client-s3": "^3.1066.0",
+    "@aws-sdk/s3-request-presigner": "^3.1066.0",
     "@fastify/cors": "^11.0.0",
     "@fastify/jwt": "^10.1.0",
     "@fastify/multipart": "^10.0.0",
@@ -77,8 +77,8 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/dockerode": "^4.0.1",
-    "@types/node": "^25.9.2",
-    "@types/nodemailer": "^8.0.0",
+    "@types/node": "^25.9.3",
+    "@types/nodemailer": "^8.0.1",
     "@types/pg": "^8.20.0",
     "@types/ssh2": "^1.15.0",
     "@vitest/coverage-v8": "^4.1.8",
