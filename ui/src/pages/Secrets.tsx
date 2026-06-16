@@ -80,15 +80,23 @@ export default function Secrets() {
   const loadData = () => {
     if (!selectedEnvironment?.id) return;
     setLoading(true);
+    const envId = selectedEnvironment.id;
+    // `allowSecretReveal` lives in the admin-only `configuration` settings module
+    // (GET .../settings/configuration is requireAdmin). It only gates the reveal
+    // affordance, which is itself admin-only (see canReveal + GET /api/secrets/:id/value),
+    // so non-admins don't need it. Fetching it for them would 403 and — bundled in
+    // this Promise.all — reject the whole batch, leaving secrets & vars unrendered.
     Promise.all([
-      listSecrets(selectedEnvironment.id),
-      listVars(selectedEnvironment.id),
-      getModuleSettings(selectedEnvironment.id, 'configuration'),
+      listSecrets(envId),
+      listVars(envId),
+      isAdmin(user) ? getModuleSettings(envId, 'configuration') : Promise.resolve(null),
     ])
       .then(([secretsRes, varsRes, settingsRes]) => {
         setSecrets(secretsRes.secrets);
         setVars(varsRes.vars);
-        setAllowSecretReveal(settingsRes.settings.allowSecretReveal as boolean);
+        if (settingsRes) {
+          setAllowSecretReveal(settingsRes.settings.allowSecretReveal as boolean);
+        }
       })
       .finally(() => setLoading(false));
   };
