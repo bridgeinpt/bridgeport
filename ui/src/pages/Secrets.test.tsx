@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import { renderWithProviders } from '../../test/render';
-import { useAppStore } from '../lib/store';
+import { useAppStore, useAuthStore } from '../lib/store';
+import { getModuleSettings } from '../lib/api';
 import { ConfirmProvider } from '@/hooks/useConfirm';
 
 // Mock API
@@ -56,6 +57,8 @@ describe('Secrets', () => {
         _count: { servers: 1, secrets: 2 },
       },
     });
+    useAuthStore.setState({ user: null, token: null });
+    vi.mocked(getModuleSettings).mockClear();
   });
 
   it('should display secret keys after loading', async () => {
@@ -79,5 +82,72 @@ describe('Secrets', () => {
       // API_KEY should have some indication of never reveal
       expect(screen.getByText('API_KEY')).toBeInTheDocument();
     });
+  });
+
+  it('renders secrets/vars for an operator without hitting the admin-only config settings', async () => {
+    // Regression: an operator can list secrets/vars but cannot read the
+    // `configuration` settings module (GET .../settings/configuration is
+    // admin-only). Previously that fetch sat inside the same Promise.all as
+    // the secrets/vars load, so its 403 rejected the whole batch and the page
+    // rendered an empty "No secrets configured" state. The admin-only fetch
+    // must be skipped for non-admins so the rest of the page still loads.
+    useAuthStore.setState({
+      user: { id: 'u-op', email: 'op@example.com', name: 'Operator', role: 'operator' },
+    });
+
+    renderWithProviders(<ConfirmProvider><Secrets /></ConfirmProvider>);
+
+    await waitFor(() => {
+      expect(screen.getByText('DATABASE_URL')).toBeInTheDocument();
+      expect(screen.getByText('API_KEY')).toBeInTheDocument();
+    });
+    // The admin-only settings fetch is skipped entirely for non-admins, so its
+    // 403 can never reject the Promise.all that loads secrets/vars.
+    expect(getModuleSettings).not.toHaveBeenCalled();
+  });
+
+  it('fetches the admin-only config settings for admins', async () => {
+    useAuthStore.setState({
+      user: { id: 'u-admin', email: 'admin@example.com', name: 'Admin', role: 'admin' },
+    });
+
+    renderWithProviders(<ConfirmProvider><Secrets /></ConfirmProvider>);
+
+    await waitFor(() => {
+      expect(screen.getByText('DATABASE_URL')).toBeInTheDocument();
+    });
+    expect(getModuleSettings).toHaveBeenCalledWith('env-1', 'configuration');
+  });
+
+  it('hides write controls (Add/Edit/Delete) for viewers', async () => {
+    // Viewers can read secrets/vars but every write 403s at the backend
+    // (enforceRoleForMethod). Don't show controls that can only fail on submit.
+    useAuthStore.setState({
+      user: { id: 'u-view', email: 'view@example.com', name: 'Viewer', role: 'viewer' },
+    });
+
+    renderWithProviders(<ConfirmProvider><Secrets /></ConfirmProvider>);
+
+    await waitFor(() => {
+      expect(screen.getByText('DATABASE_URL')).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: /add secret/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^edit$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^delete$/i })).not.toBeInTheDocument();
+  });
+
+  it('shows write controls (Add/Edit/Delete) for operators', async () => {
+    useAuthStore.setState({
+      user: { id: 'u-op', email: 'op@example.com', name: 'Operator', role: 'operator' },
+    });
+
+    renderWithProviders(<ConfirmProvider><Secrets /></ConfirmProvider>);
+
+    await waitFor(() => {
+      expect(screen.getByText('DATABASE_URL')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: /add secret/i })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /^edit$/i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: /^delete$/i }).length).toBeGreaterThan(0);
   });
 });
