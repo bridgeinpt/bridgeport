@@ -26,17 +26,25 @@ overrides:
 # dependency that wants to build fails the install loudly rather than silently
 # skipping its native binding — this is the "harder to regress" ratchet.
 #
-#   better-sqlite3 / ssh2 / cpu-features  → compile native bindings
+#   better-sqlite3                        → compile native binding
 #   esbuild                               → links its platform binary
 #   @prisma/engines / prisma              → fetch + place the query engine
 #   protobufjs                            → build-time codegen (dep of dockerode)
 #   msw                                   → service-worker asset (dev/test only)
+#
+# ssh2 / cpu-features are explicitly DENIED (`false`): their optional native
+# crypto addon does not compile against Node 26's V8 (`v8::Context::GetIsolate`
+# was removed), so the build only ever produced a fatal-looking compile error
+# before ssh2 fell back to its pure-JS crypto anyway. We skip the build
+# entirely — identical runtime behavior, no scary error in the logs. A `false`
+# is a real decision, so `strictDepBuilds` stays satisfied (it only fails the
+# install for *unlisted* build-wanting deps).
 allowBuilds:
   better-sqlite3: true
   '@prisma/engines': true
   prisma: true
-  ssh2: true
-  cpu-features: true
+  ssh2: false
+  cpu-features: false
   esbuild: true
   protobufjs: true
   msw: true

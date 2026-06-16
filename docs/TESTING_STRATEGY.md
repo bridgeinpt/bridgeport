@@ -1320,7 +1320,7 @@ jobs:
           node-version: 24
       # pnpm via npm (pinned to packageManager): pnpm/action-setup isn't on
       # this repo's GitHub Actions allowlist, and pnpm 11 needs Node >= 22.13.
-      - run: npm install -g pnpm@11.5.3
+      - run: npm install -g pnpm@11.7.0
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec prisma generate
       - run: pnpm exec vitest run --config config/vitest.unit.config.ts --reporter=github-actions
@@ -1336,7 +1336,7 @@ jobs:
           node-version: 24
       # pnpm via npm (pinned to packageManager): pnpm/action-setup isn't on
       # this repo's GitHub Actions allowlist, and pnpm 11 needs Node >= 22.13.
-      - run: npm install -g pnpm@11.5.3
+      - run: npm install -g pnpm@11.7.0
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter bridgeport-ui exec vitest run "src/lib/" --reporter=github-actions
 
@@ -1365,7 +1365,7 @@ jobs:
           node-version: 24
       # pnpm via npm (pinned to packageManager): pnpm/action-setup isn't on
       # this repo's GitHub Actions allowlist, and pnpm 11 needs Node >= 22.13.
-      - run: npm install -g pnpm@11.5.3
+      - run: npm install -g pnpm@11.7.0
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec prisma generate
       - run: pnpm exec vitest run --config config/vitest.config.ts --coverage --reporter=github-actions
@@ -1389,7 +1389,7 @@ jobs:
           node-version: 24
       # pnpm via npm (pinned to packageManager): pnpm/action-setup isn't on
       # this repo's GitHub Actions allowlist, and pnpm 11 needs Node >= 22.13.
-      - run: npm install -g pnpm@11.5.3
+      - run: npm install -g pnpm@11.7.0
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter bridgeport-ui exec vitest run --coverage --reporter=github-actions
       - uses: codecov/codecov-action@v4
@@ -1412,7 +1412,7 @@ jobs:
           node-version: 24
       # pnpm via npm (pinned to packageManager): pnpm/action-setup isn't on
       # this repo's GitHub Actions allowlist, and pnpm 11 needs Node >= 22.13.
-      - run: npm install -g pnpm@11.5.3
+      - run: npm install -g pnpm@11.7.0
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec vitest run --config config/vitest.config.ts tests/migrations/
 
@@ -1429,7 +1429,7 @@ jobs:
           node-version: 24
       # pnpm via npm (pinned to packageManager): pnpm/action-setup isn't on
       # this repo's GitHub Actions allowlist, and pnpm 11 needs Node >= 22.13.
-      - run: npm install -g pnpm@11.5.3
+      - run: npm install -g pnpm@11.7.0
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
@@ -1455,7 +1455,7 @@ jobs:
           node-version: 24
       # pnpm via npm (pinned to packageManager): pnpm/action-setup isn't on
       # this repo's GitHub Actions allowlist, and pnpm 11 needs Node >= 22.13.
-      - run: npm install -g pnpm@11.5.3
+      - run: npm install -g pnpm@11.7.0
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec prisma generate
       - run: pnpm run build
@@ -1473,7 +1473,7 @@ jobs:
           node-version: 24
       # pnpm via npm (pinned to packageManager): pnpm/action-setup isn't on
       # this repo's GitHub Actions allowlist, and pnpm 11 needs Node >= 22.13.
-      - run: npm install -g pnpm@11.5.3
+      - run: npm install -g pnpm@11.7.0
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec prisma generate
       - run: pnpm exec tsc --noEmit

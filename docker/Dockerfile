@@ -32,7 +32,7 @@ RUN echo "${CLI_VERSION}" > cli-version.txt
 # ─────────────────────────────────────────────────────────────────────────────
 FROM node:26-alpine AS pnpm-base
 WORKDIR /app
-RUN npm install -g pnpm@11.5.3
+RUN npm install -g pnpm@11.7.0
 # Workspace manifests + lockfile first for cache-friendly layering: dependency
 # layers only bust when these files change, not on every source edit.
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
