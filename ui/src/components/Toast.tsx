@@ -22,18 +22,32 @@ interface LegacyToastInput {
 }
 
 /**
+ * Stable singleton for the legacy toast surface. Defined once at module scope —
+ * NOT rebuilt per call — so `useToast()` returns a referentially stable object.
+ *
+ * This stability matters: an object rebuilt on every render makes any
+ * `useCallback`/`useMemo` that lists the toast handle in its deps recompute
+ * every render. In components that feed such memos back into state via an
+ * effect (e.g. the topology diagram's `setFlowNodes(nodes)` / `setFlowEdges(edges)`
+ * sync), that cascades into an infinite render loop — "Maximum update depth
+ * exceeded" (React #185). Every method only delegates to the module-level
+ * `sonnerToast`, so there's no per-render state to capture.
+ */
+const legacyToastApi = {
+  success: (message: string) => sonnerToast.success(message),
+  error: (message: string) => sonnerToast.error(message),
+  info: (message: string) => sonnerToast.info(message),
+  warning: (message: string) => sonnerToast.warning(message),
+  addToast: ({ type, message }: LegacyToastInput) => sonnerToast[type](message),
+  removeToast: (id: string | number) => sonnerToast.dismiss(id),
+  /** Sonner owns its own render tree; the old in-memory list is no longer surfaced. */
+  toasts: [] as never[],
+} as const;
+
+/**
  * Back-compat hook mirroring the old ToastContext surface, backed by Sonner.
- * No provider required.
+ * No provider required. Returns the stable {@link legacyToastApi} singleton.
  */
 export function useToast() {
-  return {
-    success: (message: string) => sonnerToast.success(message),
-    error: (message: string) => sonnerToast.error(message),
-    info: (message: string) => sonnerToast.info(message),
-    warning: (message: string) => sonnerToast.warning(message),
-    addToast: ({ type, message }: LegacyToastInput) => sonnerToast[type](message),
-    removeToast: (id: string | number) => sonnerToast.dismiss(id),
-    /** Sonner owns its own render tree; the old in-memory list is no longer surfaced. */
-    toasts: [] as never[],
-  };
+  return legacyToastApi;
 }
