@@ -35,10 +35,10 @@ export default defineConfig({
             return 'charts';
           }
           if (/[\\/]node_modules[\\/]@xyflow[\\/]/.test(id)) return 'flow';
-          if (/[\\/]node_modules[\\/](@uiw[\\/]react-codemirror|@codemirror[\\/]|@lezer[\\/]|codemirror)/.test(id)) {
+          if (/[\\/]node_modules[\\/](@uiw[\\/](react-)?codemirror|@codemirror[\\/]|@lezer[\\/]|codemirror)/.test(id)) {
             return 'codemirror';
           }
-          if (/[\\/]node_modules[\\/](@radix-ui[\\/]|cmdk)/.test(id)) return 'radix';
+          if (/[\\/]node_modules[\\/](@radix-ui[\\/]|radix-ui[\\/]|cmdk)/.test(id)) return 'radix';
           if (/[\\/]node_modules[\\/]@sentry/.test(id)) return 'sentry';
           if (/[\\/]node_modules[\\/](react-router|react-router-dom|react-dom|react)[\\/]/.test(id)) {
             return 'react-vendor';

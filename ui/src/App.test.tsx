@@ -1,80 +1,68 @@
-import { lazy, Suspense } from 'react';
-import { describe, it, expect } from 'vitest';
-import { screen, render } from '@testing-library/react';
-import { MemoryRouter, Routes, Route } from 'react-router-dom';
-import { ThemeProvider } from '@/components/theme-provider';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { screen } from '@testing-library/react';
+import { renderWithProviders } from '../test/render';
+import { useAuthStore, useAppStore } from './lib/store';
+import { mockUser, mockEnvironment } from '../test/msw-handlers';
 
 // ── Why this test exists (issue #277) ───────────────────────────────────────
 // App.tsx now loads every page via `React.lazy(() => import('./pages/...'))`
-// and renders them under a single `<Suspense fallback={<PageFallback />}>`
-// boundary (route-level code splitting). The risk this introduces is silent:
-// a broken/typo'd lazy import path, or a missing Suspense boundary, would only
-// surface at runtime when that route is first visited — not at build time.
+// and renders them under `<Suspense fallback={<PageFallback />}>` boundaries
+// (route-level code splitting). The risk this introduces is silent: a broken /
+// typo'd lazy import path, or a missing Suspense boundary, would only surface
+// at runtime when that route is first visited — not at build time.
 //
-// This test guards the *lazy + Suspense + router* wiring: it mounts a real
-// page module through the exact pattern App.tsx uses and asserts that the
-// Suspense fallback resolves to the real component (proven via an async
-// findBy* query). If a lazy import stops resolving or the Suspense boundary
-// goes missing, this fails.
+// This test renders the REAL <App /> and navigates to a lazy route, so it
+// exercises App.tsx's *actual* lazy + Suspense + router wiring (not a parallel
+// copy of it). If a lazy import in App.tsx stops resolving, or one of App's
+// `<Suspense>` boundaries is removed, the lazy page never mounts and the
+// findByRole assertion below times out — failing this test.
 //
-// We test the PATTERN against real page modules rather than mounting <App />
-// directly on purpose: App's `ProtectedRoute` calls `api.setToken(token)` as a
-// side effect during render and wraps every lazy route in heavy Layout /
-// AdminLayout chrome (sidebar, command palette, topbar — each with their own
-// effects and data fetching). Exercising all of that would test far more than
-// the lazy wiring this change introduced and make the smoke test flaky. The
-// `About` page is a real lazily-loaded App route (`/admin/about`) that renders
-// statically with zero API/auth setup, making it the ideal lazy target.
+// We mock the layout *chrome* (AdminLayout's sidebar / topbar / modals /
+// command palette) down to a pass-through wrapper. That keeps the render
+// stable and non-flaky WITHOUT touching the Suspense + lazy wiring this change
+// introduced — the mock replaces the wrapper component, while App.tsx's own
+// `<Suspense>` and `lazy(() => import('./pages/admin/About'))` are still the
+// code under test. We target `/admin/about` because the About page is static
+// (no data fetching / auth side effects), so it resolves cleanly through the
+// real wiring with the shared MSW harness.
 
-// `lazy(() => import(...))` mirrors App.tsx exactly — the import path is the
-// thing that can silently break, so we resolve a real module here.
-const LazyAbout = lazy(() => import('./pages/admin/About'));
+// Mock AdminLayout to a pass-through so we don't drag in AdminSidebar,
+// AccountModal, CLIModal, CommandPalette, and AdminTopBar (each with their own
+// effects/data fetching). App.tsx's <Suspense> + lazy About route live OUTSIDE
+// this wrapper, so they remain exercised.
+vi.mock('./components/AdminLayout', () => ({
+  default: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="admin-layout">{children}</div>
+  ),
+}));
 
-function PageFallback() {
-  // Mirror of App.tsx's fallback; gives us a stable testid to assert on.
-  return <div data-testid="page-fallback">Loading…</div>;
-}
+// The /admin/* branch is the one under test, but App.tsx also eagerly imports
+// Layout for the /* branch. Stub it too so importing App is side-effect free.
+vi.mock('./components/Layout', () => ({
+  default: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="layout">{children}</div>
+  ),
+}));
 
-function renderRoutingAt(path: string) {
-  return render(
-    <ThemeProvider>
-      <MemoryRouter initialEntries={[path]}>
-        <Suspense fallback={<PageFallback />}>
-          <Routes>
-            {/* Two routes pointing at lazily-loaded page modules, matching the
-                shape of App.tsx's <Routes> under a Suspense boundary. */}
-            <Route path="/about" element={<LazyAbout />} />
-            <Route path="/admin/about" element={<LazyAbout />} />
-          </Routes>
-        </Suspense>
-      </MemoryRouter>
-    </ThemeProvider>
-  );
-}
+import App from './App';
 
 describe('App lazy route wiring (issue #277)', () => {
-  it('shows the Suspense fallback before the lazy chunk resolves', () => {
-    renderRoutingAt('/about');
-    // Synchronous render: the lazy import has not resolved yet, so the
-    // Suspense boundary must be showing the fallback. This proves the
-    // boundary is actually wired around the lazy routes.
-    expect(screen.getByTestId('page-fallback')).toBeInTheDocument();
+  beforeEach(() => {
+    // Seed auth so App's <ProtectedRoute> passes (it redirects to /login
+    // without a token). Admin role is required for the /admin/* branch.
+    useAuthStore.setState({ user: mockUser, token: 'test-jwt-token' });
+    useAppStore.setState({ selectedEnvironment: mockEnvironment });
   });
 
-  it('resolves the lazy page and renders the real component (Suspense resolves)', async () => {
-    renderRoutingAt('/about');
-    // Async query: the dynamic import resolves, Suspense swaps the fallback
-    // for the real page. If the lazy import path were broken, this would
-    // never appear and the test would fail.
+  it('resolves a real lazy page through App.tsx\'s Suspense + lazy wiring', async () => {
+    renderWithProviders(<App />, { initialEntries: ['/admin/about'] });
+
+    // The About page is loaded via App.tsx's `lazy(() => import('./pages/admin/About'))`
+    // inside its own `<Suspense>` boundary. Asserting on the semantic "Features"
+    // heading (role-based, not marketing copy) proves the dynamic import
+    // resolved and Suspense swapped its fallback for the real component.
     expect(
-      await screen.findByText('Dock. Run. Ship. Repeat.')
+      await screen.findByRole('heading', { name: /Features/i })
     ).toBeInTheDocument();
-    // Fallback is gone once the real component mounted.
-    expect(screen.queryByTestId('page-fallback')).not.toBeInTheDocument();
-  });
-
-  it('resolves a lazy page on a second route too', async () => {
-    renderRoutingAt('/admin/about');
-    expect(await screen.findByText('Features')).toBeInTheDocument();
   });
 });
