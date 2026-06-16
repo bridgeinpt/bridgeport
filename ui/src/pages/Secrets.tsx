@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useAppStore, useAuthStore, isAdmin } from '../lib/store.js';
+import { useAppStore, useAuthStore, isAdmin, hasMinimumRole } from '../lib/store.js';
 import {
   listSecrets,
   createSecret,
@@ -202,6 +202,10 @@ export default function Secrets() {
   // Revealing a value is admin-only (the API enforces this too — see
   // GET /api/secrets/:id/value). The env toggle and write-only flag gate it further.
   const canReveal = (secret: Secret) => isAdmin(user) && allowSecretReveal && !secret.neverReveal;
+  // Creating/editing/deleting secrets & vars requires operator+ (the backend's
+  // enforceRoleForMethod 403s viewer writes). Hide the controls so viewers
+  // aren't shown actions that would only fail on submit.
+  const canWrite = hasMinimumRole(user, 'operator');
   const toggleUsage = (id: string) => setExpandedUsage((prev) => ({ ...prev, [id]: !prev[id] }));
 
   // Pagination for active tab
@@ -243,13 +247,16 @@ export default function Secrets() {
             </TabsTrigger>
           </TabsList>
         </Tabs>
-        <Button onClick={() => setShowCreate(true)}>
-          Add {activeTab === 'secrets' ? 'Secret' : 'Var'}
-        </Button>
+        {canWrite && (
+          <Button onClick={() => setShowCreate(true)}>
+            Add {activeTab === 'secrets' ? 'Secret' : 'Var'}
+          </Button>
+        )}
       </div>
 
-      {/* Scan Suggestions Panel */}
-      {selectedEnvironment?.id && (
+      {/* Scan Suggestions Panel — runs/previews/applies config scans (all POST),
+          which create secrets & vars, so it's an operator+ write affordance. */}
+      {canWrite && selectedEnvironment?.id && (
         <ScanSuggestionsPanel environmentId={selectedEnvironment.id} onApplied={loadData} />
       )}
 
@@ -330,7 +337,7 @@ export default function Secrets() {
         secrets.length === 0 ? (
           <EmptyState
             message="No secrets configured"
-            action={{ label: 'Add First Secret', onClick: () => setShowCreate(true) }}
+            action={canWrite ? { label: 'Add First Secret', onClick: () => setShowCreate(true) } : undefined}
           />
         ) : (
           <>
@@ -351,6 +358,7 @@ export default function Secrets() {
                       key={secret.id}
                       secret={secret}
                       canReveal={canReveal(secret)}
+                      canWrite={canWrite}
                       revealedValue={revealedSecrets[secret.id]}
                       revealError={revealErrors[secret.id]}
                       isEditing={editingId === secret.id}
@@ -383,7 +391,7 @@ export default function Secrets() {
       ) : vars.length === 0 ? (
         <EmptyState
           message="No variables configured"
-          action={{ label: 'Add First Var', onClick: () => setShowCreate(true) }}
+          action={canWrite ? { label: 'Add First Var', onClick: () => setShowCreate(true) } : undefined}
         />
       ) : (
         <>
@@ -403,6 +411,7 @@ export default function Secrets() {
                   <VarRow
                     key={v.id}
                     v={v}
+                    canWrite={canWrite}
                     isEditing={editingId === v.id}
                     editValue={editValue}
                     expandedUsage={!!expandedUsage[v.id]}
@@ -440,6 +449,7 @@ export default function Secrets() {
 interface SecretRowProps {
   secret: Secret;
   canReveal: boolean;
+  canWrite: boolean;
   revealedValue?: string;
   revealError?: string;
   isEditing: boolean;
@@ -455,7 +465,7 @@ interface SecretRowProps {
 }
 
 function SecretRow({
-  secret, canReveal, revealedValue, revealError,
+  secret, canReveal, canWrite, revealedValue, revealError,
   isEditing, editValue, expandedUsage,
   onReveal, onEdit, onEditValueChange, onEditSave, onEditCancel, onDelete, onToggleUsage,
 }: SecretRowProps) {
@@ -535,14 +545,16 @@ function SecretRow({
           {formatDistanceToNow(new Date(secret.updatedAt), { addSuffix: true })}
         </TableCell>
         <TableCell>
-          <div className="flex items-center gap-0.5">
-            <Button onClick={onEdit} variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-foreground" title="Edit">
-              <Pencil className="size-3.5" />
-            </Button>
-            <Button onClick={onDelete} variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" title="Delete">
-              <Trash2 className="size-3.5" />
-            </Button>
-          </div>
+          {canWrite && (
+            <div className="flex items-center gap-0.5">
+              <Button onClick={onEdit} variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-foreground" title="Edit">
+                <Pencil className="size-3.5" />
+              </Button>
+              <Button onClick={onDelete} variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" title="Delete">
+                <Trash2 className="size-3.5" />
+              </Button>
+            </div>
+          )}
         </TableCell>
       </TableRow>
       {/* Expanded usage row */}
@@ -574,6 +586,7 @@ function SecretRow({
 
 interface VarRowProps {
   v: Var;
+  canWrite: boolean;
   isEditing: boolean;
   editValue: string;
   expandedUsage: boolean;
@@ -585,7 +598,7 @@ interface VarRowProps {
   onToggleUsage: () => void;
 }
 
-function VarRow({ v, isEditing, editValue, expandedUsage, onEdit, onEditValueChange, onEditSave, onEditCancel, onDelete, onToggleUsage }: VarRowProps) {
+function VarRow({ v, canWrite, isEditing, editValue, expandedUsage, onEdit, onEditValueChange, onEditSave, onEditCancel, onDelete, onToggleUsage }: VarRowProps) {
   const usageCount = v.usageCount ?? 0;
 
   return (
@@ -633,14 +646,16 @@ function VarRow({ v, isEditing, editValue, expandedUsage, onEdit, onEditValueCha
           {formatDistanceToNow(new Date(v.updatedAt), { addSuffix: true })}
         </TableCell>
         <TableCell>
-          <div className="flex items-center gap-0.5">
-            <Button onClick={onEdit} variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-foreground" title="Edit">
-              <Pencil className="size-3.5" />
-            </Button>
-            <Button onClick={onDelete} variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" title="Delete">
-              <Trash2 className="size-3.5" />
-            </Button>
-          </div>
+          {canWrite && (
+            <div className="flex items-center gap-0.5">
+              <Button onClick={onEdit} variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-foreground" title="Edit">
+                <Pencil className="size-3.5" />
+              </Button>
+              <Button onClick={onDelete} variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" title="Delete">
+                <Trash2 className="size-3.5" />
+              </Button>
+            </div>
+          )}
         </TableCell>
       </TableRow>
       {expandedUsage && v.usedByServices && v.usedByServices.length > 0 && (

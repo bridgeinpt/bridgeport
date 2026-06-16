@@ -118,4 +118,36 @@ describe('Secrets', () => {
     });
     expect(getModuleSettings).toHaveBeenCalledWith('env-1', 'configuration');
   });
+
+  it('hides write controls (Add/Edit/Delete) for viewers', async () => {
+    // Viewers can read secrets/vars but every write 403s at the backend
+    // (enforceRoleForMethod). Don't show controls that can only fail on submit.
+    useAuthStore.setState({
+      user: { id: 'u-view', email: 'view@example.com', name: 'Viewer', role: 'viewer' },
+    });
+
+    renderWithProviders(<ConfirmProvider><Secrets /></ConfirmProvider>);
+
+    await waitFor(() => {
+      expect(screen.getByText('DATABASE_URL')).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: /add secret/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^edit$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^delete$/i })).not.toBeInTheDocument();
+  });
+
+  it('shows write controls (Add/Edit/Delete) for operators', async () => {
+    useAuthStore.setState({
+      user: { id: 'u-op', email: 'op@example.com', name: 'Operator', role: 'operator' },
+    });
+
+    renderWithProviders(<ConfirmProvider><Secrets /></ConfirmProvider>);
+
+    await waitFor(() => {
+      expect(screen.getByText('DATABASE_URL')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: /add secret/i })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /^edit$/i }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: /^delete$/i }).length).toBeGreaterThan(0);
+  });
 });
