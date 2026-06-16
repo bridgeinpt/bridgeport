@@ -1,46 +1,59 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore, useAppStore } from './lib/store';
 import { api } from './lib/api';
 import { setSentryUser, setSentryEnvironment } from './lib/sentry';
+// Layout / auth wrappers stay eager — they're needed for the first paint.
 import Layout from './components/Layout';
 import AdminLayout from './components/AdminLayout';
 import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
-import Servers from './pages/Servers';
-import ServerDetail from './pages/ServerDetail';
-import Services from './pages/Services';
-import ServiceDetail from './pages/ServiceDetail';
-import Secrets from './pages/Secrets';
-import ConfigFiles from './pages/ConfigFiles';
-import Fragments from './pages/Fragments';
-import Registries from './pages/Registries';
-import Databases from './pages/Databases';
-import DatabaseDetail from './pages/DatabaseDetail';
-import Monitoring from './pages/Monitoring';
-import MonitoringHealth from './pages/MonitoringHealth';
-import MonitoringAgents from './pages/MonitoringAgents';
-import MonitoringServers from './pages/MonitoringServers';
-import MonitoringServices from './pages/MonitoringServices';
-import MonitoringDatabases from './pages/MonitoringDatabases';
-import Settings from './pages/Settings';
-import Notifications from './pages/Notifications';
-import ContainerImages from './pages/ContainerImages';
-import ContainerImageDetail from './pages/ContainerImageDetail';
-import DeploymentPlans from './pages/DeploymentPlans';
-import DeploymentPlanDetail from './pages/DeploymentPlanDetail';
+
+// Page components are lazy-loaded so each route ships in its own chunk
+// (route-level code splitting), keeping the initial JS bundle small.
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Servers = lazy(() => import('./pages/Servers'));
+const ServerDetail = lazy(() => import('./pages/ServerDetail'));
+const Services = lazy(() => import('./pages/Services'));
+const ServiceDetail = lazy(() => import('./pages/ServiceDetail'));
+const Secrets = lazy(() => import('./pages/Secrets'));
+const ConfigFiles = lazy(() => import('./pages/ConfigFiles'));
+const Fragments = lazy(() => import('./pages/Fragments'));
+const Registries = lazy(() => import('./pages/Registries'));
+const Databases = lazy(() => import('./pages/Databases'));
+const DatabaseDetail = lazy(() => import('./pages/DatabaseDetail'));
+const Monitoring = lazy(() => import('./pages/Monitoring'));
+const MonitoringHealth = lazy(() => import('./pages/MonitoringHealth'));
+const MonitoringAgents = lazy(() => import('./pages/MonitoringAgents'));
+const MonitoringServers = lazy(() => import('./pages/MonitoringServers'));
+const MonitoringServices = lazy(() => import('./pages/MonitoringServices'));
+const MonitoringDatabases = lazy(() => import('./pages/MonitoringDatabases'));
+const Settings = lazy(() => import('./pages/Settings'));
+const Notifications = lazy(() => import('./pages/Notifications'));
+const ContainerImages = lazy(() => import('./pages/ContainerImages'));
+const ContainerImageDetail = lazy(() => import('./pages/ContainerImageDetail'));
+const DeploymentPlans = lazy(() => import('./pages/DeploymentPlans'));
+const DeploymentPlanDetail = lazy(() => import('./pages/DeploymentPlanDetail'));
 
 // Admin pages
-import AdminSystemSettings from './pages/admin/SystemSettings';
-import AdminServiceTypes from './pages/admin/ServiceTypes';
-import AdminDatabaseTypes from './pages/admin/DatabaseTypes';
-import AdminStorage from './pages/admin/Storage';
-import AdminUsers from './pages/admin/Users';
-import AdminAudit from './pages/admin/Audit';
-import AdminNotificationSettings from './pages/admin/NotificationSettings';
-import AdminAbout from './pages/admin/About';
-import AdminIntegrations from './pages/admin/Integrations';
-import AdminMcp from './pages/admin/Mcp';
+const AdminSystemSettings = lazy(() => import('./pages/admin/SystemSettings'));
+const AdminServiceTypes = lazy(() => import('./pages/admin/ServiceTypes'));
+const AdminDatabaseTypes = lazy(() => import('./pages/admin/DatabaseTypes'));
+const AdminStorage = lazy(() => import('./pages/admin/Storage'));
+const AdminUsers = lazy(() => import('./pages/admin/Users'));
+const AdminAudit = lazy(() => import('./pages/admin/Audit'));
+const AdminNotificationSettings = lazy(() => import('./pages/admin/NotificationSettings'));
+const AdminAbout = lazy(() => import('./pages/admin/About'));
+const AdminIntegrations = lazy(() => import('./pages/admin/Integrations'));
+const AdminMcp = lazy(() => import('./pages/admin/Mcp'));
+
+// Centered-spinner fallback shown while a lazily-loaded page chunk loads.
+function PageFallback() {
+  return (
+    <div className="flex items-center justify-center h-96">
+      <div className="size-8 animate-spin rounded-full border-b-2 border-primary"></div>
+    </div>
+  );
+}
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { token, user } = useAuthStore();
@@ -83,19 +96,21 @@ export default function App() {
         element={
           <ProtectedRoute>
             <AdminLayout>
-              <Routes>
-                <Route index element={<Navigate to="/admin/about" replace />} />
-                <Route path="system" element={<AdminSystemSettings />} />
-                <Route path="service-types" element={<AdminServiceTypes />} />
-                <Route path="database-types" element={<AdminDatabaseTypes />} />
-                <Route path="storage" element={<AdminStorage />} />
-                <Route path="users" element={<AdminUsers />} />
-                <Route path="audit" element={<AdminAudit />} />
-                <Route path="notifications" element={<AdminNotificationSettings />} />
-                <Route path="integrations" element={<AdminIntegrations />} />
-                <Route path="mcp" element={<AdminMcp />} />
-                <Route path="about" element={<AdminAbout />} />
-              </Routes>
+              <Suspense fallback={<PageFallback />}>
+                <Routes>
+                  <Route index element={<Navigate to="/admin/about" replace />} />
+                  <Route path="system" element={<AdminSystemSettings />} />
+                  <Route path="service-types" element={<AdminServiceTypes />} />
+                  <Route path="database-types" element={<AdminDatabaseTypes />} />
+                  <Route path="storage" element={<AdminStorage />} />
+                  <Route path="users" element={<AdminUsers />} />
+                  <Route path="audit" element={<AdminAudit />} />
+                  <Route path="notifications" element={<AdminNotificationSettings />} />
+                  <Route path="integrations" element={<AdminIntegrations />} />
+                  <Route path="mcp" element={<AdminMcp />} />
+                  <Route path="about" element={<AdminAbout />} />
+                </Routes>
+              </Suspense>
             </AdminLayout>
           </ProtectedRoute>
         }
@@ -107,31 +122,33 @@ export default function App() {
         element={
           <ProtectedRoute>
             <Layout>
-              <Routes>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/monitoring" element={<Monitoring />} />
-                <Route path="/monitoring/servers" element={<MonitoringServers />} />
-                <Route path="/monitoring/services" element={<MonitoringServices />} />
-                <Route path="/monitoring/databases" element={<MonitoringDatabases />} />
-                <Route path="/monitoring/health" element={<MonitoringHealth />} />
-                <Route path="/monitoring/agents" element={<MonitoringAgents />} />
-                <Route path="/servers" element={<Servers />} />
-                <Route path="/servers/:id" element={<ServerDetail />} />
-                <Route path="/services" element={<Services />} />
-                <Route path="/services/:id" element={<ServiceDetail />} />
-                <Route path="/secrets" element={<Secrets />} />
-                <Route path="/config-files" element={<ConfigFiles />} />
-                <Route path="/fragments" element={<Fragments />} />
-                <Route path="/registries" element={<Registries />} />
-                <Route path="/container-images" element={<ContainerImages />} />
-                <Route path="/container-images/:id" element={<ContainerImageDetail />} />
-                <Route path="/deployment-plans" element={<DeploymentPlans />} />
-                <Route path="/deployment-plans/:id" element={<DeploymentPlanDetail />} />
-                <Route path="/databases" element={<Databases />} />
-                <Route path="/databases/:id" element={<DatabaseDetail />} />
-                <Route path="/notifications" element={<Notifications />} />
-                <Route path="/settings" element={<Settings />} />
-              </Routes>
+              <Suspense fallback={<PageFallback />}>
+                <Routes>
+                  <Route path="/" element={<Dashboard />} />
+                  <Route path="/monitoring" element={<Monitoring />} />
+                  <Route path="/monitoring/servers" element={<MonitoringServers />} />
+                  <Route path="/monitoring/services" element={<MonitoringServices />} />
+                  <Route path="/monitoring/databases" element={<MonitoringDatabases />} />
+                  <Route path="/monitoring/health" element={<MonitoringHealth />} />
+                  <Route path="/monitoring/agents" element={<MonitoringAgents />} />
+                  <Route path="/servers" element={<Servers />} />
+                  <Route path="/servers/:id" element={<ServerDetail />} />
+                  <Route path="/services" element={<Services />} />
+                  <Route path="/services/:id" element={<ServiceDetail />} />
+                  <Route path="/secrets" element={<Secrets />} />
+                  <Route path="/config-files" element={<ConfigFiles />} />
+                  <Route path="/fragments" element={<Fragments />} />
+                  <Route path="/registries" element={<Registries />} />
+                  <Route path="/container-images" element={<ContainerImages />} />
+                  <Route path="/container-images/:id" element={<ContainerImageDetail />} />
+                  <Route path="/deployment-plans" element={<DeploymentPlans />} />
+                  <Route path="/deployment-plans/:id" element={<DeploymentPlanDetail />} />
+                  <Route path="/databases" element={<Databases />} />
+                  <Route path="/databases/:id" element={<DatabaseDetail />} />
+                  <Route path="/notifications" element={<Notifications />} />
+                  <Route path="/settings" element={<Settings />} />
+                </Routes>
+              </Suspense>
             </Layout>
           </ProtectedRoute>
         }
