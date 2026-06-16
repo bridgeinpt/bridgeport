@@ -158,7 +158,7 @@ export function AppSidebar() {
     <Sidebar collapsible="icon">
       <SidebarHeader>
         <Link to="/" className="flex h-8 items-center justify-center gap-2 px-1" aria-label="BRIDGEPORT home">
-          <img src="/favicon.png" alt="" className="size-7 shrink-0" />
+          <img src="/favicon.png" alt="" className="hidden size-7 shrink-0 group-data-[collapsible=icon]:block" />
           <img src="/logo.png" alt="BRIDGEPORT" className="h-7 group-data-[collapsible=icon]:hidden" />
         </Link>
         <div className="px-1 group-data-[collapsible=icon]:hidden">
