@@ -67,7 +67,7 @@
     "fastify-plugin": "^5.0.0",
     "ioredis": "^5.11.1",
     "mysql2": "^3.22.5",
-    "nodemailer": "^8.0.10",
+    "nodemailer": "^9.0.1",
     "p-limit": "^7.3.0",
     "pg": "^8.21.0",
     "ssh2": "^1.15.0",
