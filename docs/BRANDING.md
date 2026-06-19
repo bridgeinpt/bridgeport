@@ -94,12 +94,19 @@ bounding box so it fills the tile with no dead padding.
 
 ## Social preview & README banner
 
-`docs/social-preview.png` (1280×640, dark slate) is the OpenGraph/social card
-**and** the README banner — a dark background, so it reads on both light and dark
-GitHub themes (no white box). `docs/social-preview.svg` is the editable source.
+Two dark-background images (a dark surface reads on both light and dark GitHub
+themes, and sidesteps the transparent-raster gotcha above):
 
-To set the link preview: repo **Settings → Social preview → Edit → upload** the
-PNG. GitHub only applies it through that UI — committing the file doesn't set it.
+| File | Use |
+|---|---|
+| `docs/social-preview.png` (1280×640) | OpenGraph/social card — the link preview. |
+| `docs/readme-banner.png` | README title image — mark + wordmark + tagline. |
+
+Editable sources: `docs/social-preview.svg`, `docs/readme-banner.svg`.
+
+To set the link preview: repo **Settings → Social preview → Edit → upload**
+`social-preview.png`. GitHub only applies it through that UI — committing the
+file doesn't set it.
 
 ## Do / don't
 

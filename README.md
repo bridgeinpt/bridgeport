@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/social-preview.png" alt="BridgePort — Dock. Run. Ship. Repeat. Self-hosted Docker orchestration & monitoring across all your servers, without Kubernetes." width="820" />
+  <img src="docs/readme-banner.png" alt="BridgePort — Dock. Run. Ship. Repeat." width="760" />
 </p>
 
 <p align="center">
