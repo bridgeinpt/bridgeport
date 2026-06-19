@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 280">
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M40 0H0V40" fill="none" stroke="#ffffff" stroke-width="1" opacity="0.04"/>
+    </pattern>
+    <radialGradient id="glow" cx="50%" cy="42%" r="55%">
+      <stop offset="0" stop-color="#cc0000" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#cc0000" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="920" height="280" fill="#0a0e14"/>
+  <rect width="920" height="280" fill="url(#grid)"/>
+  <rect width="920" height="280" fill="url(#glow)"/>
+
+  <!-- lockup (centered): mark + wordmark -->
+  <g transform="translate(165 70) scale(1.5)" fill="#cc0000">
+    <rect x="30.5" y="9" width="3" height="20" rx="1.5"/>
+    <rect x="20" y="27" width="24" height="2.6" rx="1.3"/>
+    <rect x="20" y="38.4" width="24" height="2.6" rx="1.3"/>
+    <rect x="21" y="29.6" width="2" height="8.8"/><rect x="25" y="29.6" width="2" height="8.8"/><rect x="29" y="29.6" width="2" height="8.8"/><rect x="33" y="29.6" width="2" height="8.8"/><rect x="37" y="29.6" width="2" height="8.8"/><rect x="41" y="29.6" width="2" height="8.8"/>
+    <polygon points="13,16 19,16 13,52 7,52"/><polygon points="45,16 51,16 57,52 51,52"/>
+    <rect x="4" y="52" width="14" height="4" rx="1.5"/><rect x="46" y="52" width="14" height="4" rx="1.5"/>
+    <rect x="11" y="9" width="42" height="7" rx="2"/><rect x="26" y="16" width="12" height="6" rx="1.5"/>
+  </g>
+  <text x="285" y="146" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-weight="700" font-size="76" letter-spacing="1" fill="#F1F5F9">BRIDGEPORT</text>
+
+  <rect x="400" y="190" width="120" height="3" rx="1.5" fill="#cc0000"/>
+  <text x="460" y="232" text-anchor="middle" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-weight="700" font-size="22" letter-spacing="6" fill="#cc0000">DOCK. RUN. SHIP. REPEAT.</text>
+</svg>

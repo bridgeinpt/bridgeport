@@ -1,9 +1,8 @@
 <p align="center">
-  <img src="ui/public/logo.png" alt="BRIDGEPORT" width="440" />
+  <img src="docs/readme-banner.png" alt="BridgePort — Dock. Run. Ship. Repeat." width="760" />
 </p>
 
 <p align="center">
-  <b>Dock. Run. Ship. Repeat.</b><br />
   A lightweight, self-hosted tool to deploy, orchestrate, and monitor Docker services across all your servers — production-grade ops without Kubernetes.
 </p>
 

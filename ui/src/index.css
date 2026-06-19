@@ -210,3 +210,23 @@
 code, pre, .font-mono {
   font-family: var(--font-mono);
 }
+
+/*
+ * Brand loader (<BrandLoader>): the gantry mark's container lowers to the
+ * ground and lifts back on a calm ~2.8s loop, replacing the generic spinner on
+ * app boot and lazy route loads. `transform-box: view-box` keeps the 11-unit
+ * travel proportional at every render size; reduced-motion holds it still.
+ */
+@keyframes bp-crane-lower {
+  0%, 12% { transform: translateY(0); }
+  46%, 58% { transform: translateY(11px); }
+  92%, 100% { transform: translateY(0); }
+}
+.bp-crane-load {
+  transform-box: view-box;
+  transform-origin: center;
+  animation: bp-crane-lower 2.8s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bp-crane-load { animation: none; }
+}

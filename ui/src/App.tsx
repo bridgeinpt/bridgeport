@@ -7,6 +7,7 @@ import { setSentryUser, setSentryEnvironment } from './lib/sentry';
 import Layout from './components/Layout';
 import AdminLayout from './components/AdminLayout';
 import Login from './pages/Login';
+import { BrandLoader } from './components/Logo';
 
 // Page components are lazy-loaded so each route ships in its own chunk
 // (route-level code splitting), keeping the initial JS bundle small.
@@ -50,7 +51,7 @@ const AdminMcp = lazy(() => import('./pages/admin/Mcp'));
 function PageFallback() {
   return (
     <div className="flex items-center justify-center h-96">
-      <div className="size-8 animate-spin rounded-full border-b-2 border-primary"></div>
+      <BrandLoader className="size-12" />
     </div>
   );
 }
