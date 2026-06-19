@@ -11,6 +11,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Logo } from '@/components/Logo';
 
 const loginSchema = z.object({
   name: z.string().max(120).optional(),
@@ -54,7 +55,7 @@ export default function Login() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-3">
-            <img src="/logo.png" alt="BRIDGEPORT" className="h-28" />
+            <Logo variant="lockup" className="text-4xl" />
           </div>
           <p className="text-muted-foreground mt-2">Dock. Run. Ship. Repeat.</p>
         </div>

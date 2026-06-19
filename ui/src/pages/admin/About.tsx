@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
+import { Logo } from '@/components/Logo';
 
 // App version is baked in at build time via Vite
 const appVersion = import.meta.env.VITE_APP_VERSION || 'dev';
@@ -35,7 +36,9 @@ export default function About() {
         <CardContent className="text-center">
           {/* Logo and Title */}
           <div className="mb-6">
-            <img src="/logo.png" alt="BRIDGEPORT" className="mx-auto mb-4 h-28" />
+            <div className="mb-4 flex justify-center">
+              <Logo variant="lockup" className="text-3xl" />
+            </div>
             <p className="mt-1 font-medium text-primary">Dock. Run. Ship. Repeat.</p>
             <p className="mt-2 text-sm text-muted-foreground">v{appVersion}</p>
           </div>

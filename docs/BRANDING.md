@@ -1,225 +1,98 @@
-# BRIDGEPORT Branding Plan
+# BridgePort Branding
 
-> This document captures the branding decisions and implementation plan for renaming BRIDGEPORT to BRIDGEPORT.
+> The logo, mark, and loading animation. For the broader UI system (tokens,
+> theming, components) see [`docs/development/ui-guidelines.md`](development/ui-guidelines.md).
 
-## Final Decisions
+## The mark
 
-| Aspect | Value |
-|--------|-------|
-| **Name** | BRIDGEPORT |
-| **Tagline** | Dock. Run. Ship. Repeat. |
-| **License** | Apache License 2.0 |
-| **Created by** | Engineering Team at BRIDGE IN (bridgein.pt) |
+A **port gantry crane carrying a shipping container**. It reads directly on the
+product — deploy and orchestrate containers — and it's the *port* in the name.
 
----
+The mark is deliberately **name-independent**: no bridge, no "B" monogram. The
+"Bridge" half of the name is naming, not identity, so the mark survives a rename.
 
-## 1. Logo AI Generation Prompts
+- **Silhouette:** a symmetric gantry — splayed legs, feet, a top beam with a
+  trolley, and a corrugated container hanging dead-centre. Symmetry makes it
+  balanced as a square favicon; the centred load means it can ride straight up
+  and down for the loading animation.
+- **Personality:** technical and precise — clean, geometric, engineered.
 
-You need **2 images per option**: a main logo (header) and a favicon (browser tab).
+## Color
 
----
+| Token | Value | Use |
+|---|---|---|
+| `--brand` | `oklch(0.53 0.21 28)` ≈ `#CC0000` | The mark, everywhere. |
+| `--brand-foreground` | white | The mark knocked out on a burgundy tile. |
+| `--foreground` | ink (light) / near-white (dark) | The wordmark. |
 
-### Option A: Port Crane (Recommended)
+The mark is **monochrome**. The SVG uses `fill="currentColor"`, so one source
+recolors to burgundy / white / ink with a `text-*` class — no per-context files.
 
-**Main Logo** (header/login, ~40-60px height):
-```
-Minimalist shipping port crane logo for "BRIDGEPORT" deployment tool,
-geometric gantry crane silhouette lifting a container, sky blue
-(#0ea5e9) accent on dark slate (#0f172a), modern tech aesthetic,
-flat vector, clean angular lines, evokes Docker/containers,
-horizontal layout suitable for header, professional SaaS branding
-```
+## Components — `ui/src/components/Logo.tsx`
 
-**Favicon** (browser tab, 16x16px):
-```
-Ultra-minimal gantry crane icon for favicon, single geometric shape,
-sky blue (#0ea5e9) on transparent background, must be recognizable
-at 16x16 pixels, abstract angular crane silhouette, no fine details,
-bold simple form, flat vector
-```
+```tsx
+import { Logo, LogoMark, BrandLoader } from '@/components/Logo';
 
----
-
-### Option B: Anchor + Crane
-
-**Main Logo** (header/login, ~40-60px height):
-```
-Minimalist logo for "BRIDGEPORT" deployment tool, stylized anchor
-integrated with a shipping port crane, geometric design, sky blue
-accent color (#0ea5e9) on dark slate background (#0f172a), modern
-tech startup aesthetic, flat vector style, clean lines, horizontal
-header layout, professional SaaS product
+<Logo />                              // lockup: mark + BRIDGEPORT wordmark
+<Logo variant="mark" />               // the crane alone
+<Logo variant="lockup" className="text-2xl" />   // size the lockup via font-size
+<LogoMark className="size-6 text-foreground" />   // raw mark, recolored
+<BrandLoader className="size-12" />   // the animated loading mark
 ```
 
-**Favicon** (browser tab, 16x16px):
-```
-Ultra-minimal anchor icon for favicon, single geometric shape,
-sky blue (#0ea5e9) on transparent background, must be recognizable
-at 16x16 pixels, simplified anchor silhouette, no fine details,
-bold simple form, flat vector
-```
+- **Lockup** = the mark (stays brand burgundy) + the **BRIDGEPORT** wordmark set
+  in **IBM Plex Sans**, semibold, uppercase, tracked. The wordmark uses
+  `text-foreground`, so it's ink on light and white on dark. Size it with a
+  `text-*` class — the mark scales with the font (`em`).
+- **Mark** is sized with a `size-*`/`h-*` class.
 
----
+### Where it's used
+- **Sidebars** (`AppSidebar`, `AdminSidebar`) — lockup when expanded, mark when
+  the app sidebar is collapsed to icons.
+- **Login** and **About** — lockup.
 
-### Option C: Container Ship + Bridge
+## Loading animation — `<BrandLoader>`
 
-**Main Logo** (header/login, ~40-60px height):
-```
-Minimalist logo for "BRIDGEPORT", abstract container ship passing
-under a bridge arch, single continuous line art style, sky blue
-(#0ea5e9) on dark background, geometric and modern, tech company
-logo, flat design, horizontal composition for header placement
-```
+The same mark doubles as the app's loading indicator. The container **lowers to
+the ground between the feet and lifts back** on a calm ~2.8s loop — "precise
+machinery at work," not a frantic spinner.
 
-**Favicon** (browser tab, 16x16px):
-```
-Ultra-minimal bridge arch icon for favicon, single geometric shape,
-sky blue (#0ea5e9) on transparent background, must be recognizable
-at 16x16 pixels, simple arch or ship bow silhouette, no fine details,
-bold simple form, flat vector
-```
+- Driven by the `.bp-crane-load` keyframes in `ui/src/index.css`.
+  `transform-box: view-box` keeps the travel proportional at any render size.
+- **Respects `prefers-reduced-motion`**: the mark holds still at the lifted pose.
+- **Used on** app boot and lazy route/page loads (`PageFallback` in `App.tsx`),
+  replacing the old generic border-spinner. Inline spinners (buttons, dropdowns)
+  keep the small `SpinnerIcon` (lucide `Loader2`) — a detailed mark is noise at
+  inline sizes.
 
----
+## Favicon & app-icon set — `ui/public/`
 
-### Option D: Stylized "B" + Waves
+| File | What |
+|---|---|
+| `favicon.svg` | Primary favicon — burgundy rounded tile, white crane. |
+| `favicon.ico` | 16/32 fallback (legacy), simplified solid-box crane. |
+| `apple-touch-icon.png` | 180×180, square full-bleed burgundy (iOS rounds it). |
+| `icon-192.png`, `icon-512.png` | PWA icons (`any`). |
+| `maskable-192.png`, `maskable-512.png` | PWA maskable icons (crane in the safe zone). |
+| `site.webmanifest` | Name, `theme_color #cc0000`, icon entries. |
+| `logo-mark.svg` | Standalone burgundy mark for docs/external use. |
+| `logo.png` | All-burgundy horizontal lockup raster — used by the README. |
 
-**Main Logo** (header/login, ~40-60px height):
-```
-Letter "B" logo for "BRIDGEPORT", stylized with wave elements at
-the bottom suggesting water/port, geometric construction, sky blue
-(#0ea5e9) on dark background, modern monogram style, professional
-tech branding, horizontal layout for header
-```
+`index.html` references `favicon.ico` + `favicon.svg` + `apple-touch-icon` +
+the manifest, and sets `<meta name="theme-color" content="#cc0000">`.
 
-**Favicon** (browser tab, 16x16px):
-```
-Ultra-minimal letter "B" icon for favicon, geometric construction,
-sky blue (#0ea5e9) on transparent background, must be recognizable
-at 16x16 pixels, bold simple letterform with subtle wave hint,
-no fine details, flat vector
-```
+### Regenerating the icons
 
----
+The PNG/ICO set is rasterized from small source SVGs. The source SVGs and the
+build steps (render with a rasterizer, downscale to each size, pack the `.ico`)
+are not checked in — regenerate from `favicon.svg` / `logo-mark.svg` if the mark
+changes. The tile crop (`viewBox="3 3.5 58 58"`) trims the mark's bounding box so
+it fills the tile with no dead padding.
 
-## 2. About Page
+## Do / don't
 
-### Location
-- Route: `/about`
-- File: `ui/src/pages/About.tsx`
-- Access: Link in sidebar footer (info icon near user profile)
-
-### Content Structure
-
-```
-+-------------------------------------------+
-|           [BRIDGEPORT Logo]               |
-|                                           |
-|            BRIDGEPORT                     |
-|      Dock. Run. Ship. Repeat.             |
-|               v1.0.0                      |
-+-------------------------------------------+
-|                                           |
-|  A lightweight deployment management      |
-|  tool for teams who want simple,          |
-|  reliable container orchestration         |
-|  without enterprise complexity.           |
-|                                           |
-|  - Multi-environment management           |
-|  - Docker service orchestration           |
-|  - Secret management                      |
-|  - Real-time activity monitoring          |
-|  - Config file distribution               |
-|                                           |
-+-------------------------------------------+
-|                                           |
-|      Created with love by the             |
-|      Engineering Team at                  |
-|                                           |
-|         [BRIDGEIN]                        |
-|        bridgein.pt                        |
-|                                           |
-|   (c) 2024-2025 BRIDGE IN. All rights      |
-|              reserved.                    |
-|                                           |
-+-------------------------------------------+
-```
-
----
-
-## 3. Files to Modify
-
-| File | Changes |
-|------|---------|
-| `ui/index.html` | Title -> "BRIDGEPORT", add favicon link |
-| `ui/src/pages/Login.tsx` | Replace rocket emoji with logo, update name/tagline |
-| `ui/src/components/Layout.tsx` | Update sidebar header, add About link |
-| `ui/src/pages/About.tsx` | **NEW** - About page component |
-| `ui/src/App.tsx` | Add `/about` route |
-| `ui/public/logo.png` | **NEW** - Main logo (user provides) |
-| `ui/public/favicon.png` | **NEW** - Favicon (user provides) |
-| `package.json` | Update name to "bridgeport" |
-| `ui/package.json` | Update name to "bridgeport-ui" |
-| `README.md` | Update all branding references |
-
----
-
-## 4. Implementation Steps
-
-### Step 1: Add logo files
-- Generate logos using AI prompts above
-- Save as `ui/public/logo.png` and `ui/public/favicon.png`
-
-### Step 2: Update index.html
-- Change `<title>BRIDGEPORT</title>` -> `<title>BRIDGEPORT</title>`
-- Add favicon: `<link rel="icon" type="image/svg+xml" href="/favicon.png" />`
-
-### Step 3: Update Login.tsx
-- Replace rocket emoji with `<img src="/logo.png" />`
-- Change "BRIDGEPORT" -> "BRIDGEPORT"
-- Change tagline to "Dock. Run. Ship. Repeat."
-
-### Step 4: Update Layout.tsx
-- Replace rocket emoji with small logo
-- Change sidebar title to "BRIDGEPORT"
-- Add About link (info icon) in sidebar footer
-
-### Step 5: Create About.tsx
-- New page with branding, features, and BRIDGE IN credits
-- Styled consistently with existing dark theme
-
-### Step 6: Update App.tsx
-- Add route: `<Route path="/about" element={<About />} />`
-
-### Step 7: Update package.json files
-- Backend: name -> "bridgeport"
-- Frontend: name -> "bridgeport-ui"
-
-### Step 8: Update README.md
-- Replace all "BRIDGEPORT" references with "BRIDGEPORT"
-
----
-
-## 5. Verification
-
-1. `pnpm --filter bridgeport-ui run dev`
-2. Check Login page: new logo, "BRIDGEPORT", new tagline
-3. Check sidebar: logo and name updated
-4. Click About link -> verify About page renders
-5. Check browser tab: favicon + "BRIDGEPORT" title
-6. `pnpm --filter bridgeport-ui run build` -> verify production build succeeds
-
----
-
-## Status
-
-- [ ] Logo generated (main)
-- [ ] Favicon generated
-- [ ] index.html updated
-- [ ] Login.tsx updated
-- [ ] Layout.tsx updated
-- [ ] About.tsx created
-- [ ] App.tsx route added
-- [ ] package.json files updated
-- [ ] README.md updated
-- [ ] Verified in dev
-- [ ] Production build tested
+- **Do** recolor the mark with `text-*` (it's `currentColor`); keep it one color.
+- **Do** keep the mark symmetric and the container centred.
+- **Don't** add a bridge or a "B" — the identity is the crane, not the name.
+- **Don't** stretch the lockup; size it by font-size so the mark tracks the type.
+- **Don't** reintroduce raster `logo.png`/`favicon.png` in the app — use `<Logo>`.

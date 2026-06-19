@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Logo } from './Logo';
 import {
   Box,
   ChevronDown,
@@ -157,9 +158,9 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        <Link to="/" className="flex h-8 items-center justify-center gap-2 px-1" aria-label="BRIDGEPORT home">
-          <img src="/favicon.png" alt="" className="hidden size-7 shrink-0 group-data-[collapsible=icon]:block" />
-          <img src="/logo.png" alt="BRIDGEPORT" className="h-7 group-data-[collapsible=icon]:hidden" />
+        <Link to="/" className="flex h-8 items-center justify-center gap-2 px-1" aria-label="BridgePort home">
+          <Logo variant="mark" className="hidden size-7 shrink-0 group-data-[collapsible=icon]:block" />
+          <Logo variant="lockup" className="text-lg group-data-[collapsible=icon]:hidden" />
         </Link>
         <div className="px-1 group-data-[collapsible=icon]:hidden">
           <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Environment</label>

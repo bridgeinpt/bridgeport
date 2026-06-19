@@ -1,4 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
+import { Logo } from './Logo';
 import {
   Activity,
   ArrowLeft,
@@ -61,7 +62,7 @@ export default function AdminSidebar() {
           aria-label="Back to App"
           className="flex h-8 items-center justify-center"
         >
-          <img src="/logo.png" alt="BRIDGEPORT" className="h-7" />
+          <Logo variant="lockup" className="text-lg" />
         </Link>
         <Button asChild variant="ghost" className="justify-start gap-2">
           <Link to="/">
