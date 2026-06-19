@@ -76,23 +76,37 @@ machinery at work," not a frantic spinner.
 | `maskable-192.png`, `maskable-512.png` | PWA maskable icons (crane in the safe zone). |
 | `site.webmanifest` | Name, `theme_color #cc0000`, icon entries. |
 | `logo-mark.svg` | Standalone burgundy mark for docs/external use. |
-| `logo.png` | All-burgundy horizontal lockup raster — used by the README. |
 
 `index.html` references `favicon.ico` + `favicon.svg` + `apple-touch-icon` +
 the manifest, and sets `<meta name="theme-color" content="#cc0000">`.
 
 ### Regenerating the icons
 
-The PNG/ICO set is rasterized from small source SVGs. The source SVGs and the
-build steps (render with a rasterizer, downscale to each size, pack the `.ico`)
-are not checked in — regenerate from `favicon.svg` / `logo-mark.svg` if the mark
-changes. The tile crop (`viewBox="3 3.5 58 58"`) trims the mark's bounding box so
-it fills the tile with no dead padding.
+The PNG/ICO set is rasterized from small source SVGs, then downscaled to each
+size (the `.ico` packs 16/32). Regenerate from `favicon.svg` / `logo-mark.svg`
+if the mark changes. The tile crop (`viewBox="3 3.5 58 58"`) trims the mark's
+bounding box so it fills the tile with no dead padding.
+
+> **Gotcha:** the macOS QuickLook rasterizer (`qlmanage`) flattens transparency
+> onto **white**. The icon tiles and the social card avoid this by having an
+> opaque background; a *transparent* raster (e.g. a transparent lockup) needs an
+> alpha-preserving rasterizer (`rsvg-convert`, `resvg`, `cairosvg`) instead.
+
+## Social preview & README banner
+
+`docs/social-preview.png` (1280×640, dark slate) is the OpenGraph/social card
+**and** the README banner — a dark background, so it reads on both light and dark
+GitHub themes (no white box). `docs/social-preview.svg` is the editable source.
+
+To set the link preview: repo **Settings → Social preview → Edit → upload** the
+PNG. GitHub only applies it through that UI — committing the file doesn't set it.
 
 ## Do / don't
 
 - **Do** recolor the mark with `text-*` (it's `currentColor`); keep it one color.
 - **Do** keep the mark symmetric and the container centred.
+- **Do** place a colored wordmark on an opaque dark/light surface for the web —
+  GitHub markdown can't color text, so the wordmark has to be an image/SVG.
 - **Don't** add a bridge or a "B" — the identity is the crane, not the name.
 - **Don't** stretch the lockup; size it by font-size so the mark tracks the type.
-- **Don't** reintroduce raster `logo.png`/`favicon.png` in the app — use `<Logo>`.
+- **Don't** reintroduce raster logos in the app — use `<Logo>` (SVG, theme-aware).
