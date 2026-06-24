@@ -1,6 +1,6 @@
 # System Settings Reference
 
-System settings are global, admin-only configuration values that apply across all environments. They control SSH timeouts, webhook behavior, backup limits, agent thresholds, and more.
+System settings are global, admin-only configuration values that apply across all environments. They control SSH timeouts, webhook behavior, backup retention and timeouts, the instance timezone, agent thresholds, and more.
 
 ## Table of Contents
 
@@ -8,7 +8,8 @@ System settings are global, admin-only configuration values that apply across al
 - [API](#api)
 - [SSH Timeouts](#ssh-timeouts)
 - [Webhook Settings](#webhook-settings)
-- [Database Backup](#database-backup)
+- [Database Backup & Retention](#database-backup--retention)
+- [Instance Timezone](#instance-timezone)
 - [Limits](#limits)
 - [URLs](#urls)
 - [Agent Configuration](#agent-configuration)
@@ -94,7 +95,7 @@ If all retries fail, the delivery is marked as failed and the webhook's `failure
 
 ---
 
-## Database Backup
+## Database Backup & Retention
 
 Timeout for database backup operations.
 
@@ -104,6 +105,42 @@ Timeout for database backup operations.
 
 > [!NOTE]
 > `pgDumpTimeoutMs` is the **global default**, editable on the System Settings page. Individual databases can override it via their own per-database `pgDumpTimeoutMs` setting; when a database has no override, this system value applies.
+
+### Global Backup Retention Policy
+
+These settings define the **global default** [GFS retention policy](../guides/databases.md#retention) that every database inherits unless it has a per-database override. Admins edit them here; operators set per-database overrides on the database detail page.
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `backupRetentionPreset` | `string` | `"balanced"` | Active preset: `lean`, `balanced`, `long_term`, or `custom`. Selecting a non-custom preset fills the tier fields below. |
+| `backupRetentionKeepLast` | `integer` | `24` | Most-recent successful backups kept regardless of period (0–100). |
+| `backupRetentionDaily` | `integer` | `7` | Daily restore points — newest backup per calendar day (0–366). |
+| `backupRetentionWeekly` | `integer` | `4` | Weekly restore points — newest per ISO week, weeks start Monday (0–520). |
+| `backupRetentionMonthly` | `integer` | `6` | Monthly restore points — newest per calendar month (0–240). |
+| `backupRetentionYearly` | `integer` | `0` | Yearly restore points — newest per calendar year (0–50). |
+| `backupRetentionMinFloor` | `integer` | `2` | Hard floor: always keep at least this many most-recent successful backups (1–10). |
+| `backupRetentionMaxTotalBytes` | `bigint \| null` | `null` | Optional default storage cap per database (`null` = off). |
+| `backupRotationConfirmThreshold` | `integer` | `5` | When an operator saves a policy that would prune **more** backups than this in one go, the API rejects the save with `confirmationRequired` and the UI prompts for explicit confirmation. Automatic rotation never prompts. |
+| `failedBackupRetentionDays` | `integer` | `3` | Days to keep `failed` backups before they (and any partial artifact) are deleted. Stuck `in_progress` backups are marked failed first. Separate from GFS rotation. |
+
+> [!IMPORTANT]
+> A backup survives if **any** tier selects it — the tiers are a **union, not a sum**. See the [retention model](../guides/databases.md#the-tiers) for the full explanation, presets, and inheritance rules.
+
+> [!NOTE]
+> Changing the global default policy here only affects databases that inherit it. Databases with their own override are unaffected until the override is removed ("Use global default"). The new tiers take effect on the next rotation pass (after the next backup, or the daily sweep) — and the **first** real prune after a change raises a one-time [`backup.policy_first_prune`](../guides/notifications.md) notification.
+
+---
+
+## Instance Timezone
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `timezone` | `string` (IANA) | `"UTC"` | Instance timezone used for backup-rotation period bucketing and display. Examples: `Europe/Lisbon`, `America/New_York`. |
+
+The timezone determines which calendar day, ISO week, month, and year a backup belongs to during [GFS rotation](../guides/databases.md#timezone-and-period-buckets). A backup taken at 02:00 buckets to the local calendar day rather than possibly the previous or next UTC day. ISO weeks start on **Monday**. Buckets are calendar-based, so a one-hour DST shift never splits a day across two buckets.
+
+> [!TIP]
+> Set this to your operations team's local timezone so "daily" and "weekly" restore points line up with how you actually think about the calendar.
 
 ---
 

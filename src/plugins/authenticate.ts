@@ -50,6 +50,10 @@ const VIEWER_ALLOWED_MUTATIONS = new Set<string>([
   'PUT /api/notifications/preferences/:typeId',
   'PATCH /api/users/:id',
   'POST /api/users/:id/change-password',
+  // Backup-policy preview is a read-only dry-run (issue #291 §10/§14): it
+  // computes a keep/prune preview and persists nothing, so a viewer must be
+  // able to call it even though it's a POST.
+  'POST /api/databases/:id/backup-policy/preview',
   'POST /mcp',
   'DELETE /mcp',
 ]);

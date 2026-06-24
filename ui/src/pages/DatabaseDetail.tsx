@@ -13,6 +13,7 @@ import {
   deleteBackupSchedule,
   listSpacesBuckets,
   getBackupDownloadUrl,
+  setBackupPinned,
   listServers,
   testDatabaseConnection,
   updateDatabaseMonitoring,
@@ -24,7 +25,8 @@ import {
   type Server,
 } from '../lib/api';
 import { formatDistanceToNow, format } from 'date-fns';
-import { ArrowLeft, Check, X, Download, Trash2 } from 'lucide-react';
+import { ArrowLeft, Check, X, Download, Trash2, Pin, PinOff } from 'lucide-react';
+import { BackupRetentionCard } from '@/components/BackupRetentionCard';
 import { safeJsonParse } from '../lib/helpers';
 import { useConfirm } from '@/hooks/useConfirm';
 import { Button } from '@/components/ui/button';
@@ -149,9 +151,12 @@ export default function DatabaseDetail() {
     backupSpacesPrefix: '',
   });
 
+  // Note: retentionDays is intentionally NOT part of this form. Backup retention
+  // is governed by the GFS BackupRetentionPolicy (see BackupRetentionCard below),
+  // not the schedule. The schedule's stored retentionDays column is preserved
+  // on save for back-compat (see handleSaveSchedule).
   const [scheduleForm, setScheduleForm] = useState({
     cronExpression: '0 2 * * *',
-    retentionDays: 7,
     enabled: true,
   });
 
@@ -245,7 +250,6 @@ export default function DatabaseDetail() {
       if (sched) {
         setScheduleForm({
           cronExpression: sched.cronExpression,
-          retentionDays: sched.retentionDays,
           enabled: sched.enabled,
         });
       }
@@ -328,6 +332,22 @@ export default function DatabaseDetail() {
     }
   };
 
+  const handleTogglePin = async (backup: DatabaseBackup) => {
+    if (!id) return;
+    const willPin = !backup.isPinned;
+    try {
+      const { backup: updated } = await setBackupPinned(id, backup.id, willPin);
+      setBackups(prev =>
+        prev.map(b =>
+          b.id === backup.id ? { ...b, isPinned: updated.isPinned, pinnedAt: updated.pinnedAt } : b
+        )
+      );
+      toast.success(willPin ? 'Backup pinned (protected from rotation)' : 'Backup unpinned');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to update pin');
+    }
+  };
+
   const handleSaveConnection = async () => {
     if (!id || !database) return;
     setSaving(true);
@@ -394,7 +414,12 @@ export default function DatabaseDetail() {
     if (!id) return;
     setSaving(true);
     try {
-      const { schedule: sched } = await setBackupSchedule(id, scheduleForm);
+      // Preserve the stored retentionDays column (back-compat); retention is
+      // actually governed by the GFS policy, not this field.
+      const { schedule: sched } = await setBackupSchedule(id, {
+        ...scheduleForm,
+        retentionDays: schedule?.retentionDays ?? 7,
+      });
       setSchedule(sched);
       setEditingSchedule(false);
       toast.success('Schedule saved');
@@ -410,6 +435,7 @@ export default function DatabaseDetail() {
     try {
       const { schedule: sched } = await setBackupSchedule(id, {
         ...scheduleForm,
+        retentionDays: schedule.retentionDays,
         enabled: !schedule.enabled,
       });
       setSchedule(sched);
@@ -1103,17 +1129,9 @@ export default function DatabaseDetail() {
                 />
                 <p className="text-xs text-muted-foreground">e.g., "0 2 * * *" = daily at 2am</p>
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="schedule-retention">Retention Days</Label>
-                <Input
-                  id="schedule-retention"
-                  type="number"
-                  min={1}
-                  max={365}
-                  value={scheduleForm.retentionDays}
-                  onChange={e => setScheduleForm({ ...scheduleForm, retentionDays: parseInt(e.target.value) || 7 })}
-                />
-              </div>
+              <p className="text-xs text-muted-foreground">
+                How long backups are kept is configured in the "Backup retention" card below.
+              </p>
               <Label htmlFor="scheduleEnabled" className="text-sm font-normal">
                 <Checkbox
                   id="scheduleEnabled"
@@ -1152,10 +1170,6 @@ export default function DatabaseDetail() {
                   {schedule.cronExpression}
                 </code>
               </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Retention</span>
-                <span className="text-foreground">{schedule.retentionDays} days</span>
-              </div>
               {schedule.lastRunAt && (
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Last run</span>
@@ -1175,6 +1189,13 @@ export default function DatabaseDetail() {
           </CardContent>
         </Card>
       </div>
+      )}
+
+      {/* Backup Retention Policy (GFS rotation — issue #291) */}
+      {database.databaseType?.hasBackupCommand !== false && (
+        <div className="mb-6">
+          <BackupRetentionCard databaseId={id!} onRotated={() => loadBackups(currentPage)} />
+        </div>
       )}
 
       {/* Backups Table */}
@@ -1218,7 +1239,17 @@ export default function DatabaseDetail() {
 
                   return (
                     <TableRow key={backup.id}>
-                      <TableCell className="font-mono text-xs">{backup.filename}</TableCell>
+                      <TableCell className="font-mono text-xs">
+                        <span className="inline-flex items-center gap-2">
+                          {backup.filename}
+                          {backup.isPinned && (
+                            <Badge variant="info" className="gap-1 text-xs">
+                              <Pin className="size-3" />
+                              Protected
+                            </Badge>
+                          )}
+                        </span>
+                      </TableCell>
                       <TableCell>
                         {backup.status === 'completed' ? formatBytes(backup.size) : '--'}
                       </TableCell>
@@ -1278,6 +1309,18 @@ export default function DatabaseDetail() {
                               title="Download"
                             >
                               <Download className="size-4" />
+                            </Button>
+                          )}
+                          {backup.status === 'completed' && (
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => handleTogglePin(backup)}
+                              className={backup.isPinned ? 'text-info hover:text-info/80' : 'text-muted-foreground hover:text-foreground'}
+                              title={backup.isPinned ? 'Unpin (allow rotation to prune)' : 'Pin (protect from rotation)'}
+                              aria-label={backup.isPinned ? 'Unpin backup' : 'Pin backup'}
+                            >
+                              {backup.isPinned ? <PinOff className="size-4" /> : <Pin className="size-4" />}
                             </Button>
                           )}
                           <Button

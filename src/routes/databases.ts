@@ -15,7 +15,15 @@ import {
   deleteBackupSchedule,
   getBackupDownload,
   listEnvironmentBackupSummary,
+  rotateDatabase,
+  resolveRetentionPolicy,
+  globalDefaultPolicyFromSettings,
+  PRESETS,
+  RETENTION_BOUNDS,
+  type EffectivePolicy,
 } from '../services/database-backup.js';
+import { getSystemSettings } from '../services/system-settings.js';
+import { sendSystemNotification, NOTIFICATION_TYPES } from '../services/notifications.js';
 import { logAudit, actorFrom } from '../services/audit.js';
 import { userIdForFk } from '../services/auth.js';
 import { prisma } from '../lib/db.js';
@@ -31,6 +39,7 @@ import {
   handleUniqueConstraint,
   parsePaginationQuery,
   coerceNumeric,
+  formatBytes,
 } from '../lib/helpers.js';
 import { downsampleColumnar } from '../lib/metrics-downsample.js';
 import { routeSchema, paginationQuerySchema } from '../lib/openapi-schema.js';
@@ -88,6 +97,46 @@ const scheduleSchema = z.object({
   enabled: z.boolean().optional(),
 });
 
+// ── Backup retention policy (issue #291) ──────────────────────────────────
+// Tier bounds reuse RETENTION_BOUNDS (single source of truth from the service).
+const presetSchema = z.enum(['lean', 'balanced', 'long_term', 'custom']);
+
+const retentionTierFields = {
+  keepLast: z.number().int().min(RETENTION_BOUNDS.keepLast.min).max(RETENTION_BOUNDS.keepLast.max),
+  daily: z.number().int().min(RETENTION_BOUNDS.daily.min).max(RETENTION_BOUNDS.daily.max),
+  weekly: z.number().int().min(RETENTION_BOUNDS.weekly.min).max(RETENTION_BOUNDS.weekly.max),
+  monthly: z.number().int().min(RETENTION_BOUNDS.monthly.min).max(RETENTION_BOUNDS.monthly.max),
+  yearly: z.number().int().min(RETENTION_BOUNDS.yearly.min).max(RETENTION_BOUNDS.yearly.max),
+  minFloor: z.number().int().min(RETENTION_BOUNDS.minFloor.min).max(RETENTION_BOUNDS.minFloor.max),
+} as const;
+
+// PUT body: full policy (tier fields required) + optional inheritGlobal/cap/confirm.
+const backupPolicySchema = z.object({
+  inheritGlobal: z.boolean().optional(),
+  preset: presetSchema,
+  ...retentionTierFields,
+  maxTotalBytes: z.number().int().min(0).nullable().optional(),
+  confirm: z.boolean().optional(),
+});
+
+// Preview body: an OPTIONAL proposed policy (same tier fields, all optional;
+// absent = preview the current effective policy). No `confirm`.
+const backupPolicyPreviewSchema = z.object({
+  inheritGlobal: z.boolean().optional(),
+  preset: presetSchema.optional(),
+  keepLast: retentionTierFields.keepLast.optional(),
+  daily: retentionTierFields.daily.optional(),
+  weekly: retentionTierFields.weekly.optional(),
+  monthly: retentionTierFields.monthly.optional(),
+  yearly: retentionTierFields.yearly.optional(),
+  minFloor: retentionTierFields.minFloor.optional(),
+  maxTotalBytes: z.number().int().min(0).nullable().optional(),
+}).optional();
+
+// Pin body: the desired pinned state. PUT .../pin is idempotent — `true` pins,
+// `false` unpins (replaces the former POST .../pin + POST .../unpin pair).
+const backupPinSchema = z.object({ pinned: z.boolean() });
+
 // Query schema for the database /metrics/history endpoint. Mirrors the shape
 // used by /api/environments/:envId/metrics/history in routes/monitoring.ts so
 // `since` gets the same strict ISO-datetime check (rejecting malformed input
@@ -98,6 +147,96 @@ const databaseMetricsHistoryQuerySchema = z.object({
   since: z.string().datetime().optional(),
   maxPoints: z.coerce.number().min(10).max(2000).default(120),
 });
+
+type BackupPolicyBody = z.infer<typeof backupPolicySchema>;
+type BackupPolicyPreviewBody = NonNullable<z.infer<typeof backupPolicyPreviewSchema>>;
+
+/**
+ * Build the proposed EffectivePolicy a PUT would apply (issue #291 §6.5 step 1):
+ *   - inheritGlobal=true  → the global default (source 'inherited').
+ *   - non-custom preset   → tier fields from PRESETS[preset] (source 'override').
+ *   - custom              → tier fields straight from the body (source 'override').
+ * maxTotalBytes comes from the body (null = off) except when inheriting.
+ */
+function buildProposedPolicy(body: BackupPolicyBody, globalDefault: EffectivePolicy): EffectivePolicy {
+  if (body.inheritGlobal) {
+    return globalDefault;
+  }
+  const cap = body.maxTotalBytes == null ? null : BigInt(body.maxTotalBytes);
+  // An operator-configured override always activates GFS, so autoApplied=false.
+  if (body.preset !== 'custom') {
+    const tiers = PRESETS[body.preset];
+    return { ...tiers, maxTotalBytes: cap, preset: body.preset, source: 'override', autoApplied: false };
+  }
+  return {
+    keepLast: body.keepLast,
+    daily: body.daily,
+    weekly: body.weekly,
+    monthly: body.monthly,
+    yearly: body.yearly,
+    minFloor: body.minFloor,
+    maxTotalBytes: cap,
+    preset: 'custom',
+    source: 'override',
+    autoApplied: false,
+  };
+}
+
+/**
+ * Resolve the EffectivePolicy to preview (issue #291 §6.5 / §10 preview):
+ * starts from the current effective policy, then overlays whatever the
+ * (optional, partial) preview body specifies. inheritGlobal / a non-custom
+ * preset take precedence the same way buildProposedPolicy handles them.
+ */
+function resolvePreviewPolicy(
+  body: BackupPolicyPreviewBody | undefined,
+  current: EffectivePolicy,
+  globalDefault: EffectivePolicy
+): EffectivePolicy {
+  if (!body) return current;
+  if (body.inheritGlobal) return globalDefault;
+
+  // A preview always evaluates the policy as if it were active (the dry-run/
+  // confirm gate must show real GFS outcomes), so autoApplied=false here.
+  if (body.preset && body.preset !== 'custom') {
+    const tiers = PRESETS[body.preset];
+    const cap = body.maxTotalBytes === undefined ? current.maxTotalBytes : (body.maxTotalBytes == null ? null : BigInt(body.maxTotalBytes));
+    return { ...tiers, maxTotalBytes: cap, preset: body.preset, source: 'override', autoApplied: false };
+  }
+
+  // Custom (or unspecified preset): overlay provided tier fields onto current.
+  const cap = body.maxTotalBytes === undefined ? current.maxTotalBytes : (body.maxTotalBytes == null ? null : BigInt(body.maxTotalBytes));
+  return {
+    keepLast: body.keepLast ?? current.keepLast,
+    daily: body.daily ?? current.daily,
+    weekly: body.weekly ?? current.weekly,
+    monthly: body.monthly ?? current.monthly,
+    yearly: body.yearly ?? current.yearly,
+    minFloor: body.minFloor ?? current.minFloor,
+    maxTotalBytes: cap,
+    preset: body.preset ?? current.preset,
+    source: 'override',
+    autoApplied: false,
+  };
+}
+
+/** Serialize an EffectivePolicy for JSON (bigint maxTotalBytes → number|null). */
+function serializePolicy(p: EffectivePolicy): Omit<EffectivePolicy, 'maxTotalBytes'> & { maxTotalBytes: number | null } {
+  return { ...p, maxTotalBytes: p.maxTotalBytes == null ? null : Number(p.maxTotalBytes) };
+}
+
+/** Load per-backup detail for the preview keep/prune lists (size → number). */
+async function backupPreviewDetails(ids: string[]): Promise<
+  { id: string; filename: string; createdAt: Date; size: number }[]
+> {
+  if (ids.length === 0) return [];
+  const rows = await prisma.databaseBackup.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, filename: true, createdAt: true, size: true },
+    orderBy: { createdAt: 'desc' },
+  });
+  return rows.map((r) => ({ id: r.id, filename: r.filename, createdAt: r.createdAt, size: Number(r.size) }));
+}
 
 export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
   // List databases for environment
@@ -548,6 +687,367 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
       });
 
       return { success: true };
+    }
+  );
+
+  // ==================== Backup Retention Policy (issue #291) ====================
+
+  // Get the effective backup retention policy for a database (viewer).
+  fastify.get(
+    '/api/databases/:id/backup-policy',
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Get the effective backup retention policy for a database',
+        params: idParamSchema,
+        errors: [401, 404],
+      }),
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      const database = await findOrNotFound(getDatabase(id), 'Database', reply);
+      if (!database) return;
+
+      const [effective, override, settings] = await Promise.all([
+        resolveRetentionPolicy(id),
+        prisma.backupRetentionPolicy.findUnique({ where: { databaseId: id } }),
+        getSystemSettings(),
+      ]);
+
+      return {
+        // `effective.autoApplied` (via serializePolicy) and `override.autoApplied`
+        // (spread from the row) tell the UI that automatic pruning is PAUSED until
+        // the operator saves this policy. autoApplied is made explicit below so the
+        // response contract is stable regardless of the Prisma row shape.
+        effective: serializePolicy(effective),
+        override: override
+          ? {
+              ...override,
+              autoApplied: override.autoApplied,
+              maxTotalBytes: override.maxTotalBytes == null ? null : Number(override.maxTotalBytes),
+            }
+          : null,
+        globalDefault: serializePolicy(globalDefaultPolicyFromSettings(settings)),
+        source: effective.source,
+      };
+    }
+  );
+
+  // Set / replace the per-database retention override (operator). May require a
+  // confirmation pass (§6.5) when the change would prune more than the threshold.
+  fastify.put(
+    '/api/databases/:id/backup-policy',
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Set or replace the backup retention policy for a database',
+        params: idParamSchema,
+        body: backupPolicySchema,
+        errors: [400, 401, 403, 404, 409],
+      }),
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      const body = validateBody(backupPolicySchema, request, reply);
+      if (!body) return;
+
+      const database = await findOrNotFound(getDatabase(id), 'Database', reply);
+      if (!database) return;
+
+      const settings = await getSystemSettings();
+      const proposed = buildProposedPolicy(body, globalDefaultPolicyFromSettings(settings));
+
+      // Confirmation gate: dry-run the proposed policy. If it would prune more
+      // than the threshold and the client hasn't confirmed, return the preview
+      // WITHOUT saving (§6.5).
+      const dryRun = await rotateDatabase(id, { dryRun: true, policy: proposed });
+      if (dryRun.prune.length > settings.backupRotationConfirmThreshold && body.confirm !== true) {
+        const [keep, prune] = await Promise.all([
+          backupPreviewDetails(dryRun.keep),
+          backupPreviewDetails(dryRun.prune),
+        ]);
+        return reply.code(409).send({
+          confirmationRequired: true,
+          preview: { keep, prune, bytesFreed: Number(dryRun.bytesFreed) },
+        });
+      }
+
+      // Persist the override. inheritGlobal=true stores a row that the resolver
+      // treats as "use the global default"; otherwise store the resolved tiers.
+      // autoApplied=false on both branches: an operator deliberately configuring
+      // (or saving) a policy activates GFS, clearing any inert migrated snapshot.
+      const data = body.inheritGlobal
+        ? {
+            autoApplied: false,
+            inheritGlobal: true,
+            preset: body.preset,
+            keepLast: proposed.keepLast,
+            daily: proposed.daily,
+            weekly: proposed.weekly,
+            monthly: proposed.monthly,
+            yearly: proposed.yearly,
+            minFloor: proposed.minFloor,
+            maxTotalBytes: proposed.maxTotalBytes,
+          }
+        : {
+            autoApplied: false,
+            inheritGlobal: false,
+            preset: proposed.preset,
+            keepLast: proposed.keepLast,
+            daily: proposed.daily,
+            weekly: proposed.weekly,
+            monthly: proposed.monthly,
+            yearly: proposed.yearly,
+            minFloor: proposed.minFloor,
+            maxTotalBytes: proposed.maxTotalBytes,
+          };
+
+      const override = await prisma.backupRetentionPolicy.upsert({
+        where: { databaseId: id },
+        create: { databaseId: id, ...data },
+        update: data,
+      });
+
+      // Apply the new policy immediately (real rotation).
+      const result = await rotateDatabase(id, { trigger: 'policy-change' });
+
+      // First-prune-after-change notification (§12): only when this rotation
+      // actually deleted at least one backup.
+      if (result.prune.length > 0) {
+        await sendSystemNotification(
+          NOTIFICATION_TYPES.BACKUP_POLICY_FIRST_PRUNE,
+          database.environmentId,
+          {
+            preset: proposed.preset,
+            prunedCount: result.prune.length,
+            // Human-readable (e.g. "1.5 GB") — the template interpolates this
+            // string directly, so a raw byte integer would read poorly.
+            bytesFreed: formatBytes(result.bytesFreed),
+            databaseName: database.name,
+          }
+        );
+      }
+
+      await logAudit({
+        action: 'update',
+        resourceType: 'backup_retention_policy',
+        resourceId: override.id,
+        resourceName: database.name,
+        details: {
+          databaseId: id,
+          inheritGlobal: override.inheritGlobal,
+          preset: override.preset,
+          keepLast: override.keepLast,
+          daily: override.daily,
+          weekly: override.weekly,
+          monthly: override.monthly,
+          yearly: override.yearly,
+          minFloor: override.minFloor,
+          maxTotalBytes: override.maxTotalBytes == null ? null : Number(override.maxTotalBytes),
+          prunedCount: result.prune.length,
+        },
+        ...actorFrom(request),
+        environmentId: database.environmentId,
+      });
+
+      return {
+        override: { ...override, maxTotalBytes: override.maxTotalBytes == null ? null : Number(override.maxTotalBytes) },
+        rotation: {
+          keep: result.keep,
+          prune: result.prune,
+          bytesFreed: Number(result.bytesFreed),
+          cappedButUnreachable: result.cappedButUnreachable,
+        },
+      };
+    }
+  );
+
+  // Revert a database to inheriting the global default (operator).
+  fastify.delete(
+    '/api/databases/:id/backup-policy',
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Revert a database to the global default retention policy',
+        params: idParamSchema,
+        errors: [401, 403, 404],
+      }),
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      const database = await findOrNotFound(getDatabase(id), 'Database', reply);
+      if (!database) return;
+
+      // Delete the override row so the resolver falls back to the global default.
+      await prisma.backupRetentionPolicy.delete({ where: { databaseId: id } }).catch(() => {
+        /* no override row → already inheriting; idempotent */
+      });
+
+      await logAudit({
+        action: 'delete',
+        resourceType: 'backup_retention_policy',
+        resourceName: database.name,
+        details: { databaseId: id },
+        ...actorFrom(request),
+        environmentId: database.environmentId,
+      });
+
+      const effective = await resolveRetentionPolicy(id);
+      return { effective: serializePolicy(effective), source: effective.source };
+    }
+  );
+
+  // Dry-run preview of a (proposed or current) policy (viewer).
+  fastify.post(
+    '/api/databases/:id/backup-policy/preview',
+    {
+      preHandler: [fastify.authenticate],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Preview the keep/prune outcome of a backup retention policy',
+        params: idParamSchema,
+        body: backupPolicyPreviewSchema,
+        errors: [400, 401, 404],
+      }),
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+      // Body is optional; when omitted/empty we preview the current policy.
+      // Validate inline (the schema is `.optional()`, so undefined parses fine).
+      const parsed = backupPolicyPreviewSchema.safeParse(request.body ?? undefined);
+      if (!parsed.success) {
+        return reply.code(400).send({ error: 'Invalid input', details: parsed.error.issues });
+      }
+      const body = parsed.data as BackupPolicyPreviewBody | undefined;
+
+      const database = await findOrNotFound(getDatabase(id), 'Database', reply);
+      if (!database) return;
+
+      const [current, settings] = await Promise.all([
+        resolveRetentionPolicy(id),
+        getSystemSettings(),
+      ]);
+      const policy = resolvePreviewPolicy(body, current, globalDefaultPolicyFromSettings(settings));
+
+      const result = await rotateDatabase(id, { dryRun: true, policy });
+      const [keep, prune] = await Promise.all([
+        backupPreviewDetails(result.keep),
+        backupPreviewDetails(result.prune),
+      ]);
+
+      return {
+        policy: serializePolicy(policy),
+        keep,
+        prune,
+        bytesFreed: Number(result.bytesFreed),
+        cappedButUnreachable: result.cappedButUnreachable,
+      };
+    }
+  );
+
+  // Run rotation now using the stored policy (operator).
+  fastify.post(
+    '/api/databases/:id/rotate',
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Rotate a database\'s backups now using its current policy',
+        params: idParamSchema,
+        errors: [401, 403, 404],
+      }),
+    },
+    async (request, reply) => {
+      const { id } = request.params as { id: string };
+
+      const database = await findOrNotFound(getDatabase(id), 'Database', reply);
+      if (!database) return;
+
+      const result = await rotateDatabase(id, { trigger: 'manual' });
+
+      await logAudit({
+        action: 'backup.rotate',
+        resourceType: 'database',
+        resourceId: id,
+        resourceName: database.name,
+        details: {
+          databaseId: id,
+          prunedCount: result.prune.length,
+          bytesFreed: Number(result.bytesFreed),
+          trigger: 'manual',
+        },
+        ...actorFrom(request),
+        environmentId: database.environmentId,
+      });
+
+      return {
+        keep: result.keep,
+        prune: result.prune,
+        bytesFreed: Number(result.bytesFreed),
+        cappedButUnreachable: result.cappedButUnreachable,
+        errors: result.errors,
+      };
+    }
+  );
+
+  // Pin or unpin a backup (operator). Idempotent: PUT the desired pinned state.
+  // `pinned: true` protects the backup from rotation forever; `pinned: false`
+  // releases it back to normal rotation. Consolidates the former POST .../pin
+  // and POST .../unpin into one documented, idempotent endpoint.
+  fastify.put(
+    '/api/databases/:id/backups/:backupId/pin',
+    {
+      preHandler: [fastify.authenticate, requireOperator],
+      schema: routeSchema({
+        tags: ['monitoring'],
+        summary: 'Pin or unpin a backup (pinned backups are never pruned by rotation)',
+        params: z.object({ id: z.string(), backupId: z.string() }),
+        body: backupPinSchema,
+        errors: [400, 401, 403, 404],
+      }),
+    },
+    async (request, reply) => {
+      const { id, backupId } = request.params as { id: string; backupId: string };
+      const body = validateBody(backupPinSchema, request, reply);
+      if (!body) return;
+
+      const database = await findOrNotFound(getDatabase(id), 'Database', reply);
+      if (!database) return;
+
+      // The backup must exist AND belong to this database.
+      const existing = await prisma.databaseBackup.findFirst({
+        where: { id: backupId, databaseId: id },
+        select: { id: true },
+      });
+      if (!existing) {
+        return reply.code(404).send({ error: 'Backup not found' });
+      }
+
+      const backup = await prisma.databaseBackup.update({
+        where: { id: backupId },
+        data: body.pinned
+          // Pinning exempts the backup from pruning forever, so any stale
+          // lastRotationError (an orphan we'll never retry) is cleared too.
+          ? { isPinned: true, pinnedById: userIdForFk(request.authUser!), pinnedAt: new Date(), lastRotationError: null }
+          : { isPinned: false, pinnedById: null, pinnedAt: null },
+      });
+
+      await logAudit({
+        action: body.pinned ? 'backup.pin' : 'backup.unpin',
+        resourceType: 'backup',
+        resourceId: backupId,
+        resourceName: backup.filename,
+        details: { databaseId: id },
+        ...actorFrom(request),
+        environmentId: database.environmentId,
+      });
+
+      return { backup: { ...backup, size: Number(backup.size) } };
     }
   );
 

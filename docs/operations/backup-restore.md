@@ -165,8 +165,9 @@ BRIDGEPORT can manage backups for your application databases (PostgreSQL, MySQL,
 ### Quick Summary
 
 - **Schedule backups** with cron expressions (e.g., `0 2 * * *` for daily at 2 AM)
-- **Set retention** to automatically clean up old backups (1-365 days)
-- **Manual backups** can be triggered from the database detail page
+- **GFS retention** automatically thins old backups across daily/weekly/monthly/yearly tiers — set globally (admin) and overridable per database (operator). See the [Retention model](../guides/databases.md#retention).
+- **Manual backups** can be triggered from the database detail page and are never auto-pruned
+- **Pin** any backup to protect it from rotation forever
 - **Formats**: Plain SQL, custom (pg_dump), or tar for PostgreSQL
 - **Compression**: None or gzip (configurable level 1-9)
 

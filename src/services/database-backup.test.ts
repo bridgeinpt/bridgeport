@@ -36,11 +36,26 @@ vi.mock('../lib/db.js', () => ({
   },
 }));
 
-vi.mock('../lib/ssh.js', () => ({
-  SSHClient: vi.fn(),
-  LocalClient: vi.fn(),
-  isLocalhost: vi.fn().mockReturnValue(true),
-}));
+// LocalClient/SSHClient are constructed by the file-first deletion path
+// (deleteBackupArtifact -> new LocalClient().connect()/.exec()/.disconnect()).
+// They must be real constructors (the code does `new LocalClient()`), so use a
+// class whose methods are vi.fn() stubs. exec resolves to an rm-style success
+// so deleteBackup/pruneBackup exercise the real success path instead of
+// throwing "client.connect is not a function".
+vi.mock('../lib/ssh.js', () => {
+  class MockClient {
+    connect = vi.fn().mockResolvedValue(undefined);
+    exec = vi.fn().mockResolvedValue({ code: 0, stdout: '', stderr: '' });
+    disconnect = vi.fn();
+    writeFile = vi.fn().mockResolvedValue(undefined);
+  }
+  return {
+    SSHClient: MockClient,
+    LocalClient: MockClient,
+    isLocalhost: vi.fn().mockReturnValue(true),
+    shellEscape: (s: string) => `'${String(s).replace(/'/g, `'\\''`)}'`,
+  };
+});
 
 vi.mock('../lib/crypto.js', () => ({
   encrypt: vi.fn().mockReturnValue({ ciphertext: 'enc', nonce: 'n' }),

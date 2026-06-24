@@ -117,6 +117,19 @@ export function coerceNumeric(value: unknown): unknown {
 }
 
 /**
+ * Format a byte count as a human-readable size (binary units, e.g. "1.5 GB").
+ * Accepts a bigint (the repo convention for byte sizes) or a number.
+ */
+export function formatBytes(bytes: number | bigint): string {
+  const n = typeof bytes === 'bigint' ? Number(bytes) : bytes;
+  if (!Number.isFinite(n)) return '--';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+/**
  * Extract a human-readable error message from an unknown error value.
  */
 export function getErrorMessage(error: unknown, defaultMessage: string = 'Unknown error'): string {

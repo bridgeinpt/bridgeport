@@ -33,6 +33,10 @@ export const NOTIFICATION_TYPES = {
   SYSTEM_CONTAINER_CRASH: 'system.container_crash',
   SYSTEM_CONTAINER_RECOVERED: 'system.container_recovered',
   SYSTEM_DATABASE_UNREACHABLE: 'system.database_unreachable',
+
+  // Backup rotation (GFS retention)
+  BACKUP_ROTATION_ERROR: 'backup.rotation_error',
+  BACKUP_POLICY_FIRST_PRUNE: 'backup.policy_first_prune',
 } as const;
 
 export type NotificationTypeCode = (typeof NOTIFICATION_TYPES)[keyof typeof NOTIFICATION_TYPES];
@@ -241,6 +245,30 @@ const DEFAULT_TYPES: Array<{
     defaultChannels: ['in_app', 'email', 'webhook'],
     severity: 'critical',
     bounceEnabled: true,
+    bounceThreshold: 3,
+    bounceCooldown: 900,
+  },
+  {
+    code: NOTIFICATION_TYPES.BACKUP_ROTATION_ERROR,
+    category: 'system',
+    name: 'Backup Rotation Error',
+    description: 'A backup could not be pruned (orphaned physical file) or the size cap is unreachable',
+    template: 'Backup rotation problem for database "{{databaseName}}": {{error}}',
+    defaultChannels: ['in_app', 'email', 'webhook'],
+    severity: 'warning',
+    bounceEnabled: true,
+    bounceThreshold: 3,
+    bounceCooldown: 900,
+  },
+  {
+    code: NOTIFICATION_TYPES.BACKUP_POLICY_FIRST_PRUNE,
+    category: 'system',
+    name: 'Retention Policy First Prune',
+    description: 'The first real deletion after a backup retention policy change',
+    template: 'Policy "{{preset}}" pruned {{prunedCount}} backup(s) on database "{{databaseName}}", freeing {{bytesFreed}}.',
+    defaultChannels: ['in_app'],
+    severity: 'info',
+    bounceEnabled: false,
     bounceThreshold: 3,
     bounceCooldown: 900,
   },

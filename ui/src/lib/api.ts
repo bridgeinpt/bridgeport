@@ -196,6 +196,54 @@ class ApiClient {
 
     return data as T;
   }
+
+  /**
+   * Like `request`, but treats the listed `allowStatuses` as non-errors and
+   * returns their parsed body to the caller instead of throwing. Used for
+   * endpoints whose "failure" status carries a structured payload the caller
+   * must act on — e.g. the backup-policy PUT 409 `confirmationRequired` body
+   * (issue #291 §6.5), which isn't an error so much as a "confirm and retry".
+   */
+  async requestAllowing<T>(
+    method: string,
+    path: string,
+    allowStatuses: number[],
+    body?: unknown
+  ): Promise<{ status: number; data: T }> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const token = this.getToken();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+
+    if (response.status === 401) {
+      this.setToken(null);
+      window.location.href = '/login';
+      throw new Error('Unauthorized');
+    }
+
+    const data = await response.json();
+
+    if (!response.ok && !allowStatuses.includes(response.status)) {
+      const apiErr = data as ApiError;
+      if (response.status >= 500) {
+        captureException(new Error(apiErr.message ?? apiErr.error ?? 'Server error'), {
+          method,
+          url: path,
+          statusCode: response.status,
+        });
+      }
+      throw new ApiRequestError(response.status, apiErr);
+    }
+
+    return { status: response.status, data: data as T };
+  }
 }
 
 export const api = new ApiClient();
@@ -1880,6 +1928,10 @@ export interface DatabaseBackup {
   createdAt: string;
   completedAt: string | null;
   triggeredBy: { id: string; email: string; name: string | null } | null;
+  // GFS rotation (issue #291): pinned backups are never auto-pruned.
+  isPinned?: boolean;
+  pinnedAt?: string | null;
+  lastRotationError?: string | null;
 }
 
 export interface BackupSchedule {
@@ -1943,6 +1995,152 @@ export const setBackupSchedule = (
 
 export const deleteBackupSchedule = (databaseId: string) =>
   api.delete<{ success: boolean }>(`/databases/${databaseId}/schedule`);
+
+// ==================== Backup Retention Policy (GFS — issue #291) ====================
+
+export type BackupRetentionPreset = 'lean' | 'balanced' | 'long_term' | 'custom';
+
+/** A resolved retention policy: GFS tier counts + floor + optional size cap. */
+export interface BackupRetentionPolicy {
+  keepLast: number;
+  daily: number;
+  weekly: number;
+  monthly: number;
+  yearly: number;
+  minFloor: number;
+  /** Absolute storage ceiling in bytes; null = off. */
+  maxTotalBytes: number | null;
+  preset: string;
+  /**
+   * True only for an inert, upgrade-migration-created policy: automatic pruning
+   * is PAUSED until an operator reviews and saves the policy (which clears it
+   * server-side). Always false for the global default.
+   */
+  autoApplied: boolean;
+}
+
+/** Per-database override row. Shares the policy fields plus inheritance flag. */
+export interface BackupRetentionOverride extends BackupRetentionPolicy {
+  id: string;
+  databaseId: string;
+  inheritGlobal: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BackupPolicyResponse {
+  effective: BackupRetentionPolicy;
+  override: BackupRetentionOverride | null;
+  globalDefault: BackupRetentionPolicy;
+  source: 'override' | 'inherited';
+}
+
+/** Body for setting the per-database override (PUT). */
+export interface BackupPolicyInput {
+  inheritGlobal?: boolean;
+  preset: BackupRetentionPreset;
+  keepLast: number;
+  daily: number;
+  weekly: number;
+  monthly: number;
+  yearly: number;
+  minFloor: number;
+  /** Bytes; null = off. */
+  maxTotalBytes?: number | null;
+  confirm?: boolean;
+}
+
+/** Optional/partial body for previewing a policy (POST .../preview). */
+export type BackupPolicyPreviewInput = Partial<Omit<BackupPolicyInput, 'confirm'>>;
+
+/** One keep/prune entry in a preview result. */
+export interface BackupPreviewItem {
+  id: string;
+  filename: string;
+  createdAt: string;
+  size: number;
+}
+
+export interface BackupPolicyPreviewResponse {
+  policy: BackupRetentionPolicy;
+  keep: BackupPreviewItem[];
+  prune: BackupPreviewItem[];
+  bytesFreed: number;
+  cappedButUnreachable: boolean;
+}
+
+/** Preview payload returned inside a 409 confirmationRequired response. */
+export interface BackupPolicyConfirmPreview {
+  keep: BackupPreviewItem[];
+  prune: BackupPreviewItem[];
+  bytesFreed: number;
+}
+
+export interface BackupRotationResult {
+  keep: string[];
+  prune: string[];
+  bytesFreed: number;
+  cappedButUnreachable: boolean;
+  // Per-backup prune failures — matches the server payload (RotationResult.errors).
+  errors?: { backupId: string; error: string }[];
+}
+
+/** Result of a successful policy save. */
+export interface SetBackupPolicyOk {
+  confirmationRequired?: false;
+  override: BackupRetentionOverride;
+  rotation: BackupRotationResult;
+}
+
+/** 409 result: the save was rejected pending explicit confirmation (§6.5). */
+export interface SetBackupPolicyNeedsConfirm {
+  confirmationRequired: true;
+  preview: BackupPolicyConfirmPreview;
+}
+
+export type SetBackupPolicyResult = SetBackupPolicyOk | SetBackupPolicyNeedsConfirm;
+
+export const getBackupPolicy = (databaseId: string) =>
+  api.get<BackupPolicyResponse>(`/databases/${databaseId}/backup-policy`);
+
+/**
+ * Set / replace the per-database retention override. When the change would
+ * prune more than the configured threshold, the backend returns HTTP 409 with
+ * `{ confirmationRequired: true, preview }` — surfaced here as a discriminated
+ * union rather than thrown, so the caller can show a confirm dialog and
+ * re-submit the identical body with `confirm: true` (issue #291 §6.5).
+ */
+export const setBackupPolicy = async (
+  databaseId: string,
+  body: BackupPolicyInput
+): Promise<SetBackupPolicyResult> => {
+  const { status, data } = await api.requestAllowing<SetBackupPolicyResult>(
+    'PUT',
+    `/databases/${databaseId}/backup-policy`,
+    [409],
+    body
+  );
+  if (status === 409) {
+    return data as SetBackupPolicyNeedsConfirm;
+  }
+  return data as SetBackupPolicyOk;
+};
+
+export const deleteBackupPolicy = (databaseId: string) =>
+  api.delete<{ effective: BackupRetentionPolicy; source: 'override' | 'inherited' }>(
+    `/databases/${databaseId}/backup-policy`
+  );
+
+export const previewBackupPolicy = (databaseId: string, body?: BackupPolicyPreviewInput) =>
+  api.post<BackupPolicyPreviewResponse>(`/databases/${databaseId}/backup-policy/preview`, body);
+
+export const rotateDatabaseNow = (databaseId: string) =>
+  api.post<BackupRotationResult>(`/databases/${databaseId}/rotate`);
+
+// Pin (true) or unpin (false) a backup. Idempotent PUT — pinned backups are
+// never pruned by rotation.
+export const setBackupPinned = (databaseId: string, backupId: string, pinned: boolean) =>
+  api.put<{ backup: DatabaseBackup }>(`/databases/${databaseId}/backups/${backupId}/pin`, { pinned });
 
 // Backup summary: one row per database in the environment with the last
 // completed backup and schedule state. Replaces the dashboard's per-db loop.
@@ -2683,6 +2881,18 @@ export interface SystemSettings {
   healthLogRetentionDays: number;
   webhookDeliveryRetentionDays: number;
   imageDigestRetentionDays: number;
+  // Backup rotation & retention (issue #291)
+  timezone: string;
+  backupRetentionPreset: BackupRetentionPreset;
+  backupRetentionKeepLast: number;
+  backupRetentionDaily: number;
+  backupRetentionWeekly: number;
+  backupRetentionMonthly: number;
+  backupRetentionYearly: number;
+  backupRetentionMinFloor: number;
+  backupRetentionMaxTotalBytes: number | null;
+  failedBackupRetentionDays: number;
+  backupRotationConfirmThreshold: number;
   updatedAt: string;
 }
 
@@ -2705,6 +2915,18 @@ export interface SystemSettingsDefaults {
   healthLogRetentionDays: number;
   webhookDeliveryRetentionDays: number;
   imageDigestRetentionDays: number;
+  // Backup rotation & retention (issue #291)
+  timezone: string;
+  backupRetentionPreset: BackupRetentionPreset;
+  backupRetentionKeepLast: number;
+  backupRetentionDaily: number;
+  backupRetentionWeekly: number;
+  backupRetentionMonthly: number;
+  backupRetentionYearly: number;
+  backupRetentionMinFloor: number;
+  backupRetentionMaxTotalBytes: number | null;
+  failedBackupRetentionDays: number;
+  backupRotationConfirmThreshold: number;
 }
 
 export interface SystemSettingsInput {
@@ -2728,6 +2950,18 @@ export interface SystemSettingsInput {
   healthLogRetentionDays?: number;
   webhookDeliveryRetentionDays?: number;
   imageDigestRetentionDays?: number;
+  // Backup rotation & retention (issue #291)
+  timezone?: string;
+  backupRetentionPreset?: BackupRetentionPreset;
+  backupRetentionKeepLast?: number;
+  backupRetentionDaily?: number;
+  backupRetentionWeekly?: number;
+  backupRetentionMonthly?: number;
+  backupRetentionYearly?: number;
+  backupRetentionMinFloor?: number;
+  backupRetentionMaxTotalBytes?: number | null;
+  failedBackupRetentionDays?: number;
+  backupRotationConfirmThreshold?: number;
 }
 
 // Cached for 5 minutes - system settings rarely change

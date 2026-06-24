@@ -324,7 +324,8 @@ Global operational parameters configured by admins at **Admin > System**. These 
 |---|---|
 | **SSH** | Command execution timeout, connection timeout |
 | **Webhooks** | Max retries, timeout, retry delay (legacy outgoing webhooks) |
-| **Backups** | pg_dump/mysqldump timeout (global default; per-database settings override it) |
+| **Backups** | pg_dump/mysqldump timeout, global default [GFS retention policy](reference/system-settings.md#database-backup--retention), rotation confirm threshold, failed-backup retention (all global defaults; per-database settings override the policy) |
+| **General** | Instance timezone (used for backup-rotation period bucketing) |
 | **Limits** | Max upload size, active user tracking window, max registry tags to fetch, default log lines |
 | **URLs** | Agent callback URL, public URL for notification links |
 | **Retention** | Audit log, database metrics, notification, health check log, webhook delivery, and image digest retention |

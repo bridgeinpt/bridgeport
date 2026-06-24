@@ -13,6 +13,8 @@ BRIDGEPORT manages backups, monitoring, and service connections for your databas
   - [Backup Storage](#backup-storage)
   - [Backup Formats and Compression](#backup-formats-and-compression)
   - [Retention](#retention)
+  - [Failed and Stuck Backups](#failed-and-stuck-backups)
+  - [Pinning Backups](#pinning-backups)
   - [Downloading Backups](#downloading-backups)
   - [Recovery](#recovery)
 - [2. Monitor Your Databases](#2-monitor-your-databases)
@@ -142,10 +144,12 @@ Content-Type: application/json
 
 {
   "cronExpression": "0 2 * * *",
-  "retentionDays": 7,
   "enabled": true
 }
 ```
+
+> [!NOTE]
+> The schedule only controls **when** backups run. **How many** are kept is governed by the [retention policy](#retention) (the GFS tiers), configured separately. The legacy `retentionDays` field on the schedule is deprecated and no longer enforced.
 
 #### Common Cron Expressions
 
@@ -162,8 +166,8 @@ Content-Type: application/json
 | Field | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `cronExpression` | Yes | -- | Standard 5-field cron format |
-| `retentionDays` | No | 7 | How many days to keep backups (1-365) |
 | `enabled` | No | true | Toggle the schedule on/off without deleting it |
+| `retentionDays` | No | 7 | **Deprecated** — retained for backward compatibility but no longer enforced. Use the [retention policy](#retention) instead. |
 
 BRIDGEPORT's scheduler checks for due backups at the interval configured by `SCHEDULER_BACKUP_CHECK_INTERVAL` (default: 60 seconds). When a backup is due, it runs asynchronously.
 
@@ -307,11 +311,120 @@ The `pgDumpTimeoutMs` setting controls how long BRIDGEPORT waits for `pg_dump` t
 
 ### Retention
 
-When a backup schedule has `retentionDays` set, BRIDGEPORT automatically deletes backups older than the specified number of days after each successful scheduled backup.
+BRIDGEPORT keeps your backups under a **Grandfather-Father-Son (GFS) tiered retention policy** rather than a flat "delete everything older than _N_ days" rule. GFS thins older backups across calendar buckets instead of dropping them on a hard age cliff, so you keep dense coverage of the recent past and sparse-but-long coverage of the distant past. For example, a `7d / 4w / 6m` policy spans roughly six months in about 17 files.
 
-- Retention only applies to scheduled backups. Manual backups are not automatically deleted.
-- For S3 storage, the object is deleted from the bucket. For local storage, the file is deleted from the server.
-- Retention is checked after each successful backup, not on a separate schedule.
+#### The tiers
+
+A policy is six numbers plus an optional size cap:
+
+| Tier | Keeps | Bounds |
+|------|-------|--------|
+| `keepLast` | The _N_ most-recent successful backups, regardless of when they ran (covers sub-daily schedules) | 0–100 |
+| `daily` | The newest backup from each of the last _N_ calendar days | 0–366 |
+| `weekly` | The newest backup from each of the last _N_ ISO weeks (weeks start Monday) | 0–520 |
+| `monthly` | The newest backup from each of the last _N_ calendar months | 0–240 |
+| `yearly` | The newest backup from each of the last _N_ calendar years | 0–50 |
+| `minFloor` | A hard safety floor: always keep at least _N_ most-recent successful backups, no matter what the tiers select | 1–10 |
+| `maxTotalBytes` | Optional absolute storage ceiling for this database's backups (off by default) | null = off |
+
+> [!IMPORTANT]
+> **A backup survives if *any* tier selects it.** The tiers are a **union**, not a sum. A single backup can simultaneously be "the newest of today", "the newest of this week", and "the newest of this month" — it just counts once. So `keepLast=24, daily=7, weekly=4, monthly=6` does **not** keep 41 backups; it keeps however many distinct backups satisfy at least one of those rules.
+
+When more than one backup falls in the same bucket (e.g. two backups on the same day), the **newest one in the bucket wins** and the older sibling becomes eligible for pruning.
+
+#### Presets
+
+Most operators never touch the individual tiers. Pick a preset instead:
+
+| Preset | `keepLast` | `daily` | `weekly` | `monthly` | `yearly` | `minFloor` |
+|--------|-----------:|--------:|---------:|----------:|---------:|-----------:|
+| **Lean** | 12 | 7 | 4 | 0 | 0 | 2 |
+| **Balanced** (default) | 24 | 7 | 4 | 6 | 0 | 2 |
+| **Long-term** | 24 | 7 | 4 | 12 | 3 | 2 |
+
+`maxTotalBytes` is `null` (off) in every preset. Choosing **Custom** in the UI reveals the raw tier fields so you can dial in your own numbers.
+
+#### Optional size cap (`maxTotalBytes`)
+
+If you set `maxTotalBytes`, it is applied **after** the GFS tiers and safety floor as a final backstop: if this database's backups still total more than the cap, BRIDGEPORT evicts the **oldest non-pinned scheduled** backups until the total fits — but it never drops below `minFloor`, and it never evicts manual or pinned backups. If the cap can only be met by touching those exempt backups, BRIDGEPORT keeps them and emits a [`backup.rotation_error`](notifications.md) warning instead of silently violating your pins.
+
+#### Inheritance: global default vs per-database override
+
+Retention is configured at two levels:
+
+- **Global default** — set by an **admin** at **Admin > System Settings** (the "Balanced" preset out of the box). Every database inherits this unless it has its own override.
+- **Per-database override** — set by an **operator** on the database detail page. An override can pick a different preset, go fully custom, or be reverted to **"Use global default"** (which deletes the override and re-inherits whatever the admin has configured globally).
+
+The database detail page shows the **effective** policy and whether its source is *inherited* or an *override*, so you always know which one is in force.
+
+#### When rotation runs
+
+Rotation evaluates a database's policy and prunes the losers:
+
+- **After every successful backup** of that database (manual or scheduled). Completing a backup is the natural moment to re-evaluate which older siblings are still needed.
+- **Via a daily sweep** over every database that has at least one backup. The sweep catches databases whose schedule is disabled or deleted, manual-only databases, and policy changes that haven't had a backup since.
+
+You can also trigger rotation on demand with the **Rotate now** action (operator) — handy right after changing a policy.
+
+#### What rotation never touches
+
+Rotation only ever prunes backups that are **all** of: `completed`, `scheduled`, and **not pinned**. Always exempt:
+
+- **Manual backups** — never auto-pruned. A backup you took by hand sticks around until you delete it.
+- **Pinned backups** — pinning protects *any* backup (manual or scheduled) from rotation forever. Pin from the backup list (operator). Pinning an old backup does **not** consume a tier slot — it's protected *in addition* to whatever the tiers select.
+- **Failed / in-progress backups** — never occupy a tier slot; they're handled by [failed-backup cleanup](#failed-and-stuck-backups) instead.
+
+#### How pruning deletes a backup
+
+Pruning is **file-first** and fully audited, so it never silently orphans an artifact:
+
+1. The physical file is deleted first — `rm` over SSH for local storage, or a delete on the S3 object for Spaces storage.
+2. Only on success is the database row removed.
+3. If the file delete **fails**, the row is kept, `lastRotationError` is recorded on the backup, and the next daily sweep retries (retries are idempotent — a file that's already gone counts as success). A persistent failure raises a [`backup.rotation_error`](notifications.md) notification.
+
+Every pass that prunes at least one backup writes an `AuditLog` entry recording the database, the effective policy, which backups were pruned, and the bytes freed. The **first** real deletion after you change a policy also sends a one-time [`backup.policy_first_prune`](notifications.md) notification summarizing what the new policy removed — so a policy change can never quietly delete history without telling you. (Routine, non-failing rotation passes are audit-logged but do not notify.)
+
+> [!TIP]
+> Before saving a policy, use the **live keep/prune preview** on the database page (or the `POST /api/databases/:id/backup-policy/preview` endpoint). It runs a server-side dry run and shows exactly how many backups the policy would keep versus prune — no guessing, nothing deleted. If a save would prune more than the configured confirmation threshold ([`backupRotationConfirmThreshold`](../reference/system-settings.md#database-backup--retention), default 5), the UI requires you to confirm first.
+
+#### Timezone and period buckets
+
+Calendar buckets (which day/week/month/year a backup belongs to) are computed in the **instance timezone** — a new admin setting (`timezone`, IANA format such as `Europe/Lisbon`, default `UTC`). Set it at **Admin > System Settings**.
+
+This matters because a backup that runs at, say, 02:00 should land on the calendar day the operator expects, not the previous or next day in UTC. ISO weeks start on **Monday**. Buckets are calendar-based, so a one-hour DST shift never splits a single day across two buckets.
+
+#### Migrating from flat retention
+
+Upgrading from the old flat `retentionDays` model is automatic and **deletes zero backups**. On upgrade, each existing schedule's `retentionDays` is converted into that many `daily` slots (capped at 366), with weekly/monthly/yearly set to 0 and `minFloor=2`. So a database that was on `retentionDays=30` keeps roughly 30 daily restore points afterward — the first sweep prunes nothing it wouldn't already have pruned. The richer weekly/monthly/yearly tiers only ever take effect once an operator explicitly edits the policy.
+
+> [!NOTE]
+> The old `retentionDays` field on the backup schedule is retained but deprecated; it no longer drives retention. Configure retention through the backup policy (above) instead.
+
+### Failed and Stuck Backups
+
+Failed and stuck backups are cleaned up **separately** from the GFS rotation above — they never occupy a retention tier slot.
+
+- **Stuck backups** are recovered first. Any backup left in `in_progress` longer than its database's `pgDumpTimeoutMs` (plus a grace margin) is marked `failed` with an explanatory error, so a crashed or hung dump can't linger forever.
+- **Failed backups** are then deleted once they are older than `failedBackupRetentionDays` (a global admin setting, default **3** days). Any partial or temp artifact left behind is removed using the same file-first deletion as rotation.
+
+This short, separate retention keeps the failure history useful for debugging recent problems without letting dead rows and partial files accumulate.
+
+### Pinning Backups
+
+**Pinning** protects an individual backup from rotation **forever**, regardless of policy or age. Use it to hold onto a known-good snapshot — for example, the backup taken right before a risky migration or release.
+
+**UI:** Backup list > pin icon on the row (operator). Pinned rows are visually marked as protected.
+
+**API:** A single idempotent endpoint sets the pinned state via a JSON body:
+```http
+PUT /api/databases/:id/backups/:backupId/pin
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{ "pinned": true }    # protect from rotation; { "pinned": false } releases it
+```
+
+Pinning works on any backup — manual or scheduled. A pinned backup is kept *in addition* to whatever the tiers select, so pinning an old backup does not reduce how many dailies, weeklies, or monthlies you retain. Pinned backups are also never evicted by the optional `maxTotalBytes` size cap. To let a pinned backup age out normally, unpin it.
 
 ### Downloading Backups
 
@@ -522,8 +635,35 @@ This information appears in:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `cronExpression` | string | -- | Standard 5-field cron expression |
-| `retentionDays` | integer | 7 | Days to keep backups (1-365) |
 | `enabled` | boolean | true | Schedule active toggle |
+| `retentionDays` | integer | 7 | **Deprecated** — no longer enforced; superseded by the [retention policy](#retention) |
+
+### Backup Retention Policy Fields
+
+Per-database override of the global default (see [Retention](#retention)). Absent or `inheritGlobal: true` means the database inherits the admin's global default.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `inheritGlobal` | boolean | false | When true, ignore the fields below and use the global default |
+| `preset` | enum | `balanced` | `lean`, `balanced`, `long_term`, or `custom` |
+| `keepLast` | integer | 24 | Most-recent backups kept regardless of period (0–100) |
+| `daily` | integer | 7 | Daily restore points (0–366) |
+| `weekly` | integer | 4 | Weekly restore points, ISO weeks (0–520) |
+| `monthly` | integer | 6 | Monthly restore points (0–240) |
+| `yearly` | integer | 0 | Yearly restore points (0–50) |
+| `minFloor` | integer | 2 | Hard floor of most-recent successful backups (1–10) |
+| `maxTotalBytes` | bigint | null | Optional per-database storage cap (null = off) |
+
+**Endpoints:**
+
+| Method | Path | Role | Purpose |
+|--------|------|------|---------|
+| `GET` | `/api/databases/:id/backup-policy` | Viewer | Effective policy + override + global default + source |
+| `PUT` | `/api/databases/:id/backup-policy` | Operator | Set/replace the per-database override (send `confirm: true` if the preview exceeds the confirm threshold) |
+| `DELETE` | `/api/databases/:id/backup-policy` | Operator | Revert to inheriting the global default |
+| `POST` | `/api/databases/:id/backup-policy/preview` | Viewer | Dry run: `{ keep[], prune[], bytesFreed }` without deleting |
+| `POST` | `/api/databases/:id/rotate` | Operator | "Rotate now" — run rotation immediately |
+| `PUT` | `/api/databases/:id/backups/:backupId/pin` | Operator | Pin (`{ "pinned": true }`) or unpin (`{ "pinned": false }`) a backup |
 
 ### Related Environment Settings
 
@@ -538,9 +678,12 @@ This information appears in:
 | Action | Minimum Role |
 |--------|-------------|
 | View databases, backups, metrics | Viewer |
+| View retention policy and preview prune/keep | Viewer |
 | Create, edit, delete databases | Operator |
 | Create and delete backups | Operator |
 | Manage backup schedules | Operator |
+| Set per-database retention policy, pin/unpin backups, "rotate now" | Operator |
+| Edit the **global default** retention policy (Admin > System Settings) | Admin |
 | Update monitoring config | Operator |
 
 ---
@@ -564,6 +707,12 @@ The dump command failed. Common causes:
 
 **Backup fails at the "upload" step**
 For S3 storage: verify that storage is enabled for the environment and the bucket is accessible. See [Storage > Troubleshooting](storage.md#troubleshooting).
+
+**A `backup.rotation_error` notification fired**
+Rotation tried to delete a backup file but couldn't (SSH unreachable, missing local path, or an S3 error). The database row is kept — never orphaned — and the next daily sweep retries automatically. Check `lastRotationError` on the affected backup and confirm the storage backend is reachable. The same notification fires when a `maxTotalBytes` cap can't be met without evicting pinned or manual backups; in that case, raise the cap, unpin some backups, or delete manual backups by hand.
+
+**Backups aren't being pruned even though they're old**
+Confirm they're actually eligible: rotation only prunes `completed`, `scheduled`, **unpinned** backups. Manual and pinned backups are exempt by design. Also check the effective policy on the database page (it may be inheriting a generous global default) and remember that a single backup is kept if *any* tier selects it. Use the keep/prune preview to see the policy's decision.
 
 **Monitoring shows "error" status**
 Check `lastMonitoringError` on the database detail page. Common causes:
