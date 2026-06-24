@@ -11,12 +11,17 @@ import { generateTestToken } from '../../tests/helpers/auth.js';
 import {
   rotateDatabase,
   pruneBackup,
+  deleteBackup,
   markStuckBackupsFailed,
   cleanupFailedBackups,
 } from '../services/database-backup.js';
 import * as environmentsModule from './environments.js';
 import { S3Client } from '@aws-sdk/client-s3';
 import { updateSystemSettings } from '../services/system-settings.js';
+// The SAME PrismaClient instance the services use (src/lib/db.ts). app.prisma
+// is a *separate* client pointed at the same file, so to intercept a service's
+// own Prisma call we must spy on this singleton, not app.prisma.
+import { prisma as dbPrisma } from '../lib/db.js';
 
 /**
  * Integration tests for GFS backup rotation (issue #291 §14).
@@ -122,12 +127,24 @@ describe('backup rotation (issue #291)', () => {
   // prisma/migrations/20260624145904_add_backup_rotation_policy/migration.sql
   // against the real SQLite DB to prove its behaviour.
   describe('migration backfill of legacy retentionDays', () => {
-    // Kept byte-for-byte in sync with the migration's final INSERT…SELECT.
+    // Kept byte-for-byte in sync with the migration's first INSERT…SELECT.
+    // autoApplied=1 (inert): the first post-upgrade sweep must prune nothing
+    // until an operator saves the policy.
     const BACKFILL_SQL = `
-INSERT INTO "BackupRetentionPolicy" ("id","databaseId","inheritGlobal","preset","keepLast","daily","weekly","monthly","yearly","minFloor","createdAt","updatedAt")
-SELECT lower(hex(randomblob(16))), "databaseId", 0, 'custom', 12, MIN("retentionDays",366), 0, 0, 0, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+INSERT INTO "BackupRetentionPolicy" ("id","databaseId","autoApplied","inheritGlobal","preset","keepLast","daily","weekly","monthly","yearly","minFloor","createdAt","updatedAt")
+SELECT lower(hex(randomblob(16))), "databaseId", 1, 0, 'custom', 12, MIN("retentionDays",366), 0, 0, 0, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM "BackupSchedule"
 GROUP BY "databaseId"`;
+
+    // The migration's SECOND INSERT — kept byte-for-byte in sync. Gives every
+    // existing DB that has ≥1 backup but no schedule-derived policy an inert
+    // balanced snapshot (covers disabled/deleted-schedule & manual-only DBs).
+    const BACKFILL_SQL_SCHEDULELESS = `
+INSERT INTO "BackupRetentionPolicy" ("id","databaseId","autoApplied","inheritGlobal","preset","keepLast","daily","weekly","monthly","yearly","minFloor","createdAt","updatedAt")
+SELECT lower(hex(randomblob(16))), d."id", 1, 0, 'custom', 24, 7, 4, 6, 0, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+FROM "Database" d
+WHERE EXISTS (SELECT 1 FROM "DatabaseBackup" b WHERE b."databaseId" = d."id")
+  AND NOT EXISTS (SELECT 1 FROM "BackupRetentionPolicy" p WHERE p."databaseId" = d."id")`;
 
     // The backfill is a one-shot migration step (INSERT…SELECT…GROUP BY over
     // ALL schedules). In the shared test DB, start each case from a clean slate
@@ -158,6 +175,8 @@ GROUP BY "databaseId"`;
         minFloor: 2,
         preset: 'custom',
         inheritGlobal: false,
+        // Inert: the migration must NOT auto-apply GFS on upgrade.
+        autoApplied: true,
       });
     });
 
@@ -172,13 +191,47 @@ GROUP BY "databaseId"`;
 
       const policy = await app.prisma.backupRetentionPolicy.findUnique({ where: { databaseId: db.id } });
       expect(policy?.daily).toBe(366);
+      expect(policy?.autoApplied).toBe(true);
     });
 
-    it('first rotateDatabase after backfill deletes nothing the old flat policy would have kept', async () => {
-      // Old behaviour: keep scheduled backups within `retentionDays` days.
-      // With daily=N (and other tiers 0), the GFS pass keeps the newest backup
-      // in each of the last N day-buckets — for one-per-day backups inside the
-      // window that's every one of them, so nothing is pruned.
+    it('a schedule-less DB that has backups gets an inert balanced snapshot too', async () => {
+      // Covers disabled/deleted-schedule & manual-only DBs: no BackupSchedule
+      // row, but the DB has ≥1 backup, so the SECOND backfill INSERT must give
+      // it an inert balanced policy so the first sweep prunes nothing here either.
+      const env = await createTestEnvironment(app.prisma, { name: 'mig-noched' });
+      const db = await createTestDatabase(app.prisma, { environmentId: env.id, name: 'mig-db-noched' });
+      // A DB with NO backups must NOT get a policy (nothing at risk).
+      const emptyDb = await createTestDatabase(app.prisma, { environmentId: env.id, name: 'mig-db-empty' });
+      await seedBackup({ databaseId: db.id, createdAt: new Date() });
+
+      // Run BOTH backfill INSERTs, in migration order.
+      await app.prisma.$executeRawUnsafe(BACKFILL_SQL);
+      await app.prisma.$executeRawUnsafe(BACKFILL_SQL_SCHEDULELESS);
+
+      const policy = await app.prisma.backupRetentionPolicy.findUnique({ where: { databaseId: db.id } });
+      expect(policy).not.toBeNull();
+      expect(policy).toMatchObject({
+        keepLast: 24,
+        daily: 7,
+        weekly: 4,
+        monthly: 6,
+        yearly: 0,
+        minFloor: 2,
+        preset: 'custom',
+        inheritGlobal: false,
+        autoApplied: true,
+      });
+
+      // The backup-less DB gets no policy row.
+      const none = await app.prisma.backupRetentionPolicy.findUnique({ where: { databaseId: emptyDb.id } });
+      expect(none).toBeNull();
+    });
+
+    it('first sweep after backfill prunes NOTHING even when GFS would thin (inert policy)', async () => {
+      // Sub-daily (hourly) schedule: the old flat "keep N days" kept ALL backups
+      // younger than N days, but GFS daily=N keeps only the newest-per-day. The
+      // migrated policy is autoApplied (inert), so the first automatic sweep must
+      // leave the whole set untouched — proving we don't silently thin on upgrade.
       const env = await createTestEnvironment(app.prisma, { name: 'mig-rotate' });
       const server = await localhostServer(env.id, 'mig-rotate-host');
       const db = await createTestDatabase(app.prisma, {
@@ -187,18 +240,19 @@ GROUP BY "databaseId"`;
         serverId: server.id,
       });
       await app.prisma.backupSchedule.create({
-        data: { databaseId: db.id, cronExpression: '0 2 * * *', enabled: true, retentionDays: 7 },
+        data: { databaseId: db.id, cronExpression: '0 * * * *', enabled: true, retentionDays: 7 },
       });
       await app.prisma.$executeRawUnsafe(BACKFILL_SQL);
 
-      // One scheduled backup per day for the last 5 days — all within the 7-day window.
-      const now = Date.now();
-      const DAY = 24 * 60 * 60 * 1000;
+      // 6 scheduled backups within the SAME day (hourly). GFS daily=7 would keep
+      // only the newest-per-day = 1, pruning the other 5. Inert must keep all 6.
+      const base = Date.parse('2026-03-10T18:00:00Z');
+      const HOUR = 60 * 60 * 1000;
       const seeded: string[] = [];
-      for (let d = 0; d < 5; d++) {
+      for (let h = 0; h < 6; h++) {
         const b = await seedBackup({
           databaseId: db.id,
-          createdAt: new Date(now - d * DAY - 12 * 60 * 60 * 1000),
+          createdAt: new Date(base - h * HOUR),
           makeFile: true,
         });
         seeded.push(b.id);
@@ -206,7 +260,15 @@ GROUP BY "databaseId"`;
 
       const result = await rotateDatabase(db.id, { trigger: 'sweep' });
       expect(result.prune).toEqual([]);
+      expect(result.bytesFreed).toBe(0n);
+      // keep returns all candidate ids; nothing deleted on disk or in the DB.
+      expect(new Set(result.keep)).toEqual(new Set(seeded));
       expect((await remainingIds(db.id)).sort()).toEqual(seeded.sort());
+
+      // Sanity: post-backup (the other automatic trigger) is also inert.
+      const result2 = await rotateDatabase(db.id, { trigger: 'post-backup' });
+      expect(result2.prune).toEqual([]);
+      expect((await remainingIds(db.id)).length).toBe(6);
     });
   });
 
@@ -357,6 +419,71 @@ GROUP BY "databaseId"`;
       expect((await remainingIds(db.id)).sort()).toEqual([keep.id, prune.id].sort());
       expect(existsSync(prune.storagePath)).toBe(true);
     });
+
+    it('an autoApplied override is INERT for an automatic sweep, then prunes once cleared', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'rotate-inert' });
+      const server = await localhostServer(env.id, 'rotate-inert-host');
+      const db = await createTestDatabase(app.prisma, { environmentId: env.id, name: 'rotate-inert-db', serverId: server.id });
+
+      // An aggressive policy GFS WOULD thin to 1 (keepLast=1, all tiers 0), but
+      // flagged autoApplied → an automatic sweep must touch nothing.
+      await app.prisma.backupRetentionPolicy.create({
+        data: { databaseId: db.id, autoApplied: true, inheritGlobal: false, preset: 'custom', keepLast: 1, daily: 0, weekly: 0, monthly: 0, yearly: 0, minFloor: 1 },
+      });
+
+      const DAY = 24 * 60 * 60 * 1000;
+      const now = Date.now();
+      const b0 = await seedBackup({ databaseId: db.id, createdAt: new Date(now), size: 5n, makeFile: true });
+      const b1 = await seedBackup({ databaseId: db.id, createdAt: new Date(now - 1 * DAY), size: 5n, makeFile: true });
+      const b2 = await seedBackup({ databaseId: db.id, createdAt: new Date(now - 2 * DAY), size: 5n, makeFile: true });
+      const all = [b0.id, b1.id, b2.id];
+
+      // Automatic sweep: completely untouched.
+      const sweep = await rotateDatabase(db.id, { trigger: 'sweep' });
+      expect(sweep.prune).toEqual([]);
+      expect(sweep.bytesFreed).toBe(0n);
+      expect(new Set(sweep.keep)).toEqual(new Set(all));
+      expect((await remainingIds(db.id)).sort()).toEqual([...all].sort());
+      expect(existsSync(b2.storagePath)).toBe(true);
+
+      // An explicit opts.policy (preview / confirm gate) IGNORES autoApplied even
+      // while the stored policy is inert — the dry-run previews the real outcome.
+      const preview = await rotateDatabase(db.id, {
+        dryRun: true,
+        policy: { keepLast: 1, daily: 0, weekly: 0, monthly: 0, yearly: 0, minFloor: 1, maxTotalBytes: null, preset: 'custom', source: 'override', autoApplied: false },
+      });
+      expect(new Set(preview.prune)).toEqual(new Set([b1.id, b2.id]));
+      // Still nothing actually deleted by a dry-run.
+      expect((await remainingIds(db.id)).length).toBe(3);
+
+      // Operator clears the flag (mirrors what the PUT route does) → GFS activates.
+      await app.prisma.backupRetentionPolicy.update({ where: { databaseId: db.id }, data: { autoApplied: false } });
+      const after = await rotateDatabase(db.id, { trigger: 'sweep' });
+      expect(new Set(after.prune)).toEqual(new Set([b1.id, b2.id]));
+      expect(after.keep).toEqual([b0.id]);
+      expect((await remainingIds(db.id))).toEqual([b0.id]);
+      expect(existsSync(b1.storagePath)).toBe(false);
+      expect(existsSync(b2.storagePath)).toBe(false);
+    });
+
+    it('explicit (non-automatic) triggers ignore autoApplied and rotate normally', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'rotate-inert-manual' });
+      const server = await localhostServer(env.id, 'rotate-inert-manual-host');
+      const db = await createTestDatabase(app.prisma, { environmentId: env.id, name: 'rotate-inert-manual-db', serverId: server.id });
+      await app.prisma.backupRetentionPolicy.create({
+        data: { databaseId: db.id, autoApplied: true, inheritGlobal: false, preset: 'custom', keepLast: 1, daily: 0, weekly: 0, monthly: 0, yearly: 0, minFloor: 1 },
+      });
+      const DAY = 24 * 60 * 60 * 1000;
+      const now = Date.now();
+      const keep = await seedBackup({ databaseId: db.id, createdAt: new Date(now), size: 5n, makeFile: true });
+      const prune = await seedBackup({ databaseId: db.id, createdAt: new Date(now - DAY), size: 5n, makeFile: true });
+
+      // trigger: 'manual' is explicit — autoApplied must NOT pause it.
+      const result = await rotateDatabase(db.id, { trigger: 'manual' });
+      expect(result.prune).toEqual([prune.id]);
+      expect(result.keep).toEqual([keep.id]);
+      expect((await remainingIds(db.id))).toEqual([keep.id]);
+    });
   });
 
   // ==========================================================================
@@ -457,6 +584,143 @@ GROUP BY "databaseId"`;
   });
 
   // ==========================================================================
+  // lastRotationError is cleared on a KEEP pass and on pin (Fix E). The schema
+  // documents it as "cleared on success", but nothing cleared it before, so a
+  // recovered-but-kept backup showed a stale error forever.
+  // ==========================================================================
+  describe('lastRotationError clearing', () => {
+    it('clears lastRotationError on backups a real rotation KEEPS', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'clear-keep' });
+      const server = await localhostServer(env.id, 'clear-keep-host');
+      const db = await createTestDatabase(app.prisma, { environmentId: env.id, name: 'clear-keep-db', serverId: server.id });
+      // keepLast=2, all tiers 0 → newest 2 kept, oldest pruned.
+      await app.prisma.backupRetentionPolicy.create({
+        data: { databaseId: db.id, inheritGlobal: false, preset: 'custom', keepLast: 2, daily: 0, weekly: 0, monthly: 0, yearly: 0, minFloor: 1 },
+      });
+      const DAY = 24 * 60 * 60 * 1000;
+      const now = Date.now();
+      const newest = await seedBackup({ databaseId: db.id, createdAt: new Date(now), makeFile: true });
+      const second = await seedBackup({ databaseId: db.id, createdAt: new Date(now - DAY), makeFile: true });
+      const oldest = await seedBackup({ databaseId: db.id, createdAt: new Date(now - 2 * DAY), makeFile: true });
+      // Both kept rows carry a stale error from a prior failed prune attempt.
+      await app.prisma.databaseBackup.updateMany({
+        where: { id: { in: [newest.id, second.id] } },
+        data: { lastRotationError: 'previous orphan: connection reset' },
+      });
+
+      const result = await rotateDatabase(db.id, { trigger: 'manual' });
+      expect(new Set(result.keep)).toEqual(new Set([newest.id, second.id]));
+      expect(result.prune).toEqual([oldest.id]);
+
+      // The kept rows had their stale error cleared.
+      const newestRow = await app.prisma.databaseBackup.findUnique({ where: { id: newest.id } });
+      const secondRow = await app.prisma.databaseBackup.findUnique({ where: { id: second.id } });
+      expect(newestRow?.lastRotationError).toBeNull();
+      expect(secondRow?.lastRotationError).toBeNull();
+    });
+
+    it('does NOT clear lastRotationError on a dry-run keep (no write)', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'clear-dry' });
+      const server = await localhostServer(env.id, 'clear-dry-host');
+      const db = await createTestDatabase(app.prisma, { environmentId: env.id, name: 'clear-dry-db', serverId: server.id });
+      await app.prisma.backupRetentionPolicy.create({
+        data: { databaseId: db.id, inheritGlobal: false, preset: 'custom', keepLast: 1, daily: 0, weekly: 0, monthly: 0, yearly: 0, minFloor: 1 },
+      });
+      const kept = await seedBackup({ databaseId: db.id, createdAt: new Date(), makeFile: true });
+      await app.prisma.databaseBackup.update({ where: { id: kept.id }, data: { lastRotationError: 'stale' } });
+
+      await rotateDatabase(db.id, { dryRun: true });
+
+      const row = await app.prisma.databaseBackup.findUnique({ where: { id: kept.id } });
+      expect(row?.lastRotationError).toBe('stale'); // unchanged by a preview
+    });
+
+    it('clears lastRotationError when a backup is pinned via PUT .../pin', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'clear-pin' });
+      const db = await createTestDatabase(app.prisma, { environmentId: env.id, name: 'clear-pin-db' });
+      const backup = await seedBackup({ databaseId: db.id, createdAt: new Date() });
+      await app.prisma.databaseBackup.update({ where: { id: backup.id }, data: { lastRotationError: 'orphan: boom' } });
+
+      const res = await app.inject({
+        method: 'PUT',
+        url: `/api/databases/${db.id}/backups/${backup.id}/pin`,
+        headers: { authorization: `Bearer ${operatorToken}` },
+        payload: { pinned: true },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().backup.isPinned).toBe(true);
+
+      const row = await app.prisma.databaseBackup.findUnique({ where: { id: backup.id } });
+      expect(row?.lastRotationError).toBeNull();
+    });
+  });
+
+  // ==========================================================================
+  // deleteBackup (user-initiated) — must ALWAYS remove the row, even when the
+  // artifact delete fails (host down / missing key / Spaces removed), so an
+  // explicit delete is never stranded. Contrast with pruneBackup (above), which
+  // keeps the row and retries. (Code-review Fix A.)
+  // ==========================================================================
+  describe('deleteBackup (user-initiated) row always removed', () => {
+    it('deletes the DB row even when the artifact delete fails, and logs a warning', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'delete-orphan' });
+      const db = await createTestDatabase(app.prisma, { environmentId: env.id, name: 'delete-orphan-db' });
+      const backup = await seedBackup({
+        databaseId: db.id,
+        createdAt: new Date(),
+        storageType: 'spaces',
+        storagePath: 'prefix/backup.sql',
+      });
+      await app.prisma.database.update({ where: { id: db.id }, data: { backupSpacesBucket: 'my-bucket' } });
+
+      // Spaces config resolves, but the S3 delete throws a NON-404 error → the
+      // artifact delete genuinely fails (the case that used to throw/500).
+      vi.spyOn(environmentsModule, 'getEnvironmentSpacesConfig').mockResolvedValue({
+        endpoint: 'nyc3.example.com', region: 'nyc3', accessKey: 'ak', secretKey: 'sk',
+      } as never);
+      vi.spyOn(S3Client.prototype, 'send').mockRejectedValue(
+        Object.assign(new Error('connection reset'), { name: 'NetworkingError' }) as never
+      );
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      // Must NOT throw — and the row must be gone afterwards.
+      await expect(deleteBackup(backup.id)).resolves.toBeUndefined();
+      expect(await app.prisma.databaseBackup.findUnique({ where: { id: backup.id } })).toBeNull();
+      // Orphan surfaced (non-silent).
+      expect(warnSpy).toHaveBeenCalled();
+    });
+
+    it('DELETE /api/backups/:id returns 200 (not 500) when the artifact delete fails', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'delete-route-orphan' });
+      const db = await createTestDatabase(app.prisma, { environmentId: env.id, name: 'delete-route-orphan-db' });
+      const backup = await seedBackup({
+        databaseId: db.id,
+        createdAt: new Date(),
+        storageType: 'spaces',
+        storagePath: 'prefix/route.sql',
+      });
+      await app.prisma.database.update({ where: { id: db.id }, data: { backupSpacesBucket: 'my-bucket' } });
+
+      vi.spyOn(environmentsModule, 'getEnvironmentSpacesConfig').mockResolvedValue({
+        endpoint: 'nyc3.example.com', region: 'nyc3', accessKey: 'ak', secretKey: 'sk',
+      } as never);
+      vi.spyOn(S3Client.prototype, 'send').mockRejectedValue(
+        Object.assign(new Error('boom'), { name: 'NetworkingError' }) as never
+      );
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const res = await app.inject({
+        method: 'DELETE',
+        url: `/api/backups/${backup.id}`,
+        headers: { authorization: `Bearer ${operatorToken}` },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ success: true });
+      expect(await app.prisma.databaseBackup.findUnique({ where: { id: backup.id } })).toBeNull();
+    });
+  });
+
+  // ==========================================================================
   // §14 — Failed / stuck cleanup (§8).
   // ==========================================================================
   describe('markStuckBackupsFailed + cleanupFailedBackups', () => {
@@ -474,6 +738,57 @@ GROUP BY "databaseId"`;
       const freshRow = await app.prisma.databaseBackup.findUnique({ where: { id: fresh.id } });
       expect(stuckRow?.status).toBe('failed');
       expect(freshRow?.status).toBe('in_progress');
+    });
+
+    it('never flips a stuck-old backup that already completed (status guard, Fix D)', async () => {
+      // A stuck-OLD createdAt but status=completed must be left untouched — the
+      // updateMany is guarded on status='in_progress', so a backup that finished
+      // is never flapped back to failed.
+      const env = await createTestEnvironment(app.prisma, { name: 'stuck-completed' });
+      const db = await createTestDatabase(app.prisma, { environmentId: env.id, name: 'stuck-completed-db' });
+      const done = await seedBackup({
+        databaseId: db.id,
+        createdAt: new Date(Date.now() - 20 * 60 * 1000),
+        status: 'completed',
+      });
+
+      await markStuckBackupsFailed();
+
+      const row = await app.prisma.databaseBackup.findUnique({ where: { id: done.id } });
+      expect(row?.status).toBe('completed');
+    });
+
+    it('does NOT count a row that completed concurrently (updateMany count=0, Fix D)', async () => {
+      // Models the race: the row is in_progress when read, but executeBackup
+      // completes it before the conditional updateMany lands. updateMany then
+      // matches nothing (count=0), so it must NOT be counted as marked.
+      const env = await createTestEnvironment(app.prisma, { name: 'stuck-race' });
+      const db = await createTestDatabase(app.prisma, { environmentId: env.id, name: 'stuck-race-db' });
+      const stuck = await seedBackup({
+        databaseId: db.id,
+        createdAt: new Date(Date.now() - 20 * 60 * 1000),
+        status: 'in_progress',
+      });
+
+      // Force the guarded updateMany to report 0 rows affected (the concurrent
+      // completion won the race), without actually changing the row. Spy on the
+      // singleton the service uses (dbPrisma), not app.prisma.
+      const updateManySpy = vi
+        .spyOn(dbPrisma.databaseBackup, 'updateMany')
+        .mockResolvedValue({ count: 0 } as never);
+
+      const marked = await markStuckBackupsFailed();
+      // The guarded WHERE was issued for our stuck row…
+      expect(
+        updateManySpy.mock.calls.some(
+          ([arg]) =>
+            (arg as { where?: { id?: string; status?: string } })?.where?.id === stuck.id &&
+            (arg as { where?: { id?: string; status?: string } })?.where?.status === 'in_progress'
+        )
+      ).toBe(true);
+      // …but count=0 means it is NOT counted as marked. (Other stuck rows left
+      // by earlier tests also report count=0 under this mock, so assert 0.)
+      expect(marked).toBe(0);
     });
 
     it('deletes failed backups older than failedBackupRetentionDays (file-first)', async () => {
@@ -572,6 +887,62 @@ GROUP BY "databaseId"`;
 
       expect(res.statusCode).toBe(200);
       expect(await app.prisma.databaseBackup.count({ where: { databaseId: db.id } })).toBe(1);
+    });
+  });
+
+  // ==========================================================================
+  // §14 — Inert migrated policy (autoApplied) via the routes.
+  // ==========================================================================
+  describe('autoApplied (inert migrated policy) over the API', () => {
+    it('GET backup-policy exposes autoApplied on the override so the UI can show pruning is paused', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'auto-get' });
+      const db = await createTestDatabase(app.prisma, { environmentId: env.id, name: 'auto-get-db' });
+      await app.prisma.backupRetentionPolicy.create({
+        data: { databaseId: db.id, autoApplied: true, inheritGlobal: false, preset: 'custom', keepLast: 12, daily: 7, weekly: 0, monthly: 0, yearly: 0, minFloor: 2 },
+      });
+
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/databases/${db.id}/backup-policy`,
+        headers: { authorization: `Bearer ${viewerToken}` },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { override: { autoApplied: boolean } | null; effective: { autoApplied: boolean } };
+      expect(body.override?.autoApplied).toBe(true);
+      // effective mirrors the override here (not inheriting), so it's inert too.
+      expect(body.effective.autoApplied).toBe(true);
+    });
+
+    it('an operator PUT clears autoApplied (activates GFS) and prunes from then on', async () => {
+      const env = await createTestEnvironment(app.prisma, { name: 'auto-put' });
+      const server = await localhostServer(env.id, 'auto-put-host');
+      const db = await createTestDatabase(app.prisma, { environmentId: env.id, name: 'auto-put-db', serverId: server.id });
+      // Inert migrated policy in place.
+      await app.prisma.backupRetentionPolicy.create({
+        data: { databaseId: db.id, autoApplied: true, inheritGlobal: false, preset: 'custom', keepLast: 1, daily: 0, weekly: 0, monthly: 0, yearly: 0, minFloor: 1 },
+      });
+      // 3 prunable scheduled backups (under the confirm threshold of 5 once keepLast=1 → prune 2).
+      const DAY = 24 * 60 * 60 * 1000;
+      const now = Date.now();
+      const b0 = await seedBackup({ databaseId: db.id, createdAt: new Date(now), makeFile: true });
+      await seedBackup({ databaseId: db.id, createdAt: new Date(now - DAY), makeFile: true });
+      await seedBackup({ databaseId: db.id, createdAt: new Date(now - 2 * DAY), makeFile: true });
+
+      // Operator saves the same tiers → autoApplied must flip to false and rotation runs.
+      const res = await app.inject({
+        method: 'PUT',
+        url: `/api/databases/${db.id}/backup-policy`,
+        headers: { authorization: `Bearer ${operatorToken}` },
+        payload: { preset: 'custom', keepLast: 1, daily: 0, weekly: 0, monthly: 0, yearly: 0, minFloor: 1 },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { override: { autoApplied: boolean }; rotation: { prune: string[] } };
+      expect(body.override.autoApplied).toBe(false);
+      expect(body.rotation.prune.length).toBe(2);
+
+      const row = await app.prisma.backupRetentionPolicy.findUnique({ where: { databaseId: db.id } });
+      expect(row?.autoApplied).toBe(false);
+      expect((await remainingIds(db.id))).toEqual([b0.id]);
     });
   });
 

@@ -82,9 +82,9 @@ function notifyAsync(
 
 /**
  * Milliseconds from now until the next occurrence of the given local hour:minute.
- * Used to align a daily sweep's FIRST run to a low-traffic early-morning slot
- * (subsequent runs are driven by a plain 24h setInterval). Local time matches
- * the rest of the scheduler (cron evaluation also uses local getHours()).
+ * Used to align a daily sweep's FIRST run to a low-traffic early-morning slot.
+ * Local time matches the rest of the scheduler (cron evaluation also uses local
+ * getHours()).
  */
 function msUntilHour(hour: number, minute: number): number {
   const now = new Date();
@@ -94,6 +94,25 @@ function msUntilHour(hour: number, minute: number): number {
     next.setDate(next.getDate() + 1);
   }
   return next.getTime() - now.getTime();
+}
+
+/**
+ * Run `task` once per day, anchored to local `hour:minute`. The first run is an
+ * aligning setTimeout landing on the next occurrence of that wall-clock time;
+ * its callback runs the task and THEN starts the recurring 24h setInterval, so
+ * the interval is anchored to the target hour rather than to process-boot time
+ * (a plain boot-anchored 24h interval drifts off the intended hour and can
+ * double-fire within the first ~24h). Both the alignment timeout and the
+ * recurring interval are tracked under `timers` (keyed `${key}Init` / `${key}`)
+ * so stopScheduler() clears them.
+ */
+function scheduleDailyAt(key: string, hour: number, minute: number, task: () => void): void {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const init = setTimeout(() => {
+    task();
+    timers.set(key, setInterval(task, DAY_MS));
+  }, msUntilHour(hour, minute));
+  timers.set(`${key}Init`, init);
 }
 
 /**
@@ -928,9 +947,12 @@ async function runBackupRotationSweep(): Promise<void> {
       select: { id: true },
     });
 
+    // Fan out across the module's concurrency limit (like runServerHealthChecks
+    // et al.) so one slow/unreachable host doesn't stall rotation for every
+    // other database. Each DB keeps its own try/catch + captureException.
     let rotated = 0;
     let pruned = 0;
-    for (const db of databases) {
+    await Promise.allSettled(databases.map((db) => concurrencyLimit(async () => {
       try {
         const result = await rotateDatabase(db.id, { trigger: 'sweep' });
         rotated++;
@@ -939,7 +961,7 @@ async function runBackupRotationSweep(): Promise<void> {
         captureException(error, { scheduler: 'backupRotationSweep', databaseId: db.id });
         console.error(`[Scheduler] Backup rotation failed for database ${db.id}:`, error);
       }
-    }
+    })));
 
     if (pruned > 0) {
       console.log(`[Scheduler] Backup rotation sweep: pruned ${pruned} backup(s) across ${rotated} database(s)`);
@@ -1092,15 +1114,14 @@ export function startScheduler(overrides: Partial<GlobalSchedulerConfig> = {}): 
   timers.set('digestCleanup', setInterval(runDigestCleanup, 24 * 60 * 60 * 1000)); // Daily
   timers.set('imagePrune', setInterval(runImagePrune, 7 * 24 * 60 * 60 * 1000)); // Weekly
 
-  // Backup rotation & failed-backup cleanup (issue #291). Daily sweeps, matching
-  // the other retention cleanups above. The first run is kicked off after a
-  // short alignment delay landing on a low-traffic early-morning hour (~03:00 /
-  // 03:15 local) so rotation doesn't pile onto the other startup sweeps; the
-  // delay timer is tracked in `timers` so stopScheduler() clears it too.
-  timers.set('backupRotationSweep', setInterval(runBackupRotationSweep, 24 * 60 * 60 * 1000)); // Daily
-  timers.set('failedBackupCleanup', setInterval(runFailedBackupCleanup, 24 * 60 * 60 * 1000)); // Daily
-  timers.set('backupRotationSweepInit', setTimeout(runBackupRotationSweep, msUntilHour(3, 0)));
-  timers.set('failedBackupCleanupInit', setTimeout(runFailedBackupCleanup, msUntilHour(3, 15)));
+  // Backup rotation & failed-backup cleanup (issue #291). Run ONCE PER DAY,
+  // anchored to a low-traffic early-morning hour (~03:00 / 03:15 local) so they
+  // don't pile onto the other startup sweeps. scheduleDailyAt aligns the first
+  // run to the target wall-clock time and only then starts the recurring 24h
+  // interval (anchored to that hour, not to process boot), registering both
+  // handles in `timers` so stopScheduler() clears them.
+  scheduleDailyAt('backupRotationSweep', 3, 0, runBackupRotationSweep);
+  scheduleDailyAt('failedBackupCleanup', 3, 15, runFailedBackupCleanup);
 
   // Webhook deliveries (issue #126): a short-interval sweep + daily cleanups for
   // delivery history and expired idempotency keys. The sweep interval is short

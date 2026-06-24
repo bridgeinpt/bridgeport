@@ -2011,6 +2011,12 @@ export interface BackupRetentionPolicy {
   /** Absolute storage ceiling in bytes; null = off. */
   maxTotalBytes: number | null;
   preset: string;
+  /**
+   * True only for an inert, upgrade-migration-created policy: automatic pruning
+   * is PAUSED until an operator reviews and saves the policy (which clears it
+   * server-side). Always false for the global default.
+   */
+  autoApplied: boolean;
 }
 
 /** Per-database override row. Shares the policy fields plus inheritance flag. */
@@ -2075,7 +2081,8 @@ export interface BackupRotationResult {
   prune: string[];
   bytesFreed: number;
   cappedButUnreachable: boolean;
-  errors?: string[];
+  // Per-backup prune failures — matches the server payload (RotationResult.errors).
+  errors?: { backupId: string; error: string }[];
 }
 
 /** Result of a successful policy save. */

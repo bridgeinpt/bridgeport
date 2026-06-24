@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, RotateCw } from 'lucide-react';
+import { AlertTriangle, Info, RotateCw } from 'lucide-react';
 import {
   getBackupPolicy,
   setBackupPolicy,
@@ -278,6 +278,23 @@ export function BackupRetentionCard({ databaseId, onRotated }: BackupRetentionCa
         </Button>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* Inert (autoApplied) migrated policy: automatic pruning is paused
+            until the operator reviews & saves. Cleared server-side on save, so
+            this notice disappears after the post-save refetch. */}
+        {policy?.effective.autoApplied && (
+          <div
+            role="status"
+            className="flex items-start gap-2 rounded-md border border-info/30 bg-info/10 p-3 text-sm text-info"
+          >
+            <Info className="mt-0.5 size-4 shrink-0" />
+            <span className="text-foreground">
+              This retention policy was migrated from your legacy backup settings.{' '}
+              <span className="font-medium">Automatic pruning is paused</span> until you review the
+              tiers below and save the policy. Saving activates GFS rotation for this database.
+            </span>
+          </div>
+        )}
+
         {/* Use global default toggle */}
         <Label
           htmlFor="retention-inherit"

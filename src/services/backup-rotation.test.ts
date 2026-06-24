@@ -324,9 +324,10 @@ describe('resolveRetentionPolicy', () => {
     mockGetSystemSettings.mockResolvedValue(globalSettings as never);
   });
 
-  it('returns the override fields with source="override" when a row exists and inheritGlobal=false', async () => {
+  it('returns the override fields with source="override" (and autoApplied passthrough) when a row exists and inheritGlobal=false', async () => {
     mockPrisma.backupRetentionPolicy.findUnique.mockResolvedValue({
       databaseId: 'db-1',
+      autoApplied: true,
       inheritGlobal: false,
       preset: 'custom',
       keepLast: 5,
@@ -349,6 +350,8 @@ describe('resolveRetentionPolicy', () => {
       maxTotalBytes: 1000n,
       preset: 'custom',
       source: 'override',
+      // The inert flag is carried through from the row so rotateDatabase can skip.
+      autoApplied: true,
     });
     // Inherited path not consulted.
     expect(mockGetSystemSettings).not.toHaveBeenCalled();
@@ -368,6 +371,8 @@ describe('resolveRetentionPolicy', () => {
       maxTotalBytes: null,
       preset: 'balanced',
       source: 'inherited',
+      // The global default never auto-applies — it's an explicit instance setting.
+      autoApplied: false,
     });
     expect(mockGetSystemSettings).toHaveBeenCalledTimes(1);
   });

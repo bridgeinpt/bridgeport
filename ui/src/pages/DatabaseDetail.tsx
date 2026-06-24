@@ -151,9 +151,12 @@ export default function DatabaseDetail() {
     backupSpacesPrefix: '',
   });
 
+  // Note: retentionDays is intentionally NOT part of this form. Backup retention
+  // is governed by the GFS BackupRetentionPolicy (see BackupRetentionCard below),
+  // not the schedule. The schedule's stored retentionDays column is preserved
+  // on save for back-compat (see handleSaveSchedule).
   const [scheduleForm, setScheduleForm] = useState({
     cronExpression: '0 2 * * *',
-    retentionDays: 7,
     enabled: true,
   });
 
@@ -247,7 +250,6 @@ export default function DatabaseDetail() {
       if (sched) {
         setScheduleForm({
           cronExpression: sched.cronExpression,
-          retentionDays: sched.retentionDays,
           enabled: sched.enabled,
         });
       }
@@ -412,7 +414,12 @@ export default function DatabaseDetail() {
     if (!id) return;
     setSaving(true);
     try {
-      const { schedule: sched } = await setBackupSchedule(id, scheduleForm);
+      // Preserve the stored retentionDays column (back-compat); retention is
+      // actually governed by the GFS policy, not this field.
+      const { schedule: sched } = await setBackupSchedule(id, {
+        ...scheduleForm,
+        retentionDays: schedule?.retentionDays ?? 7,
+      });
       setSchedule(sched);
       setEditingSchedule(false);
       toast.success('Schedule saved');
@@ -428,6 +435,7 @@ export default function DatabaseDetail() {
     try {
       const { schedule: sched } = await setBackupSchedule(id, {
         ...scheduleForm,
+        retentionDays: schedule.retentionDays,
         enabled: !schedule.enabled,
       });
       setSchedule(sched);
@@ -1121,17 +1129,9 @@ export default function DatabaseDetail() {
                 />
                 <p className="text-xs text-muted-foreground">e.g., "0 2 * * *" = daily at 2am</p>
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="schedule-retention">Retention Days</Label>
-                <Input
-                  id="schedule-retention"
-                  type="number"
-                  min={1}
-                  max={365}
-                  value={scheduleForm.retentionDays}
-                  onChange={e => setScheduleForm({ ...scheduleForm, retentionDays: parseInt(e.target.value) || 7 })}
-                />
-              </div>
+              <p className="text-xs text-muted-foreground">
+                How long backups are kept is configured in the "Backup retention" card below.
+              </p>
               <Label htmlFor="scheduleEnabled" className="text-sm font-normal">
                 <Checkbox
                   id="scheduleEnabled"
@@ -1169,10 +1169,6 @@ export default function DatabaseDetail() {
                 <code className="font-mono text-foreground bg-muted px-2 py-0.5 rounded text-xs">
                   {schedule.cronExpression}
                 </code>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Retention</span>
-                <span className="text-foreground">{schedule.retentionDays} days</span>
               </div>
               {schedule.lastRunAt && (
                 <div className="flex justify-between text-sm">

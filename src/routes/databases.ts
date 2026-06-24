@@ -17,6 +17,7 @@ import {
   listEnvironmentBackupSummary,
   rotateDatabase,
   resolveRetentionPolicy,
+  globalDefaultPolicyFromSettings,
   PRESETS,
   RETENTION_BOUNDS,
   type EffectivePolicy,
@@ -38,6 +39,7 @@ import {
   handleUniqueConstraint,
   parsePaginationQuery,
   coerceNumeric,
+  formatBytes,
 } from '../lib/helpers.js';
 import { downsampleColumnar } from '../lib/metrics-downsample.js';
 import { routeSchema, paginationQuerySchema } from '../lib/openapi-schema.js';
@@ -150,24 +152,6 @@ type BackupPolicyBody = z.infer<typeof backupPolicySchema>;
 type BackupPolicyPreviewBody = NonNullable<z.infer<typeof backupPolicyPreviewSchema>>;
 
 /**
- * The instance global-default retention policy as an EffectivePolicy
- * (source: 'inherited'), read from SystemSettings (issue #291 §4.2).
- */
-function globalDefaultPolicy(settings: Awaited<ReturnType<typeof getSystemSettings>>): EffectivePolicy {
-  return {
-    keepLast: settings.backupRetentionKeepLast,
-    daily: settings.backupRetentionDaily,
-    weekly: settings.backupRetentionWeekly,
-    monthly: settings.backupRetentionMonthly,
-    yearly: settings.backupRetentionYearly,
-    minFloor: settings.backupRetentionMinFloor,
-    maxTotalBytes: settings.backupRetentionMaxTotalBytes,
-    preset: settings.backupRetentionPreset,
-    source: 'inherited',
-  };
-}
-
-/**
  * Build the proposed EffectivePolicy a PUT would apply (issue #291 §6.5 step 1):
  *   - inheritGlobal=true  → the global default (source 'inherited').
  *   - non-custom preset   → tier fields from PRESETS[preset] (source 'override').
@@ -179,9 +163,10 @@ function buildProposedPolicy(body: BackupPolicyBody, globalDefault: EffectivePol
     return globalDefault;
   }
   const cap = body.maxTotalBytes == null ? null : BigInt(body.maxTotalBytes);
+  // An operator-configured override always activates GFS, so autoApplied=false.
   if (body.preset !== 'custom') {
     const tiers = PRESETS[body.preset];
-    return { ...tiers, maxTotalBytes: cap, preset: body.preset, source: 'override' };
+    return { ...tiers, maxTotalBytes: cap, preset: body.preset, source: 'override', autoApplied: false };
   }
   return {
     keepLast: body.keepLast,
@@ -193,6 +178,7 @@ function buildProposedPolicy(body: BackupPolicyBody, globalDefault: EffectivePol
     maxTotalBytes: cap,
     preset: 'custom',
     source: 'override',
+    autoApplied: false,
   };
 }
 
@@ -210,10 +196,12 @@ function resolvePreviewPolicy(
   if (!body) return current;
   if (body.inheritGlobal) return globalDefault;
 
+  // A preview always evaluates the policy as if it were active (the dry-run/
+  // confirm gate must show real GFS outcomes), so autoApplied=false here.
   if (body.preset && body.preset !== 'custom') {
     const tiers = PRESETS[body.preset];
     const cap = body.maxTotalBytes === undefined ? current.maxTotalBytes : (body.maxTotalBytes == null ? null : BigInt(body.maxTotalBytes));
-    return { ...tiers, maxTotalBytes: cap, preset: body.preset, source: 'override' };
+    return { ...tiers, maxTotalBytes: cap, preset: body.preset, source: 'override', autoApplied: false };
   }
 
   // Custom (or unspecified preset): overlay provided tier fields onto current.
@@ -228,6 +216,7 @@ function resolvePreviewPolicy(
     maxTotalBytes: cap,
     preset: body.preset ?? current.preset,
     source: 'override',
+    autoApplied: false,
   };
 }
 
@@ -728,11 +717,19 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
       ]);
 
       return {
+        // `effective.autoApplied` (via serializePolicy) and `override.autoApplied`
+        // (spread from the row) tell the UI that automatic pruning is PAUSED until
+        // the operator saves this policy. autoApplied is made explicit below so the
+        // response contract is stable regardless of the Prisma row shape.
         effective: serializePolicy(effective),
         override: override
-          ? { ...override, maxTotalBytes: override.maxTotalBytes == null ? null : Number(override.maxTotalBytes) }
+          ? {
+              ...override,
+              autoApplied: override.autoApplied,
+              maxTotalBytes: override.maxTotalBytes == null ? null : Number(override.maxTotalBytes),
+            }
           : null,
-        globalDefault: serializePolicy(globalDefaultPolicy(settings)),
+        globalDefault: serializePolicy(globalDefaultPolicyFromSettings(settings)),
         source: effective.source,
       };
     }
@@ -761,7 +758,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
       if (!database) return;
 
       const settings = await getSystemSettings();
-      const proposed = buildProposedPolicy(body, globalDefaultPolicy(settings));
+      const proposed = buildProposedPolicy(body, globalDefaultPolicyFromSettings(settings));
 
       // Confirmation gate: dry-run the proposed policy. If it would prune more
       // than the threshold and the client hasn't confirmed, return the preview
@@ -780,8 +777,11 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
 
       // Persist the override. inheritGlobal=true stores a row that the resolver
       // treats as "use the global default"; otherwise store the resolved tiers.
+      // autoApplied=false on both branches: an operator deliberately configuring
+      // (or saving) a policy activates GFS, clearing any inert migrated snapshot.
       const data = body.inheritGlobal
         ? {
+            autoApplied: false,
             inheritGlobal: true,
             preset: body.preset,
             keepLast: proposed.keepLast,
@@ -793,6 +793,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
             maxTotalBytes: proposed.maxTotalBytes,
           }
         : {
+            autoApplied: false,
             inheritGlobal: false,
             preset: proposed.preset,
             keepLast: proposed.keepLast,
@@ -822,7 +823,9 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
           {
             preset: proposed.preset,
             prunedCount: result.prune.length,
-            bytesFreed: Number(result.bytesFreed),
+            // Human-readable (e.g. "1.5 GB") — the template interpolates this
+            // string directly, so a raw byte integer would read poorly.
+            bytesFreed: formatBytes(result.bytesFreed),
             databaseName: database.name,
           }
         );
@@ -929,7 +932,7 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
         resolveRetentionPolicy(id),
         getSystemSettings(),
       ]);
-      const policy = resolvePreviewPolicy(body, current, globalDefaultPolicy(settings));
+      const policy = resolvePreviewPolicy(body, current, globalDefaultPolicyFromSettings(settings));
 
       const result = await rotateDatabase(id, { dryRun: true, policy });
       const [keep, prune] = await Promise.all([
@@ -1028,7 +1031,9 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
       const backup = await prisma.databaseBackup.update({
         where: { id: backupId },
         data: body.pinned
-          ? { isPinned: true, pinnedById: userIdForFk(request.authUser!), pinnedAt: new Date() }
+          // Pinning exempts the backup from pruning forever, so any stale
+          // lastRotationError (an orphan we'll never retry) is cleared too.
+          ? { isPinned: true, pinnedById: userIdForFk(request.authUser!), pinnedAt: new Date(), lastRotationError: null }
           : { isPinned: false, pinnedById: null, pinnedAt: null },
       });
 

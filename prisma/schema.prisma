@@ -827,6 +827,13 @@ model BackupRetentionPolicy {
   inheritGlobal Boolean  @default(false)
   preset        String   @default("balanced") // "lean" | "balanced" | "long_term" | "custom"
 
+  // True when this row was auto-created by the upgrade migration as an inert
+  // snapshot of legacy retention. Automatic rotation (sweep / post-backup) SKIPS
+  // such policies — GFS only activates once an operator saves a policy (which
+  // sets this false). Honors spec decision #12 + the GOLDEN RULE (no auto-deletes
+  // on upgrade). See rotateDatabase.
+  autoApplied Boolean @default(false)
+
   keepLast      Int      @default(24)
   daily         Int      @default(7)
   weekly        Int      @default(4)

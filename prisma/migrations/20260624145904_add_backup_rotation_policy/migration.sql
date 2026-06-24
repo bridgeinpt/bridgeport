@@ -2,6 +2,7 @@
 CREATE TABLE "BackupRetentionPolicy" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "databaseId" TEXT NOT NULL,
+    "autoApplied" BOOLEAN NOT NULL DEFAULT false,
     "inheritGlobal" BOOLEAN NOT NULL DEFAULT false,
     "preset" TEXT NOT NULL DEFAULT 'balanced',
     "keepLast" INTEGER NOT NULL DEFAULT 24,
@@ -92,11 +93,28 @@ PRAGMA defer_foreign_keys=OFF;
 -- CreateIndex
 CREATE UNIQUE INDEX "BackupRetentionPolicy_databaseId_key" ON "BackupRetentionPolicy"("databaseId");
 
--- DataBackfill: convert legacy flat retention into per-DB GFS override (behavior-preserving; deletes nothing).
+-- DataBackfill: snapshot legacy flat retention into a per-DB GFS override that is
+-- INERT until an operator opts in. autoApplied=1 marks the row as auto-created by
+-- this upgrade; automatic rotation (sweep / post-backup) SKIPS such rows, so the
+-- first post-upgrade sweep deletes NOTHING. GFS only starts thinning once an
+-- operator reviews & saves the policy (the PUT route sets autoApplied=0). This
+-- honors spec decision #12 (new tiers take effect only on an explicit save) and
+-- the GOLDEN RULE (container upgrades must be automatic AND safe — no surprise
+-- deletes). A flat "keep last N days" policy and GFS daily=N diverge for sub-daily
+-- schedules (GFS keeps only newest-per-day), which is exactly why these rows must
+-- not auto-apply. See rotateDatabase.
 -- BackupSchedule.databaseId is UNIQUE (1:1 with Database), so GROUP BY yields one row per database.
--- "keep last N days" => N daily slots (capped at 366); weekly/monthly/yearly start at 0 so no thinning is introduced silently.
+-- "keep last N days" => N daily slots (capped at 366); weekly/monthly/yearly start at 0.
 -- inheritGlobal is the boolean false, stored as 0 in SQLite.
-INSERT INTO "BackupRetentionPolicy" ("id","databaseId","inheritGlobal","preset","keepLast","daily","weekly","monthly","yearly","minFloor","createdAt","updatedAt")
-SELECT lower(hex(randomblob(16))), "databaseId", 0, 'custom', 12, MIN("retentionDays",366), 0, 0, 0, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+INSERT INTO "BackupRetentionPolicy" ("id","databaseId","autoApplied","inheritGlobal","preset","keepLast","daily","weekly","monthly","yearly","minFloor","createdAt","updatedAt")
+SELECT lower(hex(randomblob(16))), "databaseId", 1, 0, 'custom', 12, MIN("retentionDays",366), 0, 0, 0, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 FROM "BackupSchedule"
 GROUP BY "databaseId";
+
+-- Every existing DB with backups but no schedule-derived policy: inert balanced snapshot
+-- so the first automatic sweep prunes nothing (covers disabled/deleted-schedule & manual-only DBs).
+INSERT INTO "BackupRetentionPolicy" ("id","databaseId","autoApplied","inheritGlobal","preset","keepLast","daily","weekly","monthly","yearly","minFloor","createdAt","updatedAt")
+SELECT lower(hex(randomblob(16))), d."id", 1, 0, 'custom', 24, 7, 4, 6, 0, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+FROM "Database" d
+WHERE EXISTS (SELECT 1 FROM "DatabaseBackup" b WHERE b."databaseId" = d."id")
+  AND NOT EXISTS (SELECT 1 FROM "BackupRetentionPolicy" p WHERE p."databaseId" = d."id");

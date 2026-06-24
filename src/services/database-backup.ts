@@ -995,10 +995,15 @@ function isNotFoundError(error: unknown): boolean {
 }
 
 /**
- * Delete a backup (user-initiated). File-first: delete the physical artifact,
- * then the DB row (§6.6 / decision #4). On artifact-delete failure the row is
- * kept and the error is surfaced (thrown) rather than silently orphaning the
- * file. Preserves the original `Promise<void>` contract.
+ * Delete a backup (user-initiated). File-first: try to delete the physical
+ * artifact, then ALWAYS delete the DB row (§6.6 / decision #4).
+ *
+ * Unlike the automated `pruneBackup` (which keeps the row + records
+ * `lastRotationError` + retries on the next sweep), an explicit user delete
+ * must always succeed: if the artifact can't be removed (host down, missing
+ * SSH key, Spaces removed) we log the orphaned file loudly via `console.warn`
+ * and still drop the row, so the user is never left with an undeletable
+ * backup. Preserves the original `Promise<void>` contract.
  */
 export async function deleteBackup(id: string): Promise<void> {
   const backup = await prisma.databaseBackup.findUnique({
@@ -1010,7 +1015,12 @@ export async function deleteBackup(id: string): Promise<void> {
 
   const result = await deleteBackupArtifact(backup);
   if (!result.ok) {
-    throw new Error(`Failed to delete backup file: ${result.error ?? 'unknown error'}`);
+    // User-initiated delete: don't strand the row. Warn about the orphaned
+    // artifact (non-silent) and still remove the record.
+    console.warn(
+      `[Backup] Could not delete artifact for backup ${id} (${backup.storageType}: ${backup.storagePath}): ` +
+      `${result.error ?? 'unknown error'}. Removing the database row anyway; the file may be orphaned.`
+    );
   }
 
   await prisma.databaseBackup.delete({ where: { id } });
@@ -1551,6 +1561,34 @@ export interface EffectivePolicy {
   maxTotalBytes: bigint | null;
   preset: string;
   source: 'override' | 'inherited';
+  // True only for an inert, upgrade-migration-created override (autoApplied row).
+  // Automatic rotation skips such policies; an operator save clears it. Always
+  // false for the inherited global default. See rotateDatabase.
+  autoApplied: boolean;
+}
+
+/**
+ * Map the instance global-default retention settings to an EffectivePolicy
+ * (§4.2). The global default is always an explicit instance setting, so
+ * `source: 'inherited'` and `autoApplied: false`. Shared by
+ * `resolveRetentionPolicy`'s inherited branch and the route layer's
+ * `globalDefaultPolicy` so the mapping lives in exactly one place.
+ */
+export function globalDefaultPolicyFromSettings(
+  settings: Awaited<ReturnType<typeof getSystemSettings>>
+): EffectivePolicy {
+  return {
+    keepLast: settings.backupRetentionKeepLast,
+    daily: settings.backupRetentionDaily,
+    weekly: settings.backupRetentionWeekly,
+    monthly: settings.backupRetentionMonthly,
+    yearly: settings.backupRetentionYearly,
+    minFloor: settings.backupRetentionMinFloor,
+    maxTotalBytes: settings.backupRetentionMaxTotalBytes,
+    preset: settings.backupRetentionPreset,
+    source: 'inherited',
+    autoApplied: false,
+  };
 }
 
 /**
@@ -1574,21 +1612,12 @@ export async function resolveRetentionPolicy(databaseId: string): Promise<Effect
       maxTotalBytes: override.maxTotalBytes,
       preset: override.preset,
       source: 'override',
+      autoApplied: override.autoApplied,
     };
   }
 
   const settings = await getSystemSettings();
-  return {
-    keepLast: settings.backupRetentionKeepLast,
-    daily: settings.backupRetentionDaily,
-    weekly: settings.backupRetentionWeekly,
-    monthly: settings.backupRetentionMonthly,
-    yearly: settings.backupRetentionYearly,
-    minFloor: settings.backupRetentionMinFloor,
-    maxTotalBytes: settings.backupRetentionMaxTotalBytes,
-    preset: settings.backupRetentionPreset,
-    source: 'inherited',
-  };
+  return globalDefaultPolicyFromSettings(settings);
 }
 
 /** Result of a rotation pass (§6.7). `bytesFreed` is bigint per repo convention. */
@@ -1662,11 +1691,35 @@ export async function rotateDatabase(
   const policy = resolvedPolicy;
   const tz = settings.timezone || 'UTC';
 
+  // INERT migrated policy guard (issue #291, GOLDEN RULE + spec decision #12).
+  // A policy auto-created by the upgrade migration (autoApplied) is a snapshot of
+  // legacy flat retention and must NOT cause automatic deletes — a flat
+  // "keep N days" and GFS daily=N diverge for sub-daily schedules. So for an
+  // AUTOMATIC trigger (sweep / post-backup) using the STORED policy (no explicit
+  // opts.policy), skip pruning entirely and keep everything until an operator
+  // saves the policy (which clears autoApplied). Explicit triggers (manual,
+  // policy-change) and any preview/confirm call with an explicit opts.policy
+  // ignore this and rotate normally.
+  const isAutomaticTrigger = trigger === 'sweep' || trigger === 'post-backup';
+  if (isAutomaticTrigger && policy.autoApplied && !opts.policy) {
+    const all = await prisma.databaseBackup.findMany({
+      where: { databaseId, status: 'completed', type: 'scheduled', isPinned: false },
+      select: { id: true },
+    });
+    console.log(
+      `[Rotation] Skipping database ${databaseId}: inert migrated policy (autoApplied) — ` +
+      `automatic pruning paused until an operator saves the retention policy. trigger=${trigger}`
+    );
+    return { keep: all.map((b) => b.id), prune: [], bytesFreed: BigInt(0) };
+  }
+
   // Prunable universe: completed + scheduled + not pinned. Sorted newest-first.
+  // `lastRotationError` is selected so we can clear a stale error on any KEPT
+  // row below (a pass that retains it means there's no outstanding orphan).
   const candidates = await prisma.databaseBackup.findMany({
     where: { databaseId, status: 'completed', type: 'scheduled', isPinned: false },
     orderBy: { createdAt: 'desc' },
-    select: { id: true, createdAt: true, size: true, filename: true },
+    select: { id: true, createdAt: true, size: true, filename: true, lastRotationError: true },
   });
 
   // Exempt-successful: completed backups that are manual OR pinned. They never
@@ -1699,7 +1752,8 @@ export async function rotateDatabase(
   const keepList = candidates.filter((c) => keep.has(c.id));
 
   if (dryRun) {
-    // Preview: bytesFreed = sum of everything we WOULD prune.
+    // Preview: bytesFreed = sum of everything we WOULD prune. A dry run never
+    // writes, so we don't clear lastRotationError here.
     const bytesFreed = pruneList.reduce((sum, b) => sum + b.size, BigInt(0));
     return {
       keep: keepList.map((b) => b.id),
@@ -1707,6 +1761,18 @@ export async function rotateDatabase(
       bytesFreed,
       cappedButUnreachable: capResult.cappedButUnreachable,
     };
+  }
+
+  // Clear a stale lastRotationError on any KEPT backup (§ schema: "cleared on
+  // success"). A pass that retains the row means there's no outstanding orphan
+  // for it, so a previously-recorded prune error is no longer meaningful. One
+  // updateMany over just the ids that currently carry an error.
+  const keptWithError = keepList.filter((b) => b.lastRotationError != null).map((b) => b.id);
+  if (keptWithError.length > 0) {
+    await prisma.databaseBackup.updateMany({
+      where: { id: { in: keptWithError } },
+      data: { lastRotationError: null },
+    });
   }
 
   // Real prune. One backup failing must not abort the whole rotation.
@@ -1804,15 +1870,20 @@ export async function markStuckBackupsFailed(): Promise<number> {
       message: 'Backup timed out: still in progress past the configured pg_dump timeout. Marked failed by the cleanup sweep.',
       step: 'dump',
     };
-    await prisma.databaseBackup.update({
-      where: { id: backup.id },
+    // Conditional update guarded on status='in_progress': if executeBackup
+    // legitimately completed (or failed) this row between the findMany above
+    // and now, the WHERE matches nothing and we neither clobber it nor count
+    // it as marked — avoiding a completed↔failed flap and a false "timed out"
+    // notification.
+    const { count } = await prisma.databaseBackup.updateMany({
+      where: { id: backup.id, status: 'in_progress' },
       data: {
         status: 'failed',
         error: JSON.stringify(backupError),
         completedAt: new Date(),
       },
     });
-    marked++;
+    if (count > 0) marked++;
   }
 
   return marked;

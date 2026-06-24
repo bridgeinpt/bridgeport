@@ -40,6 +40,20 @@ export const PRESET_OPTIONS: { value: BackupRetentionPreset; label: string; hint
   { value: 'custom', label: 'Custom', hint: 'Set each tier yourself' },
 ];
 
+/**
+ * Tier values for each non-custom preset — mirrors PRESETS in the backend
+ * (src/services/database-backup.ts §4.1). Selecting a preset fills these tier
+ * fields in the form so the persisted values match the chosen preset (the
+ * inputs are hidden for non-custom presets, so without this the form would keep
+ * whatever stale tiers were last shown). `maxTotalBytes` is always off (null)
+ * for a preset.
+ */
+export const PRESET_VALUES: Record<'lean' | 'balanced' | 'long_term', Omit<RetentionPolicyValues, 'preset'>> = {
+  lean: { keepLast: 12, daily: 7, weekly: 4, monthly: 0, yearly: 0, minFloor: 2, maxTotalBytes: null },
+  balanced: { keepLast: 24, daily: 7, weekly: 4, monthly: 6, yearly: 0, minFloor: 2, maxTotalBytes: null },
+  long_term: { keepLast: 24, daily: 7, weekly: 4, monthly: 12, yearly: 3, minFloor: 2, maxTotalBytes: null },
+};
+
 const TIER_FIELDS: {
   key: keyof typeof RETENTION_BOUNDS;
   label: string;
@@ -72,7 +86,18 @@ export function RetentionPolicyFields({ values, onChange, disabled, idPrefix }: 
         <Label>Preset</Label>
         <RadioGroup
           value={values.preset}
-          onValueChange={(v) => onChange({ preset: v as BackupRetentionPreset })}
+          onValueChange={(v) => {
+            const preset = v as BackupRetentionPreset;
+            // For a non-custom preset, also fill the (hidden) tier fields from
+            // the preset constants so the form reflects/submits the right
+            // numbers — not whatever stale tiers were last shown. 'custom'
+            // keeps the current tier values for the user to edit.
+            if (preset !== 'custom') {
+              onChange({ preset, ...PRESET_VALUES[preset] });
+            } else {
+              onChange({ preset });
+            }
+          }}
           disabled={disabled}
           className="gap-2"
         >

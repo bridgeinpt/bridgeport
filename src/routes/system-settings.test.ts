@@ -183,6 +183,96 @@ describe('system-settings routes', () => {
       expect(tooHigh.statusCode).toBe(400);
     });
 
+    it('reconciles the six tier fields to PRESETS[preset] for a non-custom preset (Fix B)', async () => {
+      // First make the stored tiers deliberately NOT match any preset (custom),
+      // so we can prove the next non-custom PUT overwrites them server-side.
+      await app.inject({
+        method: 'PUT',
+        url: '/api/settings/system',
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: {
+          backupRetentionPreset: 'custom',
+          backupRetentionKeepLast: 99,
+          backupRetentionDaily: 99,
+          backupRetentionWeekly: 99,
+          backupRetentionMonthly: 99,
+          backupRetentionYearly: 49,
+          backupRetentionMinFloor: 9,
+        },
+      });
+
+      // Now select the 'lean' preset. Tiers must be reconciled to PRESETS.lean
+      // even though the body carries no tier fields (the UI hides them).
+      const res = await app.inject({
+        method: 'PUT',
+        url: '/api/settings/system',
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { backupRetentionPreset: 'lean' },
+      });
+      expect(res.statusCode).toBe(200);
+
+      // PRESETS.lean = { keepLast: 12, daily: 7, weekly: 4, monthly: 0, yearly: 0, minFloor: 2 }
+      const { settings } = res.json();
+      expect(settings.backupRetentionPreset).toBe('lean');
+      expect(settings.backupRetentionKeepLast).toBe(12);
+      expect(settings.backupRetentionDaily).toBe(7);
+      expect(settings.backupRetentionWeekly).toBe(4);
+      expect(settings.backupRetentionMonthly).toBe(0);
+      expect(settings.backupRetentionYearly).toBe(0);
+      expect(settings.backupRetentionMinFloor).toBe(2);
+
+      // Persisted, not just echoed.
+      const persisted = await app.prisma.systemSettings.findUnique({ where: { id: 'singleton' } });
+      expect(persisted?.backupRetentionKeepLast).toBe(12);
+      expect(persisted?.backupRetentionMonthly).toBe(0);
+      expect(persisted?.backupRetentionPreset).toBe('lean');
+    });
+
+    it('leaves submitted tiers untouched for the custom preset (Fix B)', async () => {
+      const res = await app.inject({
+        method: 'PUT',
+        url: '/api/settings/system',
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: {
+          backupRetentionPreset: 'custom',
+          backupRetentionKeepLast: 5,
+          backupRetentionDaily: 3,
+          backupRetentionWeekly: 1,
+          backupRetentionMonthly: 0,
+          backupRetentionYearly: 0,
+          backupRetentionMinFloor: 2,
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      const { settings } = res.json();
+      // Custom keeps exactly what was submitted.
+      expect(settings.backupRetentionKeepLast).toBe(5);
+      expect(settings.backupRetentionDaily).toBe(3);
+      expect(settings.backupRetentionWeekly).toBe(1);
+    });
+
+    it('does not touch tier fields when no preset is submitted (Fix B)', async () => {
+      // Set a known balanced baseline first.
+      await app.inject({
+        method: 'PUT',
+        url: '/api/settings/system',
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { backupRetentionPreset: 'balanced' },
+      });
+      // A PUT that changes an unrelated field must leave the tiers as-is.
+      const res = await app.inject({
+        method: 'PUT',
+        url: '/api/settings/system',
+        headers: { authorization: `Bearer ${adminToken}` },
+        payload: { sshCommandTimeoutMs: 45000 },
+      });
+      expect(res.statusCode).toBe(200);
+      const { settings } = res.json();
+      // Still the balanced tiers (keepLast 24, monthly 6) — untouched.
+      expect(settings.backupRetentionKeepLast).toBe(24);
+      expect(settings.backupRetentionMonthly).toBe(6);
+    });
+
     it('should create audit log entry', async () => {
       await app.inject({
         method: 'PUT',

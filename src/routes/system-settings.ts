@@ -10,7 +10,7 @@ import { requireAdmin } from '../plugins/authorize.js';
 import { logAudit, actorFrom } from '../services/audit.js';
 import { validateBody } from '../lib/helpers.js';
 import { routeSchema } from '../lib/openapi-schema.js';
-import { RETENTION_BOUNDS } from '../services/database-backup.js';
+import { RETENTION_BOUNDS, PRESETS } from '../services/database-backup.js';
 
 /** True if `tz` is an IANA timezone Intl can resolve (rejects garbage). */
 function isValidTimezone(tz: string): boolean {
@@ -137,6 +137,24 @@ export async function systemSettingsRoutes(fastify: FastifyInstance): Promise<vo
       if (backupRetentionMaxTotalBytes !== undefined) {
         updateData.backupRetentionMaxTotalBytes =
           backupRetentionMaxTotalBytes === null ? null : BigInt(backupRetentionMaxTotalBytes);
+      }
+
+      // Reconcile the global-default tiers to a non-custom preset server-side
+      // (issue #291). When the admin picks lean/balanced/long_term, the six tier
+      // fields MUST match PRESETS[preset] — otherwise stale tier values persist
+      // and resolveRetentionPolicy's inherited branch applies the wrong
+      // retention. Mirrors how the per-DB PUT derives tiers from the preset.
+      // Only runs when a known non-custom preset is in the request; 'custom'
+      // (and an absent preset) leave the submitted tiers untouched.
+      // backupRetentionMaxTotalBytes is left as submitted.
+      if (body.backupRetentionPreset && body.backupRetentionPreset !== 'custom') {
+        const tiers = PRESETS[body.backupRetentionPreset];
+        updateData.backupRetentionKeepLast = tiers.keepLast;
+        updateData.backupRetentionDaily = tiers.daily;
+        updateData.backupRetentionWeekly = tiers.weekly;
+        updateData.backupRetentionMonthly = tiers.monthly;
+        updateData.backupRetentionYearly = tiers.yearly;
+        updateData.backupRetentionMinFloor = tiers.minFloor;
       }
 
       const settings = await updateSystemSettings(updateData);
