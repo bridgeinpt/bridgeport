@@ -79,7 +79,7 @@ jobs:
             # endpoints (services, container-images, monitoring/health).
             scenarios: 'services-list,container-images-list,monitoring-overview,agents-status,health-status,metrics-summary,server-metrics-history,service-metrics-history,database-metrics-history,secrets-list,databases-list,database-monitoring-summary,config-files-list,dependency-graph,backup-summary'
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: 24
