@@ -27,6 +27,17 @@ export const SYSTEM_SETTINGS_DEFAULTS = {
   healthLogRetentionDays: 30,
   webhookDeliveryRetentionDays: 30,
   imageDigestRetentionDays: 90,
+  timezone: 'UTC',
+  backupRetentionPreset: 'balanced',
+  backupRetentionKeepLast: 24,
+  backupRetentionDaily: 7,
+  backupRetentionWeekly: 4,
+  backupRetentionMonthly: 6,
+  backupRetentionYearly: 0,
+  backupRetentionMinFloor: 2,
+  backupRetentionMaxTotalBytes: null as bigint | null,
+  failedBackupRetentionDays: 3,
+  backupRotationConfirmThreshold: 5,
 };
 
 /**
@@ -91,6 +102,17 @@ export async function resetSystemSettings(): Promise<SystemSettings> {
       healthLogRetentionDays: SYSTEM_SETTINGS_DEFAULTS.healthLogRetentionDays,
       webhookDeliveryRetentionDays: SYSTEM_SETTINGS_DEFAULTS.webhookDeliveryRetentionDays,
       imageDigestRetentionDays: SYSTEM_SETTINGS_DEFAULTS.imageDigestRetentionDays,
+      timezone: SYSTEM_SETTINGS_DEFAULTS.timezone,
+      backupRetentionPreset: SYSTEM_SETTINGS_DEFAULTS.backupRetentionPreset,
+      backupRetentionKeepLast: SYSTEM_SETTINGS_DEFAULTS.backupRetentionKeepLast,
+      backupRetentionDaily: SYSTEM_SETTINGS_DEFAULTS.backupRetentionDaily,
+      backupRetentionWeekly: SYSTEM_SETTINGS_DEFAULTS.backupRetentionWeekly,
+      backupRetentionMonthly: SYSTEM_SETTINGS_DEFAULTS.backupRetentionMonthly,
+      backupRetentionYearly: SYSTEM_SETTINGS_DEFAULTS.backupRetentionYearly,
+      backupRetentionMinFloor: SYSTEM_SETTINGS_DEFAULTS.backupRetentionMinFloor,
+      backupRetentionMaxTotalBytes: SYSTEM_SETTINGS_DEFAULTS.backupRetentionMaxTotalBytes,
+      failedBackupRetentionDays: SYSTEM_SETTINGS_DEFAULTS.failedBackupRetentionDays,
+      backupRotationConfirmThreshold: SYSTEM_SETTINGS_DEFAULTS.backupRotationConfirmThreshold,
     },
   });
   return cachedSettings;

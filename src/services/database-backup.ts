@@ -9,10 +9,16 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { sendSystemNotification, NOTIFICATION_TYPES } from './notifications.js';
 import { emitWebhookEvent } from './webhook-subscriptions.js';
-import { safeJsonParse } from '../lib/helpers.js';
+import { safeJsonParse, getErrorMessage } from '../lib/helpers.js';
+import { getSystemSettings } from './system-settings.js';
+import { logAudit } from './audit.js';
 
 // Default pg_dump timeout (5 minutes)
 const DEFAULT_PG_DUMP_TIMEOUT_MS = 300000;
+
+// Grace margin added to a database's pg_dump timeout before an in_progress
+// backup is considered "stuck" and force-marked failed (see markStuckBackupsFailed).
+const STUCK_BACKUP_GRACE_MS = 5 * 60 * 1000; // 5 minutes
 
 export type BackupStep = 'connect' | 'dump' | 'upload';
 
@@ -874,25 +880,51 @@ export async function getBackup(id: string) {
   });
 }
 
-export async function deleteBackup(id: string): Promise<void> {
-  const backup = await prisma.databaseBackup.findUnique({
-    where: { id },
-    include: { database: { include: { server: true } } },
-  });
+// Minimal shape needed to locate + delete a backup's physical artifact.
+// Loaded via `include: { database: { include: { server: true } } }`.
+type BackupWithStorage = {
+  id: string;
+  storageType: string;
+  storagePath: string;
+  database: {
+    environmentId: string;
+    backupSpacesBucket: string | null;
+    server: { hostname: string } | null;
+  };
+};
 
-  if (!backup) throw new Error('Backup not found');
+/**
+ * Delete the physical artifact for a backup (file-first deletion, §6.6).
+ *
+ * Idempotent: a missing file (`rm -f` always exits 0) or a Spaces 404 /
+ * NoSuchKey counts as success, so retries after a partial failure are safe.
+ * Returns `{ ok: false, error }` on a *real* failure (unreachable host, S3
+ * error other than not-found) instead of swallowing it, so the caller can
+ * keep the DB row and retry rather than orphaning the file.
+ *
+ * Note this does NOT delete the DatabaseBackup row — callers
+ * (`deleteBackup`, `pruneBackup`, `cleanupFailedBackups`) decide row deletion
+ * based on the result.
+ */
+async function deleteBackupArtifact(
+  backup: BackupWithStorage
+): Promise<{ ok: boolean; error?: string }> {
+  if (backup.storageType === 'local') {
+    if (!backup.database.server) {
+      // No server to reach — nothing we can delete. Treat as success so the
+      // row can be cleaned up (matches prior behavior of deleting the record).
+      return { ok: true };
+    }
 
-  // Delete file from storage
-  if (backup.storageType === 'local' && backup.database.server) {
     let client: CommandClient;
     if (isLocalhost(backup.database.server.hostname)) {
       client = new LocalClient();
     } else {
       const sshCreds = await getEnvironmentSshKey(backup.database.environmentId);
       if (!sshCreds) {
-        // Can't delete file without credentials, but still delete DB record
-        await prisma.databaseBackup.delete({ where: { id } });
-        return;
+        // Can't reach the file without SSH credentials. Surface this so the
+        // caller doesn't silently orphan it.
+        return { ok: false, error: 'SSH key not configured for this environment' };
       }
       client = new SSHClient({
         hostname: backup.database.server.hostname,
@@ -903,33 +935,82 @@ export async function deleteBackup(id: string): Promise<void> {
 
     try {
       await client.connect();
-      await client.exec(`rm -f ${shellEscape(backup.storagePath)}`);
+      // `rm -f` exits 0 even if the file is already gone → idempotent.
+      const result = await client.exec(`rm -f -- ${shellEscape(backup.storagePath)}`);
       client.disconnect();
-    } catch {
-      // Ignore errors when deleting file
+      if (result.code !== 0) {
+        return { ok: false, error: result.stderr || result.stdout || `rm exited ${result.code}` };
+      }
+      return { ok: true };
+    } catch (error) {
+      try { client.disconnect(); } catch { /* best-effort */ }
+      return { ok: false, error: getErrorMessage(error, 'Failed to delete backup file') };
     }
-  } else if (backup.storageType === 'spaces' && backup.database.backupSpacesBucket) {
-    // Delete from Spaces
+  }
+
+  if (backup.storageType === 'spaces' && backup.database.backupSpacesBucket) {
     try {
       const spacesConfig = await getEnvironmentSpacesConfig(backup.database.environmentId);
-      if (spacesConfig) {
-        const s3Client = new S3Client({
-          endpoint: `https://${spacesConfig.endpoint}`,
-          region: spacesConfig.region,
-          credentials: {
-            accessKeyId: spacesConfig.accessKey,
-            secretAccessKey: spacesConfig.secretKey,
-          },
-        });
-
-        await s3Client.send(new DeleteObjectCommand({
-          Bucket: backup.database.backupSpacesBucket,
-          Key: backup.storagePath,
-        }));
+      if (!spacesConfig) {
+        // No Spaces config to reach the object — surface rather than orphan.
+        return { ok: false, error: 'Spaces not configured for this environment' };
       }
-    } catch {
-      // Ignore errors when deleting from Spaces
+      const s3Client = new S3Client({
+        endpoint: `https://${spacesConfig.endpoint}`,
+        region: spacesConfig.region,
+        credentials: {
+          accessKeyId: spacesConfig.accessKey,
+          secretAccessKey: spacesConfig.secretKey,
+        },
+      });
+      await s3Client.send(new DeleteObjectCommand({
+        Bucket: backup.database.backupSpacesBucket,
+        Key: backup.storagePath,
+      }));
+      return { ok: true };
+    } catch (error) {
+      // A missing object is success (idempotent). S3 surfaces this as
+      // NoSuchKey or a 404 $metadata status.
+      if (isNotFoundError(error)) {
+        return { ok: true };
+      }
+      return { ok: false, error: getErrorMessage(error, 'Failed to delete backup object') };
     }
+  }
+
+  // No recognized storage backend / nothing to delete.
+  return { ok: true };
+}
+
+/** True for S3 "object does not exist" errors (treated as idempotent success). */
+function isNotFoundError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const e = error as { name?: string; Code?: string; $metadata?: { httpStatusCode?: number } };
+  return (
+    e.name === 'NoSuchKey' ||
+    e.name === 'NotFound' ||
+    e.Code === 'NoSuchKey' ||
+    e.$metadata?.httpStatusCode === 404
+  );
+}
+
+/**
+ * Delete a backup (user-initiated). File-first: delete the physical artifact,
+ * then the DB row (§6.6 / decision #4). On artifact-delete failure the row is
+ * kept and the error is surfaced (thrown) rather than silently orphaning the
+ * file. Preserves the original `Promise<void>` contract.
+ */
+export async function deleteBackup(id: string): Promise<void> {
+  const backup = await prisma.databaseBackup.findUnique({
+    where: { id },
+    include: { database: { include: { server: true } } },
+  });
+
+  if (!backup) throw new Error('Backup not found');
+
+  const result = await deleteBackupArtifact(backup);
+  if (!result.ok) {
+    throw new Error(`Failed to delete backup file: ${result.error ?? 'unknown error'}`);
   }
 
   await prisma.databaseBackup.delete({ where: { id } });
@@ -1075,8 +1156,10 @@ export async function checkDueBackups(): Promise<void> {
         // Create backup (null triggeredById for scheduler-triggered backups)
         await createBackup(schedule.databaseId, null, 'scheduled');
 
-        // Clean up old backups based on retention policy
-        await enforceRetention(schedule.databaseId, schedule.retentionDays);
+        // Apply GFS retention rotation for this database (replaces the old
+        // flat retentionDays cleanup). Wrapped so a rotation failure never
+        // aborts the rest of the due-schedule loop.
+        await rotateDatabase(schedule.databaseId, { trigger: 'post-backup' });
       }
     } catch (error) {
       console.error(`[Scheduler] Failed to run backup for database ${schedule.database.name}:`, error);
@@ -1193,26 +1276,583 @@ function isScheduleDue(cronExpression: string, lastRunAt: Date | null, now: Date
   return nextRun <= now;
 }
 
-/**
- * Delete old backups based on retention policy.
- */
-async function enforceRetention(databaseId: string, retentionDays: number): Promise<void> {
-  const cutoffDate = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+// ===========================================================================
+// GFS backup rotation & retention (issue #291)
+// ===========================================================================
 
-  const oldBackups = await prisma.databaseBackup.findMany({
+/** A retention policy: GFS tier counts + floor + optional size cap (§4). */
+export interface RetentionPolicy {
+  keepLast: number;
+  daily: number;
+  weekly: number;
+  monthly: number;
+  yearly: number;
+  minFloor: number;
+}
+
+/**
+ * Named retention presets (§4.1). Selecting a non-`custom` preset fills these
+ * fields. `maxTotalBytes` defaults to null (off) in every preset. Exported so
+ * the route layer (Slice C) can round-trip preset -> fields.
+ */
+export const PRESETS: Record<'lean' | 'balanced' | 'long_term', RetentionPolicy> = {
+  lean:      { keepLast: 12, daily: 7, weekly: 4, monthly: 0,  yearly: 0, minFloor: 2 },
+  balanced:  { keepLast: 24, daily: 7, weekly: 4, monthly: 6,  yearly: 0, minFloor: 2 }, // DEFAULT
+  long_term: { keepLast: 24, daily: 7, weekly: 4, monthly: 12, yearly: 3, minFloor: 2 },
+};
+
+/**
+ * Inclusive bounds for each policy field (§4). Exported so route validation
+ * (Slice C) reuses a single source of truth.
+ */
+export const RETENTION_BOUNDS = {
+  keepLast: { min: 0, max: 100 },
+  daily:    { min: 0, max: 366 },
+  weekly:   { min: 0, max: 520 },
+  monthly:  { min: 0, max: 240 },
+  yearly:   { min: 0, max: 50 },
+  minFloor: { min: 1, max: 10 },
+} as const;
+
+/** Period granularity for tier bucketing. */
+export type Period = 'day' | 'week' | 'month' | 'year';
+
+/**
+ * Minimal shape the pure selection helpers operate on. Both the Prisma
+ * `DatabaseBackup` row and plain test objects satisfy it. Kept tiny so the
+ * helpers stay unit-testable without Prisma or Date.now.
+ */
+export interface RotationCandidate {
+  id: string;
+  createdAt: Date;
+  size: bigint;
+}
+
+/**
+ * Extract the calendar parts of a Date in a given IANA timezone using the
+ * built-in Intl APIs (no new dependency). `en-CA` formats as YYYY-MM-DD which
+ * is trivially parseable. Returns numeric year/month/day in the target tz.
+ */
+function tzDateParts(date: Date, tz: string): { year: number; month: number; day: number } {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  // en-CA produces "2026-06-22"
+  const [year, month, day] = fmt.format(date).split('-').map((p) => parseInt(p, 10));
+  return { year, month, day };
+}
+
+/**
+ * ISO-8601 week number + ISO week-year for a tz-local calendar date.
+ *
+ * ISO weeks start Monday and week 1 is the week containing the year's first
+ * Thursday. We compute this purely from the Y/M/D (already resolved in the
+ * target tz) so DST never shifts a bucket:
+ *
+ *   1. Take the day-of-week with Monday=1..Sunday=7.
+ *   2. Find the Thursday of this week (the ISO "anchor" — its calendar year is
+ *      always the ISO week-year). Thursday = current date + (4 - dow) days.
+ *   3. Week number = floor((thursday - Jan 1 of thursday's year) / 7 days) + 1.
+ *
+ * This yields the correct W52/W53/W01 behavior at year boundaries because the
+ * Thursday's year, not the original date's year, defines the week-year.
+ */
+function isoWeekKey(year: number, month: number, day: number): string {
+  // Use UTC math purely as a calendar calculator (no tz semantics here — the
+  // Y/M/D already came from the target tz). 1=Mon..7=Sun.
+  const date = new Date(Date.UTC(year, month - 1, day));
+  const dow = date.getUTCDay() === 0 ? 7 : date.getUTCDay();
+  // Shift to the Thursday of the current ISO week.
+  const thursday = new Date(date);
+  thursday.setUTCDate(date.getUTCDate() + (4 - dow));
+  const isoYear = thursday.getUTCFullYear();
+  const jan1 = new Date(Date.UTC(isoYear, 0, 1));
+  const week = Math.floor((thursday.getTime() - jan1.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
+  return `${isoYear}-W${String(week).padStart(2, '0')}`;
+}
+
+/**
+ * Calendar bucket key for a date, computed IN `tz` (§6.2). Examples:
+ *   day   "2026-06-22"
+ *   week  "2026-W26"  (ISO week, starts Monday)
+ *   month "2026-06"
+ *   year  "2026"
+ */
+export function periodKey(date: Date, period: Period, tz: string): string {
+  const { year, month, day } = tzDateParts(date, tz);
+  switch (period) {
+    case 'day':
+      return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    case 'week':
+      return isoWeekKey(year, month, day);
+    case 'month':
+      return `${year}-${String(month).padStart(2, '0')}`;
+    case 'year':
+      return `${year}`;
+  }
+}
+
+/**
+ * Select the newest-by-createdAt backup in each of the `count` most-recent
+ * buckets that exist among the candidates (§6.2). Buckets are relative to the
+ * candidates' OWN distinct keys (sortDesc then slice), not "now" — matching
+ * restic/borg semantics. `count <= 0` returns an empty set.
+ *
+ * Pure: no Prisma, no Date.now.
+ */
+export function selectPeriodTier<T extends RotationCandidate>(
+  candidates: T[],
+  period: Period,
+  count: number,
+  tz: string
+): Set<string> {
+  const selected = new Set<string>();
+  if (count <= 0) return selected;
+
+  // Group candidates by bucket key, tracking the newest in each bucket.
+  const newestByBucket = new Map<string, T>();
+  for (const c of candidates) {
+    const key = periodKey(c.createdAt, period, tz);
+    const current = newestByBucket.get(key);
+    if (!current || c.createdAt.getTime() > current.createdAt.getTime()) {
+      newestByBucket.set(key, c);
+    }
+  }
+
+  // Take the `count` most-recent buckets (descending by key — keys are
+  // lexicographically ordered the same as chronologically for our formats).
+  const keys = Array.from(newestByBucket.keys()).sort().reverse().slice(0, count);
+  for (const key of keys) {
+    selected.add(newestByBucket.get(key)!.id);
+  }
+  return selected;
+}
+
+/**
+ * Union of all retention tiers (§6.2): recent (`keepLast` newest) plus the
+ * day/week/month/year period tiers. A backup survives if ANY tier selects it.
+ * `candidates` need not be pre-sorted; the recent tier sorts internally.
+ *
+ * Pure: no Prisma, no Date.now.
+ */
+export function selectKeep<T extends RotationCandidate>(
+  candidates: T[],
+  policy: RetentionPolicy,
+  tz: string
+): Set<string> {
+  const keep = new Set<string>();
+
+  // Recent tier: the keepLast newest by createdAt.
+  const byNewest = [...candidates].sort(
+    (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+  );
+  for (const c of byNewest.slice(0, Math.max(0, policy.keepLast))) {
+    keep.add(c.id);
+  }
+
+  // Period tiers.
+  for (const id of selectPeriodTier(candidates, 'day', policy.daily, tz)) keep.add(id);
+  for (const id of selectPeriodTier(candidates, 'week', policy.weekly, tz)) keep.add(id);
+  for (const id of selectPeriodTier(candidates, 'month', policy.monthly, tz)) keep.add(id);
+  for (const id of selectPeriodTier(candidates, 'year', policy.yearly, tz)) keep.add(id);
+
+  return keep;
+}
+
+/**
+ * Safety floor (§6.3): ensure the total retained *successful* backups
+ * (exempt-successful, e.g. manual/pinned, PLUS the kept candidates) is at
+ * least `minFloor`. Pulls the most-recent items out of the prune set back
+ * into keep until satisfied. Never prunes below `minFloor` and (with
+ * minFloor >= 1) never prunes the only successful backup.
+ *
+ * Pure: no Prisma, no Date.now.
+ */
+export function applyFloor<T extends RotationCandidate>(
+  candidates: T[],
+  keepIds: Set<string>,
+  exemptSuccessfulCount: number,
+  minFloor: number
+): Set<string> {
+  const keep = new Set(keepIds);
+  // Most-recent-first so we pull back the freshest pruned items first.
+  const byNewest = [...candidates].sort(
+    (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
+  );
+  for (const c of byNewest) {
+    const retained = exemptSuccessfulCount + keep.size;
+    if (retained >= minFloor) break;
+    keep.add(c.id); // adding an already-kept id is a no-op
+  }
+  return keep;
+}
+
+/**
+ * Optional storage-cap eviction (§6.4). Only relevant when `maxTotalBytes`
+ * is set. While the total size of ALL the DB's completed backups (including
+ * manual & pinned — passed as `exemptSize`) plus the kept prunable candidates
+ * exceeds the cap, evict the OLDEST prunable kept item whose removal keeps
+ * retained-successful >= minFloor. Manual/pinned are never evicted.
+ *
+ * Returns the (possibly reduced) keep set and `cappedButUnreachable: true`
+ * when the cap still can't be met without touching exempt backups.
+ *
+ * Pure: no Prisma, no Date.now.
+ */
+export function applySizeCap<T extends RotationCandidate>(
+  candidates: T[],
+  keepIds: Set<string>,
+  exemptSize: bigint,
+  exemptSuccessfulCount: number,
+  minFloor: number,
+  maxTotalBytes: bigint | null
+): { keep: Set<string>; cappedButUnreachable: boolean } {
+  const keep = new Set(keepIds);
+  if (maxTotalBytes == null) {
+    return { keep, cappedButUnreachable: false };
+  }
+
+  const sizeById = new Map(candidates.map((c) => [c.id, c.size]));
+  let total = exemptSize;
+  for (const id of keep) {
+    total += sizeById.get(id) ?? BigInt(0);
+  }
+
+  // Oldest prunable kept items first (eviction order).
+  const keptOldestFirst = candidates
+    .filter((c) => keep.has(c.id))
+    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+
+  for (const victim of keptOldestFirst) {
+    if (total <= maxTotalBytes) break;
+    // Removing a successful candidate drops retained-successful by 1.
+    const retainedAfter = exemptSuccessfulCount + (keep.size - 1);
+    if (retainedAfter < minFloor) break; // floor protects this victim
+    keep.delete(victim.id);
+    total -= victim.size;
+  }
+
+  return { keep, cappedButUnreachable: total > maxTotalBytes };
+}
+
+/**
+ * The fully-resolved retention policy for a database plus provenance.
+ */
+export interface EffectivePolicy {
+  keepLast: number;
+  daily: number;
+  weekly: number;
+  monthly: number;
+  yearly: number;
+  minFloor: number;
+  maxTotalBytes: bigint | null;
+  preset: string;
+  source: 'override' | 'inherited';
+}
+
+/**
+ * Resolve the effective retention policy for a database (§4.2). Returns the
+ * per-database override when one exists and isn't flagged `inheritGlobal`;
+ * otherwise the global default from SystemSettings. Always concrete.
+ */
+export async function resolveRetentionPolicy(databaseId: string): Promise<EffectivePolicy> {
+  const override = await prisma.backupRetentionPolicy.findUnique({
+    where: { databaseId },
+  });
+
+  if (override && !override.inheritGlobal) {
+    return {
+      keepLast: override.keepLast,
+      daily: override.daily,
+      weekly: override.weekly,
+      monthly: override.monthly,
+      yearly: override.yearly,
+      minFloor: override.minFloor,
+      maxTotalBytes: override.maxTotalBytes,
+      preset: override.preset,
+      source: 'override',
+    };
+  }
+
+  const settings = await getSystemSettings();
+  return {
+    keepLast: settings.backupRetentionKeepLast,
+    daily: settings.backupRetentionDaily,
+    weekly: settings.backupRetentionWeekly,
+    monthly: settings.backupRetentionMonthly,
+    yearly: settings.backupRetentionYearly,
+    minFloor: settings.backupRetentionMinFloor,
+    maxTotalBytes: settings.backupRetentionMaxTotalBytes,
+    preset: settings.backupRetentionPreset,
+    source: 'inherited',
+  };
+}
+
+/** Result of a rotation pass (§6.7). `bytesFreed` is bigint per repo convention. */
+export interface RotationResult {
+  keep: string[];
+  prune: string[];
+  bytesFreed: bigint;
+  cappedButUnreachable?: boolean;
+  errors?: { backupId: string; error: string }[];
+}
+
+/**
+ * Prune a single backup: delete the physical artifact first, then the row
+ * (§6.6). On artifact-delete failure the row is KEPT, `lastRotationError` is
+ * recorded, and `{ ok: false, error }` is returned so the next sweep retries
+ * (idempotent: a missing file on retry counts as success). On success the row
+ * is deleted. Never throws for an individual backup.
+ */
+export async function pruneBackup(
+  backupId: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const backup = await prisma.databaseBackup.findUnique({
+    where: { id: backupId },
+    include: { database: { include: { server: true } } },
+  });
+
+  if (!backup) {
+    // Already gone — idempotent success.
+    return { ok: true };
+  }
+
+  const result = await deleteBackupArtifact(backup);
+  if (!result.ok) {
+    const error = result.error ?? 'Failed to delete backup file';
+    await prisma.databaseBackup
+      .update({ where: { id: backupId }, data: { lastRotationError: error } })
+      .catch(() => { /* row may have been deleted concurrently */ });
+    console.error(`[Rotation] Failed to prune backup ${backupId}: ${error}`);
+    return { ok: false, error };
+  }
+
+  await prisma.databaseBackup.delete({ where: { id: backupId } });
+  return { ok: true };
+}
+
+/**
+ * Apply GFS rotation to a single database (§6). Replaces the old
+ * `enforceRetention`.
+ *
+ * 1. Load the prunable universe (completed && scheduled && !pinned) and count
+ *    exempt-successful (completed manual or pinned) for the floor.
+ * 2. keep = selectKeep -> applyFloor -> applySizeCap (using the resolved
+ *    policy + instance timezone).
+ * 3. prune = candidates - keep.
+ * 4. dryRun returns the preview without deleting.
+ * 5. Otherwise prune each (file-first via pruneBackup), collecting failures.
+ * 6. Audit-log + notify on errors / unreachable cap.
+ */
+export async function rotateDatabase(
+  databaseId: string,
+  opts: { dryRun?: boolean; trigger?: string; policy?: EffectivePolicy } = {}
+): Promise<RotationResult> {
+  const { dryRun = false, trigger = 'manual' } = opts;
+
+  // When a proposed policy is supplied (preview / confirmation gate), evaluate
+  // it directly instead of the currently-stored one. Otherwise resolve as usual.
+  const [resolvedPolicy, settings] = await Promise.all([
+    opts.policy ? Promise.resolve(opts.policy) : resolveRetentionPolicy(databaseId),
+    getSystemSettings(),
+  ]);
+  const policy = resolvedPolicy;
+  const tz = settings.timezone || 'UTC';
+
+  // Prunable universe: completed + scheduled + not pinned. Sorted newest-first.
+  const candidates = await prisma.databaseBackup.findMany({
+    where: { databaseId, status: 'completed', type: 'scheduled', isPinned: false },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, createdAt: true, size: true, filename: true },
+  });
+
+  // Exempt-successful: completed backups that are manual OR pinned. They never
+  // get pruned but DO count toward the floor and the size cap total.
+  const exempt = await prisma.databaseBackup.findMany({
     where: {
       databaseId,
-      createdAt: { lt: cutoffDate },
-      type: 'scheduled', // Only auto-delete scheduled backups, not manual ones
+      status: 'completed',
+      OR: [{ type: 'manual' }, { isPinned: true }],
+    },
+    select: { size: true },
+  });
+  const exemptSuccessfulCount = exempt.length;
+  const exemptSize = exempt.reduce((sum, b) => sum + b.size, BigInt(0));
+
+  // Tier selection -> floor -> size cap.
+  let keep = selectKeep(candidates, policy, tz);
+  keep = applyFloor(candidates, keep, exemptSuccessfulCount, policy.minFloor);
+  const capResult = applySizeCap(
+    candidates,
+    keep,
+    exemptSize,
+    exemptSuccessfulCount,
+    policy.minFloor,
+    policy.maxTotalBytes
+  );
+  keep = capResult.keep;
+
+  const pruneList = candidates.filter((c) => !keep.has(c.id));
+  const keepList = candidates.filter((c) => keep.has(c.id));
+
+  if (dryRun) {
+    // Preview: bytesFreed = sum of everything we WOULD prune.
+    const bytesFreed = pruneList.reduce((sum, b) => sum + b.size, BigInt(0));
+    return {
+      keep: keepList.map((b) => b.id),
+      prune: pruneList.map((b) => b.id),
+      bytesFreed,
+      cappedButUnreachable: capResult.cappedButUnreachable,
+    };
+  }
+
+  // Real prune. One backup failing must not abort the whole rotation.
+  const errors: { backupId: string; error: string }[] = [];
+  const prunedIds: string[] = [];
+  const prunedFilenames: string[] = [];
+  let bytesFreed = BigInt(0);
+
+  for (const candidate of pruneList) {
+    const result = await pruneBackup(candidate.id);
+    if (result.ok) {
+      prunedIds.push(candidate.id);
+      prunedFilenames.push(candidate.filename);
+      bytesFreed += candidate.size;
+    } else {
+      errors.push({ backupId: candidate.id, error: result.error });
+    }
+  }
+
+  // Audit-log the pass if anything was actually pruned (§6.7).
+  if (prunedIds.length > 0) {
+    await logAudit({
+      action: 'backup.rotate',
+      resourceType: 'database',
+      resourceId: databaseId,
+      details: {
+        databaseId,
+        policy,
+        prunedIds,
+        prunedFilenames,
+        bytesFreed: Number(bytesFreed), // Number() only here for JSON storage
+        trigger,
+      },
+    });
+  }
+
+  // Error / orphan / unreachable-cap notification (§12).
+  if (errors.length > 0 || capResult.cappedButUnreachable) {
+    const db = await prisma.database.findUnique({
+      where: { id: databaseId },
+      select: { name: true, environmentId: true },
+    });
+    if (db) {
+      const errorMessage = errors.length > 0
+        ? `${errors.length} backup(s) could not be deleted: ${errors.map((e) => e.error).join('; ')}`
+        : 'Storage size cap could not be met without removing pinned/manual backups.';
+      await sendSystemNotification(
+        NOTIFICATION_TYPES.BACKUP_ROTATION_ERROR,
+        db.environmentId,
+        { databaseName: db.name, error: errorMessage }
+      );
+    }
+  }
+
+  return {
+    keep: keepList.map((b) => b.id),
+    prune: prunedIds,
+    bytesFreed,
+    cappedButUnreachable: capResult.cappedButUnreachable,
+    errors: errors.length > 0 ? errors : undefined,
+  };
+}
+
+// ===========================================================================
+// Failed / stuck backup cleanup (§8) — invoked by the scheduler (Slice C).
+// ===========================================================================
+
+/**
+ * Mark backups stuck in `in_progress` as failed (§8.1). A backup is "stuck"
+ * when its createdAt is older than the database's pg_dump timeout plus a grace
+ * margin (falling back to the global pgDumpTimeoutMs when the per-DB value is
+ * absent). Returns the number of backups marked failed.
+ */
+export async function markStuckBackupsFailed(): Promise<number> {
+  const now = Date.now();
+  const settings = await getSystemSettings();
+  const fallbackTimeout = settings.pgDumpTimeoutMs || DEFAULT_PG_DUMP_TIMEOUT_MS;
+
+  const inProgress = await prisma.databaseBackup.findMany({
+    where: { status: 'in_progress' },
+    select: {
+      id: true,
+      createdAt: true,
+      database: { select: { pgDumpTimeoutMs: true } },
     },
   });
 
-  for (const backup of oldBackups) {
+  let marked = 0;
+  for (const backup of inProgress) {
+    const timeout = backup.database.pgDumpTimeoutMs || fallbackTimeout;
+    const stuckAfter = backup.createdAt.getTime() + timeout + STUCK_BACKUP_GRACE_MS;
+    if (now <= stuckAfter) continue;
+
+    const backupError: BackupError = {
+      message: 'Backup timed out: still in progress past the configured pg_dump timeout. Marked failed by the cleanup sweep.',
+      step: 'dump',
+    };
+    await prisma.databaseBackup.update({
+      where: { id: backup.id },
+      data: {
+        status: 'failed',
+        error: JSON.stringify(backupError),
+        completedAt: new Date(),
+      },
+    });
+    marked++;
+  }
+
+  return marked;
+}
+
+/**
+ * Delete failed backups older than `failedBackupRetentionDays` (§8.2) — the
+ * DB row AND any partial artifact, via the same file-first helper used by
+ * rotation. Returns the number of rows deleted.
+ */
+export async function cleanupFailedBackups(): Promise<number> {
+  const settings = await getSystemSettings();
+  const retentionDays = settings.failedBackupRetentionDays;
+  if (retentionDays <= 0) return 0; // 0 = keep forever
+
+  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+
+  const oldFailed = await prisma.databaseBackup.findMany({
+    where: { status: 'failed', createdAt: { lt: cutoff } },
+    include: { database: { include: { server: true } } },
+  });
+
+  let deleted = 0;
+  for (const backup of oldFailed) {
     try {
-      await deleteBackup(backup.id);
-      console.log(`[Scheduler] Deleted old backup ${backup.filename} (retention policy)`);
+      const result = await deleteBackupArtifact(backup);
+      if (!result.ok) {
+        // Keep the row and record the problem; the next sweep retries.
+        await prisma.databaseBackup
+          .update({ where: { id: backup.id }, data: { lastRotationError: result.error } })
+          .catch(() => { /* row may be gone */ });
+        console.error(`[Cleanup] Failed to delete artifact for failed backup ${backup.id}: ${result.error}`);
+        continue;
+      }
+      await prisma.databaseBackup.delete({ where: { id: backup.id } });
+      deleted++;
     } catch (error) {
-      console.error(`[Scheduler] Failed to delete old backup ${backup.id}:`, error);
+      console.error(`[Cleanup] Failed to delete failed backup ${backup.id}:`, getErrorMessage(error));
     }
   }
+
+  return deleted;
 }

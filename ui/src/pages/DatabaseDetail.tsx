@@ -13,6 +13,7 @@ import {
   deleteBackupSchedule,
   listSpacesBuckets,
   getBackupDownloadUrl,
+  setBackupPinned,
   listServers,
   testDatabaseConnection,
   updateDatabaseMonitoring,
@@ -24,7 +25,8 @@ import {
   type Server,
 } from '../lib/api';
 import { formatDistanceToNow, format } from 'date-fns';
-import { ArrowLeft, Check, X, Download, Trash2 } from 'lucide-react';
+import { ArrowLeft, Check, X, Download, Trash2, Pin, PinOff } from 'lucide-react';
+import { BackupRetentionCard } from '@/components/BackupRetentionCard';
 import { safeJsonParse } from '../lib/helpers';
 import { useConfirm } from '@/hooks/useConfirm';
 import { Button } from '@/components/ui/button';
@@ -325,6 +327,22 @@ export default function DatabaseDetail() {
       window.open(downloadUrl, '_blank');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Download failed');
+    }
+  };
+
+  const handleTogglePin = async (backup: DatabaseBackup) => {
+    if (!id) return;
+    const willPin = !backup.isPinned;
+    try {
+      const { backup: updated } = await setBackupPinned(id, backup.id, willPin);
+      setBackups(prev =>
+        prev.map(b =>
+          b.id === backup.id ? { ...b, isPinned: updated.isPinned, pinnedAt: updated.pinnedAt } : b
+        )
+      );
+      toast.success(willPin ? 'Backup pinned (protected from rotation)' : 'Backup unpinned');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to update pin');
     }
   };
 
@@ -1177,6 +1195,13 @@ export default function DatabaseDetail() {
       </div>
       )}
 
+      {/* Backup Retention Policy (GFS rotation — issue #291) */}
+      {database.databaseType?.hasBackupCommand !== false && (
+        <div className="mb-6">
+          <BackupRetentionCard databaseId={id!} onRotated={() => loadBackups(currentPage)} />
+        </div>
+      )}
+
       {/* Backups Table */}
       {database.databaseType?.hasBackupCommand !== false && (
       <Card>
@@ -1218,7 +1243,17 @@ export default function DatabaseDetail() {
 
                   return (
                     <TableRow key={backup.id}>
-                      <TableCell className="font-mono text-xs">{backup.filename}</TableCell>
+                      <TableCell className="font-mono text-xs">
+                        <span className="inline-flex items-center gap-2">
+                          {backup.filename}
+                          {backup.isPinned && (
+                            <Badge variant="info" className="gap-1 text-xs">
+                              <Pin className="size-3" />
+                              Protected
+                            </Badge>
+                          )}
+                        </span>
+                      </TableCell>
                       <TableCell>
                         {backup.status === 'completed' ? formatBytes(backup.size) : '--'}
                       </TableCell>
@@ -1278,6 +1313,18 @@ export default function DatabaseDetail() {
                               title="Download"
                             >
                               <Download className="size-4" />
+                            </Button>
+                          )}
+                          {backup.status === 'completed' && (
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => handleTogglePin(backup)}
+                              className={backup.isPinned ? 'text-info hover:text-info/80' : 'text-muted-foreground hover:text-foreground'}
+                              title={backup.isPinned ? 'Unpin (allow rotation to prune)' : 'Pin (protect from rotation)'}
+                              aria-label={backup.isPinned ? 'Unpin backup' : 'Pin backup'}
+                            >
+                              {backup.isPinned ? <PinOff className="size-4" /> : <Pin className="size-4" />}
                             </Button>
                           )}
                           <Button

@@ -94,6 +94,8 @@ BRIDGEPORT ships with these predefined notification types:
 |---|---|---|---|---|
 | `system.backup_failed` | Backup Failed | in-app, email, webhook | critical | -- |
 | `system.backup_success` | Backup Succeeded | in-app | info | -- |
+| `backup.rotation_error` | Backup Rotation Error | in-app, email, webhook | warning | 3 / 15 min |
+| `backup.policy_first_prune` | Retention Policy First Prune | in-app | info | -- |
 | `system.health_check_failed` | Health Check Failed | in-app, email, webhook | warning | 3 / 15 min |
 | `system.health_check_recovered` | Health Check Recovered | in-app, email, webhook | info | -- |
 | `system.deployment_success` | Deployment Succeeded | in-app | info | -- |

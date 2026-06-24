@@ -8751,6 +8751,478 @@
         }
       }
     },
+    "/api/databases/{id}/backup-policy": {
+      "get": {
+        "summary": "Get the effective backup retention policy for a database",
+        "tags": [
+          "monitoring"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized — missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Set or replace the backup retention policy for a database",
+        "tags": [
+          "monitoring"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "inheritGlobal": {
+                    "type": "boolean"
+                  },
+                  "preset": {
+                    "type": "string",
+                    "enum": [
+                      "lean",
+                      "balanced",
+                      "long_term",
+                      "custom"
+                    ]
+                  },
+                  "keepLast": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "daily": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 366
+                  },
+                  "weekly": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 520
+                  },
+                  "monthly": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 240
+                  },
+                  "yearly": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 50
+                  },
+                  "minFloor": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10
+                  },
+                  "maxTotalBytes": {
+                    "nullable": true,
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "confirm": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "preset",
+                  "keepLast",
+                  "daily",
+                  "weekly",
+                  "monthly",
+                  "yearly",
+                  "minFloor"
+                ]
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Bad request — malformed input or failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — token scope or role does not permit this operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict — e.g. a unique constraint violation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Revert a database to the global default retention policy",
+        "tags": [
+          "monitoring"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized — missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — token scope or role does not permit this operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/databases/{id}/backup-policy/preview": {
+      "post": {
+        "summary": "Preview the keep/prune outcome of a backup retention policy",
+        "tags": [
+          "monitoring"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "inheritGlobal": {
+                    "type": "boolean"
+                  },
+                  "preset": {
+                    "type": "string",
+                    "enum": [
+                      "lean",
+                      "balanced",
+                      "long_term",
+                      "custom"
+                    ]
+                  },
+                  "keepLast": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "daily": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 366
+                  },
+                  "weekly": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 520
+                  },
+                  "monthly": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 240
+                  },
+                  "yearly": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 50
+                  },
+                  "minFloor": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10
+                  },
+                  "maxTotalBytes": {
+                    "nullable": true,
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Bad request — malformed input or failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/databases/{id}/rotate": {
+      "post": {
+        "summary": "Rotate a database's backups now using its current policy",
+        "tags": [
+          "monitoring"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "401": {
+            "description": "Unauthorized — missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — token scope or role does not permit this operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/databases/{id}/backups/{backupId}/pin": {
+      "put": {
+        "summary": "Pin or unpin a backup (pinned backups are never pruned by rotation)",
+        "tags": [
+          "monitoring"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "pinned": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "pinned"
+                ]
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "backupId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Bad request — malformed input or failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized — missing or invalid bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden — token scope or role does not permit this operation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/environments/{envId}/databases/metrics/history": {
       "get": {
         "parameters": [
@@ -14846,6 +15318,64 @@
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 3650
+                  },
+                  "timezone": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "backupRetentionPreset": {
+                    "type": "string",
+                    "enum": [
+                      "lean",
+                      "balanced",
+                      "long_term",
+                      "custom"
+                    ]
+                  },
+                  "backupRetentionKeepLast": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "backupRetentionDaily": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 366
+                  },
+                  "backupRetentionWeekly": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 520
+                  },
+                  "backupRetentionMonthly": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 240
+                  },
+                  "backupRetentionYearly": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 50
+                  },
+                  "backupRetentionMinFloor": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10
+                  },
+                  "backupRetentionMaxTotalBytes": {
+                    "nullable": true,
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "failedBackupRetentionDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3650
+                  },
+                  "backupRotationConfirmThreshold": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 10000
                   }
                 }
               }

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Terminal, Cpu, SlidersHorizontal, Clock, Link2, Database, AlertTriangle } from 'lucide-react';
+import { Terminal, Cpu, SlidersHorizontal, Clock, Link2, Database, AlertTriangle, Archive } from 'lucide-react';
 import { getSystemSettings, updateSystemSettings, resetSystemSettings } from '../../lib/api';
 import { toast } from '../../components/Toast';
 import { getErrorMessage } from '@/lib/helpers';
@@ -11,6 +11,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Form,
   FormControl,
@@ -20,6 +28,25 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
+import {
+  RetentionPolicyFields,
+  RETENTION_BOUNDS,
+  type RetentionPolicyValues,
+} from '@/components/RetentionPolicyFields';
+
+/**
+ * IANA timezone list for the instance-timezone selector (issue #291 §11.3).
+ * `Intl.supportedValuesOf` is widely available; fall back to a free-text input
+ * if the runtime lacks it.
+ */
+const TIMEZONES: string[] | null = (() => {
+  try {
+    const intl = Intl as typeof Intl & { supportedValuesOf?: (key: string) => string[] };
+    return typeof intl.supportedValuesOf === 'function' ? intl.supportedValuesOf('timeZone') : null;
+  } catch {
+    return null;
+  }
+})();
 
 const settingsSchema = z.object({
   sshCommandTimeoutSec: z.number().int().min(1).max(600),
@@ -39,6 +66,19 @@ const settingsSchema = z.object({
   healthLogRetentionDays: z.number().int().min(1).max(365),
   webhookDeliveryRetentionDays: z.number().int().min(1).max(365),
   imageDigestRetentionDays: z.number().int().min(1).max(3650),
+  // Backup rotation & retention (issue #291)
+  timezone: z.string().min(1),
+  backupRetentionPreset: z.enum(['lean', 'balanced', 'long_term', 'custom']),
+  backupRetentionKeepLast: z.number().int().min(RETENTION_BOUNDS.keepLast.min).max(RETENTION_BOUNDS.keepLast.max),
+  backupRetentionDaily: z.number().int().min(RETENTION_BOUNDS.daily.min).max(RETENTION_BOUNDS.daily.max),
+  backupRetentionWeekly: z.number().int().min(RETENTION_BOUNDS.weekly.min).max(RETENTION_BOUNDS.weekly.max),
+  backupRetentionMonthly: z.number().int().min(RETENTION_BOUNDS.monthly.min).max(RETENTION_BOUNDS.monthly.max),
+  backupRetentionYearly: z.number().int().min(RETENTION_BOUNDS.yearly.min).max(RETENTION_BOUNDS.yearly.max),
+  backupRetentionMinFloor: z.number().int().min(RETENTION_BOUNDS.minFloor.min).max(RETENTION_BOUNDS.minFloor.max),
+  // Bytes; null = off. Edited in GB via RetentionPolicyFields.
+  backupRetentionMaxTotalBytes: z.number().int().min(0).nullable(),
+  failedBackupRetentionDays: z.number().int().min(1).max(3650),
+  backupRotationConfirmThreshold: z.number().int().min(0).max(10000),
 });
 
 type FormData = z.infer<typeof settingsSchema>;
@@ -59,6 +99,8 @@ interface Defaults {
   healthLogRetentionDays: number;
   webhookDeliveryRetentionDays: number;
   imageDigestRetentionDays: number;
+  failedBackupRetentionDays: number;
+  backupRotationConfirmThreshold: number;
 }
 
 function msToSec(ms: number): number {
@@ -87,6 +129,17 @@ const DEFAULT_FORM: FormData = {
   healthLogRetentionDays: 30,
   webhookDeliveryRetentionDays: 30,
   imageDigestRetentionDays: 90,
+  timezone: 'UTC',
+  backupRetentionPreset: 'balanced',
+  backupRetentionKeepLast: 24,
+  backupRetentionDaily: 7,
+  backupRetentionWeekly: 4,
+  backupRetentionMonthly: 6,
+  backupRetentionYearly: 0,
+  backupRetentionMinFloor: 2,
+  backupRetentionMaxTotalBytes: null,
+  failedBackupRetentionDays: 3,
+  backupRotationConfirmThreshold: 5,
 };
 
 // Map an API settings payload to the seconds/string form shape.
@@ -109,6 +162,17 @@ function settingsToForm(settings: Awaited<ReturnType<typeof getSystemSettings>>[
     healthLogRetentionDays: settings.healthLogRetentionDays ?? 30,
     webhookDeliveryRetentionDays: settings.webhookDeliveryRetentionDays ?? 30,
     imageDigestRetentionDays: settings.imageDigestRetentionDays ?? 90,
+    timezone: settings.timezone || 'UTC',
+    backupRetentionPreset: settings.backupRetentionPreset ?? 'balanced',
+    backupRetentionKeepLast: settings.backupRetentionKeepLast ?? 24,
+    backupRetentionDaily: settings.backupRetentionDaily ?? 7,
+    backupRetentionWeekly: settings.backupRetentionWeekly ?? 4,
+    backupRetentionMonthly: settings.backupRetentionMonthly ?? 6,
+    backupRetentionYearly: settings.backupRetentionYearly ?? 0,
+    backupRetentionMinFloor: settings.backupRetentionMinFloor ?? 2,
+    backupRetentionMaxTotalBytes: settings.backupRetentionMaxTotalBytes ?? null,
+    failedBackupRetentionDays: settings.failedBackupRetentionDays ?? 3,
+    backupRotationConfirmThreshold: settings.backupRotationConfirmThreshold ?? 5,
   };
 }
 
@@ -186,6 +250,17 @@ export default function SystemSettings() {
         healthLogRetentionDays: values.healthLogRetentionDays,
         webhookDeliveryRetentionDays: values.webhookDeliveryRetentionDays,
         imageDigestRetentionDays: values.imageDigestRetentionDays,
+        timezone: values.timezone,
+        backupRetentionPreset: values.backupRetentionPreset,
+        backupRetentionKeepLast: values.backupRetentionKeepLast,
+        backupRetentionDaily: values.backupRetentionDaily,
+        backupRetentionWeekly: values.backupRetentionWeekly,
+        backupRetentionMonthly: values.backupRetentionMonthly,
+        backupRetentionYearly: values.backupRetentionYearly,
+        backupRetentionMinFloor: values.backupRetentionMinFloor,
+        backupRetentionMaxTotalBytes: values.backupRetentionMaxTotalBytes,
+        failedBackupRetentionDays: values.failedBackupRetentionDays,
+        backupRotationConfirmThreshold: values.backupRotationConfirmThreshold,
       };
       await updateSystemSettings(updateData);
       // Reset to the just-saved values so the form is no longer dirty.
@@ -229,6 +304,33 @@ export default function SystemSettings() {
 
   const saving = form.formState.isSubmitting;
   const isDirty = form.formState.isDirty;
+
+  // Bridge the flat backupRetention* form fields to the shared editor's value shape.
+  const retentionValues: RetentionPolicyValues = {
+    preset: form.watch('backupRetentionPreset'),
+    keepLast: form.watch('backupRetentionKeepLast'),
+    daily: form.watch('backupRetentionDaily'),
+    weekly: form.watch('backupRetentionWeekly'),
+    monthly: form.watch('backupRetentionMonthly'),
+    yearly: form.watch('backupRetentionYearly'),
+    minFloor: form.watch('backupRetentionMinFloor'),
+    maxTotalBytes: form.watch('backupRetentionMaxTotalBytes'),
+  };
+  const RETENTION_FIELD_MAP: Record<keyof RetentionPolicyValues, keyof FormData> = {
+    preset: 'backupRetentionPreset',
+    keepLast: 'backupRetentionKeepLast',
+    daily: 'backupRetentionDaily',
+    weekly: 'backupRetentionWeekly',
+    monthly: 'backupRetentionMonthly',
+    yearly: 'backupRetentionYearly',
+    minFloor: 'backupRetentionMinFloor',
+    maxTotalBytes: 'backupRetentionMaxTotalBytes',
+  };
+  const patchRetention = (patch: Partial<RetentionPolicyValues>) => {
+    for (const [k, v] of Object.entries(patch) as [keyof RetentionPolicyValues, never][]) {
+      form.setValue(RETENTION_FIELD_MAP[k], v, { shouldDirty: true, shouldValidate: true });
+    }
+  };
 
   return (
     <div className="p-6">
@@ -497,6 +599,107 @@ export default function SystemSettings() {
                   </FormItem>
                 )}
               />
+            </div>
+          </SettingsSection>
+
+          {/* Backup Retention (GFS rotation — issue #291) */}
+          <SettingsSection title="Backup Retention" icon={Archive}>
+            <div className="space-y-6">
+              {/* Instance timezone — used to bucket GFS periods (daily/weekly/…). */}
+              <FormField
+                control={form.control}
+                name="timezone"
+                render={({ field }) => (
+                  <FormItem className="md:max-w-md">
+                    <FormLabel>Instance Timezone</FormLabel>
+                    <FormControl>
+                      {TIMEZONES ? (
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="UTC" />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-72">
+                            {TIMEZONES.map((tz) => (
+                              <SelectItem key={tz} value={tz}>
+                                {tz}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <Input type="text" placeholder="UTC" {...field} />
+                      )}
+                    </FormControl>
+                    <FormDescription>
+                      Timezone for backup-rotation period bucketing and display (default: UTC). ISO weeks start Monday.
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {/* Global default GFS policy (inherited by databases without an override). */}
+              <div className="space-y-1.5">
+                <Label>Global default policy</Label>
+                <p className="text-xs text-muted-foreground">
+                  Databases without a per-database override inherit this policy.
+                </p>
+                <div className="pt-1">
+                  <RetentionPolicyFields
+                    idPrefix="global-retention"
+                    values={retentionValues}
+                    onChange={patchRetention}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <FormField
+                  control={form.control}
+                  name="failedBackupRetentionDays"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Failed Backup Retention (days)</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={3650}
+                          {...field}
+                          onChange={(e) => field.onChange(toNumber(e.target.value))}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        Days to keep failed/stuck backups before cleanup (default: {defaults?.failedBackupRetentionDays ?? 3} days)
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="backupRotationConfirmThreshold"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Rotation Confirm Threshold</FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={10000}
+                          {...field}
+                          onChange={(e) => field.onChange(toNumber(e.target.value))}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        Prompt for confirmation when a policy change would prune more than this many backups at once
+                        (default: {defaults?.backupRotationConfirmThreshold ?? 5})
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
             </div>
           </SettingsSection>
 

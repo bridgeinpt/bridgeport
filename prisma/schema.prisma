@@ -20,7 +20,8 @@ model User {
   deployments             Deployment[]
   auditLogs               AuditLog[]
   fileHistory             FileHistory[]
-  databaseBackups         DatabaseBackup[]
+  databaseBackups         DatabaseBackup[]         @relation("TriggeredBackups")
+  pinnedBackups           DatabaseBackup[]         @relation("PinnedBackups")
   notifications           Notification[]
   notificationPreferences NotificationPreference[]
   deploymentPlans         DeploymentPlan[]
@@ -762,10 +763,11 @@ model Database {
   lastCollectedAt       DateTime?
   lastMonitoringError   String?
 
-  backups  DatabaseBackup[]
-  schedule BackupSchedule?
-  services ServiceDatabase[]
-  metrics  DatabaseMetrics[]
+  backups         DatabaseBackup[]
+  schedule        BackupSchedule?
+  retentionPolicy BackupRetentionPolicy?
+  services        ServiceDatabase[]
+  metrics         DatabaseMetrics[]
 
   @@unique([environmentId, name])
   @@index([environmentId, monitoringEnabled])
@@ -786,26 +788,55 @@ model DatabaseBackup {
   createdAt   DateTime  @default(now())
   completedAt DateTime?
 
+  isPinned          Boolean   @default(false) // pinned backups are never auto-pruned
+  pinnedById        String?
+  pinnedBy          User?     @relation("PinnedBackups", fields: [pinnedById], references: [id], onDelete: SetNull)
+  pinnedAt          DateTime?
+  lastRotationError String? // set when a prune attempt failed to delete the physical file; cleared on success
+
   databaseId String
   database   Database @relation(fields: [databaseId], references: [id], onDelete: Cascade)
 
   triggeredById String?
-  triggeredBy   User?   @relation(fields: [triggeredById], references: [id], onDelete: SetNull)
+  triggeredBy   User?   @relation("TriggeredBackups", fields: [triggeredById], references: [id], onDelete: SetNull)
 
   @@index([databaseId, createdAt(sort: Desc)])
+  @@index([databaseId, status])
+  @@index([databaseId, isPinned])
 }
 
 // Backup schedule configuration
 model BackupSchedule {
   id             String    @id @default(cuid())
   cronExpression String // e.g., "0 2 * * *" (daily 2am)
-  retentionDays  Int       @default(7)
+  retentionDays  Int       @default(7) // deprecated: superseded by BackupRetentionPolicy
   enabled        Boolean   @default(true)
   lastRunAt      DateTime?
   nextRunAt      DateTime?
 
   databaseId String   @unique
   database   Database @relation(fields: [databaseId], references: [id], onDelete: Cascade)
+}
+
+// Per-database backup retention override. Absent / inheritGlobal=true => use SystemSettings default.
+model BackupRetentionPolicy {
+  id            String   @id @default(cuid())
+  databaseId    String   @unique
+  database      Database @relation(fields: [databaseId], references: [id], onDelete: Cascade)
+
+  inheritGlobal Boolean  @default(false)
+  preset        String   @default("balanced") // "lean" | "balanced" | "long_term" | "custom"
+
+  keepLast      Int      @default(24)
+  daily         Int      @default(7)
+  weekly        Int      @default(4)
+  monthly       Int      @default(6)
+  yearly        Int      @default(0)
+  minFloor      Int      @default(2)
+  maxTotalBytes BigInt? // null = no size cap
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
 // Links services to databases
@@ -1193,6 +1224,25 @@ model SystemSettings {
   healthLogRetentionDays       Int @default(30)
   webhookDeliveryRetentionDays Int @default(30)
   imageDigestRetentionDays     Int @default(90)
+
+  // Instance timezone for backup-rotation period bucketing & display (IANA, e.g. "Europe/Lisbon")
+  timezone String @default("UTC")
+
+  // Global default backup retention policy (inherited by databases without an override)
+  backupRetentionPreset        String @default("balanced")
+  backupRetentionKeepLast      Int    @default(24)
+  backupRetentionDaily         Int    @default(7)
+  backupRetentionWeekly        Int    @default(4)
+  backupRetentionMonthly       Int    @default(6)
+  backupRetentionYearly        Int    @default(0)
+  backupRetentionMinFloor      Int    @default(2)
+  backupRetentionMaxTotalBytes BigInt? // null = no default cap
+
+  // Cleanup of failed / stuck backups (separate from rotation)
+  failedBackupRetentionDays Int @default(3)
+
+  // Rotation safety: prompt for confirmation if a policy change would prune more than this at once
+  backupRotationConfirmThreshold Int @default(5)
 
   updatedAt DateTime @updatedAt
 }
