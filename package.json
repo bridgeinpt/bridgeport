@@ -64,7 +64,7 @@
     "dockerode": "^5.0.0",
     "dotenv": "^17.4.2",
     "fastify": "^5.8.5",
-    "fastify-plugin": "^5.0.0",
+    "fastify-plugin": "^6.0.0",
     "ioredis": "^5.11.1",
     "mysql2": "^3.22.5",
     "nodemailer": "^9.0.1",
