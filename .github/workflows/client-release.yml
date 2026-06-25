@@ -1,0 +1,86 @@
+name: client module
+
+# Releases the Go SDK sub-module (github.com/bridgeinpt/bridgeport/client) by
+# tagging client/vX.Y.Z automatically when its version marker is bumped.
+#
+# The semver decision stays human (you bump client/VERSION in the PR); the
+# tagging is automatic on merge, so it can't be forgotten. A PR guard fails the
+# check if client/ source changed without a version bump.
+#
+# Uses only GitHub-owned actions + the built-in GITHUB_TOKEN, so it needs no
+# org "allowed actions" allowlisting. (If the org's default workflow token is
+# read-only, the contents:write below still applies to this workflow.)
+
+on:
+  pull_request:
+    paths:
+      - 'client/**'
+  push:
+    branches:
+      - master
+    paths:
+      - 'client/**'
+
+permissions:
+  contents: write   # the tag job pushes a tag
+
+jobs:
+  # On PRs: if release-worthy client/ source changed but client/VERSION did not,
+  # fail with a clear message so a release can't be silently skipped.
+  version-bump-check:
+    if: github.event_name == 'pull_request'
+    name: client version bump check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require a VERSION bump for source changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # Release-worthy = client Go source (excluding tests) or go.mod/go.sum.
+          relevant="$(git diff --name-only "$BASE_SHA"...HEAD -- 'client/**' \
+            | grep -E '(\.go$|^client/go\.(mod|sum)$)' \
+            | grep -vE '_test\.go$' || true)"
+          if [ -z "$relevant" ]; then
+            echo "No release-worthy client/ source changes; version bump not required."
+            exit 0
+          fi
+          echo "Release-worthy client/ changes:"
+          echo "$relevant" | sed 's/^/  /'
+          if git diff --quiet "$BASE_SHA"...HEAD -- client/VERSION; then
+            echo "::error::client/ source changed but client/VERSION was not bumped. Bump client/VERSION (see CONTRIBUTING.md → Releasing the Go Client Module); the merge will then auto-tag the release."
+            exit 1
+          fi
+          echo "client/VERSION bumped to $(tr -d '[:space:]' < client/VERSION) — OK."
+
+  # On master: tag client/v$(client/VERSION) if that tag doesn't exist yet.
+  tag:
+    if: github.event_name == 'push'
+    name: auto-tag client release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'client/go.mod'
+          cache: false
+      - name: Tag client/vX.Y.Z when the version is new
+        run: |
+          version="$(tr -d '[:space:]' < client/VERSION)"
+          tag="client/v${version}"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "${tag} already exists — nothing to release."
+            exit 0
+          fi
+          echo "Releasing ${tag}"
+          ( cd client && go test ./... -count=1 )
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${tag}" -m "${tag}: client module release (auto-tagged on merge)"
+          git push origin "${tag}"
+          echo "Tagged and pushed ${tag}."
