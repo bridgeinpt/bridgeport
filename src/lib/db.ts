@@ -1,15 +1,21 @@
 import { PrismaClient, Prisma } from '@prisma/client';
 import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
 import { config } from './config.js';
+import { dbRetryExtension } from './db-retry.js';
 
 const adapter = new PrismaBetterSqlite3({
   url: process.env.DATABASE_URL ?? 'file:./bridgeport.db',
 });
 
+// The transient-contention retry extension (issue #299) wraps every operation
+// so SQLITE_BUSY / SQLITE_BUSY_SNAPSHOT blips are retried transparently instead
+// of surfacing as opaque 500s. The extended client is API-compatible with
+// PrismaClient; the cast keeps every `prisma.*` call site and the many
+// `(prisma: PrismaClient)` signatures across the codebase typed unchanged.
 export const prisma = new PrismaClient({
   adapter,
   log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
-});
+}).$extends(dbRetryExtension) as unknown as PrismaClient;
 
 /**
  * Check if an error is a Prisma "record not found" error.
@@ -33,9 +39,11 @@ export async function initializeDatabase(): Promise<void> {
     // Note: PRAGMAs return results in SQLite, so use $queryRawUnsafe
     // WAL mode allows concurrent readers + single writer without blocking
     await prisma.$queryRawUnsafe('PRAGMA journal_mode = WAL');
-    // Wait up to busy_timeout ms (default 5s) when database is locked instead of
-    // failing immediately. config values are Zod-validated integers, safe to
-    // interpolate into the PRAGMA string.
+    // Wait up to busy_timeout ms when the database is locked instead of failing
+    // immediately. Kept short (default 1s) because better-sqlite3's busy-wait is
+    // SYNCHRONOUS and would otherwise freeze the whole event loop; longer
+    // contention is carried by the async dbRetryExtension (issue #299). config
+    // values are Zod-validated integers, safe to interpolate into the PRAGMA.
     await prisma.$queryRawUnsafe(`PRAGMA busy_timeout = ${config.SQLITE_BUSY_TIMEOUT_MS}`);
     // NORMAL is safe with WAL and avoids extra fsync on every commit
     await prisma.$queryRawUnsafe('PRAGMA synchronous = NORMAL');

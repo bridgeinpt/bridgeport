@@ -52,8 +52,11 @@ const envSchema = z.object({
   RATE_LIMIT_WINDOW: z.string().min(1).default('1 minute'),
   BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(12),
   SESSION_TTL: z.string().min(1).default('7d'),
-  SQLITE_BUSY_TIMEOUT_MS: z.coerce.number().int().min(0).default(5000),
+  SQLITE_BUSY_TIMEOUT_MS: z.coerce.number().int().min(0).default(1000),
   SQLITE_CACHE_SIZE_KB: z.coerce.number().int().min(1000).default(64000),
+  DB_RETRY_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(5),
+  DB_RETRY_BASE_DELAY_MS: z.coerce.number().int().min(1).default(25),
+  DB_RETRY_MAX_DELAY_MS: z.coerce.number().int().min(1).default(500),
   WEBHOOK_DELIVERY_INTERVAL_MS: z.coerce.number().int().min(500).default(3000),
   WEBHOOK_DELIVERY_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(10),
   WEBHOOK_DELIVERY_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(50),
@@ -410,8 +413,11 @@ describe('config', () => {
         expect(result.data.RATE_LIMIT_WINDOW).toBe('1 minute');
         expect(result.data.BCRYPT_ROUNDS).toBe(12);
         expect(result.data.SESSION_TTL).toBe('7d');
-        expect(result.data.SQLITE_BUSY_TIMEOUT_MS).toBe(5000);
+        expect(result.data.SQLITE_BUSY_TIMEOUT_MS).toBe(1000);
         expect(result.data.SQLITE_CACHE_SIZE_KB).toBe(64000);
+        expect(result.data.DB_RETRY_MAX_ATTEMPTS).toBe(5);
+        expect(result.data.DB_RETRY_BASE_DELAY_MS).toBe(25);
+        expect(result.data.DB_RETRY_MAX_DELAY_MS).toBe(500);
         expect(result.data.WEBHOOK_DELIVERY_INTERVAL_MS).toBe(3000);
         expect(result.data.WEBHOOK_DELIVERY_CONCURRENCY).toBe(10);
         expect(result.data.WEBHOOK_DELIVERY_BATCH_SIZE).toBe(50);

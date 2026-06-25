@@ -24,6 +24,9 @@ export const ERROR_CODES = [
   'CONFLICT',
   'IDEMPOTENCY_KEY_REUSED',
   'RATE_LIMITED',
+  // Transient backpressure (e.g. SQLite write-lock contention, issue #299).
+  // Retryable: the client should retry after the Retry-After delay.
+  'SERVICE_UNAVAILABLE',
   'INTERNAL',
 ] as const;
 
@@ -46,6 +49,7 @@ const DEFAULT_STATUS_BY_CODE: Record<ErrorCode, number> = {
   CONFLICT: 409,
   IDEMPOTENCY_KEY_REUSED: 409,
   RATE_LIMITED: 429,
+  SERVICE_UNAVAILABLE: 503,
   INTERNAL: 500,
 };
 
@@ -65,6 +69,7 @@ export function codeForStatus(status: number): ErrorCode {
   if (status === 404) return 'NOT_FOUND';
   if (status === 409) return 'CONFLICT';
   if (status === 429) return 'RATE_LIMITED';
+  if (status === 503) return 'SERVICE_UNAVAILABLE';
   if (status >= 500) return 'INTERNAL';
   // 4xx that we don't have a specific mapping for — treat as validation.
   if (status >= 400) return 'VALIDATION_ERROR';

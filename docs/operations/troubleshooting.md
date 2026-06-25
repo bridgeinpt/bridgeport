@@ -73,6 +73,7 @@ If this endpoint does not respond, BRIDGEPORT is not running or not reachable.
 | `[Scheduler] Starting with intervals:` | Background scheduler started |
 | `[Scheduler] Health check failed for server X` | SSH or URL health check failed for a server |
 | `[Scheduler] Auto-deploying container image` | Auto-update triggered a deployment |
+| `Transient database contention; returning 503` | A write hit SQLite write-lock contention that outlasted the retry budget; the request got a retryable `503`. Rare — see "Transient 503s under load" below. |
 | `Crypto not initialized` | `MASTER_KEY` is missing or invalid |
 
 ### Querying a Live Instance (Read-Only API Access)
@@ -151,8 +152,28 @@ safe to hand to automated tooling.
 | Metrics page is slow | Large metrics history | Reduce retention in environment monitoring settings |
 | MCP client gets 404 on `/mcp` | MCP server disabled | Set `MCP_ENABLED=true` and restart the container |
 | MCP client sees no/few tools | Token role or env scope too narrow | Use an operator/all-environments token; call `get_capabilities` |
+| Occasional `503 SERVICE_UNAVAILABLE` under heavy load | SQLite write-lock contention outlasted the retry budget | Retry the request (the response sets `Retry-After`); see below |
 
 ---
+
+## Transient 503s under load
+
+BRIDGEPORT serves every request through a single SQLite connection, so under
+normal load DB work is naturally serialized and never self-contends. Contention
+can still arise when **another** writer holds the SQLite write lock — a
+long-running external transaction, a WAL checkpoint, or a second process
+touching the database file (for example a test harness that resets state between
+runs). Two cases result: a `SQLITE_BUSY` (the lock is held past `busy_timeout`)
+or a `SQLITE_BUSY_SNAPSHOT` (a stale read snapshot tried to upgrade to a write —
+`busy_timeout` can't help with this one).
+
+Both are **transient and retryable**. BRIDGEPORT retries the operation
+automatically with jittered backoff (`DB_RETRY_*` settings); if the contention
+outlasts the retry budget the request returns **`503` with `code:
+SERVICE_UNAVAILABLE`** and a `Retry-After` header — never an opaque `500`. A
+well-behaved client (including the Terraform provider) should retry. Persistent
+503s point at a genuine second writer on the DB file — remove it, or raise
+`DB_RETRY_MAX_ATTEMPTS` / `SQLITE_BUSY_TIMEOUT_MS`.
 
 ## Container Won't Start
 

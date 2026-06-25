@@ -34,7 +34,8 @@
     "test:ui": "cd ui && vitest run",
     "test:ui:watch": "cd ui && vitest",
     "test:all": "vitest run && cd ui && vitest run",
-    "test:stress": "tsx tests/stress/run.ts"
+    "test:stress": "tsx tests/stress/run.ts",
+    "test:repro-299": "tsx tests/stress/repro-500.ts"
   },
   "keywords": [
     "deployment",

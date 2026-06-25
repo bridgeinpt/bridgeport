@@ -110,8 +110,11 @@ Background job intervals. Interval values are in **seconds**. These set the glob
 
 | Variable | Type | Default | Description |
 |---|---|---|---|
-| `SQLITE_BUSY_TIMEOUT_MS` | number | `5000` | How long SQLite waits for a lock under WAL contention (milliseconds). |
+| `SQLITE_BUSY_TIMEOUT_MS` | number | `1000` | How long SQLite waits for a lock under WAL contention (milliseconds). Kept short because better-sqlite3's busy-wait is synchronous and blocks the event loop; longer contention is handled by the `DB_RETRY_*` async backoff below. |
 | `SQLITE_CACHE_SIZE_KB` | number | `64000` | SQLite page cache size in KiB. Lower it on memory-constrained / ARM hosts. |
+| `DB_RETRY_MAX_ATTEMPTS` | number | `5` | Total attempts (1 + retries) for a DB operation hitting transient write-lock contention (`SQLITE_BUSY` / `SQLITE_BUSY_SNAPSHOT`). After the last attempt the request returns a retryable `503`. Set `1` to disable retrying. |
+| `DB_RETRY_BASE_DELAY_MS` | number | `25` | Base backoff (with full jitter) between contention retries; doubles each attempt up to `DB_RETRY_MAX_DELAY_MS`. |
+| `DB_RETRY_MAX_DELAY_MS` | number | `500` | Cap on the per-retry backoff delay (milliseconds). |
 | `RESPONSE_CACHE_MAX_ENTRIES` | number | `500` | Max entries in the per-process short-TTL response cache before the oldest half is evicted. Minimum `1`. |
 | `SSH_EXEC_MAX_BUFFER_BYTES` | number | `10485760` | Max stdout/stderr buffer for local command execution, in bytes (default 10MB). Raise it if local exec output is being truncated. Minimum `1024`. |
 
