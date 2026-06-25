@@ -72,6 +72,7 @@
               "CONFLICT",
               "IDEMPOTENCY_KEY_REUSED",
               "RATE_LIMITED",
+              "SERVICE_UNAVAILABLE",
               "INTERNAL"
             ],
             "description": "Stable, machine-readable error code. Always present on the wire."

@@ -20,6 +20,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import fp from 'fastify-plugin';
 import { ZodError } from 'zod';
 import { ApiError, codeForStatus, type ErrorEnvelope } from '../lib/errors.js';
+import { isTransientDbError } from '../lib/db-retry.js';
 import { captureException } from '../lib/sentry.js';
 
 type AnyError = Error & {
@@ -80,6 +81,24 @@ function buildEnvelope(err: AnyError): { envelope: ErrorEnvelope; statusCode: nu
     };
   }
 
+  // Transient SQLite contention (issue #299): another writer held the lock
+  // past busy_timeout, or a SQLITE_BUSY_SNAPSHOT fired. The DB-retry extension
+  // already retried with backoff, so reaching here means the contention
+  // outlasted the retry budget. Surface a retryable 503 (not an opaque 500) so
+  // clients — and the Terraform provider's acceptance suite — back off and
+  // retry instead of failing. Only reached for raw/uncaught Prisma errors;
+  // intentional ApiError(SERVICE_UNAVAILABLE) is handled by the branch above.
+  if (isTransientDbError(err)) {
+    return {
+      envelope: {
+        code: 'SERVICE_UNAVAILABLE',
+        message: 'The service is temporarily busy. Please retry.',
+        hint: 'Retry the request after a short delay.',
+      },
+      statusCode: 503,
+    };
+  }
+
   // Rate-limit plugin throws an Error with statusCode 429 and a code of 'FST_ERR_RATE_LIMIT'.
   const status = err.statusCode ?? 500;
   const code = codeForStatus(status);
@@ -108,7 +127,14 @@ async function errorHandlerPlugin(fastify: FastifyInstance): Promise<void> {
   fastify.setErrorHandler((error: AnyError, request: FastifyRequest, reply: FastifyReply) => {
     const { envelope, statusCode } = buildEnvelope(error);
 
-    if (statusCode >= 500) {
+    if (statusCode === 503 && envelope.code === 'SERVICE_UNAVAILABLE') {
+      // Transient contention (issue #299): expected, retryable backpressure —
+      // not a code bug. Log it (so it is no longer invisible — the original
+      // report saw 500s with no level:50 line) but at WARN, and skip Sentry to
+      // avoid alert noise on every lock blip. Advertise a 1s Retry-After.
+      request.log.warn({ err: error, statusCode }, 'Transient database contention; returning 503');
+      reply.header('Retry-After', '1');
+    } else if (statusCode >= 500) {
       // Log the *original* error (with stack) before we hide it from the wire.
       request.log.error({ err: error, statusCode }, 'Unhandled error');
       captureException(error, {

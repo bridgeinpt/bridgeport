@@ -19,6 +19,7 @@ describe('errors', () => {
       expect(statusForCode('CONFLICT')).toBe(409);
       expect(statusForCode('IDEMPOTENCY_KEY_REUSED')).toBe(409);
       expect(statusForCode('RATE_LIMITED')).toBe(429);
+      expect(statusForCode('SERVICE_UNAVAILABLE')).toBe(503);
       expect(statusForCode('INTERNAL')).toBe(500);
     });
   });
@@ -32,7 +33,8 @@ describe('errors', () => {
       expect(codeForStatus(409)).toBe('CONFLICT');
       expect(codeForStatus(429)).toBe('RATE_LIMITED');
       expect(codeForStatus(500)).toBe('INTERNAL');
-      expect(codeForStatus(503)).toBe('INTERNAL');
+      // 503 is the retryable transient-contention status (issue #299).
+      expect(codeForStatus(503)).toBe('SERVICE_UNAVAILABLE');
     });
 
     it('treats unknown 4xx as VALIDATION_ERROR', () => {

@@ -520,8 +520,11 @@ BCRYPT_ROUNDS=12                          # Password hash cost (clamped 4-15)
 SESSION_TTL=7d                            # JWT/session lifetime (duration string)
 
 # Performance / SQLite
-SQLITE_BUSY_TIMEOUT_MS=5000               # Lock wait under WAL contention
+SQLITE_BUSY_TIMEOUT_MS=1000               # Lock wait under WAL contention (short: sync busy-wait blocks the event loop)
 SQLITE_CACHE_SIZE_KB=64000                # Page cache size (KiB)
+DB_RETRY_MAX_ATTEMPTS=5                   # Transient-contention retries before a 503 (issue #299)
+DB_RETRY_BASE_DELAY_MS=25                 # Backoff base (full jitter), doubles per attempt
+DB_RETRY_MAX_DELAY_MS=500                 # Backoff cap per retry
 RESPONSE_CACHE_MAX_ENTRIES=500            # Per-process response cache cap
 SSH_EXEC_MAX_BUFFER_BYTES=10485760        # Local exec stdout/stderr buffer (10MB)
 

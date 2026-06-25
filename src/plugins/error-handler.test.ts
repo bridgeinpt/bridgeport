@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import errorHandlerPlugin from './error-handler.js';
 import { ApiError } from '../lib/errors.js';
 
@@ -109,6 +110,37 @@ describe('error-handler plugin', () => {
       const res = await app.inject({ method: 'GET', url: '/x' });
       expect(res.statusCode).toBe(422);
       expect(res.json().code).toBe('VALIDATION_ERROR');
+    });
+
+    it('maps transient SQLite contention (Prisma P1008) to a retryable 503 (issue #299)', async () => {
+      const app = await buildApp();
+      app.get('/busy', async () => {
+        throw new Prisma.PrismaClientKnownRequestError('Operation timed out', {
+          code: 'P1008',
+          clientVersion: 'test',
+        });
+      });
+
+      const res = await app.inject({ method: 'GET', url: '/busy' });
+      expect(res.statusCode).toBe(503);
+      const body = res.json();
+      expect(body.code).toBe('SERVICE_UNAVAILABLE');
+      expect(body.message).toMatch(/temporarily busy/i);
+      expect(res.headers['retry-after']).toBe('1');
+      // Transient backpressure is expected operationally — do NOT page Sentry.
+      expect(captureException).not.toHaveBeenCalled();
+    });
+
+    it('maps a raw "database is locked" error to a 503 too', async () => {
+      const app = await buildApp();
+      app.get('/locked', async () => {
+        throw new Error('SQLITE_BUSY: database is locked');
+      });
+
+      const res = await app.inject({ method: 'GET', url: '/locked' });
+      expect(res.statusCode).toBe(503);
+      expect(res.json().code).toBe('SERVICE_UNAVAILABLE');
+      expect(captureException).not.toHaveBeenCalled();
     });
 
     it('masks ApiError messages on 5xx so internal detail does not leak', async () => {

@@ -65,8 +65,22 @@ const envSchema = z.object({
   RATE_LIMIT_WINDOW: z.string().min(1).default('1 minute'),
   BCRYPT_ROUNDS: z.coerce.number().int().min(4).max(15).default(12),
   SESSION_TTL: z.string().min(1).default('7d'),
-  SQLITE_BUSY_TIMEOUT_MS: z.coerce.number().int().min(0).default(5000),
+  // better-sqlite3 is SYNCHRONOUS: a busy-wait blocks the whole event loop, so
+  // a long busy_timeout freezes every in-flight request, not just the contended
+  // one. Kept deliberately short (1s) — brief contention is absorbed here, and
+  // anything longer is carried by the async DB_RETRY_* backoff below (which
+  // frees the event loop between attempts) before surfacing a retryable 503.
+  // See issue #299. Worst-case synchronous stall ≈ busy_timeout × retry attempts.
+  SQLITE_BUSY_TIMEOUT_MS: z.coerce.number().int().min(0).default(1000),
   SQLITE_CACHE_SIZE_KB: z.coerce.number().int().min(1000).default(64000),
+  // Transient SQLite-contention retry (issue #299). When another writer holds
+  // the write lock longer than busy_timeout — or a SQLITE_BUSY_SNAPSHOT fires,
+  // which busy_timeout can't block on — the operation is retried with jittered
+  // backoff before being surfaced as a retryable 503. Total attempts =
+  // DB_RETRY_MAX_ATTEMPTS; delays grow exponentially from BASE up to MAX.
+  DB_RETRY_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(20).default(5),
+  DB_RETRY_BASE_DELAY_MS: z.coerce.number().int().min(1).default(25),
+  DB_RETRY_MAX_DELAY_MS: z.coerce.number().int().min(1).default(500),
   WEBHOOK_DELIVERY_INTERVAL_MS: z.coerce.number().int().min(500).default(3000),
   WEBHOOK_DELIVERY_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(10),
   WEBHOOK_DELIVERY_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(50),
