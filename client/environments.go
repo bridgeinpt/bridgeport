@@ -29,6 +29,9 @@ type Server struct {
 	CreatedAt     string         `json:"createdAt"`
 }
 
+// ServerMetrics is a computed point-in-time summary (percentages, totals) that
+// may be embedded on a Server as Server.Metrics. It is distinct from the raw
+// time-series samples returned by GetServerMetrics — see ServerMetricsSample.
 type ServerMetrics struct {
 	CPUPercent    float64 `json:"cpuPercent"`
 	MemoryPercent float64 `json:"memoryPercent"`
@@ -39,6 +42,35 @@ type ServerMetrics struct {
 	DiskTotalGB   float64 `json:"diskTotalGb"`
 	UptimeSeconds int64   `json:"uptimeSeconds"`
 	Timestamp     string  `json:"timestamp"`
+}
+
+// ServerMetricsSample is a single raw metrics row as returned by
+// GET /api/servers/:id/metrics (which yields a time series of these). Numeric
+// fields are pointers because the API returns null for any metric a given
+// collection mode (ssh/agent) doesn't report — a nil pointer (not collected)
+// is meaningfully different from 0.
+type ServerMetricsSample struct {
+	ID             string   `json:"id"`
+	CPUPercent     *float64 `json:"cpuPercent"`
+	MemoryUsedMB   *float64 `json:"memoryUsedMb"`
+	MemoryTotalMB  *float64 `json:"memoryTotalMb"`
+	SwapUsedMB     *float64 `json:"swapUsedMb"`
+	SwapTotalMB    *float64 `json:"swapTotalMb"`
+	DiskUsedGB     *float64 `json:"diskUsedGb"`
+	DiskTotalGB    *float64 `json:"diskTotalGb"`
+	LoadAvg1       *float64 `json:"loadAvg1"`
+	LoadAvg5       *float64 `json:"loadAvg5"`
+	LoadAvg15      *float64 `json:"loadAvg15"`
+	Uptime         *int64   `json:"uptime"`
+	OpenFds        *int64   `json:"openFds"`
+	MaxFds         *int64   `json:"maxFds"`
+	TCPEstablished *int64   `json:"tcpEstablished"`
+	TCPListen      *int64   `json:"tcpListen"`
+	TCPTimeWait    *int64   `json:"tcpTimeWait"`
+	TCPCloseWait   *int64   `json:"tcpCloseWait"`
+	TCPTotal       *int64   `json:"tcpTotal"`
+	Source         string   `json:"source"`
+	CollectedAt    string   `json:"collectedAt"`
 }
 
 type SSHCredentials struct {
@@ -59,11 +91,13 @@ func (c *Client) ListEnvironments() ([]Environment, error) {
 
 // GetEnvironment returns a single environment by ID
 func (c *Client) GetEnvironment(id string) (*Environment, error) {
-	var env Environment
-	if err := c.Get(fmt.Sprintf("/api/environments/%s", id), &env); err != nil {
+	var resp struct {
+		Environment Environment `json:"environment"`
+	}
+	if err := c.Get(fmt.Sprintf("/api/environments/%s", id), &resp); err != nil {
 		return nil, err
 	}
-	return &env, nil
+	return &resp.Environment, nil
 }
 
 // ListServers returns all servers, optionally filtered by environment
@@ -104,11 +138,13 @@ func (c *Client) listServersForEnv(environmentID string) ([]Server, error) {
 
 // GetServer returns a single server by ID
 func (c *Client) GetServer(id string) (*Server, error) {
-	var server Server
-	if err := c.Get(fmt.Sprintf("/api/servers/%s", id), &server); err != nil {
+	var resp struct {
+		Server Server `json:"server"`
+	}
+	if err := c.Get(fmt.Sprintf("/api/servers/%s", id), &resp); err != nil {
 		return nil, err
 	}
-	return &server, nil
+	return &resp.Server, nil
 }
 
 // GetServerByEnvAndName finds a server by environment name and server name
@@ -154,13 +190,16 @@ func (c *Client) GetSSHKey(environmentID string) (*SSHCredentials, error) {
 	return &creds, nil
 }
 
-// GetServerMetrics returns detailed metrics for a server
-func (c *Client) GetServerMetrics(serverID string) (*ServerMetrics, error) {
-	var metrics ServerMetrics
-	if err := c.Get(fmt.Sprintf("/api/servers/%s/metrics", serverID), &metrics); err != nil {
+// GetServerMetrics returns the recent time series of metrics samples for a
+// server (most recent first), as returned by GET /api/servers/:id/metrics.
+func (c *Client) GetServerMetrics(serverID string) ([]ServerMetricsSample, error) {
+	var resp struct {
+		Metrics []ServerMetricsSample `json:"metrics"`
+	}
+	if err := c.Get(fmt.Sprintf("/api/servers/%s/metrics", serverID), &resp); err != nil {
 		return nil, err
 	}
-	return &metrics, nil
+	return resp.Metrics, nil
 }
 
 // GetEnvironmentByName finds an environment by name and returns it

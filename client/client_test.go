@@ -486,3 +486,159 @@ func TestClientListAuditLogs(t *testing.T) {
 	assert.Equal(t, 1, total)
 	assert.Equal(t, "deploy", logs[0].Action)
 }
+
+// The single-resource detail endpoints wrap the payload under the resource
+// name (e.g. {"server": {...}}). These tests guard against regressing to an
+// unwrapped unmarshal, which silently returns a zero-value struct (issue #300).
+
+func TestClientGetServerUnwrapsWrappedBody(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/servers/srv-1", r.URL.Path)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"server": Server{ID: "srv-1", Name: "web-01", PrivateIP: "10.0.0.1", EnvironmentID: "env-1"},
+		})
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "test-token")
+
+	server, err := client.GetServer("srv-1")
+	require.NoError(t, err)
+	assert.Equal(t, "srv-1", server.ID)
+	assert.Equal(t, "web-01", server.Name)
+	assert.Equal(t, "env-1", server.EnvironmentID)
+}
+
+func TestClientGetServiceUnwrapsWrappedBody(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/services/svc-1", r.URL.Path)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"service": Service{ID: "svc-1", Name: "api", ImageTag: "latest"},
+		})
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "test-token")
+
+	service, err := client.GetService("svc-1")
+	require.NoError(t, err)
+	assert.Equal(t, "svc-1", service.ID)
+	assert.Equal(t, "api", service.Name)
+	assert.Equal(t, "latest", service.ImageTag)
+}
+
+func TestClientGetEnvironmentUnwrapsWrappedBody(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/environments/env-1", r.URL.Path)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"environment": Environment{ID: "env-1", Name: "staging", DisplayName: "Staging"},
+		})
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "test-token")
+
+	env, err := client.GetEnvironment("env-1")
+	require.NoError(t, err)
+	assert.Equal(t, "env-1", env.ID)
+	assert.Equal(t, "staging", env.Name)
+	assert.Equal(t, "Staging", env.DisplayName)
+}
+
+// GET /api/servers/:id/metrics returns a time series under {"metrics": [...]}.
+// Numeric fields are nullable (a collection mode may not report every metric),
+// so they are pointers and must round-trip null as nil (issue #300).
+func TestClientGetServerMetricsReturnsSeries(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/servers/srv-1/metrics", r.URL.Path)
+		w.Write([]byte(`{"metrics":[
+			{"id":"m1","cpuPercent":12.5,"memoryUsedMb":2048,"uptime":3600,"tcpEstablished":null,"source":"agent","collectedAt":"2026-01-01T00:00:00Z"},
+			{"id":"m2","cpuPercent":null,"source":"ssh","collectedAt":"2026-01-01T00:01:00Z"}
+		]}`))
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "test-token")
+
+	metrics, err := client.GetServerMetrics("srv-1")
+	require.NoError(t, err)
+	require.Len(t, metrics, 2)
+
+	assert.Equal(t, "m1", metrics[0].ID)
+	require.NotNil(t, metrics[0].CPUPercent)
+	assert.Equal(t, 12.5, *metrics[0].CPUPercent)
+	require.NotNil(t, metrics[0].Uptime)
+	assert.Equal(t, int64(3600), *metrics[0].Uptime)
+	assert.Nil(t, metrics[0].TCPEstablished) // explicit null stays nil
+	assert.Equal(t, "agent", metrics[0].Source)
+
+	assert.Nil(t, metrics[1].CPUPercent) // explicit null stays nil
+	assert.Equal(t, "ssh", metrics[1].Source)
+}
+
+// ListRegistries must map every field the API returns, not the subset it used
+// to copy, and fold _count.containerImages into ImageCount (issue #301).
+func TestClientListRegistriesMapsAllFields(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/environments/env-1/registries", r.URL.Path)
+		w.Write([]byte(`{"registries":[{
+			"id":"reg-1","name":"dockerhub","type":"dockerhub","registryUrl":"https://index.docker.io",
+			"repositoryPrefix":"myorg","username":"bot","hasToken":true,"hasPassword":false,
+			"isDefault":true,"refreshIntervalMinutes":60,"autoLinkPattern":"app-*",
+			"lastRefreshAt":"2026-01-01T00:00:00Z","createdAt":"2025-01-01T00:00:00Z",
+			"updatedAt":"2026-01-02T00:00:00Z","environmentId":"env-1",
+			"_count":{"containerImages":7}
+		}]}`))
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "test-token")
+
+	regs, err := client.ListRegistries("env-1")
+	require.NoError(t, err)
+	require.Len(t, regs, 1)
+
+	r := regs[0]
+	assert.Equal(t, "reg-1", r.ID)
+	assert.Equal(t, "dockerhub", r.Name)
+	// Fields previously dropped by ListRegistries:
+	require.NotNil(t, r.Username)
+	assert.Equal(t, "bot", *r.Username)
+	require.NotNil(t, r.RepositoryPrefix)
+	assert.Equal(t, "myorg", *r.RepositoryPrefix)
+	require.NotNil(t, r.AutoLinkPattern)
+	assert.Equal(t, "app-*", *r.AutoLinkPattern)
+	assert.Equal(t, 60, r.RefreshIntervalMinutes)
+	assert.True(t, r.HasToken)
+	assert.False(t, r.HasPassword)
+	assert.Equal(t, "2026-01-02T00:00:00Z", r.UpdatedAt)
+	require.NotNil(t, r.LastRefreshAt)
+	assert.Equal(t, "2026-01-01T00:00:00Z", *r.LastRefreshAt)
+	// imageCount is derived from _count.containerImages:
+	assert.Equal(t, 7, r.ImageCount)
+}
+
+// GetRegistry unwraps {"registry": {...}} and folds _count into ImageCount.
+func TestClientGetRegistry(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/registries/reg-1", r.URL.Path)
+		w.Write([]byte(`{"registry":{
+			"id":"reg-1","name":"dockerhub","type":"dockerhub","registryUrl":"https://index.docker.io",
+			"username":"bot","hasToken":true,"isDefault":false,"refreshIntervalMinutes":30,
+			"environmentId":"env-1","createdAt":"2025-01-01T00:00:00Z","_count":{"containerImages":3}
+		}}`))
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "test-token")
+
+	reg, err := client.GetRegistry("reg-1")
+	require.NoError(t, err)
+	assert.Equal(t, "reg-1", reg.ID)
+	assert.Equal(t, "dockerhub", reg.Name)
+	require.NotNil(t, reg.Username)
+	assert.Equal(t, "bot", *reg.Username)
+	assert.True(t, reg.HasToken)
+	assert.Equal(t, 30, reg.RefreshIntervalMinutes)
+	assert.Equal(t, 3, reg.ImageCount)
+}

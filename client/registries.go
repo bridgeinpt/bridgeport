@@ -17,8 +17,9 @@ type Registry struct {
 	IsDefault              bool    `json:"isDefault"`
 	RefreshIntervalMinutes int     `json:"refreshIntervalMinutes,omitempty"`
 	AutoLinkPattern        *string `json:"autoLinkPattern,omitempty"`
+	LastRefreshAt          *string `json:"lastRefreshAt,omitempty"`
 	EnvironmentID          string  `json:"environmentId,omitempty"`
-	ImageCount             int     `json:"imageCount"` // populated from _count on list
+	ImageCount             int     `json:"imageCount"` // populated from _count on list/detail
 	CreatedAt              string  `json:"createdAt"`
 	UpdatedAt              string  `json:"updatedAt,omitempty"`
 }
@@ -49,29 +50,53 @@ func (c *Client) ListRegistries(environmentID string) ([]Registry, error) {
 
 	registries := make([]Registry, len(response.Registries))
 	for i, r := range response.Registries {
-		registries[i] = Registry{
-			ID:          r.ID,
-			Name:        r.Name,
-			Type:        r.Type,
-			RegistryURL: r.RegistryURL,
-			IsDefault:   r.IsDefault,
-			ImageCount:  r.Count.ContainerImages,
-			CreatedAt:   r.CreatedAt,
-		}
+		registries[i] = r.toRegistry()
 	}
 	return registries, nil
 }
 
+// GetRegistry returns a single registry connection by ID.
+func (c *Client) GetRegistry(id string) (*Registry, error) {
+	var resp struct {
+		Registry registryRaw `json:"registry"`
+	}
+	if err := c.Get(fmt.Sprintf("/api/registries/%s", id), &resp); err != nil {
+		return nil, err
+	}
+	reg := resp.Registry.toRegistry()
+	return &reg, nil
+}
+
+// GetRegistryByName finds a registry connection by name within an environment
+// (registries are unique per environment + name).
+func (c *Client) GetRegistryByName(environmentID, name string) (*Registry, error) {
+	registries, err := c.ListRegistries(environmentID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range registries {
+		if registries[i].Name == name {
+			return &registries[i], nil
+		}
+	}
+	return nil, &APIError{StatusCode: 404, Message: fmt.Sprintf("registry '%s' not found in environment '%s'", name, environmentID)}
+}
+
+// registryRaw is the wire shape for a registry: the full Registry plus the
+// image count, which the API exposes as _count.containerImages rather than a
+// direct imageCount field. Embedding Registry captures every registry field;
+// toRegistry folds the count into Registry.ImageCount.
 type registryRaw struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	RegistryURL string `json:"registryUrl"`
-	IsDefault   bool   `json:"isDefault"`
-	CreatedAt   string `json:"createdAt"`
-	Count       struct {
+	Registry
+	Count struct {
 		ContainerImages int `json:"containerImages"`
 	} `json:"_count"`
+}
+
+func (r registryRaw) toRegistry() Registry {
+	reg := r.Registry
+	reg.ImageCount = r.Count.ContainerImages
+	return reg
 }
 
 // ListContainerImages returns all container images for an environment

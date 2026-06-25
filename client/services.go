@@ -156,11 +156,13 @@ func (c *Client) listServicesForServer(serverID string) ([]Service, error) {
 
 // GetService returns a single service by ID
 func (c *Client) GetService(id string) (*Service, error) {
-	var service Service
-	if err := c.Get(fmt.Sprintf("/api/services/%s", id), &service); err != nil {
+	var resp struct {
+		Service Service `json:"service"`
+	}
+	if err := c.Get(fmt.Sprintf("/api/services/%s", id), &resp); err != nil {
 		return nil, err
 	}
-	return &service, nil
+	return &resp.Service, nil
 }
 
 // GetServiceByName finds a service by name on a specific server
