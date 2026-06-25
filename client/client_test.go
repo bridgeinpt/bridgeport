@@ -486,3 +486,61 @@ func TestClientListAuditLogs(t *testing.T) {
 	assert.Equal(t, 1, total)
 	assert.Equal(t, "deploy", logs[0].Action)
 }
+
+// The single-resource detail endpoints wrap the payload under the resource
+// name (e.g. {"server": {...}}). These tests guard against regressing to an
+// unwrapped unmarshal, which silently returns a zero-value struct (issue #300).
+
+func TestClientGetServerUnwrapsWrappedBody(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/servers/srv-1", r.URL.Path)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"server": Server{ID: "srv-1", Name: "web-01", PrivateIP: "10.0.0.1", EnvironmentID: "env-1"},
+		})
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "test-token")
+
+	server, err := client.GetServer("srv-1")
+	require.NoError(t, err)
+	assert.Equal(t, "srv-1", server.ID)
+	assert.Equal(t, "web-01", server.Name)
+	assert.Equal(t, "env-1", server.EnvironmentID)
+}
+
+func TestClientGetServiceUnwrapsWrappedBody(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/services/svc-1", r.URL.Path)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"service": Service{ID: "svc-1", Name: "api", ImageTag: "latest"},
+		})
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "test-token")
+
+	service, err := client.GetService("svc-1")
+	require.NoError(t, err)
+	assert.Equal(t, "svc-1", service.ID)
+	assert.Equal(t, "api", service.Name)
+	assert.Equal(t, "latest", service.ImageTag)
+}
+
+func TestClientGetEnvironmentUnwrapsWrappedBody(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/environments/env-1", r.URL.Path)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"environment": Environment{ID: "env-1", Name: "staging", DisplayName: "Staging"},
+		})
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "test-token")
+
+	env, err := client.GetEnvironment("env-1")
+	require.NoError(t, err)
+	assert.Equal(t, "env-1", env.ID)
+	assert.Equal(t, "staging", env.Name)
+	assert.Equal(t, "Staging", env.DisplayName)
+}
