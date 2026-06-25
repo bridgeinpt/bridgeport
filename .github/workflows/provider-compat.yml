@@ -1,0 +1,130 @@
+name: Provider Compatibility
+
+# Issue #202 — keep the out-of-repo terraform-provider-bridgeport in lockstep
+# with this platform's HTTP API. Builds the server image from the PR, checks
+# out the provider at its latest *release* tag, and runs the provider's
+# acceptance suite (TF_ACC=1) against a disposable instance of that built image
+# via the provider's own scripts/acc-harness.sh.
+#
+# A red provider suite fails the platform PR: that is the enforcement behind the
+# API stability policy. Failure playbook (compatible fix here vs. deprecation +
+# provider follow-up): docs/api-stability.md#provider-compatibility-ci.
+#
+# Like the rest of this repo's CI, this workflow uses only GitHub-owned actions
+# plus plain run-steps so it works under the org's restrictive "allowed actions"
+# policy without extra allowlisting. Terraform is installed via curl.
+#
+# Scope: runs on PRs that can affect the server's HTTP API (paths-ignore filters
+# out docs/UI/agent/CLI/client-only PRs, none of which the provider talks to),
+# nightly to catch indirect drift and new provider releases, and on demand.
+
+on:
+  pull_request:
+    branches: [master]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'ui/**'
+      - 'bridgeport-agent/**'
+      - 'cli/**'
+      - 'client/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/pull_request_template.md'
+      - '.github/CODEOWNERS'
+      - 'LICENSE'
+  schedule:
+    - cron: '0 4 * * *'  # nightly, 1h after the Test workflow's 3 AM run
+  workflow_dispatch:
+    inputs:
+      provider_ref:
+        description: 'Provider git ref to test against (default: latest release tag)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PROVIDER_REPO: bridgeinpt/terraform-provider-bridgeport
+  # Local-only tag for the PR-built image; never pushed to a registry.
+  BRIDGEPORT_IMAGE: bridgeport:provider-compat
+  TF_VERSION: '1.9.8'
+
+jobs:
+  provider-compat:
+    name: provider acceptance (TF_ACC) against PR image
+    runs-on: ubuntu-latest
+    # Headroom for a cold multi-stage docker build plus the harness's own
+    # `go test -timeout 30m` ceiling, so a legitimately slow run isn't cancelled.
+    timeout-minutes: 60
+    steps:
+      - name: Checkout platform code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # full history for agent/CLI version derivation
+
+      - name: Derive build versions
+        run: |
+          echo "VERSION_TAG=$(date +%Y%m%d%H)-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          echo "AGENT_VERSION=$(git log -1 --format='%cd-%h' --date=format:'%Y%m%d%H' -- bridgeport-agent/)" >> "$GITHUB_ENV"
+          echo "CLI_VERSION=$(git log -1 --format='%cd-%h' --date=format:'%Y%m%d%H' -- cli/)" >> "$GITHUB_ENV"
+
+      - name: Build BridgePort image from this PR
+        run: |
+          docker build \
+            --build-arg APP_VERSION="${VERSION_TAG}" \
+            --build-arg AGENT_VERSION="${AGENT_VERSION}" \
+            --build-arg CLI_VERSION="${CLI_VERSION}" \
+            -f docker/Dockerfile \
+            -t "${BRIDGEPORT_IMAGE}" \
+            .
+
+      - name: Resolve provider ref
+        id: provider
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Routed through env (not interpolated into the script) to avoid
+          # ${{ }} run-step injection; dispatch inputs are attacker-influenceable.
+          PROVIDER_REF_INPUT: ${{ github.event.inputs.provider_ref }}
+        run: |
+          REF="$PROVIDER_REF_INPUT"
+          if [ -z "$REF" ]; then
+            REF="$(gh api "repos/${PROVIDER_REPO}/releases/latest" --jq .tag_name)"
+          fi
+          # Fail loudly rather than letting an empty ref silently fall back to
+          # the provider's default branch (which would test the wrong target).
+          if [ -z "$REF" ]; then
+            echo "::error::Could not resolve a provider ref (no published release on ${PROVIDER_REPO}?). Pass provider_ref via workflow_dispatch to override."
+            exit 1
+          fi
+          echo "Testing against provider ref: $REF"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout provider at release tag
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.PROVIDER_REPO }}
+          ref: ${{ steps.provider.outputs.ref }}
+          path: provider
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: provider/go.mod
+          cache: true
+          cache-dependency-path: provider/go.sum
+
+      - name: Install Terraform CLI
+        run: |
+          curl -sSfL -o /tmp/tf.zip \
+            "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip"
+          sudo unzip -o /tmp/tf.zip -d /usr/local/bin
+          terraform version
+
+      - name: Run provider acceptance suite against PR image
+        working-directory: provider
+        run: ./scripts/acc-harness.sh test

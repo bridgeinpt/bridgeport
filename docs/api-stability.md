@@ -7,6 +7,7 @@ This document is the compatibility contract for BRIDGEPORT's HTTP API. It tells 
 - [Scope](#scope)
 - [Versioning & semver](#versioning--semver)
 - [The canonical contract](#the-canonical-contract)
+- [Provider compatibility CI](#provider-compatibility-ci)
 - [Deprecation policy](#deprecation-policy)
 - [Changelog discipline](#changelog-discipline)
 - [Version discovery](#version-discovery)
@@ -97,6 +98,45 @@ diff <(jq -S . openapi.pinned.json) <(jq -S . openapi.new.json)
 ```
 
 Where the spec models a deprecated field or parameter, it carries `deprecated: true` so generated clients and linters can surface it automatically. Spec coverage of deprecations is best-effort and still expanding, though — treat the [Current deprecations](#current-deprecations) table below as the authoritative, complete list rather than relying on a spec diff alone.
+
+---
+
+## Provider compatibility CI
+
+The OpenAPI snapshot lets a consumer diff the *declared* contract. It can't tell you whether a change quietly altered runtime **behavior** the spec doesn't model — a default that shifted, a validation rule that tightened, a response that reshaped in a way the schema still nominally allows. To catch those, we run the real [`terraform-provider-bridgeport`](https://github.com/bridgeinpt/terraform-provider-bridgeport) acceptance suite against every API-affecting PR.
+
+### What enforces this
+
+The **Provider Compatibility** workflow (`.github/workflows/provider-compat.yml`):
+
+1. Builds the server image **from the PR** (same build args as the release/edge image).
+2. Checks out `terraform-provider-bridgeport` at its **latest release tag** (resolved dynamically, not pinned).
+3. Runs that provider's acceptance suite (`TF_ACC=1`) against a **disposable instance** of the PR-built image, via the provider's own `scripts/acc-harness.sh` — which spins up the container, waits for `/health`, mints an admin token, runs the Terraform acceptance tests, and tears the container down.
+
+This is the runtime complement to the per-release `openapi.json` snapshot (see [The canonical contract](#the-canonical-contract)): the snapshot lets the provider repo run a spec-diff from its side; this job catches the behavioral breaks the spec diff can't see. A **green provider suite is a merge gate** — a red suite fails the platform PR, and that is the enforcement behind this whole policy.
+
+### When it runs
+
+| Trigger | Why |
+|---------|-----|
+| **Pull requests to `master`** that touch API-affecting paths | The provider only talks to `/api`, so the job skips docs-, UI-, agent-, CLI-, and client-only PRs (`paths-ignore`). |
+| **Nightly** (`schedule`, 04:00 UTC) | Catches *indirect* drift no diff would flag on a given PR, and picks up newly-released provider versions. |
+| **On demand** (`workflow_dispatch`) | Takes an optional `provider_ref` input to test against an arbitrary ref — e.g. the provider's `master` to validate an in-flight provider change against the current platform. |
+
+### Failure playbook
+
+A red provider suite means **one of two things**, and they have very different responses:
+
+1. **Accidental break (the common case).** The change unintentionally altered a covered API surface (see [Scope](#scope) for what's covered). **Fix it here, in this PR, before merge** — restore the compatible shape. The green suite is the gate; don't merge around it.
+2. **Intentional, policy-compliant break.** The change is a deliberate breaking change shipping in a **major** release per [Versioning & semver](#versioning--semver). It must **not** be force-merged past a red suite silently. It ships with: (a) a [Deprecation](#deprecation-policy) entry where a window applies, (b) the required "API changes" release-notes entry ([Changelog discipline](#changelog-discipline)), and (c) a **provider-side follow-up issue filed before this PR merges**, so `terraform-provider-bridgeport` is updated and re-released against the new contract. Only then do you coordinate the merge.
+
+| Symptom | Owner | Action |
+|---------|-------|--------|
+| Red because the change **accidentally** altered a covered surface | Platform PR author | Restore the compatible shape **in this PR**; re-run until green. |
+| Red because the change is an **intended major break** | Platform PR author + provider maintainer | Deprecate (where a window applies), document the "API changes" release-notes entry, **file a provider follow-up issue before merge**, then coordinate the merge + provider re-release. |
+
+> [!NOTE]
+> The job is **path-filtered**: a docs- or UI-only PR won't trigger it. If you promote it to a *required* status check in branch protection, account for that — the workflow only reports a status on PRs that touch API-affecting paths, so a required check that never runs can block PRs it was never meant to gate. Use a status-check configuration that tolerates the job being skipped (or scope the requirement accordingly).
 
 ---
 
