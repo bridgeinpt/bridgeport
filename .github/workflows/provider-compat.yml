@@ -58,7 +58,9 @@ jobs:
   provider-compat:
     name: provider acceptance (TF_ACC) against PR image
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # Headroom for a cold multi-stage docker build plus the harness's own
+    # `go test -timeout 30m` ceiling, so a legitimately slow run isn't cancelled.
+    timeout-minutes: 60
     steps:
       - name: Checkout platform code
         uses: actions/checkout@v7
@@ -92,6 +94,12 @@ jobs:
           REF="$PROVIDER_REF_INPUT"
           if [ -z "$REF" ]; then
             REF="$(gh api "repos/${PROVIDER_REPO}/releases/latest" --jq .tag_name)"
+          fi
+          # Fail loudly rather than letting an empty ref silently fall back to
+          # the provider's default branch (which would test the wrong target).
+          if [ -z "$REF" ]; then
+            echo "::error::Could not resolve a provider ref (no published release on ${PROVIDER_REPO}?). Pass provider_ref via workflow_dispatch to override."
+            exit 1
           fi
           echo "Testing against provider ref: $REF"
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
