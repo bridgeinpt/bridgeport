@@ -29,11 +29,27 @@ type Server struct {
 	CreatedAt     string         `json:"createdAt"`
 }
 
-// ServerMetrics is a single point-in-time metrics sample for a server, as
-// returned by GET /api/servers/:id/metrics (which yields a time series of
-// these). Numeric fields are pointers because the API returns null for any
-// metric a given collection mode (ssh/agent) doesn't report.
+// ServerMetrics is a computed point-in-time summary (percentages, totals) that
+// may be embedded on a Server as Server.Metrics. It is distinct from the raw
+// time-series samples returned by GetServerMetrics — see ServerMetricsSample.
 type ServerMetrics struct {
+	CPUPercent    float64 `json:"cpuPercent"`
+	MemoryPercent float64 `json:"memoryPercent"`
+	MemoryUsedMB  int64   `json:"memoryUsedMb"`
+	MemoryTotalMB int64   `json:"memoryTotalMb"`
+	DiskPercent   float64 `json:"diskPercent"`
+	DiskUsedGB    float64 `json:"diskUsedGb"`
+	DiskTotalGB   float64 `json:"diskTotalGb"`
+	UptimeSeconds int64   `json:"uptimeSeconds"`
+	Timestamp     string  `json:"timestamp"`
+}
+
+// ServerMetricsSample is a single raw metrics row as returned by
+// GET /api/servers/:id/metrics (which yields a time series of these). Numeric
+// fields are pointers because the API returns null for any metric a given
+// collection mode (ssh/agent) doesn't report — a nil pointer (not collected)
+// is meaningfully different from 0.
+type ServerMetricsSample struct {
 	ID             string   `json:"id"`
 	CPUPercent     *float64 `json:"cpuPercent"`
 	MemoryUsedMB   *float64 `json:"memoryUsedMb"`
@@ -176,9 +192,9 @@ func (c *Client) GetSSHKey(environmentID string) (*SSHCredentials, error) {
 
 // GetServerMetrics returns the recent time series of metrics samples for a
 // server (most recent first), as returned by GET /api/servers/:id/metrics.
-func (c *Client) GetServerMetrics(serverID string) ([]ServerMetrics, error) {
+func (c *Client) GetServerMetrics(serverID string) ([]ServerMetricsSample, error) {
 	var resp struct {
-		Metrics []ServerMetrics `json:"metrics"`
+		Metrics []ServerMetricsSample `json:"metrics"`
 	}
 	if err := c.Get(fmt.Sprintf("/api/servers/%s/metrics", serverID), &resp); err != nil {
 		return nil, err
