@@ -294,21 +294,26 @@ The Go SDK in `client/` (`github.com/bridgeinpt/bridgeport/client`) is a separat
 module within this repo. Because it is part of the HTTP API's contract surface,
 treat it like the API itself:
 
-- **Tag with the `client/` prefix.** Following Go's multi-module convention, the
-  client module is released as `client/vX.Y.Z` (not a bare `vX.Y.Z` — those are
-  the product/Docker release tags driven by `release.yml`). External consumers
-  `go get` a tagged version.
-- **Bump it in the same PR as wire-shape changes.** Any change that alters the
+- **Releases are tagged `client/vX.Y.Z`** — automatically. Following Go's
+  multi-module convention, the client module is released under a `client/`-prefixed
+  tag (not a bare `vX.Y.Z` — those are the product/Docker release tags driven by
+  `release.yml`). External consumers `go get` a tagged version.
+- **To release: bump `client/VERSION` in your PR.** The version lives in the
+  `client/VERSION` file. When your PR changes client source, bump it (additive →
+  minor; breaking → major; fixes → patch). On merge to `master`, the
+  **`client module`** workflow (`.github/workflows/client-release.yml`) runs the
+  client tests and tags `client/v<VERSION>` for you — no manual `git tag` step.
+  A PR check **fails** if you change client source without bumping `client/VERSION`,
+  so a release can't be silently skipped. (The workflow is idempotent: if the
+  version is already tagged, the merge is a no-op.)
+- **Keep the SDK in lockstep with the API.** Any change that alters the
   request/response shapes the client depends on (new/renamed fields, removed
-  endpoints, changed types) MUST update the client and be released alongside the
-  API change, so the published SDK never lags the contract it describes. Creating
-  the `client/vX.Y.Z` tag is a manual `git tag client/vX.Y.Z && git push origin
-  client/vX.Y.Z` step today; the product release flow does not create it
-  automatically.
+  endpoints, changed types) MUST update the client in the same PR and bump
+  `client/VERSION`, so the published SDK never lags the contract it describes.
 - **The CLI stays in lockstep locally.** `cli/go.mod` consumes the client via a
   `replace github.com/bridgeinpt/bridgeport/client => ../client` directive, so the
   CLI always builds against the in-repo client without needing a tagged release.
-  Tagging is only for external `go get` consumers.
+  Tagging is only for external `go get` consumers (e.g. the Terraform provider).
 
 ## Common Pitfalls
 
