@@ -92,8 +92,14 @@ jobs:
           if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
             PRERELEASE_FLAG="--prerelease"
           fi
+          # Attach the checked-in OpenAPI snapshot as a release asset. The spec
+          # is the canonical wire contract (see docs/api-stability.md); shipping
+          # it per release lets external clients — notably the
+          # terraform-provider-bridgeport spec-diff job — pin and diff the API
+          # surface against a stable, versioned URL.
           # shellcheck disable=SC2086
           gh release create "${GITHUB_REF_NAME}" \
             --title "${GITHUB_REF_NAME}" \
             --notes "${NOTES}" \
-            $PRERELEASE_FLAG
+            $PRERELEASE_FLAG \
+            openapi.json

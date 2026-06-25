@@ -81,10 +81,11 @@ The single source of truth for the wire format is the **OpenAPI 3.0.3 specificat
 |------|------|------|
 | Raw OpenAPI 3 spec (JSON) | `GET /openapi.json` | No |
 | Swagger UI (interactive) | `GET /api/docs` | No |
+| Per-release snapshot | `openapi.json` asset on each [GitHub Release](https://github.com/bridgeinpt/bridgeport/releases) | No |
 
-Both are unauthenticated so CI tools, code generators, and reverse-proxy probes can pull the spec without minting a token. `info.version` in the spec is sourced from the build's `APP_VERSION`.
+Both endpoints are unauthenticated so CI tools, code generators, and reverse-proxy probes can pull the spec without minting a token. `info.version` in the spec is sourced from the build's `APP_VERSION`. Every tagged release also attaches the spec as an `openapi.json` asset, so you can diff the contract between versions without a running instance — this is what lets downstream consumers (e.g. the `terraform-provider-bridgeport` spec-diff job) flag new or changed operations.
 
-**Pin the snapshot.** For reproducible integrations, fetch `/openapi.json` from the version you build against and commit it to your repo. Diff it against a later instance's spec to detect drift before upgrading:
+**Pin the snapshot.** For reproducible integrations, fetch `/openapi.json` from the version you build against (or download the `openapi.json` asset from its release) and commit it to your repo. Diff it against a later instance's spec to detect drift before upgrading:
 
 ```bash
 # Snapshot the contract you build against
