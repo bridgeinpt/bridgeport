@@ -11,15 +11,22 @@ type Environment struct {
 }
 
 type Server struct {
-	ID            string  `json:"id"`
-	Name          string  `json:"name"`
-	PrivateIP     string  `json:"privateIp"`
-	PublicIP      *string `json:"publicIp"`
-	EnvironmentID string  `json:"environmentId"`
-	Environment   *Environment `json:"environment,omitempty"`
-	Status        string  `json:"status"`
+	ID            string         `json:"id"`
+	Name          string         `json:"name"`
+	Hostname      string         `json:"hostname"`
+	PrivateIP     string         `json:"privateIp"`
+	PublicIP      *string        `json:"publicIp"`
+	// Tags is the raw JSON-encoded array string returned by the API
+	// (e.g. `["web","db"]`). Write requests take a real []string; the wire
+	// response is a string. Parse with json.Unmarshal if you need the slice.
+	Tags          string         `json:"tags,omitempty"`
+	DockerMode    string         `json:"dockerMode,omitempty"`
+	ClusterID     *string        `json:"clusterId,omitempty"`
+	EnvironmentID string         `json:"environmentId"`
+	Environment   *Environment   `json:"environment,omitempty"`
+	Status        string         `json:"status"`
 	Metrics       *ServerMetrics `json:"metrics,omitempty"`
-	CreatedAt     string  `json:"createdAt"`
+	CreatedAt     string         `json:"createdAt"`
 }
 
 type ServerMetrics struct {

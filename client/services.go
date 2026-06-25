@@ -3,15 +3,21 @@ package client
 import "fmt"
 
 // ServiceDeployment is one per-server runtime row attached to a Service template.
+// Config fields (containerName, composePath, envOverrides) are settable; the
+// rest (status/health/discovery/exposedPorts) are runtime-computed and read-only.
 type ServiceDeployment struct {
-	ID              string  `json:"id"`
-	ServiceID       string  `json:"serviceId"`
-	ServerID        string  `json:"serverId"`
-	ContainerName   string  `json:"containerName"`
+	ID            string  `json:"id"`
+	ServiceID     string  `json:"serviceId"`
+	ServerID      string  `json:"serverId"`
+	ContainerName string  `json:"containerName"`
+	ComposePath   *string `json:"composePath,omitempty"`
+	EnvOverrides  string  `json:"envOverrides,omitempty"` // raw JSON-encoded map string
+	// Runtime / computed (read-only):
 	Status          string  `json:"status"`
 	ContainerStatus string  `json:"containerStatus"`
 	HealthStatus    string  `json:"healthStatus"`
 	DiscoveryStatus string  `json:"discoveryStatus"`
+	ExposedPorts    *string `json:"exposedPorts,omitempty"` // raw JSON-encoded array string
 	LastDeployedAt  *string `json:"lastDeployedAt,omitempty"`
 	Server          *Server `json:"server,omitempty"`
 }
@@ -24,6 +30,13 @@ type Service struct {
 	ID                 string              `json:"id"`
 	Name               string              `json:"name"`
 	ImageTag           string              `json:"imageTag"`
+	ComposeTemplate    *string             `json:"composeTemplate,omitempty"`
+	HealthCheckURL     *string             `json:"healthCheckUrl,omitempty"`
+	BaseEnv            string              `json:"baseEnv,omitempty"` // raw JSON-encoded map string
+	DeployStrategy     string              `json:"deployStrategy,omitempty"`
+	HealthWaitMs       int                 `json:"healthWaitMs,omitempty"`
+	HealthRetries      int                 `json:"healthRetries,omitempty"`
+	HealthIntervalMs   int                 `json:"healthIntervalMs,omitempty"`
 	EnvironmentID      string              `json:"environmentId"`
 	ContainerImageID   string              `json:"containerImageId"`
 	ContainerImage     *ContainerImage     `json:"containerImage,omitempty"`
@@ -185,4 +198,153 @@ func (c *Client) ListServiceTypes() ([]ServiceType, error) {
 		return nil, err
 	}
 	return response.ServiceTypes, nil
+}
+
+// --- Service template CRUD ---
+
+// CreateServiceRequest is the body for POST /api/environments/:envId/services.
+// ImageTag defaults to "latest" server-side. DeployStrategy: "sequential" | "parallel".
+type CreateServiceRequest struct {
+	Name             string            `json:"name"`
+	ContainerImageID string            `json:"containerImageId"`
+	ImageTag         *string           `json:"imageTag,omitempty"`
+	ComposeTemplate  *string           `json:"composeTemplate,omitempty"`
+	HealthCheckURL   *string           `json:"healthCheckUrl,omitempty"`
+	BaseEnv          map[string]string `json:"baseEnv,omitempty"`
+	DeployStrategy   *string           `json:"deployStrategy,omitempty"`
+}
+
+// UpdateServiceRequest is the body for PATCH /api/services/:id.
+type UpdateServiceRequest struct {
+	Name             *string           `json:"name,omitempty"`
+	ContainerImageID *string           `json:"containerImageId,omitempty"`
+	ImageTag         *string           `json:"imageTag,omitempty"`
+	ComposeTemplate  *string           `json:"composeTemplate,omitempty"`
+	HealthCheckURL   *string           `json:"healthCheckUrl,omitempty"`
+	BaseEnv          map[string]string `json:"baseEnv,omitempty"`
+	DeployStrategy   *string           `json:"deployStrategy,omitempty"`
+	ServiceTypeID    *string           `json:"serviceTypeId,omitempty"`
+	HealthWaitMs     *int              `json:"healthWaitMs,omitempty"`
+	HealthRetries    *int              `json:"healthRetries,omitempty"`
+	HealthIntervalMs *int              `json:"healthIntervalMs,omitempty"`
+}
+
+// CreateService creates a service template (natural key: environment + name).
+func (c *Client) CreateService(environmentID string, req CreateServiceRequest) (*Service, error) {
+	var resp struct {
+		Service Service `json:"service"`
+	}
+	if err := c.Post(fmt.Sprintf("/api/environments/%s/services", environmentID), req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp.Service, nil
+}
+
+// UpdateService updates a service template by ID.
+func (c *Client) UpdateService(id string, req UpdateServiceRequest) (*Service, error) {
+	var resp struct {
+		Service Service `json:"service"`
+	}
+	if err := c.Patch(fmt.Sprintf("/api/services/%s", id), req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp.Service, nil
+}
+
+// DeleteService deletes a service template by ID (cascades its deployments).
+func (c *Client) DeleteService(id string) error {
+	return c.Delete(fmt.Sprintf("/api/services/%s", id), nil)
+}
+
+// --- ServiceDeployment CRUD (per-server placement) ---
+
+// CreateDeploymentRequest is the body for POST /api/services/:id/deployments.
+type CreateDeploymentRequest struct {
+	ServerID      string            `json:"serverId"`
+	ContainerName string            `json:"containerName"`
+	ComposePath   *string           `json:"composePath,omitempty"`
+	EnvOverrides  map[string]string `json:"envOverrides,omitempty"`
+}
+
+// UpdateDeploymentRequest is the body for PATCH /api/services/:id/deployments/:depId.
+// ServerID is not updatable — a deployment cannot be moved between servers.
+type UpdateDeploymentRequest struct {
+	ContainerName *string           `json:"containerName,omitempty"`
+	ComposePath   *string           `json:"composePath,omitempty"`
+	EnvOverrides  map[string]string `json:"envOverrides,omitempty"`
+}
+
+// CreateDeployment adds a deployment of a service template onto a server.
+func (c *Client) CreateDeployment(serviceID string, req CreateDeploymentRequest) (*ServiceDeployment, error) {
+	var resp struct {
+		Deployment ServiceDeployment `json:"deployment"`
+	}
+	if err := c.Post(fmt.Sprintf("/api/services/%s/deployments", serviceID), req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp.Deployment, nil
+}
+
+// UpdateDeployment updates a deployment.
+func (c *Client) UpdateDeployment(serviceID, deploymentID string, req UpdateDeploymentRequest) (*ServiceDeployment, error) {
+	var resp struct {
+		Deployment ServiceDeployment `json:"deployment"`
+	}
+	if err := c.Patch(fmt.Sprintf("/api/services/%s/deployments/%s", serviceID, deploymentID), req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp.Deployment, nil
+}
+
+// DeleteDeployment removes a deployment (the template is retained).
+func (c *Client) DeleteDeployment(serviceID, deploymentID string) error {
+	return c.Delete(fmt.Sprintf("/api/services/%s/deployments/%s", serviceID, deploymentID), nil)
+}
+
+// --- Config-file attachments (ConfigFile <-> Service) ---
+
+// ServiceFile is a config-file-to-service attachment.
+type ServiceFile struct {
+	ID                  string      `json:"id"`
+	ServiceID           string      `json:"serviceId"`
+	ConfigFileID        string      `json:"configFileId"`
+	ServiceDeploymentID *string     `json:"serviceDeploymentId,omitempty"`
+	TargetPath          string      `json:"targetPath"`
+	ConfigFile          *ConfigFile `json:"configFile,omitempty"`
+}
+
+// AttachFileRequest is the body for POST /api/services/:id/files.
+type AttachFileRequest struct {
+	ConfigFileID string `json:"configFileId"`
+	TargetPath   string `json:"targetPath"`
+}
+
+// AttachConfigFile attaches a config file to a service at a target path.
+func (c *Client) AttachConfigFile(serviceID string, req AttachFileRequest) (*ServiceFile, error) {
+	var resp struct {
+		ServiceFile ServiceFile `json:"serviceFile"`
+	}
+	if err := c.Post(fmt.Sprintf("/api/services/%s/files", serviceID), req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp.ServiceFile, nil
+}
+
+// UpdateServiceFile changes the target path of an attachment. The path segment
+// is the configFileId of the base attachment.
+func (c *Client) UpdateServiceFile(serviceID, configFileID, targetPath string) (*ServiceFile, error) {
+	var resp struct {
+		ServiceFile ServiceFile `json:"serviceFile"`
+	}
+	body := map[string]string{"targetPath": targetPath}
+	if err := c.Patch(fmt.Sprintf("/api/services/%s/files/%s", serviceID, configFileID), body, &resp); err != nil {
+		return nil, err
+	}
+	return &resp.ServiceFile, nil
+}
+
+// DetachConfigFile removes a config-file attachment from a service. The path
+// segment is the configFileId.
+func (c *Client) DetachConfigFile(serviceID, configFileID string) error {
+	return c.Delete(fmt.Sprintf("/api/services/%s/files/%s", serviceID, configFileID), nil)
 }
