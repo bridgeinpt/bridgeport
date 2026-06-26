@@ -2,6 +2,8 @@
 
 Visualize your entire infrastructure at a glance with BRIDGEPORT's interactive topology diagram -- see which services talk to which databases, how traffic flows between components, and where everything runs.
 
+![The BRIDGEPORT dashboard showing the interactive service topology diagram, with servers, services, connections, and external entities](../images/dashboard.png)
+
 ## Table of Contents
 
 - [Overview](#overview)

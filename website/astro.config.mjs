@@ -1,4 +1,4 @@
-import { defineConfig } from 'astro/config';
+import { defineConfig, passthroughImageService } from 'astro/config';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import starlight from '@astrojs/starlight';
@@ -22,6 +22,9 @@ const require = createRequire(import.meta.url);
 // https://astro.build/config
 export default defineConfig({
   site: SITE,
+  // Serve doc screenshots as-is (no Sharp). They're already small, and this avoids a
+  // fragile native build dependency on the CI/Cloudflare builders.
+  image: { service: passthroughImageService() },
   vite: {
     resolve: {
       // MDX pages live in ../docs (outside this package), so their

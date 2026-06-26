@@ -2,6 +2,8 @@
 
 A **service** in BRIDGEPORT is an **environment-scoped template** that describes _what_ to run (image, tag, health checks, compose template, base env). Where it actually runs is captured by one or more **service deployments**, each pinning the template to a specific server with its own container name, env overrides, and runtime status.
 
+![The Services list showing running, healthy services with their image tags, deployments, and exposed ports](../images/services-list.png)
+
 > [!NOTE]
 > **2.0 split.** Earlier versions tied a Service directly to a single Server. As of v2.0, a Service is a reusable template and a `ServiceDeployment` row stores per-server runtime state (status, health, container name, exposed ports, last discovered, etc.). The auto-migration creates exactly one `ServiceDeployment` per pre-existing service so nothing is lost.
 
