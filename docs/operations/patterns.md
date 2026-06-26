@@ -356,7 +356,7 @@ After setting up service connections in the topology editor (Dashboard), you get
 
 ## Related Documentation
 
-- [Getting Started](../getting-started.md) -- initial setup guide
+- [Getting Started](../getting-started.mdx) -- initial setup guide
 - [Installation](../installation.md) -- deployment options
 - [Container Images](../guides/container-images.md) -- image management
 - [Deployment Plans](../guides/deployment-plans.md) -- orchestrated deployments

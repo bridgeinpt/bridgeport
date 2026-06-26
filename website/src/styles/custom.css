@@ -1,13 +1,37 @@
-/* BridgePort brand accent (burgundy #cc0000 family) applied to Starlight's accent
-   color tokens, used for links, active nav, and focus states. */
+/* Inter — matches the BridgePort app UI for brand cohesion. */
+@import '@fontsource-variable/inter';
+
 :root {
-  --sl-color-accent-low: #3a0a0a;
-  --sl-color-accent: #cc2b2b;
-  --sl-color-accent-high: #f3bcbc;
+  --sl-font: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+/* Accent = the app's interactive "primary" sky (#0284c7), used for links and the active
+   nav item — same as the BridgePort UI. (Burgundy stays the brand mark / crane logo only.)
+   Three shades per theme: -low (subtle backgrounds), base, -high (accent text). */
+:root {
+  --sl-color-accent-low: #0c4a6e; /* sky-900 */
+  --sl-color-accent: #0284c7; /* sky-600 — app --primary */
+  --sl-color-accent-high: #bae6fd; /* sky-200 — readable accent text on dark */
 }
 
 :root[data-theme='light'] {
-  --sl-color-accent-low: #ffe1e1;
-  --sl-color-accent: #c00000;
-  --sl-color-accent-high: #5c0000;
+  --sl-color-accent-low: #e0f2fe; /* sky-100 */
+  --sl-color-accent: #0284c7; /* sky-600 */
+  --sl-color-accent-high: #075985; /* sky-800 — readable accent text on light */
+}
+
+/* Keep the top-bar chrome neutral. Starlight tints the site title and social icons with
+   the accent color (--sl-color-text-accent), which makes them look "selected". The accent
+   belongs on links and the active nav item, not on always-present chrome — so force these
+   to the regular high-contrast / muted text colors (theme-aware). */
+.site-title {
+  color: var(--sl-color-white);
+}
+
+.social-icons a {
+  color: var(--sl-color-gray-2);
+}
+
+.social-icons a:hover {
+  color: var(--sl-color-white);
 }

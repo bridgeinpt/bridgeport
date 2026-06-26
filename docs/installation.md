@@ -100,7 +100,7 @@ EOF
 
 ### 4. Create `docker-compose.yml`
 
-```yaml
+```yaml title="docker-compose.yml"
 services:
   bridgeport:
     # :latest tracks the most recent stable release. Pin to a major (:1),
@@ -198,7 +198,7 @@ networks:
 
 With a `Caddyfile`:
 
-```
+```text title="Caddyfile"
 deploy.yourcompany.com {
     reverse_proxy bridgeport:3000
 }

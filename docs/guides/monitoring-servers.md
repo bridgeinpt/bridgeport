@@ -2,6 +2,8 @@
 
 BRIDGEPORT collects server-level metrics (CPU, memory, disk, load, swap, TCP connections, and file descriptors) via SSH polling or a lightweight push agent, stores them as time-series data, and visualizes them in interactive charts.
 
+![Server monitoring with interactive CPU, memory, swap, and disk time-series charts across multiple servers](../images/monitoring-servers.png)
+
 ## Quick Start
 
 1. Navigate to **Servers** and select a server.

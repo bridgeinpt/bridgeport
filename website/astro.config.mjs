@@ -1,18 +1,44 @@
-import { defineConfig } from 'astro/config';
+import { defineConfig, passthroughImageService } from 'astro/config';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import starlight from '@astrojs/starlight';
+import sitemap from '@astrojs/sitemap';
+import mermaid from 'astro-mermaid';
 import starlightOpenAPI, { openAPISidebarGroups } from 'starlight-openapi';
 import starlightLinksValidator from 'starlight-links-validator';
+import starlightLlmsTxt from 'starlight-llms-txt';
+import starlightImageZoom from 'starlight-image-zoom';
+import starlightChangelogs from 'starlight-changelogs';
 import githubAdmonitionsToDirectives from 'remark-github-admonitions-to-directives';
 import remarkStripFirstH1 from './src/plugins/remark-strip-first-h1.mjs';
+import remarkStripTableOfContents from './src/plugins/remark-strip-toc.mjs';
 import remarkRewriteDocLinks from './src/plugins/remark-rewrite-doc-links.mjs';
 import remarkInjectDocSlug from './src/plugins/remark-inject-doc-slug.mjs';
 
+const SITE = 'https://bridgeport.bridgein.com';
 const docsDir = fileURLToPath(new URL('../docs', import.meta.url));
+const require = createRequire(import.meta.url);
 
 // https://astro.build/config
 export default defineConfig({
-  site: 'https://bridgeport.bridgein.com',
+  site: SITE,
+  // Serve doc screenshots as-is (no Sharp). They're already small, and this avoids a
+  // fragile native build dependency on the CI/Cloudflare builders.
+  image: { service: passthroughImageService() },
+  vite: {
+    resolve: {
+      // MDX pages live in ../docs (outside this package), so their
+      // `import ... from '@astrojs/starlight/components'` can't find node_modules here.
+      // Map the bare specifier to the resolved path so it works from outside the root.
+      // Anchored regex => exact match only (don't rewrite `.../components/Foo` subpaths).
+      alias: [
+        {
+          find: /^@astrojs\/starlight\/components$/,
+          replacement: require.resolve('@astrojs/starlight/components'),
+        },
+      ],
+    },
+  },
   markdown: {
     // `env` and `caddyfile` aren't bundled Shiki grammars; alias them to close matches
     // so these code blocks get highlighted instead of falling back to plain text.
@@ -24,6 +50,9 @@ export default defineConfig({
       githubAdmonitionsToDirectives,
       // Derive the page title from the leading `# Heading`, then drop it from the body.
       remarkStripFirstH1,
+      // Drop manual "## Table of Contents" sections — the right-rail TOC replaces them on
+      // the site (they stay in the source files, where they're useful on GitHub).
+      remarkStripTableOfContents,
       // Rewrite repo-relative `.md` links to published site routes.
       [remarkRewriteDocLinks, { docsDir }],
       // Tag each page with its route slug so starlight-links-validator can key it
@@ -32,6 +61,8 @@ export default defineConfig({
     ],
   },
   integrations: [
+    // Render ```mermaid code blocks as diagrams (client-side). Must precede starlight.
+    mermaid({ theme: 'default', autoTheme: true }),
     starlight({
       title: 'BridgePort',
       description:
@@ -42,6 +73,15 @@ export default defineConfig({
       // The port-gantry-crane mark (burgundy), shown alongside the title and as the favicon.
       logo: { src: './src/assets/logo.svg', replacesTitle: false },
       favicon: '/favicon.svg',
+      // Social/link-unfurl preview image (reuses the repo's social card).
+      head: [
+        { tag: 'meta', attrs: { property: 'og:image', content: `${SITE}/social-preview.png` } },
+        { tag: 'meta', attrs: { property: 'og:image:alt', content: 'BridgePort' } },
+        { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },
+        { tag: 'meta', attrs: { name: 'twitter:image', content: `${SITE}/social-preview.png` } },
+      ],
+      // "Edit this page" → the source file on GitHub.
+      editLink: { baseUrl: 'https://github.com/bridgeinpt/bridgeport/edit/master/docs/' },
       // Our docs are loaded from the repo's docs/ directory rather than src/content/docs,
       // so tell Starlight to run its Markdown transforms (asides, heading-anchor links) there.
       markdown: { processedDirs: ['../docs'] },
@@ -50,10 +90,20 @@ export default defineConfig({
         starlightOpenAPI([
           { base: 'reference/api', schema: '../openapi.json', label: 'API Reference' },
         ]),
+        // Generate llms.txt / llms-full.txt so AI agents can consume the docs.
+        starlightLlmsTxt({
+          projectName: 'BridgePort',
+          description:
+            'Self-hosted tool to deploy, orchestrate, and monitor Docker services across servers — production-grade ops without Kubernetes.',
+        }),
+        // Click-to-zoom on images (activates once docs include screenshots).
+        starlightImageZoom(),
+        // Changelog generated from the repo's GitHub Releases (config in content.config.ts).
+        starlightChangelogs(),
         starlightLinksValidator({
-          // The generated OpenAPI pages aren't markdown, so the validator has no
-          // heading data for them and can't verify links pointing into the reference.
-          exclude: ['/reference/api/', '/reference/api/**'],
+          // The generated OpenAPI + changelog pages aren't markdown, so the validator has
+          // no heading data for them and can't verify links pointing into those sections.
+          exclude: ['/reference/api/', '/reference/api/**', '/changelog/', '/changelog/**'],
           // localhost URLs are intentional examples for a self-hosted product.
           errorOnLocalLinks: false,
         }),
@@ -147,7 +197,9 @@ export default defineConfig({
             { label: 'Architecture Patterns', link: '/operations/patterns/' },
           ],
         },
+        { label: 'Changelog', link: '/changelog/' },
       ],
     }),
+    sitemap(),
   ],
 });

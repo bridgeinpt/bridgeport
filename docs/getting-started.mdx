@@ -1,3 +1,5 @@
+import { Tabs, TabItem, Steps } from '@astrojs/starlight/components';
+
 # Getting Started
 
 Get BRIDGEPORT running and manage your first server in under 5 minutes.
@@ -13,6 +15,8 @@ By the end of this guide, you will have:
 3. A server added and connected
 4. Your running Docker containers discovered as services
 
+![The BRIDGEPORT dashboard — your servers, services, and their connections at a glance](images/dashboard.png)
+
 ## Prerequisites
 
 - **Docker** installed on your machine ([install Docker](https://docs.docker.com/get-docker/))
@@ -27,7 +31,7 @@ By the end of this guide, you will have:
 
 Run this single command to start BRIDGEPORT:
 
-```bash
+```bash title="Start BRIDGEPORT (quick try-out)"
 docker run -d \
   --name bridgeport \
   -p 3000:3000 \
@@ -92,10 +96,14 @@ After logging in, you'll land on an empty dashboard. Time to set things up.
 
 Environments are how BRIDGEPORT organizes your infrastructure. Think of them as logical groups -- "production", "staging", "dev", etc. Each environment has its own servers, services, secrets, and settings.
 
+<Steps>
+
 1. Look at the **sidebar** on the left
 2. Click the **environment selector** dropdown at the top
 3. Click **Create Environment**
 4. Enter a name (e.g., `production`) and click **Create**
+
+</Steps>
 
 Your new environment is now active.
 
@@ -114,7 +122,8 @@ flowchart TD
     B --> B1["Paste your SSH key<br/>in environment settings"]
 ```
 
-### Option A: Same Machine (Docker Socket)
+<Tabs>
+<TabItem label="Same machine (Docker socket)">
 
 If your containers run on the same machine as BRIDGEPORT, mount the Docker socket. First, stop and re-create the container:
 
@@ -124,7 +133,7 @@ docker stop bridgeport && docker rm bridgeport
 
 Then re-run with the socket mounted:
 
-```bash
+```bash title="Re-run with the Docker socket mounted"
 docker run -d \
   --name bridgeport \
   -p 3000:3000 \
@@ -140,9 +149,12 @@ docker run -d \
 > [!NOTE]
 > When the Docker socket is mounted and accessible, BRIDGEPORT automatically detects the host and creates a "localhost" server. Navigate to **Servers** in the sidebar -- you should see it already listed.
 
-### Option B: Remote Server (SSH)
+</TabItem>
+<TabItem label="Remote server (SSH)">
 
 For remote servers, you'll connect via SSH.
+
+<Steps>
 
 1. **Upload your SSH key**: Go to **Configuration > Environment Settings** in the sidebar, then upload the SSH private key that has access to your server
 2. **Add the server**: Go to **Servers** in the sidebar and click **Add Server**
@@ -151,10 +163,15 @@ For remote servers, you'll connect via SSH.
    - **Hostname**: The server's IP or domain (e.g., `10.0.1.50`)
 4. **Test the connection**: BRIDGEPORT will verify SSH connectivity
 
+</Steps>
+
 Once connected, the server should appear with a **healthy** status.
 
 > [!TIP]
 > SSH keys are encrypted at rest and stored per-environment. Each environment can have its own SSH key for security isolation.
+
+</TabItem>
+</Tabs>
 
 ---
 
@@ -162,10 +179,14 @@ Once connected, the server should appear with a **healthy** status.
 
 Now for the fun part -- seeing your running containers.
 
+<Steps>
+
 1. Go to **Servers** in the sidebar
 2. Find your server and click **Discover**
 3. BRIDGEPORT scans the server for running Docker containers
 4. Each container appears as a **Service** with its image, status, and ports
+
+</Steps>
 
 Navigate to **Services** in the sidebar to see everything that was discovered. Each service is linked to a **Container Image**, which BRIDGEPORT uses to track tags, check for updates, and manage deployments.
 
@@ -175,6 +196,8 @@ Navigate to **Services** in the sidebar to see everything that was discovered. E
 
 Ready to see BRIDGEPORT in action? Try deploying a new tag to one of your services.
 
+<Steps>
+
 1. Go to **Services** and click on a service
 2. In the **Deploy** card, enter a new image tag (e.g., `v1.2.0`)
 3. Click **Deploy**
@@ -183,6 +206,8 @@ Ready to see BRIDGEPORT in action? Try deploying a new tag to one of your servic
    - Container stopped
    - New container started
    - Health check passed
+
+</Steps>
 
 The deployment is recorded in the service's **Deployment History** with full logs and timestamps.
 

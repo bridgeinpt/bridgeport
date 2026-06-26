@@ -1,5 +1,6 @@
 import { defineCollection } from 'astro:content';
 import { docsSchema } from '@astrojs/starlight/schema';
+import { changelogsLoader } from 'starlight-changelogs/loader';
 import { glob } from 'astro/loaders';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -74,4 +75,21 @@ export const collections = {
     loader: repoDocsLoader(),
     schema: docsSchema(),
   }),
+  // Changelog generated from the repo's GitHub Releases (single source — published by
+  // the /release workflow; nothing duplicated). Fetched at build; set GH_API_TOKEN to
+  // raise the GitHub API rate limit if builds ever get frequent.
+  changelogs: defineCollection({
+    loader: changelogsLoader([
+      {
+        provider: 'github',
+        base: 'changelog',
+        owner: 'bridgeinpt',
+        repo: 'bridgeport',
+        title: 'Changelog',
+        pageSize: 20,
+        token: process.env.GH_API_TOKEN,
+      },
+    ]),
+  }),
 };
+
