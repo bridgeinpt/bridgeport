@@ -73,7 +73,8 @@ func main() {
 ```
 
 Other read methods follow the same shape, e.g. `c.ListEnvironments()`,
-`c.ListServers(environmentID)`, and `c.ListServices(serverID)`.
+`c.ListServers(environmentID)`, `c.ListServices(serverID)`, and
+`c.GetHealth()` (instance version/status, for version negotiation).
 
 ## Writes
 

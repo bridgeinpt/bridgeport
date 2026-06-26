@@ -100,10 +100,10 @@ func TestClientNoAuthHeader(t *testing.T) {
 
 func TestClientAPIError(t *testing.T) {
 	tests := []struct {
-		name       string
-		status     int
-		body       string
-		wantMsg    string
+		name    string
+		status  int
+		body    string
+		wantMsg string
 	}{
 		{
 			name:    "error field",
@@ -215,6 +215,30 @@ func TestClientGetCurrentUser(t *testing.T) {
 	assert.Equal(t, "user-1", user.ID)
 	assert.Equal(t, "user@example.com", user.Email)
 	assert.Equal(t, "admin", user.Role)
+}
+
+func TestClientGetHealth(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/health", r.URL.Path)
+		w.Write([]byte(`{
+			"status":"ok",
+			"timestamp":"2026-06-26T00:00:00Z",
+			"version":"2026062600-abc1234",
+			"bundledAgentVersion":"2026062500-def5678",
+			"cliVersion":"2026062400-9876fed"
+		}`))
+	}))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, "test-token")
+
+	health, err := client.GetHealth()
+	require.NoError(t, err)
+	assert.Equal(t, "ok", health.Status)
+	assert.Equal(t, "2026-06-26T00:00:00Z", health.Timestamp)
+	assert.Equal(t, "2026062600-abc1234", health.Version)
+	assert.Equal(t, "2026062500-def5678", health.BundledAgentVersion)
+	assert.Equal(t, "2026062400-9876fed", health.CliVersion)
 }
 
 func TestClientValidateToken(t *testing.T) {
