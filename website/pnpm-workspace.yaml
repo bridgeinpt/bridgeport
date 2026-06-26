@@ -7,6 +7,14 @@
 packages:
   - '.'
 
+# Security overrides — force patched versions of transitive dependencies flagged
+# by Dependabot. These live on the docs-site build path only (Astro/Starlight
+# tooling); they never reach the app runtime or the Docker image. We pin the
+# fixed versions so the alerts close and can't silently regress.
+#   form-data  GHSA-hmw2-7cc7-3qxx / CVE-2026-12143  (<4.0.6)  via httpsnippet → starlight-openapi
+overrides:
+  form-data: '^4.0.6'
+
 # Build scripts the Astro toolchain needs. Both install prebuilt binaries (no local
 # compilation): sharp links libvips for image optimization; esbuild links its
 # platform binary. Anything else stays blocked (strictDepBuilds below).
