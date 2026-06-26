@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://bridgeport.bridgein.com/sitemap-index.xml
