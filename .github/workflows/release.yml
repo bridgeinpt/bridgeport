@@ -103,3 +103,25 @@ jobs:
             --notes "${NOTES}" \
             $PRERELEASE_FLAG \
             openapi.json
+
+      - name: Refresh docs changelog (Cloudflare deploy hook)
+        # The docs changelog is generated from GitHub Releases at build time. Cloudflare
+        # rebuilds the docs on master pushes, but NOT on the Release created above —
+        # GitHub suppresses workflow triggers from GITHUB_TOKEN-created events, so a
+        # standalone `release: published` hook can't fire here. POST the deploy hook
+        # directly (a plain HTTP call, not a GitHub event) to rebuild the docs with this
+        # release. Non-fatal (the release is already published); skipped for prereleases.
+        env:
+          HOOK: ${{ secrets.CLOUDFLARE_DEPLOY_HOOK }}
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == *-* ]]; then
+            echo "Prerelease ${GITHUB_REF_NAME} — not refreshing the public docs changelog."
+            exit 0
+          fi
+          if [ -z "$HOOK" ]; then
+            echo "CLOUDFLARE_DEPLOY_HOOK not set — skipping docs rebuild."
+            exit 0
+          fi
+          curl -fsS -X POST "$HOOK" >/dev/null \
+            && echo "Triggered docs site rebuild." \
+            || echo "Deploy hook failed (non-fatal — release is already published)."

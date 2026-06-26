@@ -5,6 +5,11 @@ name: Docs Deploy on Release
 # time, but Cloudflare only rebuilds on pushes to master — so without this, a freshly
 # published release wouldn't appear on the changelog until the next master deploy.
 #
+# NOTE: releases cut by release.yml use GITHUB_TOKEN, and GitHub does NOT trigger
+# workflows from GITHUB_TOKEN-created events — so this does NOT fire for the /release
+# flow. release.yml pings the deploy hook itself for that path; this workflow covers
+# Releases published/edited manually via the GitHub UI, plus manual workflow_dispatch.
+#
 # Setup (one-time): in the Cloudflare Pages "bridgeport" project →
 #   Settings → Builds & deployments → Deploy hooks → create a hook (production / master),
 #   then store its URL as the repo secret CLOUDFLARE_DEPLOY_HOOK
