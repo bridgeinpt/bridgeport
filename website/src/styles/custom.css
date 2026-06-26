@@ -1,0 +1,13 @@
+/* BridgePort brand accent (burgundy #cc0000 family) applied to Starlight's accent
+   color tokens, used for links, active nav, and focus states. */
+:root {
+  --sl-color-accent-low: #3a0a0a;
+  --sl-color-accent: #cc2b2b;
+  --sl-color-accent-high: #f3bcbc;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #ffe1e1;
+  --sl-color-accent: #c00000;
+  --sl-color-accent-high: #5c0000;
+}

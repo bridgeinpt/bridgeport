@@ -271,7 +271,7 @@ The apply flow depends on the suggestion kind.
 
 1. **Confirm** -- review the proposed key, type, and affected files. The value is prefilled (editable). Edit the key/type before proceeding.
 2. **Preview** -- see a per-file diff showing only the changed lines (`literal-value` → `${KEY}`). Each file is a collapsible section so multi-file changes stay manageable. Substitution only replaces lines where the value is the entire right-hand side of a `KEY=value` (or `KEY: value`) pair -- substring occurrences inside other values (e.g. `staging` inside `app-staging.bridgein.com`) are intentionally left alone. Nothing is written yet.
-3. **Apply** -- BRIDGEPORT creates the secret or var (if not already present), substitutes the value in every selected file, saves the previous content to [file history](config-files.md#file-history) for rollback, and writes an audit log entry per mutation with `source: config_scan`.
+3. **Apply** -- BRIDGEPORT creates the secret or var (if not already present), substitutes the value in every selected file, saves the previous content to [file history](config-files.md#edit-history-and-rollback) for rollback, and writes an audit log entry per mutation with `source: config_scan`.
 
 **Missing references** skip the preview step (no file modifications happen):
 
@@ -552,5 +552,5 @@ The scanner only surfaces values that (a) meet `scanMinLength`, (b) exceed `scan
 
 - [Config Files](config-files.md) -- Using `${KEY}` placeholders in config file templates
 - [Environment Settings](environments.md) -- The `allowSecretReveal` toggle
-- [Audit Logs](../audit.md) -- Tracking secret access
+- [Audit Logs](../operations/security.md#audit-logging) -- Tracking secret access
 - [Configuration Reference](../configuration.md) -- `MASTER_KEY` environment variable
