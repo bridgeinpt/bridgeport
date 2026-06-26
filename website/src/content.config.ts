@@ -70,6 +70,23 @@ function repoDocsLoader() {
   };
 }
 
+// Wrap a content loader so a load() failure is logged and swallowed instead of failing
+// the whole build — used for the changelog's build-time GitHub fetch so a transient
+// rate-limit / API blip degrades to "no changelog this build" rather than a broken deploy.
+function resilientLoader(loader: ReturnType<typeof changelogsLoader>) {
+  return {
+    ...loader,
+    load: async (context: Parameters<typeof loader.load>[0]) => {
+      try {
+        await loader.load(context);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        context.logger?.warn?.(`Changelog load failed — skipping this build (${msg})`);
+      }
+    },
+  };
+}
+
 export const collections = {
   docs: defineCollection({
     loader: repoDocsLoader(),
@@ -79,17 +96,19 @@ export const collections = {
   // the /release workflow; nothing duplicated). Fetched at build; set GH_API_TOKEN to
   // raise the GitHub API rate limit if builds ever get frequent.
   changelogs: defineCollection({
-    loader: changelogsLoader([
-      {
-        provider: 'github',
-        base: 'changelog',
-        owner: 'bridgeinpt',
-        repo: 'bridgeport',
-        title: 'Changelog',
-        pageSize: 20,
-        token: process.env.GH_API_TOKEN,
-      },
-    ]),
+    loader: resilientLoader(
+      changelogsLoader([
+        {
+          provider: 'github',
+          base: 'changelog',
+          owner: 'bridgeinpt',
+          repo: 'bridgeport',
+          title: 'Changelog',
+          pageSize: 20,
+          token: process.env.GH_API_TOKEN,
+        },
+      ]),
+    ),
   }),
 };
 

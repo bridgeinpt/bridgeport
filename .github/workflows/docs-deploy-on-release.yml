@@ -1,0 +1,40 @@
+name: Docs Deploy on Release
+
+# When a GitHub Release is published (or its notes edited), ping Cloudflare Pages to
+# rebuild the docs site. The docs changelog is generated from GitHub Releases at BUILD
+# time, but Cloudflare only rebuilds on pushes to master — so without this, a freshly
+# published release wouldn't appear on the changelog until the next master deploy.
+#
+# Setup (one-time): in the Cloudflare Pages "bridgeport" project →
+#   Settings → Builds & deployments → Deploy hooks → create a hook (production / master),
+#   then store its URL as the repo secret CLOUDFLARE_DEPLOY_HOOK
+#   (repo Settings → Secrets and variables → Actions).
+# Until the secret is set, this workflow is a no-op (it skips, it doesn't fail).
+
+on:
+  release:
+    types: [published, edited]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-deploy-on-release
+  cancel-in-progress: true
+
+jobs:
+  trigger:
+    name: Trigger Cloudflare Pages rebuild
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: POST the Cloudflare deploy hook
+        env:
+          HOOK: ${{ secrets.CLOUDFLARE_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "CLOUDFLARE_DEPLOY_HOOK secret not set — skipping (add it to refresh the docs changelog on release)."
+            exit 0
+          fi
+          curl -fsS -X POST "$HOOK" >/dev/null && echo "Triggered Cloudflare Pages rebuild of the docs site."

@@ -47,4 +47,9 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Build site (runs link validation + OpenAPI parse)
         working-directory: website
+        # Authenticate the changelog's GitHub API fetch (GITHUB_TOKEN ~1000 req/hr) so it
+        # isn't subject to the unauthenticated 60/hr limit. The fetch is also non-fatal
+        # (see content.config.ts), so a blip degrades to "no changelog" rather than a fail.
+        env:
+          GH_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: pnpm build
