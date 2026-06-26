@@ -8,8 +8,10 @@ import starlightOpenAPI, { openAPISidebarGroups } from 'starlight-openapi';
 import starlightLinksValidator from 'starlight-links-validator';
 import starlightLlmsTxt from 'starlight-llms-txt';
 import starlightImageZoom from 'starlight-image-zoom';
+import starlightChangelogs from 'starlight-changelogs';
 import githubAdmonitionsToDirectives from 'remark-github-admonitions-to-directives';
 import remarkStripFirstH1 from './src/plugins/remark-strip-first-h1.mjs';
+import remarkStripTableOfContents from './src/plugins/remark-strip-toc.mjs';
 import remarkRewriteDocLinks from './src/plugins/remark-rewrite-doc-links.mjs';
 import remarkInjectDocSlug from './src/plugins/remark-inject-doc-slug.mjs';
 
@@ -45,6 +47,9 @@ export default defineConfig({
       githubAdmonitionsToDirectives,
       // Derive the page title from the leading `# Heading`, then drop it from the body.
       remarkStripFirstH1,
+      // Drop manual "## Table of Contents" sections — the right-rail TOC replaces them on
+      // the site (they stay in the source files, where they're useful on GitHub).
+      remarkStripTableOfContents,
       // Rewrite repo-relative `.md` links to published site routes.
       [remarkRewriteDocLinks, { docsDir }],
       // Tag each page with its route slug so starlight-links-validator can key it
@@ -90,10 +95,12 @@ export default defineConfig({
         }),
         // Click-to-zoom on images (activates once docs include screenshots).
         starlightImageZoom(),
+        // Changelog generated from the repo's GitHub Releases (config in content.config.ts).
+        starlightChangelogs(),
         starlightLinksValidator({
-          // The generated OpenAPI pages aren't markdown, so the validator has no
-          // heading data for them and can't verify links pointing into the reference.
-          exclude: ['/reference/api/', '/reference/api/**'],
+          // The generated OpenAPI + changelog pages aren't markdown, so the validator has
+          // no heading data for them and can't verify links pointing into those sections.
+          exclude: ['/reference/api/', '/reference/api/**', '/changelog/', '/changelog/**'],
           // localhost URLs are intentional examples for a self-hosted product.
           errorOnLocalLinks: false,
         }),
@@ -187,6 +194,7 @@ export default defineConfig({
             { label: 'Architecture Patterns', link: '/operations/patterns/' },
           ],
         },
+        { label: 'Changelog', link: '/changelog/' },
       ],
     }),
     sitemap(),
