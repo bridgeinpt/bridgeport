@@ -10,7 +10,7 @@ New to BRIDGEPORT? Start from the top and work down.
 
 | Doc | Description |
 |-----|-------------|
-| [Getting Started](getting-started.md) | Deploy BRIDGEPORT and manage your first server in 5 minutes |
+| [Getting Started](getting-started.mdx) | Deploy BRIDGEPORT and manage your first server in 5 minutes |
 | [Core Concepts](concepts.md) | How BRIDGEPORT thinks: environments, servers, services, images |
 | [Installation Guide](installation.md) | Docker run, Docker Compose, reverse proxy, and development setup |
 | [Configuration Reference](configuration.md) | Every environment variable, with recipes for common setups |
@@ -123,7 +123,7 @@ Help build BRIDGEPORT.
 
 | I want to... | Go here |
 |---|---|
-| Get BRIDGEPORT running in 5 minutes | [Getting Started](getting-started.md) |
+| Get BRIDGEPORT running in 5 minutes | [Getting Started](getting-started.mdx) |
 | Deploy to production | [Installation Guide](installation.md) |
 | Add my first server | [Servers](guides/servers.md) |
 | Deploy a service | [Services](guides/services.md) |

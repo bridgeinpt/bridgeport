@@ -1,5 +1,6 @@
 import { defineConfig } from 'astro/config';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import starlight from '@astrojs/starlight';
 import sitemap from '@astrojs/sitemap';
 import mermaid from 'astro-mermaid';
@@ -14,10 +15,25 @@ import remarkInjectDocSlug from './src/plugins/remark-inject-doc-slug.mjs';
 
 const SITE = 'https://bridgeport.bridgein.com';
 const docsDir = fileURLToPath(new URL('../docs', import.meta.url));
+const require = createRequire(import.meta.url);
 
 // https://astro.build/config
 export default defineConfig({
   site: SITE,
+  vite: {
+    resolve: {
+      // MDX pages live in ../docs (outside this package), so their
+      // `import ... from '@astrojs/starlight/components'` can't find node_modules here.
+      // Map the bare specifier to the resolved path so it works from outside the root.
+      // Anchored regex => exact match only (don't rewrite `.../components/Foo` subpaths).
+      alias: [
+        {
+          find: /^@astrojs\/starlight\/components$/,
+          replacement: require.resolve('@astrojs/starlight/components'),
+        },
+      ],
+    },
+  },
   markdown: {
     // `env` and `caddyfile` aren't bundled Shiki grammars; alias them to close matches
     // so these code blocks get highlighted instead of falling back to plain text.
