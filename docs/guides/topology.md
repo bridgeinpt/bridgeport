@@ -8,7 +8,7 @@ Visualize your entire infrastructure at a glance with BRIDGEPORT's interactive t
 - [Quick Start](#quick-start)
 - [How It Works](#how-it-works)
 - [Creating Connections](#creating-connections)
-  - [Connection Properties](#connection-properties)
+  - [Connection metadata](#connection-metadata)
   - [Direction Explained](#direction-explained)
 - [External Entities](#external-entities)
 - [Server Clustering](#server-clustering)

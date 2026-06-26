@@ -1,0 +1,19 @@
+# Standalone workspace for the documentation site.
+#
+# The docs site is intentionally NOT part of the root app workspace: keeping its
+# frontend toolchain (Astro, sharp, etc.) out of the app's pnpm-lock.yaml means the
+# production Docker image's `--prod --filter=bridgeport` install is unaffected. CI
+# and Cloudflare Pages install/build from this directory.
+packages:
+  - '.'
+
+# Build scripts the Astro toolchain needs. Both install prebuilt binaries (no local
+# compilation): sharp links libvips for image optimization; esbuild links its
+# platform binary. Anything else stays blocked (strictDepBuilds below).
+allowBuilds:
+  sharp: true
+  esbuild: true
+
+# Mirror the app workspace's supply-chain posture.
+minimumReleaseAge: 1440
+strictDepBuilds: true

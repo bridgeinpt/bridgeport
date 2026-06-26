@@ -28,7 +28,7 @@
 
 <p align="center">
   <a href="#quick-start"><b>Quick Start</b></a> &nbsp;·&nbsp;
-  <a href="docs/getting-started.md">Docs</a> &nbsp;·&nbsp;
+  <a href="https://bridgeport.bridgein.com">Docs</a> &nbsp;·&nbsp;
   <a href="#key-features">Features</a> &nbsp;·&nbsp;
   <a href="docs/reference/cli.md">CLI</a>
 </p>

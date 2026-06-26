@@ -1,0 +1,22 @@
+{
+  "name": "bridgeport-website",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.7.0",
+  "description": "Public documentation site for BridgePort, built with Astro Starlight from the repo's docs/ markdown.",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "astro check"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.41.0",
+    "astro": "^7.0.2",
+    "remark-github-admonitions-to-directives": "^2.1.0",
+    "starlight-links-validator": "^0.24.1",
+    "starlight-openapi": "^0.25.3",
+    "unist-util-visit": "^5.1.0"
+  }
+}

@@ -7,7 +7,7 @@ How BRIDGEPORT thinks about your infrastructure -- the mental model you need to 
 ## Table of Contents
 
 - [Architecture Overview](#architecture-overview)
-- [Core Concepts](#core-concepts-1)
+- [Core Entities](#core-entities)
 - [How Concepts Relate](#how-concepts-relate)
 - [Glossary](#glossary)
 
@@ -53,7 +53,7 @@ graph TB
 
 ---
 
-## Core Concepts
+## Core Entities
 
 ### Environment
 

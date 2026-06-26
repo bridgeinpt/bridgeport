@@ -1,0 +1,50 @@
+name: Docs Site
+
+# Builds the public documentation site (website/) on changes to the docs source,
+# the OpenAPI spec, or the site itself. `astro build` runs starlight-links-validator
+# and parses openapi.json, so a broken internal link or a malformed spec fails here.
+# The site is a standalone package (its own lockfile) — install and build run inside
+# website/. Deploys are handled separately by Cloudflare Pages' git integration.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'docs/**'
+      - 'openapi.json'
+      - 'website/**'
+      - '.github/workflows/docs-site.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'docs/**'
+      - 'openapi.json'
+      - 'website/**'
+      - '.github/workflows/docs-site.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build & validate links
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      # pnpm via npm (version pinned to package.json's packageManager):
+      # pnpm/action-setup isn't on this repo's GitHub Actions allowlist.
+      - run: npm install -g pnpm@11.7.0
+      - name: Install dependencies
+        working-directory: website
+        run: pnpm install --frozen-lockfile
+      - name: Build site (runs link validation + OpenAPI parse)
+        working-directory: website
+        run: pnpm build

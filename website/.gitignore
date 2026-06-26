@@ -1,0 +1,6 @@
+# build output
+dist/
+# astro generated types & cache
+.astro/
+# dependencies (installed at the workspace root)
+node_modules/

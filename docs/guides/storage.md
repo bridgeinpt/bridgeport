@@ -71,7 +71,7 @@ flowchart LR
 
 - General file hosting
 - Config file syncing (that uses SSH directly)
-- BRIDGEPORT's own database (see [Backup & Restore](../backup-restore.md))
+- BRIDGEPORT's own database (see [Backup & Restore](../operations/backup-restore.md))
 
 **Architecture:**
 
@@ -461,5 +461,5 @@ Configure both before setting a database to use Spaces storage.
 ## Related
 
 - [Databases](databases.md) -- Configure a database to use Spaces for backup storage
-- [Backup & Restore](../backup-restore.md) -- Full backup workflow, formats, scheduling, and restore procedures
+- [Backup & Restore](../operations/backup-restore.md) -- Full backup workflow, formats, scheduling, and restore procedures
 - [Environments](environments.md) -- Overview of environment-level settings
