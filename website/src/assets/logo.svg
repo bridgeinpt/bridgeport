@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="#cc0000" role="img" aria-label="BridgePort">
+  <rect x="30.5" y="9" width="3" height="20" rx="1.5"/>
+  <rect x="20" y="27" width="24" height="2.6" rx="1.3"/>
+  <rect x="20" y="38.4" width="24" height="2.6" rx="1.3"/>
+  <rect x="21" y="29.6" width="2" height="8.8"/>
+  <rect x="25" y="29.6" width="2" height="8.8"/>
+  <rect x="29" y="29.6" width="2" height="8.8"/>
+  <rect x="33" y="29.6" width="2" height="8.8"/>
+  <rect x="37" y="29.6" width="2" height="8.8"/>
+  <rect x="41" y="29.6" width="2" height="8.8"/>
+  <polygon points="13,16 19,16 13,52 7,52"/>
+  <polygon points="45,16 51,16 57,52 51,52"/>
+  <rect x="4" y="52" width="14" height="4" rx="1.5"/>
+  <rect x="46" y="52" width="14" height="4" rx="1.5"/>
+  <rect x="11" y="9" width="42" height="7" rx="2"/>
+  <rect x="26" y="16" width="12" height="6" rx="1.5"/>
+</svg>
