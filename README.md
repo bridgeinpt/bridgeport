@@ -63,6 +63,7 @@ BRIDGEPORT gives you a single web UI to manage all your Docker infrastructure. C
 | **Registry** | Registry Integration | Docker Hub, GHCR, and private registries with auto-update |
 | **Topology** | Service Topology | Interactive diagram of services, databases, external entities (CDNs, clients), and server clusters |
 | **API** | REST API & Service Accounts | Environment-scoped API tokens and machine service accounts for CI/CD automation |
+| **IaC** | Terraform / OpenTofu Provider | Manage environments, servers, config, secrets, registries, images, and services declaratively with the official [provider](https://github.com/bridgeinpt/terraform-provider-bridgeport) |
 | **Agents** | MCP Server | Expose the API to MCP-capable AI agents (Claude, Cursor, Claude Code) as scoped tools — opt-in, bring-your-own-model, no inference on the host |
 | **CLI** | CLI Tool | SSH, logs, exec, deploy, and manage from the terminal |
 | **Plugins** | Plugin System | JSON-defined service types and database types with monitoring queries |
@@ -200,6 +201,7 @@ flowchart TD
 | [CLI Reference](docs/reference/cli.md) | Full command-line interface documentation |
 | [API Reference](docs/reference/api.md) | REST API authentication and endpoints |
 | [API Stability Policy](docs/api-stability.md) | Compatibility contract, semver, and deprecation window for the HTTP API |
+| [Terraform Provider](docs/guides/terraform.md) | Manage BRIDGEPORT declaratively with the official Terraform / OpenTofu provider |
 | [Operations](docs/operations/) | Upgrades, security hardening, backups, troubleshooting |
 | [Contributing](CONTRIBUTING.md) | Development setup, code style, and PR process |
 
@@ -216,6 +218,7 @@ flowchart TD
 | Set up notifications | [Notifications Guide](docs/guides/notifications.md) |
 | Use the CLI | [CLI Reference](docs/reference/cli.md) |
 | Orchestrate multi-service deploys | [Deployment Plans](docs/guides/deployment-plans.md) |
+| Manage BRIDGEPORT as code | [Terraform Provider](docs/guides/terraform.md) |
 | Contribute to BRIDGEPORT | [Contributing Guide](CONTRIBUTING.md) |
 | Report a security issue | [Security Policy](docs/SECURITY.md) |
 

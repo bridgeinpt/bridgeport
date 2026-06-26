@@ -185,6 +185,17 @@ pnpm exec vitest run src/routes/auth.test.ts                 # Single file
 
 > **Full guide** (examples, factories, what to test): [`docs/development/testing-guide.md`](docs/development/testing-guide.md)
 
+## Common Pitfalls / CI Quirks
+
+Hard-won gotchas that aren't obvious from the code — check here before debugging a "mysterious" failure:
+
+- **Never run bare `npm test` / `vitest run`.** There is no root vitest config, so a bare run skips `tests/setup.ts` (leaving `MASTER_KEY`/`JWT_SECRET` unset → route tests error at collection), runs `ui/**` under the wrong environment, and globs any `.claude/worktrees/` copies — hundreds of spurious failures. Always use the two scoped configs above (and `cd ui && pnpm exec vitest run` for UI).
+- **Fresh git worktrees need `pnpm install` before pushing.** A new `.claude/worktrees/` checkout has no installed `ui/` devDeps, so the pre-push hook (which runs `src/lib/` vitest for backend *and* UI) dies with a cryptic `@vitejs/plugin-react` error. Run `pnpm install` in the worktree first — don't reach for `--no-verify`.
+- **Route schema changes require an OpenAPI snapshot refresh.** Adding/changing a `src/routes/**` route that carries a `routeSchema` needs `pnpm run openapi:dump` + the regenerated `openapi.json` committed, or the **OpenAPI Spec Drift** CI check fails even when everything else is green. Body-less write routes can also drop `openapi.test.ts`'s WRITE-body coverage floor (0.62) — fix with a real request body or route consolidation, never by lowering the floor.
+- **GitHub Actions are allowlisted.** Only approved actions run; an un-allowlisted third-party action makes the job fail with `startup_failure`. Also: `build.yml` (the Docker image build) does **not** run on PRs, so verify Docker/image changes locally.
+- **CodeQL `js/missing-rate-limiting` false positive.** Adding Fastify `{schema}` route-options to a handler already covered by the global rate limit trips this alert. It's a known false positive — dismiss it; the global limiter still applies.
+- **Global `onSend` hooks must be sync, 4-arg `done`-callback style.** A deferring/async global `onSend` double-writes headers (`ERR_HTTP_HEADERS_SENT`) against the error-handler's payload-rewriting `onSend`. Do async work in `onResponse` instead.
+
 ## Versioning
 
 BRIDGEPORT uses git-based versioning derived at build time:
@@ -198,6 +209,14 @@ This means:
 - Agent/CLI versions only change when their code changes
 - UI displays app version via `import.meta.env.VITE_APP_VERSION`
 - Bundled agent/CLI versions stored in text files inside the Docker image
+
+## Go SDK (`client/`) & Terraform Provider
+
+`client/` is an importable Go SDK (`github.com/bridgeinpt/bridgeport/client`) for the HTTP API. The official [`terraform-provider-bridgeport`](https://github.com/bridgeinpt/terraform-provider-bridgeport) (separate repo, published to the Terraform + OpenTofu registries) is built on top of it — see [`docs/guides/terraform.md`](docs/guides/terraform.md). This repo owns the contract that keeps them in lockstep.
+
+- **The SDK has its own version line.** Bump `client/VERSION` (semver) when you change anything under `client/`; a CI job auto-tags `client/vX.Y.Z` on merge to master from that marker. New method = minor bump; behavior change/removal = major. The provider pins a `client/vX.Y.Z` and bumps it to pick up new methods.
+- **Keep the SDK in lockstep with the API.** Any API change the SDK should expose (new route, changed shape, new field) lands the matching SDK method **in the same PR**, with `client/VERSION` bumped. The checked-in OpenAPI snapshot and the [API stability policy](docs/api-stability.md) are the contract.
+- **⚠️ Tell the provider repo when an SDK change affects it.** When an SDK change is **breaking**, or it **resolves an SDK-gap issue the provider raised against this repo**: either comment on the originating [`terraform-provider-bridgeport`](https://github.com/bridgeinpt/terraform-provider-bridgeport/issues) issue, or — if none exists — open a new one telling them what changed and what to update on their side. The provider must never silently fall behind a breaking SDK release.
 
 ## Architecture & Reference
 
