@@ -39,6 +39,9 @@ export default defineConfig({
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/bridgeinpt/bridgeport' },
       ],
+      // The port-gantry-crane mark (burgundy), shown alongside the title and as the favicon.
+      logo: { src: './src/assets/logo.svg', replacesTitle: false },
+      favicon: '/favicon.svg',
       // Our docs are loaded from the repo's docs/ directory rather than src/content/docs,
       // so tell Starlight to run its Markdown transforms (asides, heading-anchor links) there.
       markdown: { processedDirs: ['../docs'] },
@@ -55,6 +58,10 @@ export default defineConfig({
           errorOnLocalLinks: false,
         }),
       ],
+      // Explicit, curated sidebar mirroring docs/README.md. (Starlight's `autogenerate`
+      // resolves directories relative to src/content/docs, so it finds nothing for our
+      // docs loaded from ../docs — hence the manual listing, which also gives a nicer
+      // curated order than alphabetical autogeneration.)
       sidebar: [
         {
           label: 'Start Here',
@@ -66,10 +73,80 @@ export default defineConfig({
             { label: 'API Stability', link: '/api-stability/' },
           ],
         },
-        { label: 'Guides', items: [{ autogenerate: { directory: 'guides' } }] },
-        { label: 'Reference', items: [{ autogenerate: { directory: 'reference' } }] },
-        { label: 'Operations', items: [{ autogenerate: { directory: 'operations' } }] },
+        {
+          label: 'Guides',
+          items: [
+            { label: 'Users & Roles', link: '/guides/users/' },
+            {
+              label: 'Infrastructure',
+              items: [
+                { label: 'Environments', link: '/guides/environments/' },
+                { label: 'Servers', link: '/guides/servers/' },
+                { label: 'Server Bootstrap', link: '/guides/server-bootstrap/' },
+                { label: 'Services', link: '/guides/services/' },
+                { label: 'Container Images', link: '/guides/container-images/' },
+                { label: 'Registries', link: '/guides/registries/' },
+              ],
+            },
+            {
+              label: 'Configuration & Secrets',
+              items: [
+                { label: 'Secrets & Variables', link: '/guides/secrets/' },
+                { label: 'Config Files', link: '/guides/config-files/' },
+              ],
+            },
+            {
+              label: 'Data',
+              items: [
+                { label: 'Databases', link: '/guides/databases/' },
+                { label: 'S3 / Spaces Storage', link: '/guides/storage/' },
+              ],
+            },
+            {
+              label: 'Monitoring',
+              items: [
+                { label: 'Monitoring Quick Start', link: '/guides/monitoring/' },
+                { label: 'Server Monitoring', link: '/guides/monitoring-servers/' },
+                { label: 'Service Monitoring', link: '/guides/monitoring-services/' },
+                { label: 'Database Monitoring', link: '/guides/monitoring-databases/' },
+                { label: 'Health Checks', link: '/guides/health-checks/' },
+              ],
+            },
+            {
+              label: 'Automation & Visualization',
+              items: [
+                { label: 'Notifications', link: '/guides/notifications/' },
+                { label: 'Service Topology', link: '/guides/topology/' },
+                { label: 'Deployment Plans', link: '/guides/deployment-plans/' },
+                { label: 'Webhooks', link: '/guides/webhooks/' },
+                { label: 'Terraform Provider', link: '/guides/terraform/' },
+              ],
+            },
+          ],
+        },
+        {
+          label: 'Reference',
+          items: [
+            { label: 'CLI', link: '/reference/cli/' },
+            { label: 'Agent', link: '/reference/agent/' },
+            { label: 'MCP Server', link: '/reference/mcp/' },
+            { label: 'Real-Time Events (SSE)', link: '/reference/events/' },
+            { label: 'Plugin Authoring', link: '/reference/plugins/' },
+            { label: 'Environment Settings', link: '/reference/environment-settings/' },
+            { label: 'System Settings', link: '/reference/system-settings/' },
+          ],
+        },
         ...openAPISidebarGroups,
+        {
+          label: 'Operations',
+          items: [
+            { label: 'Upgrades', link: '/operations/upgrades/' },
+            { label: 'Security & Hardening', link: '/operations/security/' },
+            { label: 'Backup & Restore', link: '/operations/backup-restore/' },
+            { label: 'Troubleshooting', link: '/operations/troubleshooting/' },
+            { label: 'Architecture Patterns', link: '/operations/patterns/' },
+          ],
+        },
       ],
     }),
   ],
