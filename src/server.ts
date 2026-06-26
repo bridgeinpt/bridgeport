@@ -98,16 +98,35 @@ async function buildServer() {
   });
 
   // Global rate limiting — defaults to 100 requests/minute per client IP
-  // (RATE_LIMIT_MAX / RATE_LIMIT_WINDOW). Self-hosted admin tools rarely see
-  // legitimate bursts above this, and the cap protects against
-  // credential-stuffing, webhook floods, and accidental client-side polling
-  // loops.  `/health` and `/api/client-config` are allow-listed so external
-  // monitors don't get throttled.
+  // (RATE_LIMIT_MAX / RATE_LIMIT_WINDOW). The cap protects the *programmatic*
+  // surface (`/api/*`, `/mcp`) against credential-stuffing, webhook floods, and
+  // accidental client-side polling loops.
+  //
+  // It deliberately does NOT cover static asset serving or the SPA shell: a
+  // single page load pulls `index.html` + a dozen hashed JS/CSS chunks, and
+  // monitoring pages poll every 30s, so one legitimate user trivially exceeds
+  // the per-IP budget. Throttling those requests broke the UI — the browser's
+  // lazy-import fetch for a route chunk 404s on a 429 ("Failed to fetch
+  // dynamically imported module"), and the rate-limit error raised on the
+  // `@fastify/static` wildcard route was mis-reported as a 500 (its
+  // errorHandler delegates to our global handler). Static file serving is best
+  // DoS-protected at the reverse proxy / CDN layer, not here.
+  //
+  // `/health` and `/api/client-config` stay exempt so external monitors and the
+  // frontend bootstrap aren't throttled.
   await fastify.register(rateLimit, {
     global: true,
     max: config.RATE_LIMIT_MAX,
     timeWindow: config.RATE_LIMIT_WINDOW,
-    allowList: (req) => req.url === '/health' || req.url === '/api/client-config',
+    allowList: (req) => {
+      if (req.url === '/health' || req.url === '/api/client-config') return true;
+      // Strip the query string before matching the path.
+      const path = req.url.split('?', 1)[0];
+      // Keep the programmatic surface throttled; everything else is static
+      // assets / the SPA shell, which are GET/HEAD-only and safe to exempt.
+      if (path.startsWith('/api/') || path === '/mcp') return false;
+      return req.method === 'GET' || req.method === 'HEAD';
+    },
     errorResponseBuilder: (_req, context) => {
       const retryAfter = Math.ceil(context.ttl / 1000);
       return {

@@ -99,6 +99,27 @@ function buildEnvelope(err: AnyError): { envelope: ErrorEnvelope; statusCode: nu
     };
   }
 
+  // Rate-limit backpressure. @fastify/rate-limit's `errorResponseBuilder`
+  // (see src/server.ts) returns a plain object {code:'RATE_LIMITED', message,
+  // hint, retryAfter} — it has NO `statusCode` and is not an ApiError, so the
+  // generic fallback below would default it to 500 and page Sentry. This is
+  // reached when a rate-limit rejection flows through the error handler rather
+  // than being sent directly by the plugin — e.g. one raised on the
+  // `@fastify/static` wildcard route, whose errorHandler delegates here.
+  // Classify it as the retryable 429 it actually is; the surrounding handler
+  // sets Retry-After and skips Sentry (expected operationally, like the 503).
+  if (err.code === 'RATE_LIMITED') {
+    const hint = (err as AnyError & { hint?: string }).hint;
+    return {
+      envelope: {
+        code: 'RATE_LIMITED',
+        message: err.message || 'Rate limit exceeded.',
+        ...(hint ? { hint } : {}),
+      },
+      statusCode: 429,
+    };
+  }
+
   // Rate-limit plugin throws an Error with statusCode 429 and a code of 'FST_ERR_RATE_LIMIT'.
   const status = err.statusCode ?? 500;
   const code = codeForStatus(status);
@@ -134,6 +155,13 @@ async function errorHandlerPlugin(fastify: FastifyInstance): Promise<void> {
       // avoid alert noise on every lock blip. Advertise a 1s Retry-After.
       request.log.warn({ err: error, statusCode }, 'Transient database contention; returning 503');
       reply.header('Retry-After', '1');
+    } else if (statusCode === 429) {
+      // Rate-limit backpressure that reached the error handler (see
+      // buildEnvelope). Expected operationally — advertise the RFC Retry-After
+      // (the value rides on the rate-limit error object) and do NOT capture to
+      // Sentry. Returning before the 5xx branch keeps it out of the alert feed.
+      const retryAfter = (error as AnyError & { retryAfter?: number }).retryAfter;
+      if (typeof retryAfter === 'number') reply.header('Retry-After', String(retryAfter));
     } else if (statusCode >= 500) {
       // Log the *original* error (with stack) before we hide it from the wire.
       request.log.error({ err: error, statusCode }, 'Unhandled error');

@@ -7,10 +7,14 @@ import { ConfirmProvider } from './hooks/useConfirm';
 import { ThemeProvider } from './components/theme-provider';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { initSentry } from './lib/sentry';
+import { registerPreloadErrorReload } from './lib/preload-error';
 import './index.css';
 
 // Fire-and-forget — doesn't block rendering
 initSentry();
+
+// Recover from stale lazy-route chunks after a redeploy (one-shot reload).
+registerPreloadErrorReload();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

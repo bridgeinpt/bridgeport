@@ -143,6 +143,31 @@ describe('error-handler plugin', () => {
       expect(captureException).not.toHaveBeenCalled();
     });
 
+    it('classifies a RATE_LIMITED error as a retryable 429 and does not page Sentry', async () => {
+      const app = await buildApp();
+      app.get('/limited', async () => {
+        // Mirror @fastify/rate-limit's errorResponseBuilder output (see
+        // src/server.ts): code/message/hint/retryAfter but NO statusCode, and
+        // not an ApiError. The generic fallback would otherwise call this a 500.
+        throw Object.assign(new Error('Rate limit exceeded. Try again in 12 seconds.'), {
+          code: 'RATE_LIMITED',
+          hint: 'Retry after 12 seconds.',
+          retryAfter: 12,
+        });
+      });
+
+      const res = await app.inject({ method: 'GET', url: '/limited' });
+      expect(res.statusCode).toBe(429);
+      const body = res.json();
+      expect(body.code).toBe('RATE_LIMITED');
+      expect(body.message).toMatch(/rate limit exceeded/i);
+      expect(body.hint).toBe('Retry after 12 seconds.');
+      // Advertises Retry-After so clients back off.
+      expect(res.headers['retry-after']).toBe('12');
+      // Expected backpressure — must NOT be reported as a 500 / captured.
+      expect(captureException).not.toHaveBeenCalled();
+    });
+
     it('masks ApiError messages on 5xx so internal detail does not leak', async () => {
       const app = await buildApp();
       app.get('/api-boom', async () => {
