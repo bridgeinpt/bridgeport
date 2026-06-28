@@ -25,4 +25,10 @@ describe('About', () => {
     renderWithProviders(<About />);
     expect(screen.getByText('Features')).toBeInTheDocument();
   });
+
+  it('should link to the documentation site', () => {
+    renderWithProviders(<About />);
+    const docsLink = screen.getByRole('link', { name: /Documentation/ });
+    expect(docsLink).toHaveAttribute('href', 'https://bridgeport.bridgein.com');
+  });
 });

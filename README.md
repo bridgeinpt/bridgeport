@@ -8,6 +8,7 @@
 
 <!-- functional + CI status badges -->
 <p align="center">
+  <a href="https://bridgeport.bridgein.com"><img alt="Documentation" src="https://img.shields.io/badge/docs-bridgeport.bridgein.com-CC0000?logo=readthedocs&logoColor=white" /></a>
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/License-Apache--2.0-blue.svg" /></a>
   <a href="https://ghcr.io/bridgeinpt/bridgeport"><img alt="Docker image" src="https://img.shields.io/badge/ghcr.io-bridgeinpt%2Fbridgeport-2496ED?logo=docker&logoColor=white" /></a>
   <a href="https://github.com/bridgeinpt/bridgeport/actions/workflows/test.yml"><img alt="Tests" src="https://github.com/bridgeinpt/bridgeport/actions/workflows/test.yml/badge.svg" /></a>
@@ -28,7 +29,7 @@
 
 <p align="center">
   <a href="#quick-start"><b>Quick Start</b></a> &nbsp;·&nbsp;
-  <a href="https://bridgeport.bridgein.com">Docs</a> &nbsp;·&nbsp;
+  <a href="https://bridgeport.bridgein.com"><b>Docs</b></a> &nbsp;·&nbsp;
   <a href="#key-features">Features</a> &nbsp;·&nbsp;
   <a href="docs/reference/cli.md">CLI</a>
 </p>
@@ -191,9 +192,11 @@ flowchart TD
 
 ## Documentation
 
+> 📖 **The full documentation is published at [bridgeport.bridgein.com](https://bridgeport.bridgein.com)** — a searchable site with the API reference, architecture diagrams, and changelog, built from the same [`docs/`](docs/) sources linked below (so the two never drift).
+
 | Section | Description |
 |---|---|
-| [Getting Started](docs/getting-started.md) | Deploy BRIDGEPORT and manage your first server in 5 minutes |
+| [Getting Started](docs/getting-started.mdx) | Deploy BRIDGEPORT and manage your first server in 5 minutes |
 | [Core Concepts](docs/concepts.md) | Architecture overview and glossary |
 | [Installation Guide](docs/installation.md) | Docker run, Docker Compose, and development setup |
 | [Configuration](docs/configuration.md) | Environment variables, recipes, and settings reference |
