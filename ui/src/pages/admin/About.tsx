@@ -9,6 +9,7 @@ import {
   Bell,
   Workflow,
   Heart,
+  BookOpen,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
@@ -41,6 +42,15 @@ export default function About() {
             </div>
             <p className="mt-1 font-medium text-primary">Dock. Run. Ship. Repeat.</p>
             <p className="mt-2 text-sm text-muted-foreground">v{appVersion}</p>
+            <a
+              href="https://bridgeport.bridgein.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-primary transition-colors hover:underline"
+            >
+              <BookOpen className="size-4" />
+              Documentation
+            </a>
           </div>
 
           <Separator className="my-6" />

@@ -1,6 +1,6 @@
 ---
 import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
-import { Card, CardGrid } from '@astrojs/starlight/components';
+import { CardGrid, LinkCard } from '@astrojs/starlight/components';
 ---
 
 <StarlightPage
@@ -28,29 +28,35 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
   }}
 >
   <CardGrid stagger>
-    <Card title="Servers & services" icon="puzzle">
-      Add servers over SSH or the Docker socket, discover running containers, and deploy services
-      from a central image catalog. See [Servers](/guides/servers/) and [Services](/guides/services/).
-    </Card>
-    <Card title="Config & secrets" icon="seti:lock">
-      AES-256-GCM encrypted secrets, reusable config fragments, and templated files synced to your
-      servers. See [Secrets](/guides/secrets/) and [Config Files](/guides/config-files/).
-    </Card>
-    <Card title="Monitoring & health" icon="approve-check">
-      Server, service, and database metrics plus container, URL, TCP, and TLS health checks with
-      bounce protection. See [Monitoring](/guides/monitoring/) and [Health Checks](/guides/health-checks/).
-    </Card>
-    <Card title="Orchestration" icon="rocket">
-      Multi-service deployment plans with dependency ordering and auto-rollback, plus CI/CD webhooks.
-      See [Deployment Plans](/guides/deployment-plans/) and [Webhooks](/guides/webhooks/).
-    </Card>
-    <Card title="Automate it" icon="setting">
-      Drive everything from the REST API, the Go SDK, the CLI, or the Terraform provider.
-      See the [API Reference](/reference/api/) and [CLI](/reference/cli/).
-    </Card>
-    <Card title="Run it in production" icon="open-book">
-      Backups, upgrades, security hardening, and real-world topologies. See
-      [Operations](/operations/upgrades/) and [Security](/operations/security/).
-    </Card>
+    <LinkCard
+      title="Servers & services"
+      href="/guides/services/"
+      description="Add servers over SSH or the Docker socket, discover running containers, and deploy from a central image catalog."
+    />
+    <LinkCard
+      title="Config & secrets"
+      href="/guides/secrets/"
+      description="AES-256-GCM encrypted secrets, reusable config fragments, and templated files synced to your servers."
+    />
+    <LinkCard
+      title="Monitoring & health"
+      href="/guides/monitoring/"
+      description="Server, service, and database metrics plus container, URL, TCP, and TLS health checks with bounce protection."
+    />
+    <LinkCard
+      title="Orchestration"
+      href="/guides/deployment-plans/"
+      description="Multi-service deployment plans with dependency ordering and auto-rollback, plus CI/CD webhooks."
+    />
+    <LinkCard
+      title="Automate it"
+      href="/reference/api/"
+      description="Drive everything from the REST API, the Go SDK, the CLI, or the Terraform provider."
+    />
+    <LinkCard
+      title="Run it in production"
+      href="/operations/upgrades/"
+      description="Backups, upgrades, security hardening, and real-world topologies."
+    />
   </CardGrid>
 </StarlightPage>
