@@ -92,6 +92,7 @@
     "vitest": "^4.1.9"
   },
   "overrides": {
+    "@codemirror/state": "^6.7.0",
     "@hono/node-server": "^1.19.13",
     "esbuild": "^0.28.1",
     "uuid": "^11"

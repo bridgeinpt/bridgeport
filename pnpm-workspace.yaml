@@ -11,10 +11,18 @@ packages:
 #   uuid               GHSA-w5hq-g745-h8pq  (<11.1.1)   via hyperid → autocannon (stress tests)
 #   @hono/node-server  GHSA-92pp-h63x-v22m  (<1.19.13)  via @prisma/dev → prisma
 #   esbuild            GHSA-g7r4-m6w7-qqqr  (<0.28.1)   via vite + tsx (build/dev tooling)
+#
+# Deduplication override (not a CVE): @codemirror/state MUST be a singleton —
+# CodeMirror uses `instanceof` checks against it, so two copies throw
+# "Unrecognized extension value in extension set". Bumping @codemirror/language
+# to 6.12.4 (needs state ^6.7.0) alongside consumers still on state 6.6.0 pulls
+# two copies, crashing the editor so the config-file view modal never renders.
+# Forcing a single ^6.7.0 collapses the tree to one instance.
 overrides:
   uuid: '^11.1.1'
   '@hono/node-server': '^1.19.13'
   esbuild: '^0.28.1'
+  '@codemirror/state': '^6.7.0'
 
 # Supply-chain hardening (replaces the old .npmrc `ignore-scripts=true`).
 #
