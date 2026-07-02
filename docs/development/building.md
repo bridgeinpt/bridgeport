@@ -270,3 +270,4 @@ The version is injected via Go linker flags (`-ldflags "-X github.com/bridgeinpt
 - [Development Setup](setup.md) -- local development environment
 - [Architecture](architecture.md) -- codebase structure
 - [Upgrades](../operations/upgrades.md) -- how built images are deployed
+- [Docs Site Deployment](docs-site.md) -- how the separate documentation site is built and deployed
