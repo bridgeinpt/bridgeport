@@ -116,6 +116,7 @@ Help build BRIDGEPORT.
 | [Architecture Guide](development/architecture.md) | Codebase deep dive: backend, frontend, scheduler, auth flow |
 | [Database Migrations](development/database-migrations.md) | How to make schema changes safely with Prisma |
 | [Building](development/building.md) | Build the Docker image, Go agent, and CLI |
+| [Docs Site Deployment](development/docs-site.md) | How this documentation site is built and deployed |
 
 ---
 
