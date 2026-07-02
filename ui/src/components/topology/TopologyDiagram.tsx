@@ -59,7 +59,14 @@ import {
   updateServerCluster,
   deleteServerCluster,
 } from '../../lib/api';
-import { inferConnections, mergeConnections, aggregateCollapsedEdges, type TopologyEdge } from '../../lib/topology';
+import {
+  inferConnections,
+  mergeConnections,
+  aggregateCollapsedEdges,
+  serviceInstanceId,
+  serviceInstanceNodeId,
+  type TopologyEdge,
+} from '../../lib/topology';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useToast } from '../Toast';
 import { toPng } from 'html-to-image';
@@ -237,9 +244,14 @@ function parseExposedPorts(portsJson: string | null | undefined): ExposedPort[] 
 
 interface BuildResult {
   nodes: Node[];
+  // Keyed by "<serviceId>@<serverId>" instance id — a service template can
+  // have one instance node per server it's deployed on.
   serviceToServer: Map<string, string>;
   databaseToServer: Map<string, string>;
   serverToCluster: Map<string, string>;
+  // serviceId -> instance node ids, for fanning template-scoped edges out to
+  // every deployment of the service.
+  serviceInstances: Map<string, string[]>;
 }
 
 // Sidecar parameters bundle so the function signature stays manageable as
@@ -276,7 +288,20 @@ function buildNodes(ctx: BuildNodesContext): BuildResult {
   const serviceToServer = new Map<string, string>();
   const databaseToServer = new Map<string, string>();
   const serverToCluster = new Map<string, string>();
+  const serviceInstances = new Map<string, string[]>();
   let serverX = 0;
+
+  // Register one instance per (service, server) pair. Node ids are
+  // per-instance ("service:<id>@<serverId>") so a service deployed on N
+  // servers renders as N distinct nodes without duplicate React Flow ids.
+  const registerServiceInstance = (serviceId: string, serverId: string): string => {
+    const nodeId = serviceInstanceNodeId(serviceId, serverId);
+    serviceToServer.set(serviceInstanceId(serviceId, serverId), serverId);
+    const list = serviceInstances.get(serviceId);
+    if (list) list.push(nodeId);
+    else serviceInstances.set(serviceId, [nodeId]);
+    return nodeId;
+  };
 
   const placedDatabaseIds = new Set<string>();
 
@@ -340,7 +365,7 @@ function buildNodes(ctx: BuildNodesContext): BuildResult {
     // If the parent cluster is collapsed, skip rendering child servers — the
     // cluster node is the visual stand-in and edges aggregate to it.
     if (parentClusterCollapsed) {
-      for (const service of server.services) serviceToServer.set(service.id, server.id);
+      for (const service of server.services) registerServiceInstance(service.id, server.id);
       const serverDatabases = databases.filter((db) => db.serverId === server.id);
       for (const db of serverDatabases) {
         placedDatabaseIds.add(db.id);
@@ -352,7 +377,7 @@ function buildNodes(ctx: BuildNodesContext): BuildResult {
     serverDatabases.forEach((db) => placedDatabaseIds.add(db.id));
 
     for (const service of server.services) {
-      serviceToServer.set(service.id, server.id);
+      registerServiceInstance(service.id, server.id);
     }
     for (const db of serverDatabases) {
       databaseToServer.set(db.id, server.id);
@@ -443,7 +468,7 @@ function buildNodes(ctx: BuildNodesContext): BuildResult {
         const ports = parseExposedPorts(service.exposedPorts);
         const primaryPort = ports.length > 0 ? ports[0].container : null;
 
-        const nodeId = `service:${service.id}`;
+        const nodeId = serviceInstanceNodeId(service.id, server.id);
         // Child positions are relative to parent; only use saved if no parent change
         nodes.push({
           id: nodeId,
@@ -554,7 +579,7 @@ function buildNodes(ctx: BuildNodesContext): BuildResult {
     });
   });
 
-  return { nodes, serviceToServer, databaseToServer, serverToCluster };
+  return { nodes, serviceToServer, databaseToServer, serverToCluster, serviceInstances };
 }
 
 function topologyEdgesToReactFlow(
@@ -562,8 +587,13 @@ function topologyEdgesToReactFlow(
   onDelete: ((connectionId: string) => void) | null,
 ): Edge[] {
   return topologyEdges.map((te) => {
-    // Extract manual connection ID from edge ID (format: "manual:<connectionId>")
-    const manualId = te.type === 'manual' && te.id.startsWith('manual:') ? te.id.replace('manual:', '') : undefined;
+    // Extract manual connection ID from edge ID (format: "manual:<connectionId>",
+    // with an optional "@<source>-><target>" fan-out suffix when the template
+    // connection is rendered once per service instance — all fanned edges map
+    // back to the same underlying connection).
+    const manualId = te.type === 'manual' && te.id.startsWith('manual:')
+      ? te.id.replace('manual:', '').split('@')[0]
+      : undefined;
     // Suppress inline delete for aggregated edges — the user can't tell which
     // underlying connection the X would destroy.
     const canDelete = manualId && onDelete && !te.aggregated;
@@ -867,12 +897,14 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
       return;
     }
 
-    // Parse node IDs (format: "service:<id>" | "database:<id>" | "external:<id>").
-    // We narrow to the persisted endpoint types — server/cluster IDs cannot be
-    // either source or target of a stored connection.
+    // Parse node IDs (format: "service:<id>@<serverId>" | "database:<id>" |
+    // "external:<id>"). We narrow to the persisted endpoint types — server/
+    // cluster IDs cannot be either source or target of a stored connection.
+    // Service nodes are per-deployment instances; stripping the "@<serverId>"
+    // suffix keeps manual connections template-scoped.
     const parseNodeId = (nodeId: string): { type: ConnectionEndpointType | 'server' | 'cluster'; id: string } => {
       const [type, ...rest] = nodeId.split(':');
-      return { type: type as ConnectionEndpointType | 'server' | 'cluster', id: rest.join(':') };
+      return { type: type as ConnectionEndpointType | 'server' | 'cluster', id: rest.join(':').split('@')[0] };
     };
 
     // React Flow normalizes connections so source always has a "source" handle,
@@ -1114,7 +1146,7 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     return map;
   }, [servers, databases, externalEntities]);
 
-  const { nodes, serviceToServer, databaseToServer, serverToCluster } = useMemo(
+  const { nodes, serviceToServer, databaseToServer, serverToCluster, serviceInstances } = useMemo(
     () => buildNodes({
       servers,
       databases,
@@ -1146,7 +1178,7 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
 
   const edges = useMemo(() => {
     const inferred = inferConnections(servers, databases);
-    const merged = mergeConnections(inferred, manualConnections);
+    const merged = mergeConnections(inferred, manualConnections, serviceInstances);
     const aggregated = aggregateCollapsedEdges(
       merged,
       collapsedServers,
@@ -1165,6 +1197,7 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     databaseToServer,
     collapsedClusters,
     serverToCluster,
+    serviceInstances,
     canInteract,
     handleDeleteConnection,
   ]);

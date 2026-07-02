@@ -11,10 +11,20 @@ vi.mock('../components/Toast', () => ({
   }),
 }));
 
-// Mock topology diagram
+// Mock topology diagram. A vi.fn so tests can inspect the props Dashboard
+// passes in (mock.calls survive vi.clearAllMocks' call-count reset per test,
+// since clearAllMocks preserves implementations set in the factory).
 vi.mock('../components/topology', () => ({
-  TopologyDiagram: () => <div data-testid="topology-diagram">Topology</div>,
+  TopologyDiagram: vi.fn(() => <div data-testid="topology-diagram">Topology</div>),
 }));
+
+// Latest props handed to the mocked TopologyDiagram in the current test.
+async function getTopologyProps() {
+  const { TopologyDiagram } = await import('../components/topology');
+  const calls = vi.mocked(TopologyDiagram).mock.calls;
+  expect(calls.length).toBeGreaterThan(0);
+  return calls[calls.length - 1][0];
+}
 
 // Mock API
 vi.mock('../lib/api', async () => {
@@ -91,6 +101,82 @@ vi.mock('../lib/api', async () => {
 });
 
 const Dashboard = (await import('./Dashboard')).default;
+
+// ---- Fixture builders for multi-deployment scenarios (issue #335) ----
+
+// ServerWithServicesCount-shaped row (only the fields Dashboard reads).
+function makeServer(id: string, name: string, hostname: string) {
+  return {
+    id,
+    name,
+    hostname,
+    publicIp: null,
+    tags: '[]',
+    status: 'healthy',
+    serverType: 'remote',
+    lastCheckedAt: null,
+    environmentId: 'env-1',
+    _count: { services: 1 },
+  };
+}
+
+// ServiceDeployment-shaped row with its joined server (only the fields the
+// deploymentsOf / serversWithServices / alerts memos read).
+function makeDeployment(opts: {
+  serverId: string;
+  serverName: string;
+  status?: string;
+  healthStatus?: string;
+  discoveryStatus?: string;
+}) {
+  return {
+    id: `dep-${opts.serverId}`,
+    serviceId: 'svc-1',
+    serverId: opts.serverId,
+    containerName: 'api',
+    composePath: null,
+    envOverrides: null,
+    exposedPorts: null,
+    status: opts.status ?? 'running',
+    containerStatus: opts.status ?? 'running',
+    healthStatus: opts.healthStatus ?? 'healthy',
+    discoveryStatus: opts.discoveryStatus ?? 'found',
+    lastCheckedAt: null,
+    lastDiscoveredAt: null,
+    lastDeployedAt: null,
+    server: { id: opts.serverId, name: opts.serverName },
+  };
+}
+
+// One 'api' service template with the given deployments. The flattened
+// back-compat fields mirror the FIRST deployment, exactly as listServices
+// returns them — so a test only passes if Dashboard reads serviceDeployments
+// rather than the flattened surface.
+function makeMultiDeployService(deployments: ReturnType<typeof makeDeployment>[]) {
+  const first = deployments[0];
+  return {
+    id: 'svc-1',
+    name: 'api',
+    containerName: 'api',
+    imageTag: 'v1.0.0',
+    composePath: null,
+    healthCheckUrl: null,
+    status: first?.status,
+    containerStatus: first?.containerStatus,
+    healthStatus: first?.healthStatus,
+    exposedPorts: null,
+    discoveryStatus: first?.discoveryStatus,
+    lastCheckedAt: null,
+    lastDiscoveredAt: null,
+    serverId: first?.serverId,
+    autoUpdate: false,
+    latestAvailableTag: null,
+    latestAvailableDigest: null,
+    lastUpdateCheckAt: null,
+    server: first?.server,
+    serviceDeployments: deployments,
+  };
+}
 
 describe('Dashboard', () => {
   beforeEach(() => {
@@ -465,6 +551,160 @@ describe('Dashboard', () => {
       // (empty list) which collapses the card entirely — that's fine, the
       // assertion above already proved the loading branch rendered.
       resolveBackup!({ databases: [] });
+    });
+  });
+
+  // ==================== Multi-deployment services (issue #335) ====================
+  //
+  // A service template can be deployed on several servers. The topology input,
+  // alerts, and health grid must read serviceDeployments[] — not just the
+  // flattened first-deployment back-compat fields — or every deployment past
+  // the first becomes invisible.
+  describe('multi-deployment services', () => {
+    // Two servers; 'api' deployed on both — healthy on web-01 and, by default,
+    // exited/unhealthy on web-02. The flattened fields on the template row
+    // mirror the FIRST (healthy) deployment.
+    async function seedTwoServerService(
+      second: { status?: string; healthStatus?: string; discoveryStatus?: string } = {
+        status: 'exited',
+        healthStatus: 'unhealthy',
+      }
+    ) {
+      const api = await import('../lib/api');
+      vi.mocked(api.listServers).mockResolvedValueOnce({
+        servers: [
+          makeServer('server-1', 'web-01', '10.0.0.1'),
+          makeServer('server-2', 'web-02', '10.0.0.2'),
+        ],
+        total: 2,
+      } as Awaited<ReturnType<typeof api.listServers>>);
+      vi.mocked(api.listServices).mockResolvedValueOnce({
+        services: [
+          makeMultiDeployService([
+            makeDeployment({ serverId: 'server-1', serverName: 'web-01' }),
+            makeDeployment({ serverId: 'server-2', serverName: 'web-02', ...second }),
+          ]),
+        ],
+        total: 1,
+      } as Awaited<ReturnType<typeof api.listServices>>);
+    }
+
+    it('renders a multi-deployment service under every server in the topology input', async () => {
+      await seedTwoServerService();
+      renderWithProviders(<Dashboard />);
+      await waitFor(() => {
+        expect(screen.getByTestId('topology-diagram')).toBeInTheDocument();
+      });
+
+      const props = await getTopologyProps();
+      expect(props.servers).toHaveLength(2);
+      const byId = new Map(props.servers.map((s) => [s.id, s]));
+      const onWeb01 = byId.get('server-1')!.services;
+      const onWeb02 = byId.get('server-2')!.services;
+      // The same template appears once under EACH server it's deployed on,
+      // with that deployment's runtime fields flattened onto the synthetic row.
+      expect(onWeb01).toHaveLength(1);
+      expect(onWeb01[0]).toMatchObject({
+        id: 'svc-1',
+        serverId: 'server-1',
+        status: 'running',
+        healthStatus: 'healthy',
+      });
+      expect(onWeb02).toHaveLength(1);
+      expect(onWeb02[0]).toMatchObject({
+        id: 'svc-1',
+        serverId: 'server-2',
+        status: 'exited',
+        healthStatus: 'unhealthy',
+      });
+    });
+
+    it('raises per-deployment alerts so a healthy first deployment cannot mask an unhealthy second one', async () => {
+      await seedTwoServerService({
+        status: 'exited',
+        healthStatus: 'unhealthy',
+        discoveryStatus: 'missing',
+      });
+      renderWithProviders(<Dashboard />);
+
+      // Unhealthy + missing-container alerts both derive from the SECOND
+      // deployment (the flattened first-deployment fields are all healthy).
+      await screen.findByText('Unhealthy Service');
+      expect(screen.getByText(/api on web-02: exited/)).toBeInTheDocument();
+      expect(screen.getByText('Missing Container')).toBeInTheDocument();
+      expect(screen.getByText(/api on web-02: container not found/)).toBeInTheDocument();
+      // The healthy first deployment must not produce alerts.
+      expect(screen.queryByText(/api on web-01/)).not.toBeInTheDocument();
+    });
+
+    it('shows the worst-of-deployments status in the services health grid', async () => {
+      await seedTwoServerService();
+      renderWithProviders(<Dashboard />);
+
+      const links = await screen.findAllByRole('link', { name: 'api' });
+      const badgeLink = links.find((l) => l.getAttribute('title')?.startsWith('api on'));
+      expect(badgeLink).toBeDefined();
+      // serverName lists every deployment's server; overall is the WORST
+      // status across deployments (healthy on web-01, unhealthy on web-02).
+      expect(badgeLink).toHaveAttribute('title', 'api on web-01, web-02 - unhealthy');
+      // Worst-of also drives the healthy counter: 0 of 1 services healthy.
+      expect(screen.getByText(/\(0\/1 healthy\)/)).toBeInTheDocument();
+    });
+
+    it('back-compat: groups a service without serviceDeployments under its flattened serverId', async () => {
+      // The default listServices mock returns a flattened row (serverId:
+      // 'server-1', server join, no serviceDeployments array) — the pre-2.0
+      // back-compat surface some endpoints still emit.
+      renderWithProviders(<Dashboard />);
+      await waitFor(() => {
+        expect(screen.getByTestId('topology-diagram')).toBeInTheDocument();
+      });
+
+      const props = await getTopologyProps();
+      expect(props.servers).toHaveLength(1);
+      expect(props.servers[0].services.map((s) => s.id)).toEqual(['svc-1']);
+
+      // Health grid falls back to the flattened fields too.
+      const links = screen.getAllByRole('link', { name: 'api' });
+      const badgeLink = links.find((l) => l.getAttribute('title')?.startsWith('api on'));
+      expect(badgeLink).toHaveAttribute('title', 'api on web-01 - healthy');
+    });
+
+    it('skips undeployed templates in the topology input but keeps them in the health grid', async () => {
+      const api = await import('../lib/api');
+      vi.mocked(api.listServices).mockResolvedValueOnce({
+        services: [
+          {
+            id: 'svc-orphan',
+            name: 'orphan',
+            imageTag: 'v1.0.0',
+            // No serverId / server / serviceDeployments — template with no
+            // deployments yet.
+            autoUpdate: false,
+            latestAvailableTag: null,
+            latestAvailableDigest: null,
+            lastUpdateCheckAt: null,
+          },
+        ],
+        total: 1,
+      } as Awaited<ReturnType<typeof api.listServices>>);
+
+      renderWithProviders(<Dashboard />);
+      await waitFor(() => {
+        expect(screen.getByTestId('topology-diagram')).toBeInTheDocument();
+      });
+
+      const props = await getTopologyProps();
+      expect(props.servers).toHaveLength(1);
+      expect(props.servers[0].services).toHaveLength(0);
+
+      // Health grid still shows the template with an unknown server, and an
+      // undeployed template raises no unhealthy-service alert.
+      const links = screen.getAllByRole('link', { name: 'orphan' });
+      const badgeLink = links.find((l) => l.getAttribute('title')?.startsWith('orphan on'));
+      expect(badgeLink).toBeDefined();
+      expect(badgeLink!.getAttribute('title')).toContain('orphan on unknown');
+      expect(screen.queryByText('Unhealthy Service')).not.toBeInTheDocument();
     });
   });
 });

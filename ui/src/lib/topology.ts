@@ -4,11 +4,32 @@ import { safeJsonParse } from './helpers';
 export interface InferredConnection {
   sourceType: 'service' | 'database';
   sourceId: string;
+  // Server hosting the source deployment — a service template can be deployed
+  // on several servers, so the edge must pin to the matching instance node.
+  sourceServerId: string;
   targetType: 'service' | 'database';
   targetId: string;
   port: number;
   protocol: string;
   label: string;
+}
+
+/**
+ * Id part of a per-deployment service instance node: `<serviceId>@<serverId>`.
+ * The `@` separator keeps the existing `split(':')` node-id parsing intact.
+ * This is the key shape `aggregateCollapsedEdges`' serviceToServer map uses.
+ */
+export function serviceInstanceId(serviceId: string, serverId: string): string {
+  return `${serviceId}@${serverId}`;
+}
+
+/**
+ * Full node id for one deployment (instance) of a service on a server:
+ * `service:<serviceId>@<serverId>`. A template deployed to N servers renders
+ * as N instance nodes (one inside each server group).
+ */
+export function serviceInstanceNodeId(serviceId: string, serverId: string): string {
+  return `service:${serviceInstanceId(serviceId, serverId)}`;
 }
 
 // Well-known port to database type mapping
@@ -86,12 +107,15 @@ export function inferConnections(
           }
 
           if (matched) {
-            const key = `service:${service.id}->database:${db.id}:${containerPort}`;
+            // Dedupe per server so the same template deployed on two servers
+            // yields one inferred edge per instance, not one total.
+            const key = `service:${service.id}@${server.id}->database:${db.id}:${containerPort}`;
             if (!seen.has(key)) {
               seen.add(key);
               connections.push({
                 sourceType: 'service',
                 sourceId: service.id,
+                sourceServerId: server.id,
                 targetType: 'database',
                 targetId: db.id,
                 port: containerPort,
@@ -131,15 +155,23 @@ export interface TopologyEdge {
 
 export function mergeConnections(
   inferred: InferredConnection[],
-  manual: ServiceConnection[]
+  manual: ServiceConnection[],
+  // serviceId -> instance node ids ("service:<id>@<serverId>"), one per
+  // deployment. Manual connections are template-scoped, so each service
+  // endpoint fans out to every instance (mirrors the Mermaid export).
+  serviceInstances: Map<string, string[]> = new Map()
 ): TopologyEdge[] {
   const edges: TopologyEdge[] = [];
 
-  // Add auto-inferred edges
+  // Add auto-inferred edges — pinned to the source deployment's instance node.
   for (const conn of inferred) {
+    const source =
+      conn.sourceType === 'service'
+        ? serviceInstanceNodeId(conn.sourceId, conn.sourceServerId)
+        : `${conn.sourceType}:${conn.sourceId}`;
     edges.push({
-      id: `auto:${conn.sourceType}:${conn.sourceId}->${conn.targetType}:${conn.targetId}:${conn.port}`,
-      source: `${conn.sourceType}:${conn.sourceId}`,
+      id: `auto:${source}->${conn.targetType}:${conn.targetId}:${conn.port}`,
+      source,
       target: `${conn.targetType}:${conn.targetId}`,
       type: 'auto',
       directed: true, // auto-inferred are always directed (service -> db)
@@ -149,20 +181,41 @@ export function mergeConnections(
     });
   }
 
+  // Resolve a connection endpoint to node ids. Services fan out to all their
+  // instances; a template with no known instances falls back to the plain
+  // template node id (keeps the edge parseable even if it can't render).
+  const resolveEndpoints = (type: string, id: string): string[] => {
+    if (type === 'service') {
+      const instances = serviceInstances.get(id);
+      if (instances && instances.length > 0) return instances;
+      return [`service:${id}`];
+    }
+    return [`${type}:${id}`];
+  };
+
   // Add manual edges
   for (const conn of manual) {
-    edges.push({
-      id: `manual:${conn.id}`,
-      source: `${conn.sourceType}:${conn.sourceId}`,
-      sourceHandle: conn.sourceHandle ?? undefined,
-      target: `${conn.targetType}:${conn.targetId}`,
-      targetHandle: conn.targetHandle ?? undefined,
-      type: 'manual',
-      directed: conn.direction === 'forward',
-      port: conn.port,
-      protocol: conn.protocol,
-      label: conn.label,
-    });
+    const sources = resolveEndpoints(conn.sourceType, conn.sourceId);
+    const targets = resolveEndpoints(conn.targetType, conn.targetId);
+    // Fanned-out edges need unique React Flow ids; the suffix after `@` is
+    // stripped when mapping back to the underlying connection id.
+    const fannedOut = sources.length > 1 || targets.length > 1;
+    for (const source of sources) {
+      for (const target of targets) {
+        edges.push({
+          id: fannedOut ? `manual:${conn.id}@${source}->${target}` : `manual:${conn.id}`,
+          source,
+          sourceHandle: conn.sourceHandle ?? undefined,
+          target,
+          targetHandle: conn.targetHandle ?? undefined,
+          type: 'manual',
+          directed: conn.direction === 'forward',
+          port: conn.port,
+          protocol: conn.protocol,
+          label: conn.label,
+        });
+      }
+    }
   }
 
   return edges;
@@ -181,7 +234,7 @@ export function mergeConnections(
 export function aggregateCollapsedEdges(
   edges: TopologyEdge[],
   collapsedServerIds: Set<string>,
-  serviceToServer: Map<string, string>, // serviceId -> serverId
+  serviceToServer: Map<string, string>, // "<serviceId>@<serverId>" instance id -> serverId
   databaseToServer: Map<string, string>, // databaseId -> serverId
   collapsedClusterIds: Set<string> = new Set(),
   serverToCluster: Map<string, string> = new Map() // serverId -> clusterId

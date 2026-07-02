@@ -36,7 +36,7 @@ The topology diagram lives on your **Dashboard** page and renders an interactive
 
 **What the topology diagram shows:**
 
-- Services grouped visually by the server they run on
+- Services grouped visually by the server they run on -- a service deployed to multiple servers appears inside each of those servers, one node per deployment
 - Databases (both server-hosted and standalone)
 - User-defined connections with port, protocol, and direction metadata
 - Real-time status via color-coded nodes
@@ -115,6 +115,9 @@ Click the **+** button in the topology toolbar to open a form where you can pick
 
 > [!NOTE]
 > A connection is uniquely identified by the combination of environment, source, target, and port. You can have multiple connections between the same two nodes if they use different ports. When port is omitted, the backend rejects duplicates between the same endpoints with `409 Conflict`.
+
+> [!NOTE]
+> Service endpoints reference the service **template**, not a specific deployment. If the service is deployed on multiple servers, the edge is drawn to every instance of it on the diagram (same fan-out as the Mermaid export), and deleting the connection removes all of those edges.
 
 ### From the API
 
@@ -252,7 +255,7 @@ The topology diagram renders three types of nodes:
 
 | Node Type | Visual | Source |
 |-----------|--------|--------|
-| **ServiceNode** | Rounded rectangle with service name, status indicator, and exposed port | Every `Service` in the environment |
+| **ServiceNode** | Rounded rectangle with service name, status indicator, and exposed port | Every deployment of every `Service` -- a service deployed on N servers renders as N nodes, each showing that deployment's own status |
 | **DatabaseNode** | Cylinder shape with database name and port | Every `Database` in the environment |
 | **ServerGroupNode** | Container box that groups its child services (and databases hosted on it) -- resizable when selected | Every `Server` in the environment |
 | **ExternalEntityNode** | Pill-shaped node with a globe icon, color-coded by `kind` | Every `ExternalEntity` in the environment |
@@ -267,7 +270,7 @@ Each node displays a color-coded status indicator:
 
 ### Server Grouping
 
-Services are automatically grouped inside their parent server's visual boundary. This gives you an immediate sense of which services are co-located.
+Services are automatically grouped inside their parent server's visual boundary. This gives you an immediate sense of which services are co-located. A service with deployments on multiple servers appears inside each of those servers, and each node reflects that deployment's own runtime status.
 
 ```
 ┌─────────────────────────────────┐

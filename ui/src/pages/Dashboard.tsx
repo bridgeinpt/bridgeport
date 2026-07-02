@@ -80,6 +80,36 @@ interface ServiceWithUpdate extends Service {
   targetTag: string;
 }
 
+type OverallServiceStatus = 'healthy' | 'unknown' | 'unhealthy';
+
+// Collapse one deployment's runtime/health signal into the 3-state dot the
+// shared statusVariant() can map (preserves the prior 3-state semantics).
+function classifyDeployment(d: { status?: string; healthStatus?: string }): OverallServiceStatus {
+  if (d.healthStatus === 'healthy' || d.status === 'running' || d.status === 'healthy') return 'healthy';
+  if (d.healthStatus === 'degraded' || d.status === 'unknown') return 'unknown';
+  return 'unhealthy';
+}
+
+const OVERALL_SEVERITY: Record<OverallServiceStatus, number> = {
+  healthy: 0,
+  unknown: 1,
+  unhealthy: 2,
+};
+
+// A service template's deployments; falls back to the template row itself
+// (which carries the first deployment's flattened runtime fields) when the
+// serviceDeployments array is absent and the row is attached to a server.
+function deploymentsOf(service: ServiceWithServerName): Array<{
+  serverId?: string;
+  server?: { id: string; name: string };
+  status?: string;
+  healthStatus?: string;
+  discoveryStatus?: string;
+}> {
+  if (service.serviceDeployments?.length) return service.serviceDeployments;
+  return service.serverId ? [service] : [];
+}
+
 export default function Dashboard() {
   const { selectedEnvironment, dismissedAlerts, dismissAlert, clearDismissedAlerts } = useAppStore();
   const { user } = useAuthStore();
@@ -226,33 +256,36 @@ export default function Dashboard() {
     });
 
     // Unhealthy services (using Set for O(1) lookup).
-    // We iterate the flat `services` array (one row per service template enriched
-    // with the first deployment's runtime + server, via listServices' back-compat
-    // surface). In 2.0 these fields are populated from ServiceDeployment.
+    // Iterate every deployment of each service template — reading only the
+    // flattened first-deployment fields would hide an unhealthy second
+    // deployment. Alert ids are per-deployment so dismissing one server's
+    // alert doesn't dismiss the others.
     const healthyStatuses = new Set(['running', 'healthy', 'unknown']);
     services.forEach((service) => {
-      const serverName = service.server?.name ?? 'unknown';
-      const status = service.status ?? 'unknown';
-      if (!healthyStatuses.has(status)) {
-        result.push({
-          id: `unhealthy-${service.id}`,
-          type: 'unhealthy',
-          severity: 'error',
-          title: 'Unhealthy Service',
-          description: `${service.name} on ${serverName}: ${status}`,
-          link: `/services/${service.id}`,
-        });
-      }
+      for (const d of deploymentsOf(service)) {
+        const serverName = d.server?.name ?? 'unknown';
+        const status = d.status ?? 'unknown';
+        if (!healthyStatuses.has(status)) {
+          result.push({
+            id: `unhealthy-${service.id}-${d.serverId}`,
+            type: 'unhealthy',
+            severity: 'error',
+            title: 'Unhealthy Service',
+            description: `${service.name} on ${serverName}: ${status}`,
+            link: `/services/${service.id}`,
+          });
+        }
 
-      if (service.discoveryStatus === 'missing') {
-        result.push({
-          id: `missing-${service.id}`,
-          type: 'missing',
-          severity: 'warning',
-          title: 'Missing Container',
-          description: `${service.name} on ${serverName}: container not found`,
-          link: `/services/${service.id}`,
-        });
+        if (d.discoveryStatus === 'missing') {
+          result.push({
+            id: `missing-${service.id}-${d.serverId}`,
+            type: 'missing',
+            severity: 'warning',
+            title: 'Missing Container',
+            description: `${service.name} on ${serverName}: container not found`,
+            link: `/services/${service.id}`,
+          });
+        }
       }
     });
 
@@ -303,26 +336,60 @@ export default function Dashboard() {
       .slice(0, 5);
   }, [auditLogs]);
 
-  // All services with server info for health grid.
-  // `server` is the back-compat surface from listServices (first deployment) — may
-  // be undefined for templates with no deployments.
+  // All services with server info for health grid: one badge per service
+  // template (keeps counts consistent with `_count.services`), with `overall`
+  // as the worst status across all its deployments — a healthy first
+  // deployment must not mask an unhealthy second one.
   const allServices = useMemo(() => {
-    return services.map((s) => ({ ...s, serverName: s.server?.name ?? 'unknown' }));
+    return services.map((s) => {
+      const deployments = deploymentsOf(s);
+      // Templates with no deployments classify off the (empty) flattened
+      // fields, preserving the previous single-row behavior.
+      const rows = deployments.length > 0 ? deployments : [s];
+      let overall: OverallServiceStatus = 'healthy';
+      for (const d of rows) {
+        const status = classifyDeployment(d);
+        if (OVERALL_SEVERITY[status] > OVERALL_SEVERITY[overall]) overall = status;
+      }
+      const serverName =
+        deployments.map((d) => d.server?.name ?? 'unknown').join(', ') || 'unknown';
+      return { ...s, serverName, overall };
+    });
   }, [services]);
 
   // Build a topology-friendly `ServerWithServices[]` shape from the separate
   // servers + services arrays. The topology component still expects nested services.
-  // Services that aren't yet attached to a server (no deployments) are skipped.
+  // A service template fans out to one synthetic row per deployment (with that
+  // deployment's runtime fields flattened on top) so it renders under EVERY
+  // server it's deployed on, not just the first deployment's. Rows without a
+  // serviceDeployments array fall back to the flattened first-deployment
+  // serverId. Services that aren't attached to any server are skipped.
   // We cast to ServerWithServices: TopologyDiagram reads status / healthStatus /
-  // containerImage / imageTag, all of which are present on listServices' back-compat
-  // surface (first deployment flattened onto the template).
+  // containerImage / imageTag, all present on the synthetic rows.
   const serversWithServices = useMemo<ServerWithServices[]>(() => {
     const byServer = new Map<string, ServiceWithServerName[]>();
+    const add = (serverId: string, row: ServiceWithServerName) => {
+      const list = byServer.get(serverId);
+      if (list) list.push(row);
+      else byServer.set(serverId, [row]);
+    };
     for (const s of services) {
-      if (!s.serverId) continue;
-      const list = byServer.get(s.serverId);
-      if (list) list.push(s);
-      else byServer.set(s.serverId, [s]);
+      const deployments = s.serviceDeployments ?? [];
+      if (deployments.length > 0) {
+        for (const d of deployments) {
+          add(d.serverId, {
+            ...s,
+            serverId: d.serverId,
+            server: d.server,
+            status: d.status,
+            healthStatus: d.healthStatus,
+            containerStatus: d.containerStatus,
+            exposedPorts: d.exposedPorts,
+          });
+        }
+      } else if (s.serverId) {
+        add(s.serverId, s);
+      }
     }
     return servers.map((srv) => ({
       ...srv,
@@ -330,11 +397,9 @@ export default function Dashboard() {
     }));
   }, [servers, services]);
 
-  // Service health counts
+  // Service health counts (worst-of-deployments, same signal as the grid)
   const serviceHealthCounts = useMemo(() => {
-    const healthy = allServices.filter(
-      (s) => s.healthStatus === 'healthy' || s.status === 'running' || s.status === 'healthy'
-    ).length;
+    const healthy = allServices.filter((s) => s.overall === 'healthy').length;
     return { healthy, total: allServices.length };
   }, [allServices]);
 
@@ -802,31 +867,23 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="flex flex-wrap gap-2">
-              {allServices.map((service) => {
-                // Collapse the runtime/health signal into an overall status the
-                // shared statusVariant() can map (preserves the prior 3-state dot).
-                const overall =
-                  service.healthStatus === 'healthy' || service.status === 'running' || service.status === 'healthy'
-                    ? 'healthy'
-                    : service.healthStatus === 'degraded' || service.status === 'unknown'
-                    ? 'unknown'
-                    : 'unhealthy';
-                return (
-                  <Link
-                    key={service.id}
-                    to={`/services/${service.id}`}
-                    title={`${service.name} on ${service.serverName} - ${service.healthStatus || service.status}`}
-                  >
-                    <StatusBadge
-                      kind="overall"
-                      value={overall}
-                      label={service.name}
-                      dot
-                      className="px-3 py-2 text-sm"
-                    />
-                  </Link>
-                );
-              })}
+              {allServices.map((service) => (
+                // `overall` is the worst status across the service's
+                // deployments (computed in the allServices memo).
+                <Link
+                  key={service.id}
+                  to={`/services/${service.id}`}
+                  title={`${service.name} on ${service.serverName} - ${service.overall}`}
+                >
+                  <StatusBadge
+                    kind="overall"
+                    value={service.overall}
+                    label={service.name}
+                    dot
+                    className="px-3 py-2 text-sm"
+                  />
+                </Link>
+              ))}
             </div>
           </CardContent>
         </Card>
