@@ -93,6 +93,18 @@ async function buildServer() {
   }
   await fastify.register(cors, buildCorsOptions(config));
 
+  // Baseline security response headers (defense-in-depth). Deliberately minimal
+  // and dependency-free: no Content-Security-Policy (it needs per-deployment
+  // tuning against the SPA and a wrong policy silently breaks the UI) and no
+  // HSTS (owned by the TLS-terminating reverse proxy). This closes clickjacking
+  // and MIME-sniffing across the API and the served SPA; a stricter CSP/HSTS
+  // belongs at the proxy layer.
+  fastify.addHook('onRequest', async (_req, reply) => {
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('X-Frame-Options', 'SAMEORIGIN');
+    reply.header('Referrer-Policy', 'no-referrer');
+  });
+
   await fastify.register(jwt, {
     secret: config.JWT_SECRET,
   });
@@ -169,17 +181,23 @@ async function buildServer() {
     },
   });
 
-  // Custom JSON parser that allows empty bodies
+  // Custom JSON parser that allows empty bodies. It also stashes the raw
+  // request bytes on `request.rawBody` so signature-verified endpoints (the
+  // webhook routes) can HMAC exactly what the sender signed, rather than a
+  // re-serialized object (key order / whitespace differences would otherwise
+  // break the signature — see src/routes/webhooks.ts).
   fastify.addContentTypeParser(
     'application/json',
     { parseAs: 'string' },
     (req, body, done) => {
-      if (!body || body === '') {
+      const raw = typeof body === 'string' ? body : (body as Buffer)?.toString('utf8');
+      req.rawBody = raw;
+      if (!raw || raw === '') {
         done(null, {});
         return;
       }
       try {
-        done(null, JSON.parse(body as string));
+        done(null, JSON.parse(raw));
       } catch (err) {
         done(err as Error, undefined);
       }

@@ -12,6 +12,27 @@ const IGNORED_ERROR_CODES = new Set([
   'ENOTFOUND',
 ]);
 
+// Explicit secret-scrub safety net. Sentry is already conservative here
+// (sendDefaultPii:false, and the error handler attaches only a curated
+// {method,url,statusCode,requestId}), but this guarantees that any object
+// passed as `extra` — now or in future call sites — has secret-bearing keys
+// redacted before it leaves the process.
+const SECRET_KEY_RE =
+  /(secret|password|passwd|token|api[-_]?key|authorization|cookie|private[-_]?key|master[-_]?key|encrypted|nonce)/i;
+
+function scrubSecrets(value: unknown, depth = 0): unknown {
+  if (value == null || depth > 6) return value;
+  if (Array.isArray(value)) return value.map((v) => scrubSecrets(v, depth + 1));
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = SECRET_KEY_RE.test(k) ? '[redacted]' : scrubSecrets(v, depth + 1);
+    }
+    return out;
+  }
+  return value;
+}
+
 export function initSentry(release?: string): void {
   if (!config.SENTRY_BACKEND_DSN || !config.SENTRY_ENABLED) {
     return;
@@ -29,6 +50,9 @@ export function initSentry(release?: string): void {
       if (code && IGNORED_ERROR_CODES.has(code)) {
         return null;
       }
+      // Redact secret-bearing keys from any attached extra/contexts data.
+      if (event.extra) event.extra = scrubSecrets(event.extra) as typeof event.extra;
+      if (event.contexts) event.contexts = scrubSecrets(event.contexts) as typeof event.contexts;
       return event;
     },
   });
@@ -40,7 +64,8 @@ export function initSentry(release?: string): void {
 export function captureException(error: unknown, context?: Record<string, unknown>): void {
   if (!initialized) return;
 
-  Sentry.captureException(error, context ? { extra: context } : undefined);
+  const extra = context ? (scrubSecrets(context) as Record<string, unknown>) : undefined;
+  Sentry.captureException(error, extra ? { extra } : undefined);
 }
 
 export function getSentryConfig(appVersion: string): {

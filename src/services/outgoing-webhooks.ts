@@ -4,6 +4,7 @@ import { encrypt, decrypt } from '../lib/crypto.js';
 import type { WebhookConfig } from '@prisma/client';
 import { getSystemSettings, parseWebhookRetryDelays } from './system-settings.js';
 import { safeJsonParse } from '../lib/helpers.js';
+import { isBlockedWebhookHost } from './webhook-subscriptions.js';
 
 interface WebhookConfigInput {
   name: string;
@@ -212,11 +213,27 @@ async function sendWebhookWithRetry(
   let lastError: string | undefined;
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
+    // SSRF guard: re-validate the destination before every attempt. A host that
+    // was safe when the webhook was configured can rebind via DNS to an internal
+    // address, so re-resolve and range-check on each try and fail closed rather
+    // than deliver to loopback/private/link-local/metadata infrastructure.
+    if (await isBlockedWebhookHost(webhook.url)) {
+      lastError =
+        'Destination resolves to a blocked (private/loopback/link-local/metadata) address';
+      console.error(
+        `[Webhooks] Blocked SSRF-unsafe delivery for webhook "${webhook.name}" (${webhook.id}): ${lastError}`
+      );
+      break;
+    }
+
     try {
       const response = await fetch(webhook.url, {
         method: 'POST',
         headers,
         body: payloadString,
+        // Do NOT auto-follow redirects: a 3xx could point at internal
+        // infrastructure (SSRF). Treat it as a non-2xx failure instead.
+        redirect: 'manual',
         signal: AbortSignal.timeout(timeoutMs),
       });
 

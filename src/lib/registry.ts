@@ -1,4 +1,5 @@
 import { getSystemSettings } from '../services/system-settings.js';
+import { isBlockedWebhookHost } from '../services/webhook-subscriptions.js';
 
 // Common types
 export interface RegistryTag {
@@ -382,7 +383,24 @@ export class GenericRegistryClient implements RegistryClient {
     return headers;
   }
 
+  /**
+   * SSRF guard: refuse to fetch when the configured registry URL targets a
+   * private, loopback, link-local, or cloud-metadata (169.254.169.254) address.
+   * Reuses the webhook host guard, which rejects non-http(s) schemes and
+   * resolves DNS to range-check every returned address (so a public hostname
+   * pointing at an internal IP is also blocked). Re-checked before every
+   * outbound request so DNS rebinding can't slip past a one-time check.
+   */
+  private async assertRegistryHostAllowed(): Promise<void> {
+    if (await isBlockedWebhookHost(this.registryUrl)) {
+      throw new Error(
+        'Registry URL targets a private, loopback, link-local, or metadata address, which is not allowed'
+      );
+    }
+  }
+
   private async fetch<T>(path: string): Promise<T> {
+    await this.assertRegistryHostAllowed();
     const response = await fetch(`${this.registryUrl}${path}`, {
       headers: {
         Accept: [
@@ -393,6 +411,9 @@ export class GenericRegistryClient implements RegistryClient {
         ].join(', '),
         ...this.getAuthHeader(),
       },
+      // Do NOT auto-follow redirects: a 3xx Location could point at internal
+      // infrastructure (SSRF). A redirect surfaces as a non-ok status below.
+      redirect: 'manual',
     });
 
     if (!response.ok) {
@@ -403,8 +424,11 @@ export class GenericRegistryClient implements RegistryClient {
   }
 
   async testConnection(): Promise<void> {
+    await this.assertRegistryHostAllowed();
     const response = await fetch(`${this.registryUrl}/v2/`, {
       headers: this.getAuthHeader(),
+      // No auto-follow: a redirect to an internal address must not be chased.
+      redirect: 'manual',
     });
 
     if (!response.ok && response.status !== 401) {
@@ -478,6 +502,7 @@ export class GenericRegistryClient implements RegistryClient {
   }
 
   async getManifestDigest(repo: string, tag: string): Promise<string> {
+    await this.assertRegistryHostAllowed();
     // Try multiple manifest types — registries vary in what they support
     const response = await fetch(`${this.registryUrl}/v2/${repo}/manifests/${tag}`, {
       method: 'HEAD',
@@ -490,6 +515,8 @@ export class GenericRegistryClient implements RegistryClient {
         ].join(', '),
         ...this.getAuthHeader(),
       },
+      // No auto-follow: a redirect to an internal address must not be chased.
+      redirect: 'manual',
     });
 
     if (!response.ok) {

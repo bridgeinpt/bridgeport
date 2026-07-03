@@ -4122,6 +4122,16 @@
           "services"
         ],
         "responses": {
+          "400": {
+            "description": "Bad request — malformed input or failed validation.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
           "401": {
             "description": "Unauthorized — missing or invalid bearer token.",
             "content": {
@@ -6081,7 +6091,7 @@
                   },
                   "registryUrl": {
                     "type": "string",
-                    "minLength": 1
+                    "format": "uri"
                   },
                   "repositoryPrefix": {
                     "type": "string"
@@ -6225,7 +6235,7 @@
                   },
                   "registryUrl": {
                     "type": "string",
-                    "minLength": 1
+                    "format": "uri"
                   },
                   "repositoryPrefix": {
                     "nullable": true,

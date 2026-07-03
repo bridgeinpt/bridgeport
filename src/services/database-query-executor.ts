@@ -154,11 +154,16 @@ async function executeSSHQueries(
         let cmd = query.query;
         if (conn.placeholders) {
           for (const [key, value] of Object.entries(conn.placeholders)) {
-            cmd = cmd.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value);
+            // Shell-escape substituted values so injected metacharacters can't
+            // execute. The query template (query.query) is a trusted, plugin-
+            // defined string; the placeholder VALUES come from user DB config.
+            // Use a replacer function so `$`-sequences in the escaped value are
+            // inserted literally, not interpreted as replacement patterns.
+            cmd = cmd.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), () => shellEscape(String(value)));
           }
         }
         if (conn.filePath) {
-          cmd = cmd.replace(/\{\{filePath\}\}/g, conn.filePath);
+          cmd = cmd.replace(/\{\{filePath\}\}/g, () => shellEscape(String(conn.filePath)));
         }
 
         const result = await client.exec(cmd);

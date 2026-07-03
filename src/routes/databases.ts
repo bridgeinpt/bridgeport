@@ -1523,12 +1523,16 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
       }),
     },
     async (request, reply) => {
-      const { id } = request.params as { envId: string; id: string };
+      const { envId, id } = request.params as { envId: string; id: string };
       const { hours } = request.query as { hours?: string };
 
+      // Scope by envId: an env-scoped token passes enforceTokenScope on the path
+      // :envId, so the resource load MUST also verify the database belongs to
+      // that environment — otherwise a token for env A reaches env B's database
+      // via /api/environments/<A>/databases/<id-in-B>/metrics.
       const database = await findOrNotFound(
-        prisma.database.findUnique({
-          where: { id },
+        prisma.database.findFirst({
+          where: { id, environmentId: envId },
           include: {
             databaseType: { select: { monitoringConfig: true } },
           },
@@ -1578,8 +1582,8 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
       const { envId, id } = request.params as { envId: string; id: string };
 
       const database = await findOrNotFound(
-        prisma.database.findUnique({
-          where: { id },
+        prisma.database.findFirst({
+          where: { id, environmentId: envId },
           include: { databaseType: true, server: true },
         }),
         'Database',
@@ -1610,14 +1614,16 @@ export async function databaseRoutes(fastify: FastifyInstance): Promise<void> {
       }),
     },
     async (request, reply) => {
-      const { id } = request.params as { envId: string; id: string };
+      const { envId, id } = request.params as { envId: string; id: string };
       const body = request.body as {
         monitoringEnabled?: boolean;
         collectionIntervalSec?: number;
       };
 
+      // Scope by envId (see the metrics route above) so an env-scoped token
+      // can't toggle monitoring on a database outside its environment.
       const database = await findOrNotFound(
-        prisma.database.findUnique({ where: { id } }),
+        prisma.database.findFirst({ where: { id, environmentId: envId } }),
         'Database',
         reply
       );

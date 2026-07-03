@@ -9,6 +9,15 @@ import { DEPLOYMENT_STATUS } from '../lib/constants.js';
 import { validateBody, findOrNotFound, getErrorMessage } from '../lib/helpers.js';
 import { routeSchema } from '../lib/openapi-schema.js';
 
+// The raw request bytes, stashed by the JSON content-type parser in server.ts.
+// Signature-verified webhook endpoints HMAC these exact bytes rather than a
+// re-serialized object (key order / whitespace would otherwise break the HMAC).
+declare module 'fastify' {
+  interface FastifyRequest {
+    rawBody?: string;
+  }
+}
+
 const deployWebhookSchema = z.object({
   service: z.string().min(1), // Service name or ID
   environment: z.string().min(1), // Environment name
@@ -22,7 +31,20 @@ const deployImageWebhookSchema = z.object({
   imageTag: z.string().min(1),
 });
 
-// Simple webhook secret verification
+// Constant-time string compare that never throws. crypto.timingSafeEqual
+// raises a RangeError when the two buffers differ in length (e.g. an attacker
+// sends a short/garbage signature), so we length-check first and only then
+// compare — returning false rather than surfacing an uncaught 500.
+function safeEqual(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+// Simple webhook secret verification. `payload` MUST be the raw request body
+// bytes as received (request.rawBody), not a re-serialized object — HMAC is
+// only meaningful over the exact bytes the sender signed.
 function verifyWebhookSignature(
   payload: string,
   signature: string,
@@ -33,10 +55,7 @@ function verifyWebhookSignature(
     .update(payload)
     .digest('hex');
 
-  return crypto.timingSafeEqual(
-    Buffer.from(signature),
-    Buffer.from(expectedSignature)
-  );
+  return safeEqual(signature, expectedSignature);
 }
 
 export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
@@ -52,16 +71,21 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
     const signature = request.headers['x-webhook-signature'] as string;
     const webhookSecret = process.env.WEBHOOK_SECRET;
 
-    // Verify signature if secret is configured
-    if (webhookSecret) {
-      if (!signature) {
-        return reply.code(401).send({ error: 'Missing signature' });
-      }
-
-      const rawBody = JSON.stringify(request.body);
-      if (!verifyWebhookSignature(rawBody, signature, webhookSecret)) {
-        return reply.code(401).send({ error: 'Invalid signature' });
-      }
+    // Fail closed: this endpoint triggers real deployments, so it must be
+    // authenticated. If no secret is configured the endpoint is DISABLED
+    // (returns 401) rather than left open to unauthenticated callers.
+    if (!webhookSecret) {
+      return reply.code(401).send({
+        error: 'Webhook authentication is not configured. Set WEBHOOK_SECRET to enable this endpoint.',
+      });
+    }
+    if (!signature) {
+      return reply.code(401).send({ error: 'Missing signature' });
+    }
+    // HMAC over the exact received bytes (request.rawBody), not a re-serialized
+    // object — see the JSON content-type parser in server.ts.
+    if (!verifyWebhookSignature(request.rawBody ?? '', signature, webhookSecret)) {
+      return reply.code(401).send({ error: 'Invalid signature' });
     }
 
     const body = validateBody(deployWebhookSchema, request, reply);
@@ -155,23 +179,30 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
     schema: routeSchema({
       tags: ['services'],
       summary: 'GitHub Actions webhook: deploy on package published events',
-      errors: [401],
+      errors: [400, 401],
     }),
   }, async (request, reply) => {
     const signature = request.headers['x-hub-signature-256'] as string;
     const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET;
 
-    // Verify GitHub signature
-    if (webhookSecret && signature) {
-      const rawBody = JSON.stringify(request.body);
-      const expectedSig = 'sha256=' + crypto
-        .createHmac('sha256', webhookSecret)
-        .update(rawBody)
-        .digest('hex');
-
-      if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSig))) {
-        return reply.code(401).send({ error: 'Invalid signature' });
-      }
+    // Fail closed. Previously verification ran only `if (webhookSecret && signature)`,
+    // so omitting the signature header skipped it entirely — an auth bypass. Now the
+    // endpoint is disabled unless a secret is configured, and the signature is required.
+    if (!webhookSecret) {
+      return reply.code(401).send({
+        error: 'GitHub webhook authentication is not configured. Set GITHUB_WEBHOOK_SECRET to enable this endpoint.',
+      });
+    }
+    if (!signature) {
+      return reply.code(401).send({ error: 'Missing signature' });
+    }
+    // HMAC over the exact received bytes (GitHub signs the raw payload).
+    const expectedSig = 'sha256=' + crypto
+      .createHmac('sha256', webhookSecret)
+      .update(request.rawBody ?? '')
+      .digest('hex');
+    if (!safeEqual(signature, expectedSig)) {
+      return reply.code(401).send({ error: 'Invalid signature' });
     }
 
     const event = request.headers['x-github-event'];
@@ -179,17 +210,25 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
 
     // Handle package published event (container registry)
     if (event === 'package' && payload.action === 'published') {
-      const packageData = payload.package as {
-        name: string;
-        package_version: { version: string };
-      };
+      const packageData = payload.package as
+        | { name?: string; package_version?: { version?: string } }
+        | undefined;
+      const packageName = packageData?.name;
+      const version = packageData?.package_version?.version;
+
+      // Require a concrete package name and a well-formed image tag. An empty
+      // name would `contains: ''`-match every image in every environment (mass
+      // redeploy), and the version flows into the image reference for the pull.
+      if (!packageName || !version || !/^[A-Za-z0-9._:/-]+$/.test(version)) {
+        return reply.code(400).send({ error: 'Invalid or incomplete package payload' });
+      }
 
       // Find matching services and deploy
       const services = await prisma.service.findMany({
         where: {
           containerImage: {
             imageName: {
-              contains: packageData.name,
+              contains: packageName,
             },
           },
         },
@@ -203,7 +242,7 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
             service.id,
             'github-webhook',
             null,
-            { imageTag: packageData.package_version.version }
+            { imageTag: version }
           );
 
           const serviceRow = await prisma.service.findUnique({
@@ -216,7 +255,7 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
             resourceType: 'service',
             resourceId: service.id,
             resourceName: service.name,
-            details: { source: 'github-webhook', packageName: packageData.name, imageTag: packageData.package_version.version, deploymentCount: outcome.results.length, halted: outcome.halted },
+            details: { source: 'github-webhook', packageName, imageTag: version, deploymentCount: outcome.results.length, halted: outcome.halted },
             environmentId: serviceRow?.environmentId,
           });
 
@@ -253,16 +292,21 @@ export async function webhookRoutes(fastify: FastifyInstance): Promise<void> {
     const signature = request.headers['x-webhook-signature'] as string;
     const webhookSecret = process.env.WEBHOOK_SECRET;
 
-    // Verify signature if secret is configured
-    if (webhookSecret) {
-      if (!signature) {
-        return reply.code(401).send({ error: 'Missing signature' });
-      }
-
-      const rawBody = JSON.stringify(request.body);
-      if (!verifyWebhookSignature(rawBody, signature, webhookSecret)) {
-        return reply.code(401).send({ error: 'Invalid signature' });
-      }
+    // Fail closed: this endpoint triggers real deployments, so it must be
+    // authenticated. If no secret is configured the endpoint is DISABLED
+    // (returns 401) rather than left open to unauthenticated callers.
+    if (!webhookSecret) {
+      return reply.code(401).send({
+        error: 'Webhook authentication is not configured. Set WEBHOOK_SECRET to enable this endpoint.',
+      });
+    }
+    if (!signature) {
+      return reply.code(401).send({ error: 'Missing signature' });
+    }
+    // HMAC over the exact received bytes (request.rawBody), not a re-serialized
+    // object — see the JSON content-type parser in server.ts.
+    if (!verifyWebhookSignature(request.rawBody ?? '', signature, webhookSecret)) {
+      return reply.code(401).send({ error: 'Invalid signature' });
     }
 
     const body = validateBody(deployImageWebhookSchema, request, reply);
