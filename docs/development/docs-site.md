@@ -6,6 +6,8 @@ How the public documentation site is built and deployed.
 
 The site is built with [Astro](https://astro.build) + [Starlight](https://starlight.astro.build), living in [`website/`](../../website). Page content is authored in [`docs/`](../) (this directory) plus the checked-in [`openapi.json`](../../openapi.json) spec — `website/astro.config.mjs` points Starlight at both and defines the sidebar. The site is a standalone pnpm workspace with its own lockfile (`website/pnpm-lock.yaml`), separate from the root workspace.
 
+Two pages are generated from **GitHub data at build time** rather than from markdown: the **changelog** (from GitHub Releases, via `starlight-changelogs` in `website/src/content.config.ts`) and **What's Next** (from open milestones, `epic`-labelled issues and their sub-issues, in `website/src/pages/roadmap.astro`). Both fetches are non-fatal — an API failure degrades to a fallback note instead of failing the build — and both honor the optional `GH_API_TOKEN` env var to raise the GitHub API rate limit (CI passes `GITHUB_TOKEN`; unauthenticated works for local builds).
+
 Hosting is Cloudflare Pages, with the Pages project connected directly to this GitHub repository.
 
 ## CI vs. deploy
@@ -17,11 +19,11 @@ Two separate things happen when `docs/**`, `openapi.json`, or `website/**` chang
 
 So a normal merge to `master` that touches the docs deploys automatically — no GitHub Actions step triggers it.
 
-## The `CLOUDFLARE_DEPLOY_HOOK` secret
+## The `CLOUDFLARE_DEPLOY_HOOK` secret (manual redeploys)
 
-The site's changelog page is generated from GitHub Releases at *build* time. Cloudflare only rebuilds on a `master` push, so a new GitHub Release wouldn't show up on the changelog until the next docs-related commit. The `CLOUDFLARE_DEPLOY_HOOK` repo secret (a Cloudflare Pages deploy hook URL) exists to force a rebuild in that case:
+The changelog and What's Next pages are generated from GitHub data at *build* time, but Cloudflare only rebuilds on a `master` push — so GitHub-side-only changes (a new Release; issues filed, closed, or reshuffled between milestones) don't appear until the next docs-related commit. The `CLOUDFLARE_DEPLOY_HOOK` repo secret (a Cloudflare Pages deploy hook URL) exists to force a rebuild in those cases:
 
-- [`.github/workflows/docs-deploy-on-release.yml`](../../.github/workflows/docs-deploy-on-release.yml) POSTs the hook when a Release is published/edited via the GitHub UI, or via manual `workflow_dispatch`.
+- [`.github/workflows/docs-deploy-on-release.yml`](../../.github/workflows/docs-deploy-on-release.yml) ("Docs Site Redeploy") POSTs the hook when a Release is published/edited via the GitHub UI — **or on manual `workflow_dispatch`**: run it from the Actions tab (or `gh workflow run docs-deploy-on-release.yml`) after a round of issue/milestone consolidation to refresh What's Next immediately.
 - [`.github/workflows/release.yml`](../../.github/workflows/release.yml)'s "Refresh docs changelog" step POSTs the hook after the `/release` flow cuts a Release — that flow authenticates as `GITHUB_TOKEN`, and GitHub does not fire `release: published` events for `GITHUB_TOKEN`-created releases, so the dedicated workflow above can't catch it.
 
 Both call sites are non-fatal no-ops if the secret is unset — they log a message and exit `0` rather than fail the workflow.
@@ -38,7 +40,7 @@ Custom-domain mapping for the Pages project is configured entirely in the **Clou
 ## When a docs deploy doesn't happen
 
 1. Check the **Cloudflare Pages dashboard → Deployments** tab for the project and read the build log for the missing deploy. Most failures are a build-time error (bad Astro/Starlight config, a broken link caught differently than CI, etc.) rather than a trigger problem, since Cloudflare's git integration doesn't depend on any GitHub Actions state.
-2. If the missing content is specifically the **changelog** (a new Release not appearing), check whether `CLOUDFLARE_DEPLOY_HOOK` is set (repo Settings → Secrets and variables → Actions) and look at the run logs for `docs-deploy-on-release.yml` or the "Refresh docs changelog" step in `release.yml` — both log clearly when the secret is missing or the POST fails.
+2. If the missing content is specifically the **changelog** (a new Release not appearing) or **What's Next** (issue/milestone changes not appearing), check whether `CLOUDFLARE_DEPLOY_HOOK` is set (repo Settings → Secrets and variables → Actions) and look at the run logs for `docs-deploy-on-release.yml` or the "Refresh docs changelog" step in `release.yml` — both log clearly when the secret is missing or the POST fails. For What's Next, a manual run of "Docs Site Redeploy" is the refresh button.
 3. Confirm [`docs-site.yml`](../../.github/workflows/docs-site.yml) (the CI check) is green on the merged commit. A red CI check doesn't block Cloudflare's deploy, but it's a strong signal something in the same change would also break the live build.
 
 ## Related

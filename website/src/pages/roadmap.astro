@@ -1,0 +1,445 @@
+---
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+import { Aside, Badge } from '@astrojs/starlight/components';
+
+/**
+ * "What's Next" — a roadmap page generated at build time from the repo's GitHub
+ * milestones, mirroring the changelog's build-time-fetch pattern (content.config.ts).
+ *
+ * Structure: open milestones (lowest version first) → their `epic`-labelled issues as
+ * cards with a progress bar computed from direct sub-issues → any non-epic milestone
+ * issues as a flat list → a "want to help?" block from `help wanted` / `good first issue`.
+ *
+ * Freshness model (deliberate): Cloudflare Pages rebuilds on every push to master, and a
+ * merge is exactly the event that closes roadmap items — so "merged ⇒ it disappears from
+ * What's Next" happens on its own. Milestone-only reshuffles show up on the next deploy
+ * (or a manual Cloudflare redeploy). Like the changelog, a failed fetch degrades to a
+ * fallback note rather than failing the build; set GH_API_TOKEN to raise the API limit.
+ */
+
+const OWNER = 'bridgeinpt';
+const REPO = 'bridgeport';
+const REPO_URL = `https://github.com/${OWNER}/${REPO}`;
+
+interface SubIssuesSummary {
+  total: number;
+  completed: number;
+  percent_completed: number;
+}
+
+interface ApiIssue {
+  number: number;
+  title: string;
+  state: 'open' | 'closed';
+  html_url: string;
+  body?: string | null;
+  labels: Array<{ name?: string }>;
+  sub_issues_summary?: SubIssuesSummary;
+  pull_request?: unknown;
+}
+
+interface ApiMilestone {
+  number: number;
+  title: string;
+  html_url: string;
+  open_issues: number;
+  closed_issues: number;
+}
+
+interface MemberNode {
+  issue: ApiIssue;
+  children: MemberNode[];
+}
+
+interface EpicCard {
+  epic: ApiIssue;
+  name: string;
+  goal: string;
+  members: MemberNode[];
+  done: number;
+  total: number;
+}
+
+interface MilestoneSection {
+  milestone: ApiMilestone;
+  epics: EpicCard[];
+  standalone: ApiIssue[];
+}
+
+interface RoadmapData {
+  sections: MilestoneSection[];
+  helpWanted: ApiIssue[];
+  goodFirst: ApiIssue[];
+}
+
+const token = process.env.GH_API_TOKEN;
+
+async function gh<T>(path: string): Promise<T> {
+  const res = await fetch(`https://api.github.com/repos/${OWNER}/${REPO}${path}`, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+  if (!res.ok) throw new Error(`GitHub API ${res.status} for ${path}`);
+  return (await res.json()) as T;
+}
+
+function hasLabel(issue: ApiIssue, name: string): boolean {
+  return issue.labels.some((l) => l.name === name);
+}
+
+/** "Epic: Progressive delivery & safe rollouts (#316 #317 #321)" → clean display name. */
+function epicName(title: string): string {
+  return title
+    .replace(/^epic:\s*/i, '')
+    .replace(/\s*\((?:#\d+[\s,]*)+\)\s*$/, '')
+    .trim();
+}
+
+/** First prose paragraph of the epic body (after its leading heading), lightly de-markdowned. */
+function epicGoal(body: string | null | undefined): string {
+  const lines = (body ?? '').split(/\r?\n/);
+  let i = 0;
+  while (i < lines.length && (lines[i]!.trim() === '' || lines[i]!.startsWith('#'))) i++;
+  const para: string[] = [];
+  while (i < lines.length && lines[i]!.trim() !== '' && !lines[i]!.startsWith('#')) {
+    para.push(lines[i]!.trim());
+    i++;
+  }
+  return para.join(' ').replace(/\*\*/g, '').replace(/`/g, '');
+}
+
+/** Fetch an issue's sub-issues; recurse where GitHub reports nested sub-issues. */
+async function fetchMembers(issueNumber: number, covered: Set<number>): Promise<MemberNode[]> {
+  const subs = await gh<ApiIssue[]>(`/issues/${issueNumber}/sub_issues?per_page=100`);
+  const nodes: MemberNode[] = [];
+  for (const sub of subs) {
+    covered.add(sub.number);
+    const children =
+      (sub.sub_issues_summary?.total ?? 0) > 0 ? await fetchMembers(sub.number, covered) : [];
+    nodes.push({ issue: sub, children });
+  }
+  return nodes;
+}
+
+async function loadRoadmap(): Promise<RoadmapData> {
+  const milestones = await gh<ApiMilestone[]>('/milestones?state=open&per_page=20');
+  milestones.sort((a, b) => parseFloat(a.title) - parseFloat(b.title));
+
+  const sections: MilestoneSection[] = [];
+  for (const milestone of milestones) {
+    const listed = await gh<ApiIssue[]>(
+      `/issues?milestone=${milestone.number}&state=open&per_page=100`,
+    );
+    const issues = listed.filter((i) => !i.pull_request);
+    const covered = new Set<number>();
+    const epics: EpicCard[] = [];
+    for (const epic of issues.filter((i) => hasLabel(i, 'epic')).sort((a, b) => a.number - b.number)) {
+      covered.add(epic.number);
+      const members = await fetchMembers(epic.number, covered);
+      // Progress counts direct members only (a split issue is one unit until it closes),
+      // matching GitHub's own sub-issue completion semantics.
+      const done = members.filter((m) => m.issue.state === 'closed').length;
+      epics.push({
+        epic,
+        name: epicName(epic.title),
+        goal: epicGoal(epic.body),
+        members,
+        done,
+        total: members.length,
+      });
+    }
+    const standalone = issues
+      .filter((i) => !covered.has(i.number))
+      .sort((a, b) => a.number - b.number);
+    if (epics.length > 0 || standalone.length > 0) sections.push({ milestone, epics, standalone });
+  }
+
+  const [helpWanted, goodFirst] = await Promise.all([
+    gh<ApiIssue[]>(`/issues?state=open&labels=${encodeURIComponent('help wanted')}&per_page=50`),
+    gh<ApiIssue[]>(
+      `/issues?state=open&labels=${encodeURIComponent('good first issue')}&per_page=50`,
+    ),
+  ]);
+  return {
+    sections,
+    helpWanted: helpWanted.filter((i) => !i.pull_request),
+    goodFirst: goodFirst.filter((i) => !i.pull_request),
+  };
+}
+
+let data: RoadmapData | null = null;
+try {
+  data = await loadRoadmap();
+} catch (err) {
+  console.warn(
+    `[roadmap] GitHub fetch failed — rendering fallback (${err instanceof Error ? err.message : err})`,
+  );
+}
+
+const builtOn = new Date().toISOString().slice(0, 10);
+---
+
+<StarlightPage
+  frontmatter={{
+    title: "What's Next",
+    description:
+      'The BridgePort roadmap — upcoming milestones and epics, generated from the GitHub issue tracker.',
+    tableOfContents: false,
+    editUrl: false,
+  }}
+>
+  <p>
+    Where BridgePort is heading, straight from the
+    <a href={`${REPO_URL}/milestones`}>GitHub milestones</a> — grouped into epics, in rough order of
+    intent. Once something ships it moves to the <a href="/changelog/">changelog</a> and drops off
+    this page.
+  </p>
+
+  <Aside type="note" title="Directions, not commitments">
+    Milestones describe intent and grouping, not dates or promises. Scope moves as reality does —
+    the issue tracker is always the source of truth.
+  </Aside>
+
+  {
+    data === null ? (
+      <Aside type="caution" title="Roadmap unavailable in this build">
+        The GitHub API couldn't be reached while building this page. See the live plan on the{' '}
+        <a href={`${REPO_URL}/milestones`}>GitHub milestones</a> page.
+      </Aside>
+    ) : (
+      <>
+        {data.sections.map((section, index) => (
+          <section class="milestone">
+            <h2 id={`milestone-${section.milestone.title}`}>
+              <a href={section.milestone.html_url}>Milestone {section.milestone.title}</a>
+              <Badge
+                text={index === 0 ? 'Up next' : 'Later'}
+                variant={index === 0 ? 'success' : 'note'}
+              />
+            </h2>
+
+            {section.epics.map((card) => (
+              <article class="epic">
+                <header>
+                  <h3>
+                    <a href={card.epic.html_url}>{card.name}</a>
+                  </h3>
+                  {card.total > 0 && (
+                    <span class="count">
+                      {card.done}/{card.total} done
+                    </span>
+                  )}
+                </header>
+                {card.total > 0 && (
+                  <div
+                    class="bar"
+                    role="progressbar"
+                    aria-valuemin="0"
+                    aria-valuemax={String(card.total)}
+                    aria-valuenow={String(card.done)}
+                    aria-label={`${card.done} of ${card.total} issues completed`}
+                  >
+                    <span style={`width:${card.total ? Math.round((card.done / card.total) * 100) : 0}%`} />
+                  </div>
+                )}
+                <p class="goal">{card.goal}</p>
+                {card.members.length > 0 && (
+                  <details>
+                    <summary>Issues in this epic</summary>
+                    <ul class="members">
+                      {card.members.map((member) => (
+                        <li class={member.issue.state === 'closed' ? 'done' : ''}>
+                          <span class="mark">{member.issue.state === 'closed' ? '✓' : '○'}</span>
+                          <a href={member.issue.html_url}>#{member.issue.number}</a>{' '}
+                          {member.issue.title}
+                          {member.children.length > 0 && (
+                            <ul class="members nested">
+                              {member.children.map((child) => (
+                                <li class={child.issue.state === 'closed' ? 'done' : ''}>
+                                  <span class="mark">
+                                    {child.issue.state === 'closed' ? '✓' : '○'}
+                                  </span>
+                                  <a href={child.issue.html_url}>#{child.issue.number}</a>{' '}
+                                  {child.issue.title}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </article>
+            ))}
+
+            {section.standalone.length > 0 && (
+              <ul class="members standalone">
+                {section.standalone.map((issue) => (
+                  <li>
+                    <span class="mark">○</span>
+                    <a href={issue.html_url}>#{issue.number}</a> {issue.title}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        ))}
+
+        {(data.goodFirst.length > 0 || data.helpWanted.length > 0) && (
+          <section class="milestone">
+            <h2 id="want-to-help">Want to help?</h2>
+            <p>
+              These are scoped and ready for outside contributions — comment on an issue to claim
+              it.
+            </p>
+            {data.goodFirst.length > 0 && (
+              <>
+                <h3>Good first issues</h3>
+                <ul class="members standalone">
+                  {data.goodFirst.map((issue) => (
+                    <li>
+                      <span class="mark">○</span>
+                      <a href={issue.html_url}>#{issue.number}</a> {issue.title}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            {data.helpWanted.length > 0 && (
+              <>
+                <h3>Help wanted</h3>
+                <ul class="members standalone">
+                  {data.helpWanted.map((issue) => (
+                    <li>
+                      <span class="mark">○</span>
+                      <a href={issue.html_url}>#{issue.number}</a> {issue.title}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </section>
+        )}
+      </>
+    )
+  }
+
+  <p class="refreshed">
+    Generated from the GitHub issue tracker when this site was last deployed ({builtOn}).
+  </p>
+</StarlightPage>
+
+<style>
+  .milestone {
+    margin-top: 2.5rem;
+  }
+  .milestone h2 {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  .milestone h2 a {
+    color: var(--sl-color-white);
+    text-decoration: none;
+  }
+  .milestone h2 a:hover {
+    text-decoration: underline;
+  }
+
+  .epic {
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.5rem;
+    padding: 1rem 1.25rem 1.1rem;
+    margin-top: 1rem;
+    background: var(--sl-color-black);
+  }
+  .epic header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+  .epic h3 {
+    margin: 0;
+    font-size: var(--sl-text-lg);
+  }
+  .epic h3 a {
+    color: var(--sl-color-white);
+    text-decoration: none;
+  }
+  .epic h3 a:hover {
+    color: var(--sl-color-accent-high);
+  }
+  .epic .count {
+    font-size: var(--sl-text-xs);
+    color: var(--sl-color-gray-3);
+    white-space: nowrap;
+  }
+
+  .bar {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--sl-color-gray-5);
+    overflow: hidden;
+    margin-top: 0.65rem;
+  }
+  .bar span {
+    display: block;
+    height: 100%;
+    background: var(--sl-color-accent);
+    border-radius: 3px;
+  }
+
+  .epic .goal {
+    margin-top: 0.75rem;
+    color: var(--sl-color-gray-2);
+    font-size: var(--sl-text-sm);
+  }
+
+  details {
+    margin-top: 0.6rem;
+  }
+  details summary {
+    cursor: pointer;
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-gray-3);
+  }
+
+  ul.members {
+    list-style: none;
+    padding-left: 0.25rem;
+    margin-top: 0.5rem;
+    font-size: var(--sl-text-sm);
+  }
+  ul.members li {
+    margin-top: 0.3rem;
+  }
+  ul.members .mark {
+    display: inline-block;
+    width: 1.1rem;
+    color: var(--sl-color-gray-3);
+  }
+  ul.members li.done > .mark {
+    color: var(--sl-color-green);
+  }
+  ul.members li.done {
+    color: var(--sl-color-gray-3);
+  }
+  ul.members.nested {
+    padding-left: 1.35rem;
+    margin-top: 0.2rem;
+  }
+  ul.members.standalone {
+    margin-top: 1rem;
+  }
+
+  .refreshed {
+    margin-top: 2.5rem;
+    font-size: var(--sl-text-xs);
+    color: var(--sl-color-gray-3);
+  }
+</style>
