@@ -220,7 +220,7 @@ When several servers belong together logically -- an HA pair, a swarm or Kuberne
 
 Densely-populated server groups can become unreadable in a fixed-width box. To fix that, **select a server box** (click its border) -- four resize handles appear on the corners. Drag them to enlarge the container so child services stay legible.
 
-The new size persists in the diagram layout for everyone on the team, alongside the existing position data. Server boxes can't be shrunk below the bounding box of their currently-laid-out children to avoid clipping. The same NodeResizer behavior is available on external entities and cluster containers.
+The new size persists in the diagram layout for everyone on the team, alongside the existing position data. Server boxes can't be shrunk below the bounding box of their currently-laid-out children to avoid clipping. This floor also applies to previously saved sizes: if new services are deployed to a server after its layout was saved, the box grows to fit them on the next render instead of clipping the new children. The same NodeResizer behavior is available on external entities and cluster containers.
 
 ---
 

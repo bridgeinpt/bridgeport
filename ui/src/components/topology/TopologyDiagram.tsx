@@ -398,11 +398,17 @@ function buildNodes(ctx: BuildNodesContext): BuildResult {
 
     const serverNodeId = `server:${server.id}`;
     const savedPos = savedPositions?.[serverNodeId];
-    // Prefer saved size from a prior resize; otherwise fall back to the
-    // computed bounding box. Clamp NodeResizer to the computed minimums so
-    // children with extent:'parent' don't get clipped.
-    const serverWidth = savedPos?.width ?? computedWidth;
-    const serverHeight = savedPos?.height ?? computedHeight;
+    // Prefer saved size from a prior resize, but never below the computed
+    // bounding box (the same floor NodeResizer enforces): a saved size can
+    // predate children added later (e.g. a service deployed to this server
+    // after the layout was saved), and children with extent:'parent' would
+    // get clamped into the too-small box, stacking over each other and the
+    // header. Collapsed servers always use the collapsed height — a saved
+    // expanded height must not keep the box tall after collapsing.
+    const serverWidth = Math.max(savedPos?.width ?? 0, computedWidth);
+    const serverHeight = isCollapsed
+      ? computedHeight
+      : Math.max(savedPos?.height ?? 0, computedHeight);
 
     // Position the server group: inside its cluster's local coordinate space
     // when clustered, otherwise on the canvas. For clustered servers we lay
