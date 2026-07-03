@@ -104,6 +104,8 @@ function deploymentsOf(service: ServiceWithServerName): Array<{
   server?: { id: string; name: string };
   status?: string;
   healthStatus?: string;
+  containerStatus?: string;
+  exposedPorts?: string | null;
   discoveryStatus?: string;
 }> {
   if (service.serviceDeployments?.length) return service.serviceDeployments;
@@ -351,9 +353,14 @@ export default function Dashboard() {
         const status = classifyDeployment(d);
         if (OVERALL_SEVERITY[status] > OVERALL_SEVERITY[overall]) overall = status;
       }
-      const serverName =
-        deployments.map((d) => d.server?.name ?? 'unknown').join(', ') || 'unknown';
-      return { ...s, serverName, overall };
+      // Tooltip detail: per-deployment RAW statuses with their server names —
+      // `overall` drives the 3-state dot, but the raw runtime status
+      // ("exited", "restarting", …) is what you actually debug with.
+      const statusTitle =
+        deployments
+          .map((d) => `${d.server?.name ?? 'unknown'}: ${d.healthStatus || d.status || 'unknown'}`)
+          .join(', ') || 'unknown';
+      return { ...s, statusTitle, overall };
     });
   }, [services]);
 
@@ -374,21 +381,19 @@ export default function Dashboard() {
       else byServer.set(serverId, [row]);
     };
     for (const s of services) {
-      const deployments = s.serviceDeployments ?? [];
-      if (deployments.length > 0) {
-        for (const d of deployments) {
-          add(d.serverId, {
-            ...s,
-            serverId: d.serverId,
-            server: d.server,
-            status: d.status,
-            healthStatus: d.healthStatus,
-            containerStatus: d.containerStatus,
-            exposedPorts: d.exposedPorts,
-          });
-        }
-      } else if (s.serverId) {
-        add(s.serverId, s);
+      // deploymentsOf owns the fallback policy: real deployments when present,
+      // else the template row itself (so the spread below is an identity).
+      for (const d of deploymentsOf(s)) {
+        if (!d.serverId) continue;
+        add(d.serverId, {
+          ...s,
+          serverId: d.serverId,
+          server: d.server,
+          status: d.status,
+          healthStatus: d.healthStatus,
+          containerStatus: d.containerStatus,
+          exposedPorts: d.exposedPorts,
+        });
       }
     }
     return servers.map((srv) => ({
@@ -868,12 +873,12 @@ export default function Dashboard() {
           <CardContent>
             <div className="flex flex-wrap gap-2">
               {allServices.map((service) => (
-                // `overall` is the worst status across the service's
-                // deployments (computed in the allServices memo).
+                // `overall` (the worst status across deployments) drives the
+                // dot; the title carries each deployment's raw status.
                 <Link
                   key={service.id}
                   to={`/services/${service.id}`}
-                  title={`${service.name} on ${service.serverName} - ${service.overall}`}
+                  title={`${service.name} on ${service.statusTitle}`}
                 >
                   <StatusBadge
                     kind="overall"

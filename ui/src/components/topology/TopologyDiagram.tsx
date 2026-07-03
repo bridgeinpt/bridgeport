@@ -65,8 +65,10 @@ import {
   aggregateCollapsedEdges,
   serviceInstanceId,
   serviceInstanceNodeId,
+  stripInstanceSuffix,
   type TopologyEdge,
 } from '../../lib/topology';
+import { useConfirm } from '@/hooks/useConfirm';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useToast } from '../Toast';
 import { toPng } from 'html-to-image';
@@ -587,13 +589,9 @@ function topologyEdgesToReactFlow(
   onDelete: ((connectionId: string) => void) | null,
 ): Edge[] {
   return topologyEdges.map((te) => {
-    // Extract manual connection ID from edge ID (format: "manual:<connectionId>",
-    // with an optional "@<source>-><target>" fan-out suffix when the template
-    // connection is rendered once per service instance — all fanned edges map
-    // back to the same underlying connection).
-    const manualId = te.type === 'manual' && te.id.startsWith('manual:')
-      ? te.id.replace('manual:', '').split('@')[0]
-      : undefined;
+    // The underlying connection id travels on the edge itself — edge ids
+    // carry per-instance fan-out suffixes and are never parsed here.
+    const manualId = te.type === 'manual' ? te.connectionId : undefined;
     // Suppress inline delete for aggregated edges — the user can't tell which
     // underlying connection the X would destroy.
     const canDelete = manualId && onDelete && !te.aggregated;
@@ -690,26 +688,9 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
   const fetchGenRef = useRef(0);
   const isDraggingRef = useRef(false);
   const toast = useToast();
+  const confirm = useConfirm();
 
   const canInteract = userRole === 'admin' || userRole === 'operator';
-
-  const handleDeleteConnection = useCallback(async (connectionId: string) => {
-    let removed: ServiceConnection | undefined;
-    setManualConnections((prev) => {
-      removed = prev.find((c) => c.id === connectionId);
-      return prev.filter((c) => c.id !== connectionId);
-    });
-    fetchGenRef.current++;
-    try {
-      await deleteConnection(connectionId);
-    } catch (err) {
-      // Roll back the optimistic removal and surface the error.
-      if (removed) {
-        setManualConnections((prev) => (prev.some((c) => c.id === connectionId) ? prev : [...prev, removed!]));
-      }
-      toast.error(`Failed to delete connection: ${getErrorMessage(err, 'Unknown error')}`);
-    }
-  }, [toast]);
 
   // Fetch manual connections
   useEffect(() => {
@@ -904,7 +885,7 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     // suffix keeps manual connections template-scoped.
     const parseNodeId = (nodeId: string): { type: ConnectionEndpointType | 'server' | 'cluster'; id: string } => {
       const [type, ...rest] = nodeId.split(':');
-      return { type: type as ConnectionEndpointType | 'server' | 'cluster', id: rest.join(':').split('@')[0] };
+      return { type: type as ConnectionEndpointType | 'server' | 'cluster', id: stripInstanceSuffix(rest.join(':')) };
     };
 
     // React Flow normalizes connections so source always has a "source" handle,
@@ -930,6 +911,14 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     const isValidEndpoint = (t: string): t is ConnectionEndpointType =>
       t === 'service' || t === 'database' || t === 'external';
     if (!isValidEndpoint(source.type) || !isValidEndpoint(target.type)) return;
+
+    // Two instance nodes of the same service collapse to the same template
+    // endpoint — the backend would reject it as a self-connection, so explain
+    // instead of surfacing a 400.
+    if (source.type === target.type && source.id === target.id) {
+      toast.info('These are two instances of the same service — connections are service-scoped.');
+      return;
+    }
 
     try {
       const conn = await createConnection({
@@ -1176,6 +1165,45 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
     ]
   );
 
+  // Defined after the buildNodes memo because it reads `serviceInstances`.
+  // A manual connection is template-scoped: when its service endpoints are
+  // deployed on several servers it renders as several instance edges, and
+  // deleting it removes ALL of them — confirm before that blast radius.
+  // Single-instance connections keep the immediate optimistic delete.
+  const handleDeleteConnection = useCallback(async (connectionId: string) => {
+    const conn = manualConnections.find((c) => c.id === connectionId);
+    if (conn) {
+      const instanceCount = (type: string, id: string) =>
+        type === 'service' ? Math.max(1, serviceInstances.get(id)?.length ?? 1) : 1;
+      const instanceEdgeCount =
+        instanceCount(conn.sourceType, conn.sourceId) * instanceCount(conn.targetType, conn.targetId);
+      if (instanceEdgeCount > 1) {
+        const confirmed = await confirm({
+          title: 'Delete connection?',
+          description: `This connection appears on ${instanceEdgeCount} server instances; deleting removes all of them.`,
+          confirmText: 'Delete',
+          destructive: true,
+        });
+        if (!confirmed) return;
+      }
+    }
+    let removed: ServiceConnection | undefined;
+    setManualConnections((prev) => {
+      removed = prev.find((c) => c.id === connectionId);
+      return prev.filter((c) => c.id !== connectionId);
+    });
+    fetchGenRef.current++;
+    try {
+      await deleteConnection(connectionId);
+    } catch (err) {
+      // Roll back the optimistic removal and surface the error.
+      if (removed) {
+        setManualConnections((prev) => (prev.some((c) => c.id === connectionId) ? prev : [...prev, removed!]));
+      }
+      toast.error(`Failed to delete connection: ${getErrorMessage(err, 'Unknown error')}`);
+    }
+  }, [manualConnections, serviceInstances, confirm, toast]);
+
   const edges = useMemo(() => {
     const inferred = inferConnections(servers, databases);
     const merged = mergeConnections(inferred, manualConnections, serviceInstances);
@@ -1278,7 +1306,9 @@ function DiagramInner({ servers, databases, environmentId, userRole }: TopologyD
   }, [flowEdges, canInteract, handleDeleteConnection, onEdgesChange]);
 
   const heightClass = mode === 'compact' ? 'h-[350px]' : mode === 'expanded' ? 'h-[700px]' : '';
-  const totalServices = servers.reduce((acc, s) => acc + s.services.length, 0);
+  // Unique templates, not deployment rows — a service fanned out under N
+  // servers still counts once.
+  const totalServices = new Set(servers.flatMap((s) => s.services.map((svc) => svc.id))).size;
   const isEmpty =
     servers.length === 0 &&
     databases.length === 0 &&

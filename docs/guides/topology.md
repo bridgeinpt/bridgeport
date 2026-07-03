@@ -117,7 +117,7 @@ Click the **+** button in the topology toolbar to open a form where you can pick
 > A connection is uniquely identified by the combination of environment, source, target, and port. You can have multiple connections between the same two nodes if they use different ports. When port is omitted, the backend rejects duplicates between the same endpoints with `409 Conflict`.
 
 > [!NOTE]
-> Service endpoints reference the service **template**, not a specific deployment. If the service is deployed on multiple servers, the edge is drawn to every instance of it on the diagram (same fan-out as the Mermaid export), and deleting the connection removes all of those edges.
+> Service endpoints reference the service **template**, not a specific deployment. If the service is deployed on multiple servers, the edge is drawn to every instance of it on the diagram (same fan-out as the Mermaid export), and deleting the connection removes all of those edges — the UI asks for confirmation first when more than one instance edge would be removed.
 
 ### From the API
 

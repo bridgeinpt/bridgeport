@@ -32,6 +32,16 @@ export function serviceInstanceNodeId(serviceId: string, serverId: string): stri
   return `service:${serviceInstanceId(serviceId, serverId)}`;
 }
 
+/**
+ * Inverse of the instance-id encoders above: strip everything from the first
+ * `@` on, recovering the template-scoped part of an instance id (or of an
+ * edge id carrying a fan-out suffix). Keep all encode/decode of the `@`
+ * convention in this module.
+ */
+export function stripInstanceSuffix(id: string): string {
+  return id.split('@')[0];
+}
+
 // Well-known port to database type mapping
 const WELL_KNOWN_PORTS: Record<number, string> = {
   5432: 'postgresql',
@@ -84,15 +94,15 @@ export function inferConnections(
             matched = true;
           }
 
-          // Cross-server match: database host matches service's server hostname/IP
+          // Cross-server match: database host matches service's server hostname/IP.
+          // localhost/127.0.0.1 hosts are deliberately NOT matched here — a
+          // localhost-bound DB is only reachable from its own server (covered
+          // by the same-server branch above), and a serverId-less localhost DB
+          // is un-pinnable, so fanning it out to every server would draw
+          // connections that cannot exist.
           if (!matched && db.host && containerPort === db.port) {
             const serverHostname = serverHostMap.get(server.id);
-            if (
-              db.host === serverHostname ||
-              db.host === server.publicIp ||
-              db.host === 'localhost' ||
-              db.host === '127.0.0.1'
-            ) {
+            if (db.host === serverHostname || db.host === server.publicIp) {
               matched = true;
             }
           }
@@ -147,6 +157,10 @@ export interface TopologyEdge {
   port?: number | null;
   protocol?: string | null;
   label?: string | null;
+  // Underlying ServiceConnection id for manual edges — the canonical link
+  // back to the connection (edge ids carry per-instance fan-out suffixes and
+  // must not be parsed to recover it).
+  connectionId?: string;
   // True when this edge's source/target were rewritten by collapse-aggregation
   // (so the inline X delete button should be suppressed even if the original
   // edge was a single manual connection).
@@ -197,13 +211,14 @@ export function mergeConnections(
   for (const conn of manual) {
     const sources = resolveEndpoints(conn.sourceType, conn.sourceId);
     const targets = resolveEndpoints(conn.targetType, conn.targetId);
-    // Fanned-out edges need unique React Flow ids; the suffix after `@` is
-    // stripped when mapping back to the underlying connection id.
-    const fannedOut = sources.length > 1 || targets.length > 1;
+    // Edge ids carry the endpoint pair so fanned-out edges get unique React
+    // Flow ids; the link back to the underlying connection lives in
+    // `connectionId`, never in the id string.
     for (const source of sources) {
       for (const target of targets) {
         edges.push({
-          id: fannedOut ? `manual:${conn.id}@${source}->${target}` : `manual:${conn.id}`,
+          id: `manual:${conn.id}@${source}->${target}`,
+          connectionId: conn.id,
           source,
           sourceHandle: conn.sourceHandle ?? undefined,
           target,
@@ -219,6 +234,20 @@ export function mergeConnections(
   }
 
   return edges;
+}
+
+/**
+ * Logical identity of an edge, independent of per-instance fan-out: all
+ * instance edges rendered for ONE underlying connection share the same
+ * logical id. Manual edges group by their `connectionId`; inferred edge ids
+ * embed the source instance node id ("auto:service:<svcId>@<serverId>->…"),
+ * so dropping the "@<serverId>" yields the template-level identity.
+ */
+function logicalEdgeId(edge: TopologyEdge): string {
+  if (edge.type === 'manual') {
+    return edge.connectionId ? `manual:${edge.connectionId}` : stripInstanceSuffix(edge.id);
+  }
+  return edge.id.replace(/@.*?->/, '->');
 }
 
 /**
@@ -264,8 +293,10 @@ export function aggregateCollapsedEdges(
     return nodeKey;
   };
 
-  // Group edges by resolved source->target
-  const grouped = new Map<string, { count: number; types: Set<string>; hasDirected: boolean; firstEdge: TopologyEdge }>();
+  // Group edges by resolved source->target. Count DISTINCT underlying
+  // (logical) edges, not raw instance edges — several fanned instances of
+  // the same connection collapsing into one bucket are still ONE connection.
+  const grouped = new Map<string, { logicalIds: Set<string>; types: Set<string>; hasDirected: boolean; firstEdge: TopologyEdge }>();
   const result: TopologyEdge[] = [];
 
   for (const edge of edges) {
@@ -284,25 +315,31 @@ export function aggregateCollapsedEdges(
     const key = `${resolvedSource}->${resolvedTarget}`;
     const existing = grouped.get(key);
     if (existing) {
-      existing.count++;
+      existing.logicalIds.add(logicalEdgeId(edge));
       existing.types.add(edge.type);
       if (edge.directed) existing.hasDirected = true;
     } else {
-      grouped.set(key, { count: 1, types: new Set([edge.type]), hasDirected: edge.directed, firstEdge: edge });
+      grouped.set(key, {
+        logicalIds: new Set([logicalEdgeId(edge)]),
+        types: new Set([edge.type]),
+        hasDirected: edge.directed,
+        firstEdge: edge,
+      });
     }
   }
 
   // Create aggregated edges
   for (const [key, info] of grouped) {
     const [source, target] = key.split('->');
+    const count = info.logicalIds.size;
 
-    // When only one edge is aggregated, preserve the original edge data
-    // (id keeps its `manual:<connId>` prefix so we don't lose the link to the
-    // underlying connection), but flag it as aggregated so the inline X
-    // delete button is hidden — the visible edge now reads as
+    // When only one underlying connection is aggregated, preserve the
+    // original edge data (the `...firstEdge` spread keeps `connectionId`,
+    // the link to the underlying connection), but flag it as aggregated so
+    // the inline X delete button is hidden — the visible edge now reads as
     // server-to-X, and clicking X would delete an underlying connection the
     // user can no longer disambiguate.
-    if (info.count === 1) {
+    if (count === 1) {
       result.push({
         ...info.firstEdge,
         source,
@@ -323,7 +360,7 @@ export function aggregateCollapsedEdges(
       target,
       type: isMultiType ? 'auto' : (info.types.values().next().value as 'auto' | 'manual'),
       directed: info.hasDirected,
-      label: `${info.count} connections`,
+      label: `${count} connections`,
       aggregated: true,
     });
   }

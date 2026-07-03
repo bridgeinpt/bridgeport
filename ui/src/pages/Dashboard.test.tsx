@@ -637,18 +637,31 @@ describe('Dashboard', () => {
       expect(screen.queryByText(/api on web-01/)).not.toBeInTheDocument();
     });
 
-    it('shows the worst-of-deployments status in the services health grid', async () => {
+    it('shows per-deployment raw statuses in the services health grid tooltip', async () => {
       await seedTwoServerService();
       renderWithProviders(<Dashboard />);
 
       const links = await screen.findAllByRole('link', { name: 'api' });
       const badgeLink = links.find((l) => l.getAttribute('title')?.startsWith('api on'));
       expect(badgeLink).toBeDefined();
-      // serverName lists every deployment's server; overall is the WORST
-      // status across deployments (healthy on web-01, unhealthy on web-02).
-      expect(badgeLink).toHaveAttribute('title', 'api on web-01, web-02 - unhealthy');
-      // Worst-of also drives the healthy counter: 0 of 1 services healthy.
+      // The tooltip lists every deployment's server with its RAW status
+      // (healthStatus falling back to status) — the 3-state `overall` only
+      // drives the dot and must not mask what each instance reports.
+      expect(badgeLink).toHaveAttribute('title', 'api on web-01: healthy, web-02: unhealthy');
+      // The worst-of-deployments overall still drives the healthy counter:
+      // 0 of 1 services healthy.
       expect(screen.getByText(/\(0\/1 healthy\)/)).toBeInTheDocument();
+    });
+
+    it('falls back to the raw runtime status in the tooltip when healthStatus is empty', async () => {
+      await seedTwoServerService({ status: 'exited', healthStatus: '' });
+      renderWithProviders(<Dashboard />);
+
+      const links = await screen.findAllByRole('link', { name: 'api' });
+      const badgeLink = links.find((l) => l.getAttribute('title')?.startsWith('api on'));
+      // With no health signal, the raw runtime status ("exited") surfaces —
+      // exactly what you need when debugging the instance.
+      expect(badgeLink).toHaveAttribute('title', 'api on web-01: healthy, web-02: exited');
     });
 
     it('back-compat: groups a service without serviceDeployments under its flattened serverId', async () => {
@@ -667,7 +680,7 @@ describe('Dashboard', () => {
       // Health grid falls back to the flattened fields too.
       const links = screen.getAllByRole('link', { name: 'api' });
       const badgeLink = links.find((l) => l.getAttribute('title')?.startsWith('api on'));
-      expect(badgeLink).toHaveAttribute('title', 'api on web-01 - healthy');
+      expect(badgeLink).toHaveAttribute('title', 'api on web-01: healthy');
     });
 
     it('skips undeployed templates in the topology input but keeps them in the health grid', async () => {
