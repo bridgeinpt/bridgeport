@@ -50,6 +50,12 @@ async function lastFlowProps() {
   const calls = vi.mocked(ReactFlow).mock.calls;
   expect(calls.length).toBeGreaterThan(0);
   return calls[calls.length - 1][0] as unknown as {
+    nodes: Array<{
+      id: string;
+      position: { x: number; y: number };
+      style?: { width?: number; height?: number };
+      data: { onToggleCollapse?: (serverId: string) => void };
+    }>;
     edges: Array<{ id: string }>;
     onConnect: (conn: {
       source: string;
@@ -280,6 +286,75 @@ describe('TopologyDiagram', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     expect(vi.mocked(api.deleteConnection)).not.toHaveBeenCalled();
+  });
+
+  // ==================== saved-size clamping ====================
+
+  // s1 has 2 services -> 1 column, 2 rows: width max(200, 160+12+40-12)=200,
+  // height 40 + 2*(44+12) + 20 + 12 = 184. A layout saved before a second
+  // deployment fanned out under this server carries a smaller height; children
+  // have extent:'parent', so an unclamped box stacks them over each other.
+  const S1_COMPUTED_WIDTH = 200;
+  const S1_COMPUTED_HEIGHT = 184;
+
+  it('never sizes a server group below its children footprint, even with a smaller saved size', async () => {
+    const api = await import('../../lib/api');
+    vi.mocked(api.getDiagramLayout).mockResolvedValue({
+      layout: { positions: { 'server:s1': { x: 5, y: 7, width: 220, height: 90 } } },
+    } as Awaited<ReturnType<typeof api.getDiagramLayout>>);
+
+    renderDiagram();
+
+    // Saved layout applied once the server node picks up the saved position.
+    await waitFor(async () => {
+      const props = await lastFlowProps();
+      const server = props.nodes.find((n) => n.id === 'server:s1');
+      expect(server?.position).toEqual({ x: 5, y: 7 });
+    });
+
+    const props = await lastFlowProps();
+    const server = props.nodes.find((n) => n.id === 'server:s1')!;
+    // Saved width (220) beats the computed 200; saved height (90) is clamped
+    // up to the computed 184 so both service children stay visible.
+    expect(server.style?.width).toBe(220);
+    expect(server.style?.height).toBe(S1_COMPUTED_HEIGHT);
+    expect(server.style?.height).toBeGreaterThanOrEqual(S1_COMPUTED_HEIGHT);
+  });
+
+  it('collapses a server to the header height even when a taller size was saved', async () => {
+    const api = await import('../../lib/api');
+    vi.mocked(api.getDiagramLayout).mockResolvedValue({
+      layout: { positions: { 'server:s1': { x: 5, y: 7, width: 220, height: 400 } } },
+    } as Awaited<ReturnType<typeof api.getDiagramLayout>>);
+
+    renderDiagram();
+    await waitFor(async () => {
+      const props = await lastFlowProps();
+      const server = props.nodes.find((n) => n.id === 'server:s1');
+      expect(server?.position).toEqual({ x: 5, y: 7 });
+    });
+
+    let props = await lastFlowProps();
+    const server = props.nodes.find((n) => n.id === 'server:s1')!;
+    await act(async () => {
+      server.data.onToggleCollapse!('s1');
+    });
+
+    props = await lastFlowProps();
+    const collapsed = props.nodes.find((n) => n.id === 'server:s1')!;
+    // SERVER_HEADER_HEIGHT (40) + 10 — the saved 400 must not keep it tall.
+    expect(collapsed.style?.height).toBe(50);
+    // Width keeps the saved value (never below the computed minimum).
+    expect(collapsed.style?.width).toBe(220);
+
+    // Expanding again restores the clamped expanded height.
+    await act(async () => {
+      collapsed.data.onToggleCollapse!('s1');
+    });
+    props = await lastFlowProps();
+    const expanded = props.nodes.find((n) => n.id === 'server:s1')!;
+    expect(expanded.style?.height).toBe(Math.max(400, S1_COMPUTED_HEIGHT));
+    expect(expanded.style?.width).toBe(Math.max(220, S1_COMPUTED_WIDTH));
   });
 
   it('deletes a single-instance connection immediately without a confirmation', async () => {
