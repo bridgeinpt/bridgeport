@@ -3,6 +3,9 @@ import {
   inferConnections,
   mergeConnections,
   aggregateCollapsedEdges,
+  serviceInstanceId,
+  serviceInstanceNodeId,
+  stripInstanceSuffix,
   type InferredConnection,
   type TopologyEdge,
 } from './topology';
@@ -75,6 +78,25 @@ function createDatabase(
   } as Database;
 }
 
+describe('serviceInstanceId / serviceInstanceNodeId', () => {
+  it('should build "<serviceId>@<serverId>" and "service:<serviceId>@<serverId>"', () => {
+    expect(serviceInstanceId('svc1', 's1')).toBe('svc1@s1');
+    expect(serviceInstanceNodeId('svc1', 's1')).toBe('service:svc1@s1');
+  });
+});
+
+describe('stripInstanceSuffix', () => {
+  it('should invert the instance-id encoders', () => {
+    expect(stripInstanceSuffix(serviceInstanceId('svc1', 's1'))).toBe('svc1');
+    expect(stripInstanceSuffix(serviceInstanceNodeId('svc1', 's1'))).toBe('service:svc1');
+  });
+
+  it('should leave ids without a suffix unchanged', () => {
+    expect(stripInstanceSuffix('svc1')).toBe('svc1');
+    expect(stripInstanceSuffix('database:db1')).toBe('database:db1');
+  });
+});
+
 describe('inferConnections', () => {
   it('should return empty array when no servers or databases', () => {
     expect(inferConnections([], [])).toEqual([]);
@@ -91,6 +113,7 @@ describe('inferConnections', () => {
     expect(connections[0]).toMatchObject({
       sourceType: 'service',
       sourceId: 'svc1',
+      sourceServerId: 's1',
       targetType: 'database',
       targetId: 'db1',
       port: 5432,
@@ -107,6 +130,7 @@ describe('inferConnections', () => {
     const connections = inferConnections([server], [db]);
     expect(connections).toHaveLength(1);
     expect(connections[0].targetId).toBe('db1');
+    expect(connections[0].sourceServerId).toBe('s1');
   });
 
   it('should match by well-known port when port matches database type', () => {
@@ -133,6 +157,58 @@ describe('inferConnections', () => {
 
     const connections = inferConnections([server], [db]);
     expect(connections).toHaveLength(1);
+  });
+
+  it('should infer one edge per server when the same template is deployed on two servers', () => {
+    // The same service template (svc1) is deployed on two servers, each
+    // exposing the db container port under two host ports — exercising the
+    // per-server dedupe: exactly one inferred edge per instance (not one
+    // total, and not one per duplicate exposed-port entry).
+    const exposedPorts =
+      '[{"host":5432,"container":5432,"protocol":"tcp"},{"host":15432,"container":5432,"protocol":"tcp"}]';
+    const server1 = createServer('s1', '10.0.0.1', [{ id: 'svc1', exposedPorts }]);
+    const server2 = createServer('s2', '10.0.0.2', [{ id: 'svc1', exposedPorts }]);
+    // The well-known-port fallback (postgres on 5432) matches on any server.
+    const db = createDatabase('db1', { port: 5432, databaseTypeName: 'PostgreSQL' });
+
+    const connections = inferConnections([server1, server2], [db]);
+    expect(connections).toHaveLength(2);
+    expect(connections).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sourceId: 'svc1', sourceServerId: 's1', targetId: 'db1' }),
+        expect.objectContaining({ sourceId: 'svc1', sourceServerId: 's2', targetId: 'db1' }),
+      ])
+    );
+  });
+
+  it('should only connect a localhost database to service instances on its own server', () => {
+    // db1 is bound to localhost ON s1 (non-well-known port so the type
+    // fallback can't kick in). The same template is deployed on s1 and s2 —
+    // only the s1 instance can actually reach the DB, so only it gets an edge.
+    const exposedPorts = '[{"host":5433,"container":5433,"protocol":"tcp"}]';
+    const server1 = createServer('s1', '10.0.0.1', [{ id: 'svc1', exposedPorts }]);
+    const server2 = createServer('s2', '10.0.0.2', [{ id: 'svc1', exposedPorts }]);
+    const db = createDatabase('db1', { serverId: 's1', host: 'localhost', port: 5433 });
+
+    const connections = inferConnections([server1, server2], [db]);
+    expect(connections).toHaveLength(1);
+    expect(connections[0]).toMatchObject({
+      sourceId: 'svc1',
+      sourceServerId: 's1',
+      targetId: 'db1',
+    });
+  });
+
+  it('should not fan a serverId-less localhost database out to every server', () => {
+    // A localhost DB with no serverId is un-pinnable — inferring an edge from
+    // every server would draw connections that cannot exist.
+    const exposedPorts = '[{"host":5433,"container":5433,"protocol":"tcp"}]';
+    const server1 = createServer('s1', '10.0.0.1', [{ id: 'svc1', exposedPorts }]);
+    const server2 = createServer('s2', '10.0.0.2', [{ id: 'svc1', exposedPorts }]);
+    const db = createDatabase('db1', { host: '127.0.0.1', port: 5433 });
+
+    const connections = inferConnections([server1, server2], [db]);
+    expect(connections).toHaveLength(0);
   });
 
   it('should not match when ports do not match', () => {
@@ -169,15 +245,32 @@ describe('inferConnections', () => {
 });
 
 describe('mergeConnections', () => {
+  // Shorthand for a manual service->service connection fixture.
+  function createManualConnection(overrides: Partial<ServiceConnection> = {}): ServiceConnection {
+    return {
+      id: 'conn-1',
+      sourceType: 'service',
+      sourceId: 'svc1',
+      targetType: 'service',
+      targetId: 'svc2',
+      port: 8080,
+      protocol: 'http',
+      direction: 'forward',
+      label: 'API calls',
+      ...overrides,
+    } as ServiceConnection;
+  }
+
   it('should return empty array for no connections', () => {
     expect(mergeConnections([], [])).toEqual([]);
   });
 
-  it('should convert inferred connections to auto edges', () => {
+  it('should convert inferred connections to auto edges pinned to the source instance', () => {
     const inferred: InferredConnection[] = [
       {
         sourceType: 'service',
         sourceId: 'svc1',
+        sourceServerId: 's1',
         targetType: 'database',
         targetId: 'db1',
         port: 5432,
@@ -189,33 +282,43 @@ describe('mergeConnections', () => {
     const edges = mergeConnections(inferred, []);
     expect(edges).toHaveLength(1);
     expect(edges[0]).toMatchObject({
+      id: 'auto:service:svc1@s1->database:db1:5432',
       type: 'auto',
       directed: true,
-      source: 'service:svc1',
+      source: 'service:svc1@s1',
       target: 'database:db1',
       port: 5432,
     });
   });
 
-  it('should convert manual connections to manual edges', () => {
-    const manual: ServiceConnection[] = [
-      {
-        id: 'conn-1',
-        sourceType: 'service',
-        sourceId: 'svc1',
-        targetType: 'service',
-        targetId: 'svc2',
-        port: 8080,
-        protocol: 'http',
-        direction: 'forward',
-        label: 'API calls',
-      } as ServiceConnection,
+  it('should pin inferred edges from the same template to their own server instances', () => {
+    // Two inferred connections for the same service template, one per server
+    // — each must attach to its own instance node with a unique edge id.
+    const base = {
+      sourceType: 'service' as const,
+      sourceId: 'svc1',
+      targetType: 'database' as const,
+      targetId: 'db1',
+      port: 5432,
+      protocol: 'tcp',
+      label: 'PG',
+    };
+    const inferred: InferredConnection[] = [
+      { ...base, sourceServerId: 's1' },
+      { ...base, sourceServerId: 's2' },
     ];
 
-    const edges = mergeConnections([], manual);
+    const edges = mergeConnections(inferred, []);
+    expect(edges.map((e) => e.source)).toEqual(['service:svc1@s1', 'service:svc1@s2']);
+    expect(new Set(edges.map((e) => e.id)).size).toBe(2);
+  });
+
+  it('should fall back to template node ids for manual edges when no instance map is provided', () => {
+    const edges = mergeConnections([], [createManualConnection()]);
     expect(edges).toHaveLength(1);
     expect(edges[0]).toMatchObject({
-      id: 'manual:conn-1',
+      id: 'manual:conn-1@service:svc1->service:svc2',
+      connectionId: 'conn-1',
       type: 'manual',
       directed: true,
       source: 'service:svc1',
@@ -224,22 +327,98 @@ describe('mergeConnections', () => {
   });
 
   it('should set directed=false for non-forward manual connections', () => {
-    const manual = [
-      {
-        id: 'conn-1',
-        sourceType: 'service',
-        sourceId: 'svc1',
-        targetType: 'service',
-        targetId: 'svc2',
-        port: 8080,
-        protocol: 'http',
-        direction: 'bidirectional',
-        label: null,
-      } as ServiceConnection,
-    ];
-
-    const edges = mergeConnections([], manual);
+    const edges = mergeConnections([], [
+      createManualConnection({ direction: 'bidirectional', label: null }),
+    ]);
     expect(edges[0].directed).toBe(false);
+  });
+
+  it('should fan a template-scoped manual edge out to every instance of the source service', () => {
+    const serviceInstances = new Map([
+      ['svc1', ['service:svc1@s1', 'service:svc1@s2']],
+      ['svc2', ['service:svc2@s1']],
+    ]);
+
+    const edges = mergeConnections([], [createManualConnection()], serviceInstances);
+    expect(edges).toHaveLength(2);
+    expect(edges.map((e) => e.source)).toEqual(['service:svc1@s1', 'service:svc1@s2']);
+    for (const edge of edges) {
+      expect(edge).toMatchObject({
+        type: 'manual',
+        target: 'service:svc2@s1',
+        directed: true,
+        port: 8080,
+        label: 'API calls',
+      });
+    }
+    // Fanned edges need unique React Flow ids; the link back to the
+    // underlying connection travels in `connectionId` (never parsed from the
+    // id string).
+    expect(new Set(edges.map((e) => e.id)).size).toBe(2);
+    for (const edge of edges) {
+      expect(edge.connectionId).toBe('conn-1');
+    }
+  });
+
+  it('should fan out the cross product when both endpoints have multiple instances', () => {
+    const serviceInstances = new Map([
+      ['svc1', ['service:svc1@s1', 'service:svc1@s2']],
+      ['svc2', ['service:svc2@s3', 'service:svc2@s4']],
+    ]);
+
+    const edges = mergeConnections([], [createManualConnection()], serviceInstances);
+    expect(edges).toHaveLength(4);
+    expect(new Set(edges.map((e) => e.id)).size).toBe(4);
+    expect(edges.map((e) => `${e.source}->${e.target}`).sort()).toEqual([
+      'service:svc1@s1->service:svc2@s3',
+      'service:svc1@s1->service:svc2@s4',
+      'service:svc1@s2->service:svc2@s3',
+      'service:svc1@s2->service:svc2@s4',
+    ]);
+  });
+
+  it('should use the suffixed id form and carry connectionId even without fan-out', () => {
+    const serviceInstances = new Map([
+      ['svc1', ['service:svc1@s1']],
+      ['svc2', ['service:svc2@s2']],
+    ]);
+
+    const edges = mergeConnections([], [createManualConnection()], serviceInstances);
+    expect(edges).toHaveLength(1);
+    // The id format is uniform (endpoint-pair suffix regardless of fan-out);
+    // deletability comes from `connectionId`, not from the id shape.
+    expect(edges[0]).toMatchObject({
+      id: 'manual:conn-1@service:svc1@s1->service:svc2@s2',
+      connectionId: 'conn-1',
+      source: 'service:svc1@s1',
+      target: 'service:svc2@s2',
+    });
+  });
+
+  it('should fall back to the template node id for a service missing from the instance map', () => {
+    // svc2 has no known instances (e.g. no deployments yet) — the edge keeps
+    // the plain template node id on that side so it stays parseable.
+    const serviceInstances = new Map([['svc1', ['service:svc1@s1', 'service:svc1@s2']]]);
+
+    const edges = mergeConnections([], [createManualConnection()], serviceInstances);
+    expect(edges).toHaveLength(2);
+    for (const edge of edges) {
+      expect(edge.target).toBe('service:svc2');
+    }
+  });
+
+  it('should not fan out database endpoints', () => {
+    const conn = createManualConnection({
+      targetType: 'database',
+      targetId: 'db1',
+    });
+    const serviceInstances = new Map([['svc1', ['service:svc1@s1', 'service:svc1@s2']]]);
+
+    const edges = mergeConnections([], [conn], serviceInstances);
+    expect(edges).toHaveLength(2);
+    for (const edge of edges) {
+      expect(edge.target).toBe('database:db1');
+    }
   });
 
   it('should combine both auto and manual edges', () => {
@@ -247,6 +426,7 @@ describe('mergeConnections', () => {
       {
         sourceType: 'service',
         sourceId: 'svc1',
+        sourceServerId: 's1',
         targetType: 'database',
         targetId: 'db1',
         port: 5432,
@@ -254,21 +434,8 @@ describe('mergeConnections', () => {
         label: 'PG',
       },
     ];
-    const manual = [
-      {
-        id: 'conn-1',
-        sourceType: 'service',
-        sourceId: 'svc1',
-        targetType: 'service',
-        targetId: 'svc2',
-        port: 80,
-        protocol: 'http',
-        direction: 'forward',
-        label: null,
-      } as ServiceConnection,
-    ];
 
-    const edges = mergeConnections(inferred, manual);
+    const edges = mergeConnections(inferred, [createManualConnection({ label: null })]);
     expect(edges).toHaveLength(2);
     expect(edges.filter((e) => e.type === 'auto')).toHaveLength(1);
     expect(edges.filter((e) => e.type === 'manual')).toHaveLength(1);
@@ -280,7 +447,7 @@ describe('aggregateCollapsedEdges', () => {
     const edges: TopologyEdge[] = [
       {
         id: 'auto:1',
-        source: 'service:svc1',
+        source: 'service:svc1@server-1',
         target: 'database:db1',
         type: 'auto',
         directed: true,
@@ -300,14 +467,14 @@ describe('aggregateCollapsedEdges', () => {
     const edges: TopologyEdge[] = [
       {
         id: 'auto:1',
-        source: 'service:svc1',
+        source: 'service:svc1@server-1',
         target: 'database:db1',
         type: 'auto',
         directed: true,
       },
       {
         id: 'auto:2',
-        source: 'service:svc2',
+        source: 'service:svc2@server-1',
         target: 'database:db1',
         type: 'auto',
         directed: true,
@@ -315,8 +482,8 @@ describe('aggregateCollapsedEdges', () => {
     ];
 
     const serviceToServer = new Map([
-      ['svc1', 'server-1'],
-      ['svc2', 'server-1'],
+      ['svc1@server-1', 'server-1'],
+      ['svc2@server-1', 'server-1'],
     ]);
     const databaseToServer = new Map<string, string>();
 
@@ -337,16 +504,16 @@ describe('aggregateCollapsedEdges', () => {
     const edges: TopologyEdge[] = [
       {
         id: 'manual:1',
-        source: 'service:svc1',
-        target: 'service:svc2',
+        source: 'service:svc1@server-1',
+        target: 'service:svc2@server-1',
         type: 'manual',
         directed: true,
       },
     ];
 
     const serviceToServer = new Map([
-      ['svc1', 'server-1'],
-      ['svc2', 'server-1'],
+      ['svc1@server-1', 'server-1'],
+      ['svc2@server-1', 'server-1'],
     ]);
 
     const result = aggregateCollapsedEdges(
@@ -359,19 +526,60 @@ describe('aggregateCollapsedEdges', () => {
     expect(result).toHaveLength(0);
   });
 
+  it('should collapse only the matching instance when a service is deployed on two servers', () => {
+    // svc1 is deployed on server-1 (collapsed) and server-2 (expanded); each
+    // instance has its own edge to db1. Only the server-1 instance's edge is
+    // rewritten to the server bucket — the server-2 instance passes through.
+    const edges: TopologyEdge[] = [
+      {
+        id: 'auto:service:svc1@server-1->database:db1:5432',
+        source: 'service:svc1@server-1',
+        target: 'database:db1',
+        type: 'auto',
+        directed: true,
+      },
+      {
+        id: 'auto:service:svc1@server-2->database:db1:5432',
+        source: 'service:svc1@server-2',
+        target: 'database:db1',
+        type: 'auto',
+        directed: true,
+      },
+    ];
+    const serviceToServer = new Map([
+      ['svc1@server-1', 'server-1'],
+      ['svc1@server-2', 'server-2'],
+    ]);
+
+    const result = aggregateCollapsedEdges(
+      edges,
+      new Set(['server-1']),
+      serviceToServer,
+      new Map()
+    );
+
+    expect(result).toHaveLength(2);
+    const passThrough = result.find((e) => e.source === 'service:svc1@server-2');
+    expect(passThrough).toEqual(edges[1]);
+    const rewritten = result.find((e) => e.source === 'server:server-1');
+    expect(rewritten).toBeDefined();
+    expect(rewritten!.target).toBe('database:db1');
+    expect(rewritten!.aggregated).toBe(true);
+  });
+
   it('should pass through edges not touching collapsed servers', () => {
     const edges: TopologyEdge[] = [
       {
         id: 'auto:1',
-        source: 'service:svc1',
+        source: 'service:svc1@server-2',
         target: 'database:db1',
         type: 'auto',
         directed: true,
       },
     ];
 
-    // svc1 is on server-2, which is NOT collapsed
-    const serviceToServer = new Map([['svc1', 'server-2']]);
+    // svc1's instance is on server-2, which is NOT collapsed
+    const serviceToServer = new Map([['svc1@server-2', 'server-2']]);
 
     const result = aggregateCollapsedEdges(
       edges,
@@ -388,7 +596,7 @@ describe('aggregateCollapsedEdges', () => {
     const edges: TopologyEdge[] = [
       {
         id: 'manual:conn1',
-        source: 'service:svc1',
+        source: 'service:svc1@server-1',
         target: 'database:db1',
         type: 'manual',
         directed: true,
@@ -397,7 +605,7 @@ describe('aggregateCollapsedEdges', () => {
       },
     ];
 
-    const serviceToServer = new Map([['svc1', 'server-1']]);
+    const serviceToServer = new Map([['svc1@server-1', 'server-1']]);
 
     const result = aggregateCollapsedEdges(
       edges,
@@ -422,10 +630,13 @@ describe('aggregateCollapsedEdges', () => {
 
   it('should mark count>1 aggregated edges as aggregated', () => {
     const edges: TopologyEdge[] = [
-      { id: 'manual:1', source: 'service:svc1', target: 'database:db1', type: 'manual', directed: true },
-      { id: 'manual:2', source: 'service:svc2', target: 'database:db1', type: 'manual', directed: true },
+      { id: 'manual:1', source: 'service:svc1@server-1', target: 'database:db1', type: 'manual', directed: true },
+      { id: 'manual:2', source: 'service:svc2@server-1', target: 'database:db1', type: 'manual', directed: true },
     ];
-    const serviceToServer = new Map([['svc1', 'server-1'], ['svc2', 'server-1']]);
+    const serviceToServer = new Map([
+      ['svc1@server-1', 'server-1'],
+      ['svc2@server-1', 'server-1'],
+    ]);
 
     const result = aggregateCollapsedEdges(edges, new Set(['server-1']), serviceToServer, new Map());
 
@@ -434,11 +645,166 @@ describe('aggregateCollapsedEdges', () => {
     expect(result[0].label).toBe('2 connections');
   });
 
+  it('should preserve a single fanned manual connection collapsed into one bucket (not "2 connections")', () => {
+    // ONE underlying connection (conn-1) fanned out to two instances of svc1
+    // (server-1 and server-2), both inside collapsed cluster-A. The bucket
+    // receives two instance edges but only one logical connection — its
+    // metadata (label/port and the connection link) must be preserved instead
+    // of rendering "2 connections".
+    const edges: TopologyEdge[] = [
+      {
+        id: 'manual:conn-1@service:svc1@server-1->database:db1',
+        connectionId: 'conn-1',
+        source: 'service:svc1@server-1',
+        target: 'database:db1',
+        type: 'manual',
+        directed: true,
+        label: 'API',
+        port: 8080,
+      },
+      {
+        id: 'manual:conn-1@service:svc1@server-2->database:db1',
+        connectionId: 'conn-1',
+        source: 'service:svc1@server-2',
+        target: 'database:db1',
+        type: 'manual',
+        directed: true,
+        label: 'API',
+        port: 8080,
+      },
+    ];
+    const serviceToServer = new Map([
+      ['svc1@server-1', 'server-1'],
+      ['svc1@server-2', 'server-2'],
+    ]);
+    const serverToCluster = new Map([
+      ['server-1', 'cluster-A'],
+      ['server-2', 'cluster-A'],
+    ]);
+
+    const result = aggregateCollapsedEdges(
+      edges,
+      new Set(),
+      serviceToServer,
+      new Map(),
+      new Set(['cluster-A']),
+      serverToCluster
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0].source).toBe('cluster:cluster-A');
+    expect(result[0].target).toBe('database:db1');
+    expect(result[0].label).toBe('API');
+    expect(result[0].port).toBe(8080);
+    expect(result[0].connectionId).toBe('conn-1');
+    expect(result[0].aggregated).toBe(true);
+  });
+
+  it('should preserve a single fanned inferred connection collapsed into one bucket', () => {
+    // Inferred analog: the same template-level connection pinned to two
+    // instances. The two auto edges share one logical identity, so the
+    // collapsed bucket keeps port/protocol/label.
+    const edges: TopologyEdge[] = [
+      {
+        id: 'auto:service:svc1@server-1->database:db1:5432',
+        source: 'service:svc1@server-1',
+        target: 'database:db1',
+        type: 'auto',
+        directed: true,
+        port: 5432,
+        protocol: 'tcp',
+        label: 'PostgreSQL :5432',
+      },
+      {
+        id: 'auto:service:svc1@server-2->database:db1:5432',
+        source: 'service:svc1@server-2',
+        target: 'database:db1',
+        type: 'auto',
+        directed: true,
+        port: 5432,
+        protocol: 'tcp',
+        label: 'PostgreSQL :5432',
+      },
+    ];
+    const serviceToServer = new Map([
+      ['svc1@server-1', 'server-1'],
+      ['svc1@server-2', 'server-2'],
+    ]);
+    const serverToCluster = new Map([
+      ['server-1', 'cluster-A'],
+      ['server-2', 'cluster-A'],
+    ]);
+
+    const result = aggregateCollapsedEdges(
+      edges,
+      new Set(),
+      serviceToServer,
+      new Map(),
+      new Set(['cluster-A']),
+      serverToCluster
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0].source).toBe('cluster:cluster-A');
+    expect(result[0].target).toBe('database:db1');
+    expect(result[0].label).toBe('PostgreSQL :5432');
+    expect(result[0].port).toBe(5432);
+    expect(result[0].protocol).toBe('tcp');
+    expect(result[0].aggregated).toBe(true);
+  });
+
+  it('should count distinct connections (not instance edges) in the aggregated label', () => {
+    // conn-1 fans out to two instance edges; conn-2 renders once. The bucket
+    // holds three instance edges but only TWO logical connections.
+    const fan = (server: string): TopologyEdge => ({
+      id: `manual:conn-1@service:svc1@${server}->database:db1`,
+      connectionId: 'conn-1',
+      source: `service:svc1@${server}`,
+      target: 'database:db1',
+      type: 'manual',
+      directed: true,
+    });
+    const edges: TopologyEdge[] = [
+      fan('server-1'),
+      fan('server-2'),
+      {
+        id: 'manual:conn-2@service:svc2@server-1->database:db1',
+        connectionId: 'conn-2',
+        source: 'service:svc2@server-1',
+        target: 'database:db1',
+        type: 'manual',
+        directed: true,
+      },
+    ];
+    const serviceToServer = new Map([
+      ['svc1@server-1', 'server-1'],
+      ['svc1@server-2', 'server-2'],
+      ['svc2@server-1', 'server-1'],
+    ]);
+    const serverToCluster = new Map([
+      ['server-1', 'cluster-A'],
+      ['server-2', 'cluster-A'],
+    ]);
+
+    const result = aggregateCollapsedEdges(
+      edges,
+      new Set(),
+      serviceToServer,
+      new Map(),
+      new Set(['cluster-A']),
+      serverToCluster
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0].label).toBe('2 connections');
+    expect(result[0].aggregated).toBe(true);
+  });
+
   it('should NOT mark pass-through edges as aggregated', () => {
     const edges: TopologyEdge[] = [
-      { id: 'auto:1', source: 'service:svc1', target: 'database:db1', type: 'auto', directed: true },
+      { id: 'auto:1', source: 'service:svc1@server-2', target: 'database:db1', type: 'auto', directed: true },
     ];
-    const serviceToServer = new Map([['svc1', 'server-2']]);
+    const serviceToServer = new Map([['svc1@server-2', 'server-2']]);
 
     const result = aggregateCollapsedEdges(edges, new Set(['server-1']), serviceToServer, new Map());
 
@@ -455,15 +821,15 @@ describe('aggregateCollapsedEdges', () => {
     const edges: TopologyEdge[] = [
       {
         id: 'manual:1',
-        source: 'service:svc1',
-        target: 'service:svc2',
+        source: 'service:svc1@server-1',
+        target: 'service:svc2@server-2',
         type: 'manual',
         directed: true,
       },
     ];
     const serviceToServer = new Map([
-      ['svc1', 'server-1'],
-      ['svc2', 'server-2'],
+      ['svc1@server-1', 'server-1'],
+      ['svc2@server-2', 'server-2'],
     ]);
     const serverToCluster = new Map([
       ['server-1', 'cluster-A'],
@@ -484,15 +850,15 @@ describe('aggregateCollapsedEdges', () => {
 
   it('should aggregate edges between two different collapsed clusters into one cluster->cluster edge', () => {
     const edges: TopologyEdge[] = [
-      { id: 'manual:1', source: 'service:svc1', target: 'service:svc3', type: 'manual', directed: true },
-      { id: 'manual:2', source: 'service:svc2', target: 'service:svc4', type: 'manual', directed: true },
+      { id: 'manual:1', source: 'service:svc1@server-1', target: 'service:svc3@server-3', type: 'manual', directed: true },
+      { id: 'manual:2', source: 'service:svc2@server-2', target: 'service:svc4@server-4', type: 'manual', directed: true },
     ];
     // svc1, svc2 live in cluster-A; svc3, svc4 live in cluster-B.
     const serviceToServer = new Map([
-      ['svc1', 'server-1'],
-      ['svc2', 'server-2'],
-      ['svc3', 'server-3'],
-      ['svc4', 'server-4'],
+      ['svc1@server-1', 'server-1'],
+      ['svc2@server-2', 'server-2'],
+      ['svc3@server-3', 'server-3'],
+      ['svc4@server-4', 'server-4'],
     ]);
     const serverToCluster = new Map([
       ['server-1', 'cluster-A'],
@@ -520,9 +886,9 @@ describe('aggregateCollapsedEdges', () => {
   it('should aggregate edges from a clustered server to a non-clustered node as cluster->node', () => {
     const edges: TopologyEdge[] = [
       // svc1 inside cluster-A, db1 not in any cluster.
-      { id: 'manual:1', source: 'service:svc1', target: 'database:db1', type: 'manual', directed: true, label: 'PG' },
+      { id: 'manual:1', source: 'service:svc1@server-1', target: 'database:db1', type: 'manual', directed: true, label: 'PG' },
     ];
-    const serviceToServer = new Map([['svc1', 'server-1']]);
+    const serviceToServer = new Map([['svc1@server-1', 'server-1']]);
     const databaseToServer = new Map<string, string>(); // db1 unmapped -> passes through
     const serverToCluster = new Map([['server-1', 'cluster-A']]);
 
@@ -550,9 +916,9 @@ describe('aggregateCollapsedEdges', () => {
     // The cluster bucket takes precedence — endpoint resolves to `cluster:cluster-A`,
     // not `server:server-1`.
     const edges: TopologyEdge[] = [
-      { id: 'manual:1', source: 'service:svc1', target: 'database:db1', type: 'manual', directed: true },
+      { id: 'manual:1', source: 'service:svc1@server-1', target: 'database:db1', type: 'manual', directed: true },
     ];
-    const serviceToServer = new Map([['svc1', 'server-1']]);
+    const serviceToServer = new Map([['svc1@server-1', 'server-1']]);
     const serverToCluster = new Map([['server-1', 'cluster-A']]);
 
     const result = aggregateCollapsedEdges(
@@ -574,9 +940,9 @@ describe('aggregateCollapsedEdges', () => {
     // and is also not in collapsedServerIds. svc on server-2 must pass through
     // unchanged.
     const edges: TopologyEdge[] = [
-      { id: 'manual:1', source: 'service:svc-outside', target: 'database:db1', type: 'manual', directed: true },
+      { id: 'manual:1', source: 'service:svc-outside@server-2', target: 'database:db1', type: 'manual', directed: true },
     ];
-    const serviceToServer = new Map([['svc-outside', 'server-2']]);
+    const serviceToServer = new Map([['svc-outside@server-2', 'server-2']]);
     const serverToCluster = new Map([['server-1', 'cluster-A']]);
 
     const result = aggregateCollapsedEdges(
@@ -598,7 +964,7 @@ describe('aggregateCollapsedEdges', () => {
     const edges: TopologyEdge[] = [
       {
         id: 'manual:1',
-        source: 'service:svc1',
+        source: 'service:svc1@server-2',
         sourceHandle: 'bottom',
         target: 'database:db1',
         targetHandle: 'top',
@@ -606,9 +972,9 @@ describe('aggregateCollapsedEdges', () => {
         directed: true,
       },
     ];
-    // svc1 is on server-2 which is NOT collapsed and not in any cluster
-    // — edge passes through resolveNode untouched.
-    const serviceToServer = new Map([['svc1', 'server-2']]);
+    // svc1's instance is on server-2 which is NOT collapsed and not in any
+    // cluster — edge passes through resolveNode untouched.
+    const serviceToServer = new Map([['svc1@server-2', 'server-2']]);
 
     const result = aggregateCollapsedEdges(edges, new Set(['server-1']), serviceToServer, new Map());
 
@@ -624,7 +990,7 @@ describe('aggregateCollapsedEdges', () => {
     const edges: TopologyEdge[] = [
       {
         id: 'manual:1',
-        source: 'service:svc1',
+        source: 'service:svc1@server-1',
         sourceHandle: 'bottom',
         target: 'database:db1',
         targetHandle: 'top',
@@ -632,7 +998,7 @@ describe('aggregateCollapsedEdges', () => {
         directed: true,
       },
     ];
-    const serviceToServer = new Map([['svc1', 'server-1']]);
+    const serviceToServer = new Map([['svc1@server-1', 'server-1']]);
 
     const result = aggregateCollapsedEdges(
       edges,
@@ -659,7 +1025,7 @@ describe('aggregateCollapsedEdges', () => {
         id: 'manual:1',
         source: 'external:ext1',
         sourceHandle: 'right',
-        target: 'service:svc1',
+        target: 'service:svc1@server-2',
         targetHandle: 'left',
         type: 'manual',
         directed: true,
@@ -672,8 +1038,8 @@ describe('aggregateCollapsedEdges', () => {
         directed: false,
       },
     ];
-    // svc1 lives on server-2 which is NOT collapsed.
-    const serviceToServer = new Map([['svc1', 'server-2']]);
+    // svc1's instance lives on server-2 which is NOT collapsed.
+    const serviceToServer = new Map([['svc1@server-2', 'server-2']]);
 
     const result = aggregateCollapsedEdges(
       edges,
@@ -695,12 +1061,12 @@ describe('aggregateCollapsedEdges', () => {
       {
         id: 'manual:1',
         source: 'external:ext1',
-        target: 'service:svc1',
+        target: 'service:svc1@server-1',
         type: 'manual',
         directed: true,
       },
     ];
-    const serviceToServer = new Map([['svc1', 'server-1']]);
+    const serviceToServer = new Map([['svc1@server-1', 'server-1']]);
 
     const result = aggregateCollapsedEdges(
       edges,

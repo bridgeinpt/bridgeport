@@ -125,15 +125,27 @@ export function AddConnectionModal({
   // Build flat node list grouped by server.
   const nodeOptions = useMemo<NodeOption[]>(() => {
     const options: NodeOption[] = [];
+    // Connections are template-scoped, so a service deployed on several
+    // servers is ONE option (duplicate ids would collide as React keys and
+    // Radix Select values); the group label lists every server it runs on.
+    const serviceEntries = new Map<string, { label: string; serverNames: string[] }>();
     for (const server of servers) {
       for (const service of server.services) {
-        options.push({
-          type: 'service',
-          id: service.id,
-          label: service.name,
-          group: `Server: ${server.name}`,
-        });
+        const entry = serviceEntries.get(service.id);
+        if (entry) entry.serverNames.push(server.name);
+        else serviceEntries.set(service.id, { label: service.name, serverNames: [server.name] });
       }
+    }
+    for (const [id, { label, serverNames }] of serviceEntries) {
+      options.push({
+        type: 'service',
+        id,
+        label,
+        group:
+          serverNames.length > 1
+            ? `Servers: ${serverNames.join(', ')}`
+            : `Server: ${serverNames[0]}`,
+      });
     }
     for (const db of databases) {
       const serverName = servers.find((s) => s.id === db.serverId)?.name;
