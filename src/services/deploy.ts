@@ -234,7 +234,7 @@ export async function deployService(
         // deploys doing a plain `cat >` to the same path could interleave into a
         // half-written, unparseable file. `mv` on the same directory is atomic.
         const composeTmp = `${composePath}.tmp.${deploymentRow.id}`;
-        await sshClient.exec(`cat > ${shellEscape(composeTmp)} << 'COMPOSEEOF'\n${artifacts.compose.content}\nCOMPOSEEOF`);
+        await sshClient.writeFile(composeTmp, Buffer.from(artifacts.compose.content, 'utf8'));
         await sshClient.exec(`mv -f ${shellEscape(composeTmp)} ${shellEscape(composePath)}`);
       }
 
@@ -253,7 +253,7 @@ export async function deployService(
           const fileBuffer = Buffer.from(cf.content, 'base64');
           await sshClient.writeFile(cfPath, fileBuffer);
         } else {
-          await sshClient.exec(`cat > ${shellEscape(cfPath)} << 'CFEOF'\n${cf.content}\nCFEOF`);
+          await sshClient.writeFile(cfPath, Buffer.from(cf.content, 'utf8'));
         }
 
         // Set restrictive permissions for .env files (contain secrets)

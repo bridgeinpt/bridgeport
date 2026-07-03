@@ -421,8 +421,22 @@ describe('docker', () => {
 
         const docker = new DockerSSHClient(mockClient);
         await expect(docker.restartContainer('my-container')).resolves.toBeUndefined();
+        // The container name is shell-escaped (single-quoted) before interpolation.
         expect(mockClient.exec).toHaveBeenCalledWith(
-          expect.stringContaining('docker restart my-container')
+          expect.stringContaining("docker restart 'my-container'")
+        );
+      });
+
+      it('should shell-escape a malicious container name (command-injection guard)', async () => {
+        const mockClient = createMockCommandClient(new Map([
+          ['docker restart', { stdout: '', stderr: '', code: 0 }],
+        ]));
+
+        const docker = new DockerSSHClient(mockClient);
+        await docker.restartContainer('x; rm -rf /');
+        // The injected `;` must be inside the single-quoted arg, not a command separator.
+        expect(mockClient.exec).toHaveBeenCalledWith(
+          expect.stringContaining("docker restart 'x; rm -rf /'")
         );
       });
 
@@ -445,8 +459,9 @@ describe('docker', () => {
 
         const docker = new DockerSSHClient(mockClient);
         await expect(docker.pullImage('nginx:latest')).resolves.toBeUndefined();
+        // The image ref is shell-escaped (single-quoted) before interpolation.
         expect(mockClient.exec).toHaveBeenCalledWith(
-          expect.stringContaining('docker pull nginx:latest')
+          expect.stringContaining("docker pull 'nginx:latest'")
         );
       });
 

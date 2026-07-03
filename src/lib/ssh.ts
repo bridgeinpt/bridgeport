@@ -762,7 +762,7 @@ export class DockerSSH {
   }
 
   async restartContainer(containerName: string): Promise<void> {
-    const { code, stderr } = await this.client.exec(this.pathPrefix + `docker restart ${containerName}`);
+    const { code, stderr } = await this.client.exec(this.pathPrefix + `docker restart ${shellEscape(containerName)}`);
     if (code !== 0) {
       throw new Error(`Failed to restart container: ${stderr}`);
     }
@@ -776,7 +776,7 @@ export class DockerSSH {
   }> {
     // Get container state and health status (use | as delimiter since tabs don't work reliably)
     const { stdout, code } = await this.client.exec(
-      this.pathPrefix + `docker inspect --format '{{.State.Status}}|{{.State.Running}}|{{.State.Health.Status}}' ${containerName} 2>/dev/null || echo "not_found|false|"`
+      this.pathPrefix + `docker inspect --format '{{.State.Status}}|{{.State.Running}}|{{.State.Health.Status}}' ${shellEscape(containerName)} 2>/dev/null || echo "not_found|false|"`
     );
 
     if (code !== 0 || stdout.includes(CONTAINER_STATUS.NOT_FOUND)) {
@@ -804,7 +804,7 @@ export class DockerSSH {
     // Format: state|running|health|image|ports_json
     // Ports come from NetworkSettings.Ports which is a map like {"80/tcp":[{"HostIp":"0.0.0.0","HostPort":"8080"}]}
     const { stdout, code } = await this.client.exec(
-      this.pathPrefix + `docker inspect --format '{{.State.Status}}|{{.State.Running}}|{{.State.Health.Status}}|{{.Config.Image}}|{{json .NetworkSettings.Ports}}' ${containerName} 2>/dev/null || echo "not_found|false|||{}"`
+      this.pathPrefix + `docker inspect --format '{{.State.Status}}|{{.State.Running}}|{{.State.Health.Status}}|{{.Config.Image}}|{{json .NetworkSettings.Ports}}' ${shellEscape(containerName)} 2>/dev/null || echo "not_found|false|||{}"`
     );
 
     if (code !== 0 || stdout.includes(CONTAINER_STATUS.NOT_FOUND)) {
@@ -861,7 +861,7 @@ export class DockerSSH {
     error?: string;
   }> {
     const { stdout, code } = await this.client.exec(
-      `curl -s -o /dev/null -w '%{http_code}' --connect-timeout ${timeoutSeconds} '${url}' 2>/dev/null || echo "000"`
+      `curl -s -o /dev/null -w '%{http_code}' --connect-timeout ${timeoutSeconds} ${shellEscape(url)} 2>/dev/null || echo "000"`
     );
 
     const statusCode = parseInt(stdout.trim(), 10);
@@ -878,7 +878,7 @@ export class DockerSSH {
   }
 
   async pullImage(image: string): Promise<void> {
-    const { code, stderr } = await this.client.exec(this.pathPrefix + `docker pull ${image}`);
+    const { code, stderr } = await this.client.exec(this.pathPrefix + `docker pull ${shellEscape(image)}`);
     if (code !== 0) {
       throw new Error(`Failed to pull image: ${stderr}`);
     }

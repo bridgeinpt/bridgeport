@@ -446,7 +446,7 @@ export class DockerSSHClient implements DockerClient {
 
   async getContainerInfo(containerName: string): Promise<ContainerDetails> {
     const { stdout, code } = await this.client.exec(
-      this.pathPrefix + `docker inspect --format '{{.State.Status}}|{{.State.Running}}|{{.State.Health.Status}}|{{.Config.Image}}|{{json .NetworkSettings.Ports}}' ${containerName} 2>/dev/null || echo "not_found|false|||{}"`
+      this.pathPrefix + `docker inspect --format '{{.State.Status}}|{{.State.Running}}|{{.State.Health.Status}}|{{.Config.Image}}|{{json .NetworkSettings.Ports}}' ${shellEscape(containerName)} 2>/dev/null || echo "not_found|false|||{}"`
     );
 
     if (code !== 0 || stdout.includes(CONTAINER_STATUS.NOT_FOUND)) {
@@ -495,7 +495,7 @@ export class DockerSSHClient implements DockerClient {
 
   async getContainerHealth(containerName: string): Promise<ContainerHealth> {
     const { stdout, code } = await this.client.exec(
-      this.pathPrefix + `docker inspect --format '{{.State.Status}}|{{.State.Running}}|{{.State.Health.Status}}' ${containerName} 2>/dev/null || echo "not_found|false|"`
+      this.pathPrefix + `docker inspect --format '{{.State.Status}}|{{.State.Running}}|{{.State.Health.Status}}' ${shellEscape(containerName)} 2>/dev/null || echo "not_found|false|"`
     );
 
     if (code !== 0 || stdout.includes(CONTAINER_STATUS.NOT_FOUND)) {
@@ -562,7 +562,7 @@ export class DockerSSHClient implements DockerClient {
     const metrics: ContainerStats = {};
 
     const statsResult = await this.client.exec(
-      `docker stats --no-stream --format '{{json .}}' ${containerName} 2>/dev/null`
+      `docker stats --no-stream --format '{{json .}}' ${shellEscape(containerName)} 2>/dev/null`
     );
 
     if (statsResult.code === 0 && statsResult.stdout) {
@@ -607,7 +607,7 @@ export class DockerSSHClient implements DockerClient {
 
     // Get restart count
     const inspectResult = await this.client.exec(
-      `docker inspect --format '{{.RestartCount}}' ${containerName} 2>/dev/null`
+      `docker inspect --format '{{.RestartCount}}' ${shellEscape(containerName)} 2>/dev/null`
     );
     if (inspectResult.code === 0 && inspectResult.stdout) {
       const restarts = parseInt(inspectResult.stdout.trim());
@@ -630,7 +630,7 @@ export class DockerSSHClient implements DockerClient {
   }
 
   async restartContainer(containerName: string): Promise<void> {
-    const { code, stderr } = await this.client.exec(this.pathPrefix + `docker restart ${containerName}`);
+    const { code, stderr } = await this.client.exec(this.pathPrefix + `docker restart ${shellEscape(containerName)}`);
     if (code !== 0) {
       throw new Error(`Failed to restart container: ${stderr}`);
     }
@@ -640,7 +640,7 @@ export class DockerSSHClient implements DockerClient {
     // SSH-mode pulls rely on the persistent `docker login` performed by
     // ensureRegistryLogin (see src/services/registry-login.ts). The auth arg
     // is accepted for interface parity with the socket client but unused here.
-    const { code, stderr } = await this.client.exec(this.pathPrefix + `docker pull ${image}`);
+    const { code, stderr } = await this.client.exec(this.pathPrefix + `docker pull ${shellEscape(image)}`);
     if (code !== 0) {
       throw new Error(`Failed to pull image: ${stderr}`);
     }

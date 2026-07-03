@@ -549,7 +549,7 @@ async function executeBackup(backupId: string): Promise<void> {
         filePath: db.filePath || '',
         outputFile: targetPath,
       };
-      dumpCommand = backupTemplate.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] || '');
+      dumpCommand = backupTemplate.replace(/\{\{(\w+)\}\}/g, (_, key) => shellEscape(String(vars[key] ?? '')));
 
       // Determine client based on whether we need SSH
       if (db.server && !isLocalhost(db.server.hostname)) {
@@ -594,17 +594,17 @@ async function executeBackup(backupId: string): Promise<void> {
       if (pgOpts.dataOnly) cmdParts.push('--data-only');
 
       // Connection options
-      cmdParts.push(`-h ${db.host}`);
-      cmdParts.push(`-p ${db.port || 5432}`);
-      cmdParts.push(`-U ${username}`);
-      cmdParts.push(`-d ${db.databaseName}`);
+      cmdParts.push(`-h ${shellEscape(String(db.host))}`);
+      cmdParts.push(`-p ${Number(db.port) || 5432}`);
+      cmdParts.push(`-U ${shellEscape(username)}`);
+      cmdParts.push(`-d ${shellEscape(String(db.databaseName))}`);
 
       // Output file or pipe through gzip
       if (db.backupCompression === 'gzip' && db.backupFormat === 'plain') {
         // Pipe through gzip for plain format
-        cmdParts.push(`| gzip -${db.backupCompressionLevel} > "${targetPath}"`);
+        cmdParts.push(`| gzip -${Number(db.backupCompressionLevel)} > ${shellEscape(targetPath)}`);
       } else {
-        cmdParts.push(`-f "${targetPath}"`);
+        cmdParts.push(`-f ${shellEscape(targetPath)}`);
       }
 
       // Use 2>&1 to capture stderr in stdout so we get better error messages
@@ -643,9 +643,9 @@ async function executeBackup(backupId: string): Promise<void> {
       // IMPORTANT: sqlite3 silently creates an empty database if the file doesn't exist,
       // so we must verify the file exists first to avoid creating empty backups
       if (db.backupCompression === 'gzip') {
-        dumpCommand = `test -f "${db.filePath}" && sqlite3 "${db.filePath}" ".dump" | gzip -${db.backupCompressionLevel} > "${sqliteDumpPath}" || (echo "Database file not found: ${db.filePath}" >&2 && exit 1)`;
+        dumpCommand = `test -f ${shellEscape(String(db.filePath))} && sqlite3 ${shellEscape(String(db.filePath))} ".dump" | gzip -${Number(db.backupCompressionLevel)} > ${shellEscape(sqliteDumpPath)} || (echo "Database file not found:" ${shellEscape(String(db.filePath))} >&2 && exit 1)`;
       } else {
-        dumpCommand = `test -f "${db.filePath}" && sqlite3 "${db.filePath}" ".dump" > "${sqliteDumpPath}" || (echo "Database file not found: ${db.filePath}" >&2 && exit 1)`;
+        dumpCommand = `test -f ${shellEscape(String(db.filePath))} && sqlite3 ${shellEscape(String(db.filePath))} ".dump" > ${shellEscape(sqliteDumpPath)} || (echo "Database file not found:" ${shellEscape(String(db.filePath))} >&2 && exit 1)`;
       }
     } else {
       throw new Error(`Unsupported database type or missing configuration: ${db.type}`);

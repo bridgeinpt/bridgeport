@@ -109,6 +109,17 @@ export function loadConfig(): Config {
     process.exit(1);
   }
 
+  // Non-fatal hardening warning: a short JWT_SECRET is brute-forceable. We warn
+  // rather than hard-fail (min(1) stays) so an in-place container upgrade never
+  // refuses to boot on an existing secret — the "container updates must always
+  // work" rule. Recommend >= 32 chars (e.g. `openssl rand -base64 32`).
+  if (result.data.JWT_SECRET.length < 32) {
+    console.warn(
+      `[config] JWT_SECRET is only ${result.data.JWT_SECRET.length} characters. ` +
+      'Use at least 32 (e.g. `openssl rand -base64 32`) — a short secret weakens session security.'
+    );
+  }
+
   return result.data;
 }
 

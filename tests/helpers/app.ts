@@ -71,17 +71,21 @@ export async function buildTestApp(options: BuildTestAppOptions = {}): Promise<T
   // compiler keeps Fastify from validating (and Ajv-compiling) those schemas.
   fastify.setValidatorCompiler(() => () => true);
 
-  // Custom JSON parser that allows empty bodies (matches production server)
+  // Custom JSON parser that allows empty bodies and stashes the raw request
+  // bytes on request.rawBody (matches production server.ts — required so the
+  // signature-verified webhook routes HMAC the exact received bytes).
   fastify.addContentTypeParser(
     'application/json',
     { parseAs: 'string' },
     (req, body, done) => {
-      if (!body || body === '') {
+      const raw = typeof body === 'string' ? body : (body as Buffer)?.toString('utf8');
+      req.rawBody = raw;
+      if (!raw || raw === '') {
         done(null, {});
         return;
       }
       try {
-        done(null, JSON.parse(body as string));
+        done(null, JSON.parse(raw));
       } catch (err) {
         done(err as Error, undefined);
       }

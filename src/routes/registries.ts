@@ -20,7 +20,7 @@ const registryTypeSchema = z.enum(['digitalocean', 'dockerhub', 'generic']);
 const createRegistrySchema = z.object({
   name: z.string().min(1),
   type: registryTypeSchema,
-  registryUrl: z.string().min(1),
+  registryUrl: z.string().url(),
   repositoryPrefix: z.string().optional(),
   token: z.string().optional(),
   username: z.string().optional(),
@@ -33,7 +33,7 @@ const createRegistrySchema = z.object({
 const updateRegistrySchema = z.object({
   name: z.string().min(1).optional(),
   type: registryTypeSchema.optional(),
-  registryUrl: z.string().min(1).optional(),
+  registryUrl: z.string().url().optional(),
   repositoryPrefix: z.string().nullable().optional(),
   token: z.string().nullable().optional(),
   username: z.string().nullable().optional(),

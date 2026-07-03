@@ -234,13 +234,13 @@ GitHub sends `X-Hub-Signature-256` with each request, which BRIDGEPORT verifies 
 
 ### Authentication
 
-Incoming webhooks use HMAC-SHA256 signature verification.
+Incoming webhooks use HMAC-SHA256 signature verification, and the endpoints **fail closed**.
 
 **How it works:**
 
-1. Set the `WEBHOOK_SECRET` environment variable on your BRIDGEPORT instance (or `GITHUB_WEBHOOK_SECRET` for the GitHub endpoint).
-2. When sending a webhook, compute `HMAC-SHA256(request_body, secret)` and include it in the header.
-3. BRIDGEPORT recomputes the signature and compares using constant-time comparison.
+1. Set the `WEBHOOK_SECRET` environment variable on your BRIDGEPORT instance (or `GITHUB_WEBHOOK_SECRET` for the GitHub endpoint). **This is required** — if the relevant secret is not configured, the endpoint is disabled and returns `401` for every request. The endpoints are unauthenticated by design otherwise (no user session), so the shared secret *is* the authentication.
+2. When sending a webhook, compute `HMAC-SHA256(request_body, secret)` over the exact request body bytes and include it in the header. A request with a missing or invalid signature is rejected with `401`.
+3. BRIDGEPORT recomputes the signature over the raw received bytes and compares using constant-time comparison.
 
 **Header format:**
 
@@ -263,8 +263,8 @@ curl -X POST https://your-bridgeport.example.com/api/webhooks/deploy \
   -d "$PAYLOAD"
 ```
 
-> [!TIP]
-> If `WEBHOOK_SECRET` is not set on BRIDGEPORT, signature verification is skipped entirely. This is convenient for testing but not recommended for production. Always set a strong secret.
+> [!IMPORTANT]
+> The incoming webhook endpoints **fail closed**: if `WEBHOOK_SECRET` (or `GITHUB_WEBHOOK_SECRET` for the GitHub endpoint) is not set, the corresponding endpoint is **disabled** and returns `401` for every request. Set a strong secret (e.g. `openssl rand -base64 32`) to enable it. This prevents an unauthenticated caller from triggering deployments on an instance where the secret was never configured.
 
 ---
 
