@@ -101,9 +101,10 @@ export default defineConfig({
         // Changelog generated from the repo's GitHub Releases (config in content.config.ts).
         starlightChangelogs(),
         starlightLinksValidator({
-          // The generated OpenAPI + changelog pages aren't markdown, so the validator has
-          // no heading data for them and can't verify links pointing into those sections.
-          exclude: ['/reference/api/', '/reference/api/**', '/changelog/', '/changelog/**'],
+          // The generated OpenAPI + changelog + roadmap pages aren't markdown, so the
+          // validator has no heading data for them and can't verify links pointing into
+          // those sections.
+          exclude: ['/reference/api/', '/reference/api/**', '/changelog/', '/changelog/**', '/roadmap/'],
           // localhost URLs are intentional examples for a self-hosted product.
           errorOnLocalLinks: false,
         }),
@@ -198,6 +199,7 @@ export default defineConfig({
           ],
         },
         { label: 'Changelog', link: '/changelog/' },
+        { label: "What's Next", link: '/roadmap/' },
       ],
     }),
     sitemap(),
