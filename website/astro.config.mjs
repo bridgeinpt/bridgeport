@@ -73,8 +73,18 @@ export default defineConfig({
       // The port-gantry-crane mark (burgundy), shown alongside the title and as the favicon.
       logo: { src: './src/assets/logo.svg', replacesTitle: false },
       favicon: '/favicon.svg',
-      // Social/link-unfurl preview image (reuses the repo's social card).
+      // Social/link-unfurl preview image (reuses the repo's social card) + site-wide
+      // SEO meta Starlight doesn't emit on its own.
       head: [
+        { tag: 'meta', attrs: { property: 'og:site_name', content: 'BridgePort' } },
+        {
+          tag: 'meta',
+          attrs: { name: 'theme-color', media: '(prefers-color-scheme: dark)', content: '#0f172a' },
+        },
+        {
+          tag: 'meta',
+          attrs: { name: 'theme-color', media: '(prefers-color-scheme: light)', content: '#ffffff' },
+        },
         { tag: 'meta', attrs: { property: 'og:image', content: `${SITE}/social-preview.png` } },
         { tag: 'meta', attrs: { property: 'og:image:alt', content: 'BridgePort' } },
         { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },
