@@ -73,12 +73,20 @@ export default defineConfig({
       // The port-gantry-crane mark (burgundy), shown alongside the title and as the favicon.
       logo: { src: './src/assets/logo.svg', replacesTitle: false },
       favicon: '/favicon.svg',
-      // Social/link-unfurl preview image (reuses the repo's social card).
+      // Site-wide SEO meta Starlight doesn't emit on its own. og:image / twitter:image
+      // are emitted per page by the Head override (src/components/Head.astro), which
+      // points at generated /og/<route>.png cards with a static fallback.
       head: [
-        { tag: 'meta', attrs: { property: 'og:image', content: `${SITE}/social-preview.png` } },
-        { tag: 'meta', attrs: { property: 'og:image:alt', content: 'BridgePort' } },
+        { tag: 'meta', attrs: { property: 'og:site_name', content: 'BridgePort' } },
+        {
+          tag: 'meta',
+          attrs: { name: 'theme-color', media: '(prefers-color-scheme: dark)', content: '#0f172a' },
+        },
+        {
+          tag: 'meta',
+          attrs: { name: 'theme-color', media: '(prefers-color-scheme: light)', content: '#ffffff' },
+        },
         { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },
-        { tag: 'meta', attrs: { name: 'twitter:image', content: `${SITE}/social-preview.png` } },
       ],
       // "Edit this page" → the source file on GitHub.
       editLink: { baseUrl: 'https://github.com/bridgeinpt/bridgeport/edit/master/docs/' },
@@ -86,6 +94,13 @@ export default defineConfig({
       // so tell Starlight to run its Markdown transforms (asides, heading-anchor links) there.
       markdown: { processedDirs: ['../docs'] },
       customCss: ['./src/styles/custom.css'],
+      // Overrides: Head adds per-page OG images; Header adds the marketing-page
+      // nav; Footer appends the site-wide link map.
+      components: {
+        Head: './src/components/Head.astro',
+        Header: './src/components/Header.astro',
+        Footer: './src/components/Footer.astro',
+      },
       plugins: [
         starlightOpenAPI([
           { base: 'reference/api', schema: '../openapi.json', label: 'API Reference' },
@@ -104,7 +119,19 @@ export default defineConfig({
           // The generated OpenAPI + changelog + roadmap pages aren't markdown, so the
           // validator has no heading data for them and can't verify links pointing into
           // those sections.
-          exclude: ['/reference/api/', '/reference/api/**', '/changelog/', '/changelog/**', '/roadmap/'],
+          // (/compare/**, /use-cases/**, and /faq/ are custom .astro pages, same as /roadmap/.)
+          exclude: [
+            '/reference/api/',
+            '/reference/api/**',
+            '/changelog/',
+            '/changelog/**',
+            '/roadmap/',
+            '/compare/',
+            '/compare/**',
+            '/use-cases/',
+            '/use-cases/**',
+            '/faq/',
+          ],
           // localhost URLs are intentional examples for a self-hosted product.
           errorOnLocalLinks: false,
         }),

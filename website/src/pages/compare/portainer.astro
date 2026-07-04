@@ -1,0 +1,97 @@
+---
+import ComparePage from '../../components/ComparePage.astro';
+---
+
+<ComparePage
+  competitor="Portainer"
+  title="BridgePort vs Portainer"
+  description="Portainer alternative for deployment-centric teams: BridgePort focuses on orchestrated rollouts, encrypted secrets, config sync, and monitoring for Docker fleets. An honest comparison."
+  framing="Deployment control plane vs container platform GUI"
+  intro={[
+    'Portainer and BridgePort overlap — both are self-hostable web UIs for managing containers across multiple hosts — but they grew from different centers of gravity. Portainer is a general-purpose management GUI for container platforms: Docker, Swarm, and Kubernetes environments, with broad point-and-click control over everything on them.',
+    'BridgePort is narrower and deeper: it treats plain Docker servers as a fleet to operate, and builds the deployment workflow around that — service templates from an image catalog, dependency-ordered rollout plans with automatic rollback, encrypted secrets wired into templated config files, and built-in monitoring with alerting. Less platform breadth, more opinionated ops.',
+  ]}
+  rows={[
+    {
+      label: 'Center of gravity',
+      bp: { mark: 'yes', text: 'Deployment & operations workflow for Docker fleets' },
+      other: { mark: 'yes', text: 'General management GUI across container platforms' },
+    },
+    {
+      label: 'Kubernetes & Swarm',
+      bp: { mark: 'no', text: 'Plain Docker hosts only — deliberately' },
+      other: { mark: 'yes', text: 'Manages Docker, Swarm, and Kubernetes environments' },
+    },
+    {
+      label: 'Server connection',
+      bp: { mark: 'yes', text: 'SSH or Docker socket; optional lightweight metrics agent' },
+      other: { mark: 'yes', text: 'Agent per environment (or socket/Edge agent)' },
+    },
+    {
+      label: 'Multi-service rollouts',
+      bp: { mark: 'yes', text: 'Deployment plans: dependency ordering, health gates, automatic rollback' },
+      other: { mark: 'partial', text: 'Stack deploys and redeploy webhooks; cross-stack ordering and auto-rollback are not the model' },
+    },
+    {
+      label: 'Secrets',
+      bp: { mark: 'yes', text: 'AES-256-GCM encrypted at rest, usage-tracked across config files' },
+      other: { mark: 'partial', text: 'Docker/Kubernetes secrets surfaced through the UI' },
+    },
+    {
+      label: 'Config management',
+      bp: { mark: 'yes', text: 'Templated config files + reusable fragments synced to servers, with drift-safe resync' },
+      other: { mark: 'no', text: 'Not a config management tool' },
+    },
+    {
+      label: 'Monitoring & alerting',
+      bp: { mark: 'yes', text: 'Metrics history, container/URL/TCP/TLS health checks, notifications' },
+      other: { mark: 'partial', text: 'Live container stats and status; alerting/history via external tools' },
+    },
+    {
+      label: 'Infrastructure as code',
+      bp: { mark: 'yes', text: 'Terraform provider, REST API, Go SDK, CLI, MCP server' },
+      other: { mark: 'partial', text: 'REST API; GitOps-style stack updates from git' },
+    },
+    {
+      label: 'Database & topology view',
+      bp: { mark: 'yes', text: 'Database monitoring and a live topology diagram of services, servers, and dependencies' },
+      other: { mark: 'no', text: 'Containers and stacks, not an infrastructure topology' },
+    },
+    {
+      label: 'License & editions',
+      bp: { mark: 'yes', text: 'Apache-2.0, one edition, all features' },
+      other: { mark: 'partial', text: 'Free Community Edition plus a commercial Business Edition with advanced features' },
+    },
+  ]}
+  tableNote="Portainer capabilities vary between Community and Business editions and evolve quickly — verify specifics against Portainer's current documentation for your version."
+  chooseBp={[
+    'Your unit of work is "roll out this set of services across these servers, safely" — not ad-hoc container administration.',
+    'You want secrets, config templating, monitoring, and alerting in one tool instead of assembling them around a GUI.',
+    'You manage infrastructure as code and want a first-class Terraform provider and API.',
+    'You want every feature in the open-source edition, with no commercial tier to compare against.',
+  ]}
+  chooseOther={[
+    'You manage Kubernetes or Swarm environments alongside plain Docker — one GUI for all of them.',
+    'You mainly want broad point-and-click administration: exec into containers, browse volumes, prune images.',
+    'You value its large ecosystem, app-template library, and community.',
+  ]}
+  reviewed="July 2026"
+  faqs={[
+    {
+      q: 'Is BridgePort a Portainer alternative?',
+      a: 'For teams managing plain Docker servers, yes — with a different emphasis. BridgePort centers on orchestrated deployments, encrypted secrets, config sync, and monitoring; Portainer centers on broad GUI management of container platforms including Swarm and Kubernetes.',
+    },
+    {
+      q: 'Can BridgePort exec into containers and view logs like Portainer?',
+      a: 'Yes — logs and shell access are available from the UI and CLI, alongside deploys, secrets, and monitoring.',
+    },
+    {
+      q: 'Does BridgePort require an agent on every server?',
+      a: 'No. Servers connect over SSH or the Docker socket. The optional Go agent adds richer metrics collection, and BridgePort can deploy it for you when you want it.',
+    },
+    {
+      q: 'Is any BridgePort functionality paywalled?',
+      a: 'No. BridgePort is Apache-2.0 with a single edition — RBAC, audit logging, monitoring, and the Terraform provider are all included.',
+    },
+  ]}
+/>

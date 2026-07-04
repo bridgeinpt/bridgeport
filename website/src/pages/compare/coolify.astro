@@ -1,0 +1,97 @@
+---
+import ComparePage from '../../components/ComparePage.astro';
+---
+
+<ComparePage
+  competitor="Coolify"
+  title="BridgePort vs Coolify"
+  description="Coolify alternative for ops-centric teams: Coolify is a self-hosted PaaS for git-push deploys; BridgePort is a fleet control plane for image-based Docker services. An honest comparison."
+  framing="Fleet control plane vs self-hosted PaaS"
+  intro={[
+    'Coolify and BridgePort are both self-hosted, open-source answers to "I want to run my stuff on my servers" — but they answer it for different workflows. Coolify is a platform-as-a-service you host yourself: push a git repository, it builds the app, wires a proxy and TLS, and runs it. A self-hosted Heroku, and a good one.',
+    'BridgePort starts one step later in the pipeline. It assumes CI already builds your images, and takes over from there: cataloged images deployed as services across a fleet, config and secrets synced to servers, dependency-ordered rollout plans with automatic rollback, and monitoring across servers, services, and databases. It also adopts infrastructure that already exists rather than assuming it was born on the platform.',
+  ]}
+  rows={[
+    {
+      label: 'Philosophy',
+      bp: { mark: 'yes', text: 'Ops control plane for image-based services on your fleet' },
+      other: { mark: 'yes', text: 'Self-hosted PaaS: git push → build → run' },
+    },
+    {
+      label: 'Builds from source',
+      bp: { mark: 'no', text: 'Bring images from any registry — CI owns the build' },
+      other: { mark: 'yes', text: 'Builds apps from git (Dockerfiles, Nixpacks, static sites)' },
+    },
+    {
+      label: 'Adopting existing servers',
+      bp: { mark: 'yes', text: 'Discovers and manages containers already running on your hosts' },
+      other: { mark: 'partial', text: 'Manages servers it provisions; pre-existing workloads stay outside its model' },
+    },
+    {
+      label: 'Reverse proxy & TLS',
+      bp: { mark: 'no', text: 'Bring your own (Caddy, Traefik, nginx) — managed as services like everything else' },
+      other: { mark: 'yes', text: 'Built-in proxy with automatic HTTPS' },
+    },
+    {
+      label: 'Multi-service orchestration',
+      bp: { mark: 'yes', text: 'Deployment plans: dependency ordering, health gates, automatic rollback' },
+      other: { mark: 'partial', text: 'Per-app deploys with rollback to previous images; cross-app ordering is not the model' },
+    },
+    {
+      label: 'Secrets & config',
+      bp: { mark: 'yes', text: 'AES-256-GCM secrets + templated config files and fragments synced to servers' },
+      other: { mark: 'partial', text: 'Per-app environment variables; shared/team variables' },
+    },
+    {
+      label: 'Monitoring',
+      bp: { mark: 'yes', text: 'Server, service, and database metrics; URL/TCP/TLS checks; notifications' },
+      other: { mark: 'partial', text: 'Container status, basic server metrics, and notifications' },
+    },
+    {
+      label: 'Databases',
+      bp: { mark: 'yes', text: 'Monitors and manages the databases you run, wherever they run' },
+      other: { mark: 'yes', text: 'One-click provisioning of popular databases with backups' },
+    },
+    {
+      label: 'Infrastructure as code',
+      bp: { mark: 'yes', text: 'Terraform provider, REST API, Go SDK, CLI, MCP server' },
+      other: { mark: 'partial', text: 'REST API and webhooks' },
+    },
+    {
+      label: 'License',
+      bp: { mark: 'yes', text: 'Apache-2.0, self-hosted' },
+      other: { mark: 'yes', text: 'Apache-2.0, self-hosted (optional paid cloud)' },
+    },
+  ]}
+  tableNote="Coolify moves fast — verify specifics against its current documentation for your version."
+  chooseBp={[
+    'CI already builds and pushes images, and you want deployment + operations from there.',
+    'You operate an existing fleet — including containers, proxies, and databases you set up yourself.',
+    'You need coordinated multi-service rollouts with rollback, not just per-app deploys.',
+    'You want your platform manageable through Terraform and a stable API.',
+  ]}
+  chooseOther={[
+    'You want git-push-to-deploy with builds, proxy, and TLS handled for you.',
+    'You are hosting many small apps and sites and value one-click databases and services.',
+    'A Heroku-like developer experience matters more than fleet-level orchestration.',
+  ]}
+  reviewed="July 2026"
+  faqs={[
+    {
+      q: 'Is BridgePort a Coolify alternative?',
+      a: 'They solve adjacent problems. Coolify is a self-hosted PaaS optimized for git-push deploys of apps it builds; BridgePort is a control plane for operating image-based Docker services across a fleet, including infrastructure it did not create. Ops-centric teams tend to fit BridgePort; app-hosting workflows fit Coolify.',
+    },
+    {
+      q: 'Does BridgePort build my application from a git repository?',
+      a: 'No, by design. Your CI builds and pushes the image to a registry; a webhook then triggers BridgePort to roll it out. That keeps builds reproducible in CI and deployments auditable in BridgePort.',
+    },
+    {
+      q: 'Does BridgePort handle my reverse proxy and HTTPS?',
+      a: 'BridgePort does not ship an embedded proxy. You run Caddy, Traefik, or nginx as a BridgePort-managed service — with its config templated, synced, and health-checked like everything else.',
+    },
+    {
+      q: 'Can I migrate from Coolify to BridgePort?',
+      a: 'If your apps are containers on servers you control, BridgePort can discover the running containers and manage them in place — migration is adopting, not rebuilding.',
+    },
+  ]}
+/>

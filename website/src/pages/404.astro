@@ -1,0 +1,91 @@
+---
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+
+/** Custom 404 — points lost visitors at search, the docs, and the homepage. */
+---
+
+<StarlightPage
+  frontmatter={{
+    title: 'Page not found',
+    description: 'This page has sailed. Try search, the docs, or the homepage.',
+    template: 'splash',
+    tableOfContents: false,
+    editUrl: false,
+  }}
+>
+  <div class="nf">
+    <p class="nf-code" aria-hidden="true">404 // CONTAINER NOT FOUND</p>
+    <p class="nf-lead">
+      This page isn't at this berth — it may have moved with a docs reshuffle, or the URL has a
+      typo. The search bar above (<kbd>Ctrl</kbd>+<kbd>K</kbd>) knows every page on the site.
+    </p>
+    <div class="nf-links">
+      <a class="nf-btn nf-btn-primary" href="/">Homepage</a>
+      <a class="nf-btn" href="/getting-started/">Getting started</a>
+      <a class="nf-btn" href="/use-cases/">Use cases</a>
+      <a class="nf-btn" href="/faq/">FAQ</a>
+    </div>
+    <p class="nf-report">
+      Followed a link here from the docs? That's a bug —{' '}
+      <a href="https://github.com/bridgeinpt/bridgeport/issues">report it</a>.
+    </p>
+  </div>
+</StarlightPage>
+
+<style is:global>
+  .nf {
+    max-width: 42rem;
+    margin-inline: auto;
+    padding-block: 2rem 4rem;
+  }
+  .nf-code {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 0.78rem;
+    letter-spacing: 0.16em;
+    color: #cc0000;
+    margin: 0 0 1rem;
+  }
+  .nf-lead {
+    font-size: 1.02rem;
+    line-height: 1.7;
+    color: var(--sl-color-gray-2);
+  }
+  .nf-lead kbd {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 0.8em;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.3em;
+    padding: 0.1em 0.4em;
+    background: var(--sl-color-black);
+  }
+  .nf-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.7rem;
+    margin-top: 1.75rem;
+  }
+  .nf-btn {
+    display: inline-flex;
+    font-family: 'IBM Plex Sans', var(--sl-font);
+    font-weight: 600;
+    font-size: 0.88rem;
+    padding: 0.55rem 1.1rem;
+    border-radius: 999px;
+    text-decoration: none;
+    border: 1px solid color-mix(in srgb, var(--sl-color-gray-5) 72%, transparent);
+    color: var(--sl-color-white);
+  }
+  .nf-btn:hover {
+    background: color-mix(in srgb, var(--sl-color-gray-6) 60%, transparent);
+  }
+  .nf-btn-primary {
+    background: var(--sl-color-accent);
+    border-color: transparent;
+    color: #fff;
+  }
+  .nf-report {
+    margin-top: 2rem;
+    font-size: 0.88rem;
+    color: var(--sl-color-gray-3);
+  }
+</style>

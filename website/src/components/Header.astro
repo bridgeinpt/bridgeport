@@ -1,0 +1,135 @@
+---
+import Search from '@astrojs/starlight/components/Search.astro';
+import SiteTitle from '@astrojs/starlight/components/SiteTitle.astro';
+import SocialIcons from '@astrojs/starlight/components/SocialIcons.astro';
+import ThemeSelect from '@astrojs/starlight/components/ThemeSelect.astro';
+
+/**
+ * Header override: the default Starlight header plus a small top-nav for the
+ * marketing pages (use cases, comparisons, FAQ, roadmap), which otherwise are
+ * only reachable from the homepage. Layout and styles mirror the default
+ * Header.astro; the nav sits in the title column and hides below 72rem —
+ * smaller viewports reach the same links through the site footer.
+ */
+
+const links = [
+  { href: '/getting-started/', label: 'Docs', match: /^\/(getting-started|concepts|installation|configuration|guides|reference|operations|api-stability)/ },
+  { href: '/use-cases/', label: 'Use cases', match: /^\/use-cases/ },
+  { href: '/compare/', label: 'Compare', match: /^\/compare/ },
+  { href: '/faq/', label: 'FAQ', match: /^\/faq/ },
+  { href: '/roadmap/', label: 'Roadmap', match: /^\/roadmap/ },
+];
+
+const path = Astro.url.pathname;
+---
+
+<div class="header">
+  <div class="title-wrapper sl-flex">
+    <SiteTitle />
+    <nav class="site-nav" aria-label="Main">
+      {
+        links.map((link) => (
+          <a href={link.href} aria-current={link.match.test(path) ? 'true' : undefined}>
+            {link.label}
+          </a>
+        ))
+      }
+    </nav>
+  </div>
+  <div class="sl-flex print:hidden">
+    <Search />
+  </div>
+  <div class="sl-hidden md:sl-flex print:hidden right-group">
+    <div class="sl-flex social-icons">
+      <SocialIcons />
+    </div>
+    <ThemeSelect />
+  </div>
+</div>
+
+<style>
+  .header {
+    display: flex;
+    gap: var(--sl-nav-gap);
+    justify-content: space-between;
+    align-items: center;
+    height: 100%;
+  }
+
+  .title-wrapper {
+    /* Prevent long titles overflowing and covering the search and menu buttons on narrow viewports. */
+    overflow: clip;
+    /* Avoid clipping focus ring around link inside title wrapper. */
+    padding: 0.25rem;
+    margin: -0.25rem;
+    min-width: 0;
+    align-items: center;
+    gap: 1.75rem;
+  }
+
+  .site-nav {
+    display: none;
+    align-items: center;
+    gap: 1.4rem;
+  }
+  .site-nav a {
+    font-family: 'IBM Plex Sans', var(--sl-font);
+    font-size: var(--sl-text-sm);
+    font-weight: 500;
+    color: var(--sl-color-gray-2);
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color 0.12s ease;
+  }
+  .site-nav a:hover {
+    color: var(--sl-color-white);
+  }
+  .site-nav a[aria-current='true'] {
+    color: var(--sl-color-accent-high);
+    font-weight: 600;
+  }
+  @media (min-width: 72rem) {
+    .site-nav {
+      display: flex;
+    }
+  }
+
+  .right-group,
+  .social-icons {
+    gap: 1rem;
+    align-items: center;
+  }
+  .social-icons::after {
+    content: '';
+    height: 2rem;
+    border-inline-end: 1px solid var(--sl-color-gray-5);
+  }
+
+  @media (min-width: 50rem) {
+    :global(:root[data-has-sidebar]) {
+      --__sidebar-pad: calc(2 * var(--sl-nav-pad-x));
+    }
+    :global(:root:not([data-has-toc])) {
+      --__toc-width: 0rem;
+    }
+    .header {
+      --__sidebar-width: max(0rem, var(--sl-content-inline-start, 0rem) - var(--sl-nav-pad-x));
+      --__main-column-fr: calc(
+        (
+            100% + var(--__sidebar-pad, 0rem) - var(--__toc-width, var(--sl-sidebar-width)) -
+              (2 * var(--__toc-width, var(--sl-nav-pad-x))) - var(--sl-content-inline-start, 0rem) -
+              var(--sl-content-width)
+          ) / 2
+      );
+      display: grid;
+      grid-template-columns:
+        minmax(
+          calc(var(--__sidebar-width) + max(0rem, var(--__main-column-fr) - var(--sl-nav-gap))),
+          auto
+        )
+        1fr
+        auto;
+      align-content: center;
+    }
+  }
+</style>

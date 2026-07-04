@@ -1,0 +1,97 @@
+---
+import ComparePage from '../../components/ComparePage.astro';
+---
+
+<ComparePage
+  competitor="CapRover"
+  title="BridgePort vs CapRover"
+  description="CapRover alternative for fleet operations: CapRover is a Swarm-based self-hosted PaaS; BridgePort deploys, orchestrates, and monitors image-based Docker services across plain servers."
+  framing="Fleet control plane vs Swarm-based PaaS"
+  intro={[
+    'CapRover is one of the longest-standing self-hosted PaaS projects: built on Docker Swarm with an nginx load balancer in front, it gives you one-click apps, git-based deploys via its captain-definition file, automatic Let’s Encrypt certificates, and cluster scaling by joining more Swarm nodes.',
+    'BridgePort approaches the same hardware from the operations side. There is no build system, no bundled load balancer, and no Swarm: it deploys images your CI already built onto plain Docker hosts, coordinates multi-service rollout plans with health gates and automatic rollback, syncs encrypted secrets and templated config, and monitors everything — including servers and containers it did not create.',
+  ]}
+  rows={[
+    {
+      label: 'Philosophy',
+      bp: { mark: 'yes', text: 'Ops control plane for image-based services on your fleet' },
+      other: { mark: 'yes', text: 'Self-hosted PaaS: apps deployed onto a Swarm cluster it manages' },
+    },
+    {
+      label: 'Cluster layer',
+      bp: { mark: 'yes', text: 'None — plain Docker hosts over SSH or socket, each independent' },
+      other: { mark: 'partial', text: 'Docker Swarm underneath; multi-server means joining nodes to the cluster' },
+    },
+    {
+      label: 'Builds from source',
+      bp: { mark: 'no', text: 'Bring images from any registry — CI owns the build' },
+      other: { mark: 'yes', text: 'captain-definition builds from git, plus one-click app marketplace' },
+    },
+    {
+      label: 'Adopting existing servers',
+      bp: { mark: 'yes', text: 'Discovers and manages containers already running on your hosts' },
+      other: { mark: 'no', text: 'Servers become CapRover/Swarm nodes; existing workloads sit outside its model' },
+    },
+    {
+      label: 'Reverse proxy & TLS',
+      bp: { mark: 'no', text: 'Bring your own (Caddy, Traefik, nginx) — managed as services like everything else' },
+      other: { mark: 'yes', text: 'Built-in nginx with automatic Let’s Encrypt' },
+    },
+    {
+      label: 'Multi-service orchestration',
+      bp: { mark: 'yes', text: 'Deployment plans: dependency ordering, health gates, automatic rollback' },
+      other: { mark: 'partial', text: 'Per-app deploys with webhooks; cross-app ordering and health-gated rollback are not the model' },
+    },
+    {
+      label: 'Secrets & config',
+      bp: { mark: 'yes', text: 'AES-256-GCM secrets + templated config files and fragments synced to servers' },
+      other: { mark: 'partial', text: 'Per-app environment variables' },
+    },
+    {
+      label: 'Monitoring',
+      bp: { mark: 'yes', text: 'Server/service/database metrics history, URL/TCP/TLS checks, alerting' },
+      other: { mark: 'partial', text: 'Basic app metrics and optional self-hosted monitoring add-ons (e.g. NetData)' },
+    },
+    {
+      label: 'Infrastructure as code',
+      bp: { mark: 'yes', text: 'Terraform provider, REST API, Go SDK, CLI, MCP server' },
+      other: { mark: 'partial', text: 'CLI and webhook-driven deploys' },
+    },
+    {
+      label: 'License & cost',
+      bp: { mark: 'yes', text: 'Apache-2.0, one edition, all features' },
+      other: { mark: 'yes', text: 'Open source and free to self-host' },
+    },
+  ]}
+  tableNote="CapRover capabilities summarized at the architecture level — verify specifics against its current documentation for your version."
+  chooseBp={[
+    'You want your servers to stay plain Docker hosts — no Swarm cluster to maintain.',
+    'CI already builds images and you need safe, coordinated rollouts across services.',
+    'You are adopting existing infrastructure, not rebuilding it onto a platform.',
+    'Monitoring, secrets, config sync, and audit need to live in the same tool.',
+  ]}
+  chooseOther={[
+    'You want a battle-tested, free PaaS with one-click apps and automatic HTTPS.',
+    'Git-push deploys of a handful of apps on one box (or a small Swarm) is the whole job.',
+    'You value its large catalog of community one-click applications.',
+  ]}
+  reviewed="July 2026"
+  faqs={[
+    {
+      q: 'Is BridgePort a CapRover alternative?',
+      a: 'For running containerized services on your own servers, yes — with a different center of gravity. CapRover is a Swarm-based PaaS that builds and hosts apps behind its bundled nginx; BridgePort is a control plane that deploys CI-built images across plain Docker hosts with orchestrated rollouts, secrets, config sync, and monitoring.',
+    },
+    {
+      q: 'Do I need Docker Swarm for BridgePort?',
+      a: 'No. BridgePort has no cluster layer at all — each server is managed independently over SSH or the Docker socket, which is exactly what makes adopting existing hosts painless.',
+    },
+    {
+      q: 'Can BridgePort replace CapRover’s one-click apps?',
+      a: 'BridgePort deploys any image from any registry, so the same software is available — but as explicitly configured services rather than one-click installs. That trades convenience for config that is versioned, templated, and auditable.',
+    },
+    {
+      q: 'How would I migrate from CapRover to BridgePort?',
+      a: 'Point BridgePort at the servers, let container discovery import what is running where possible, and recreate apps as services from their images with secrets and config managed by BridgePort. Since there is no cluster to unwind on the BridgePort side, migration can proceed one service at a time.',
+    },
+  ]}
+/>

@@ -21,6 +21,7 @@ overrides:
 allowBuilds:
   sharp: true
   esbuild: true
+  '@ibm/plex-sans': set this to true or false
 
 # Mirror the app workspace's supply-chain posture.
 minimumReleaseAge: 1440

@@ -1,0 +1,155 @@
+---
+import Default from '@astrojs/starlight/components/Footer.astro';
+
+/**
+ * Footer override: keeps the default Starlight footer (edit link, prev/next
+ * pagination) and appends a site-wide footer with a link map — the global
+ * navigation for the marketing pages on viewports where the header nav is
+ * hidden, and an internal-linking surface for every page.
+ */
+
+const GITHUB = 'https://github.com/bridgeinpt/bridgeport';
+
+const columns = [
+  {
+    title: 'Product',
+    links: [
+      { href: '/use-cases/', label: 'Use cases' },
+      { href: '/compare/', label: 'Compare' },
+      { href: '/faq/', label: 'FAQ' },
+      { href: '/roadmap/', label: 'Roadmap' },
+      { href: '/changelog/', label: 'Changelog' },
+    ],
+  },
+  {
+    title: 'Documentation',
+    links: [
+      { href: '/getting-started/', label: 'Getting started' },
+      { href: '/concepts/', label: 'Core concepts' },
+      { href: '/installation/', label: 'Installation' },
+      { href: '/reference/api/', label: 'API reference' },
+      { href: '/operations/security/', label: 'Security' },
+    ],
+  },
+  {
+    title: 'Project',
+    links: [
+      { href: GITHUB, label: 'GitHub' },
+      { href: `${GITHUB}/issues`, label: 'Issues' },
+      { href: `${GITHUB}/blob/master/LICENSE`, label: 'Apache-2.0 license' },
+      { href: '/llms.txt', label: 'llms.txt' },
+    ],
+  },
+];
+---
+
+<Default><slot /></Default>
+
+<div class="site-footer">
+  <div class="site-footer-grid">
+    <div class="site-footer-brand">
+      <svg
+        aria-hidden="true"
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 64 64"
+        fill="currentColor"
+        class="site-footer-mark"
+        ><rect x="30.5" y="9" width="3" height="20" rx="1.5"/><rect x="20" y="27" width="24" height="2.6" rx="1.3"/><rect x="20" y="38.4" width="24" height="2.6" rx="1.3"/><rect x="21" y="29.6" width="2" height="8.8"/><rect x="25" y="29.6" width="2" height="8.8"/><rect x="29" y="29.6" width="2" height="8.8"/><rect x="33" y="29.6" width="2" height="8.8"/><rect x="37" y="29.6" width="2" height="8.8"/><rect x="41" y="29.6" width="2" height="8.8"/><polygon points="13,16 19,16 13,52 7,52"/><polygon points="45,16 51,16 57,52 51,52"/><rect x="4" y="52" width="14" height="4" rx="1.5"/><rect x="46" y="52" width="14" height="4" rx="1.5"/><rect x="11" y="9" width="42" height="7" rx="2"/><rect x="26" y="16" width="12" height="6" rx="1.5"/></svg
+      >
+      <p class="site-footer-name">BridgePort</p>
+      <p class="site-footer-tag">
+        Deploy, orchestrate &amp; monitor Docker across all your servers — without Kubernetes.
+      </p>
+    </div>
+    {
+      columns.map((col) => (
+        <nav class="site-footer-col" aria-label={col.title}>
+          <p class="site-footer-title">{col.title}</p>
+          <ul>
+            {col.links.map((link) => (
+              <li>
+                <a href={link.href}>{link.label}</a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      ))
+    }
+  </div>
+  <p class="site-footer-line">Self-hosted · open source · your infrastructure, your data.</p>
+</div>
+
+<style>
+  .site-footer {
+    margin-top: 3rem;
+    padding-top: 2.25rem;
+    border-top: 1px solid var(--sl-color-gray-5);
+  }
+  .site-footer-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr;
+    gap: 2rem;
+  }
+  @media (max-width: 50rem) {
+    .site-footer-grid {
+      grid-template-columns: 1fr 1fr;
+    }
+    .site-footer-brand {
+      grid-column: 1 / -1;
+    }
+  }
+  .site-footer-mark {
+    width: 2rem;
+    height: 2rem;
+    color: #cc0000;
+  }
+  .site-footer-name {
+    font-family: 'IBM Plex Sans', var(--sl-font);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--sl-color-white);
+    margin: 0.5rem 0 0.4rem;
+  }
+  .site-footer-tag {
+    margin: 0;
+    font-size: var(--sl-text-xs);
+    line-height: 1.6;
+    color: var(--sl-color-gray-3);
+    max-width: 26ch;
+  }
+  .site-footer-title {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--sl-color-gray-3);
+    margin: 0 0 0.75rem;
+  }
+  .site-footer-col ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .site-footer-col li {
+    margin-top: 0.45rem;
+  }
+  .site-footer-col a {
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-gray-2);
+    text-decoration: none;
+  }
+  .site-footer-col a:hover {
+    color: var(--sl-color-white);
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+  .site-footer-line {
+    margin: 2.25rem 0 0;
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--sl-color-gray-4);
+  }
+</style>

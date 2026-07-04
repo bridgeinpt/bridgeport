@@ -1,62 +1,969 @@
 ---
 import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
-import { CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+/**
+ * Landing page — BridgePort's public homepage (this site doubles as the product's
+ * only published website, so this page is a full marketing front door, not a docs
+ * splash). Built on the Starlight splash template so the header, theme switcher,
+ * and search stay consistent with the docs; everything below the hero is custom.
+ *
+ * Design language: "engineered harbor" — IBM Plex Sans display type (matches the
+ * BRIDGEPORT wordmark), IBM Plex Mono manifest-style labels, blueprint grid
+ * backdrop, the burgundy crane as the only brand-red element, sky for actions.
+ */
+
+const SITE = 'https://bridgeport.bridgein.com';
+const GITHUB = 'https://github.com/bridgeinpt/bridgeport';
+
+// GitHub star count, fetched at build time (same degrade-gracefully pattern as the
+// roadmap page): a failed fetch just means the button shows no count.
+let stars: string | null = null;
+try {
+  const res = await fetch('https://api.github.com/repos/bridgeinpt/bridgeport', {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      ...(process.env.GH_API_TOKEN ? { Authorization: `Bearer ${process.env.GH_API_TOKEN}` } : {}),
+    },
+  });
+  if (res.ok) {
+    const count = (await res.json()).stargazers_count;
+    if (typeof count === 'number' && count > 0) {
+      stars = count >= 1000 ? `${(count / 1000).toFixed(1).replace(/\.0$/, '')}k` : String(count);
+    }
+  }
+} catch {
+  /* offline build — no star count */
+}
+
+const description =
+  'BridgePort is a lightweight, open-source, self-hosted tool to deploy, orchestrate, and monitor Docker services across all your servers — encrypted secrets, health checks, deployment plans with auto-rollback, and real-time monitoring. Production-grade ops without Kubernetes.';
+
+// Structured data for search engines: the product and the site.
+const jsonLd = JSON.stringify({
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'SoftwareApplication',
+      name: 'BridgePort',
+      description,
+      url: SITE,
+      applicationCategory: 'DeveloperApplication',
+      operatingSystem: 'Linux, Docker',
+      license: 'https://www.apache.org/licenses/LICENSE-2.0',
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+      softwareHelp: { '@type': 'CreativeWork', url: `${SITE}/getting-started/` },
+      sameAs: [GITHUB],
+    },
+    {
+      '@type': 'WebSite',
+      name: 'BridgePort',
+      url: SITE,
+      description,
+    },
+  ],
+});
+
+// The animated "deployment plan" log rendered in the hero terminal.
+const terminalHtml = `
+<div class="lp-term" role="img" aria-label="A BridgePort deployment plan log: pulling an image, deploying three services across two servers, health checks passing, no rollback needed.">
+  <div class="lp-term-bar">
+    <span class="lp-dot"></span><span class="lp-dot"></span><span class="lp-dot"></span>
+    <span class="lp-term-title">bridgeport — deployment plan</span>
+  </div>
+  <div class="lp-term-body" aria-hidden="true">
+    <p class="tl tl-1"><span class="t-dim">plan</span>&nbsp;<span class="t-bright">v2.4.1-rollout</span>&nbsp;<span class="t-dim">· 3 services · 2 servers</span></p>
+    <p class="tl tl-2"><span class="t-arrow">→</span><span class="t-verb">pull</span><span class="t-what">ghcr.io/acme/api:v2.4.1</span><span class="t-fill"></span><span class="t-ok">ok</span></p>
+    <p class="tl tl-3"><span class="t-arrow">→</span><span class="t-verb">deploy</span><span class="t-what">api&nbsp;·&nbsp;web-01, web-02</span><span class="t-fill"></span><span class="t-ok">ok</span></p>
+    <p class="tl tl-4"><span class="t-arrow">→</span><span class="t-verb">health</span><span class="t-what">GET /healthz · 200 in 84 ms</span><span class="t-fill"></span><span class="t-ok">ok</span></p>
+    <p class="tl tl-5"><span class="t-arrow">→</span><span class="t-verb">deploy</span><span class="t-what">worker&nbsp;·&nbsp;jobs-01</span><span class="t-fill"></span><span class="t-ok">ok</span></p>
+    <p class="tl tl-6"><span class="t-check">✓</span><span class="t-done">plan complete — 3/3 healthy · 0 rollbacks</span><span class="t-cursor"></span></p>
+  </div>
+</div>`;
 ---
 
 <StarlightPage
   frontmatter={{
-    title: 'BridgePort',
-    description:
-      'Self-hosted Docker deployment, orchestration, and monitoring — production-grade ops without Kubernetes.',
+    title: 'Self-Hosted Docker Deployment, Orchestration & Monitoring',
+    description,
     template: 'splash',
+    tableOfContents: false,
+    editUrl: false,
+    head: [
+      { tag: 'script', attrs: { type: 'application/ld+json' }, content: jsonLd },
+      { tag: 'meta', attrs: { property: 'og:type', content: 'website' } },
+    ],
     hero: {
-      image: {
-        html: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="256" height="256" fill="#cc0000" role="img" aria-label="BridgePort"><rect x="30.5" y="9" width="3" height="20" rx="1.5"/><rect x="20" y="27" width="24" height="2.6" rx="1.3"/><rect x="20" y="38.4" width="24" height="2.6" rx="1.3"/><rect x="21" y="29.6" width="2" height="8.8"/><rect x="25" y="29.6" width="2" height="8.8"/><rect x="29" y="29.6" width="2" height="8.8"/><rect x="33" y="29.6" width="2" height="8.8"/><rect x="37" y="29.6" width="2" height="8.8"/><rect x="41" y="29.6" width="2" height="8.8"/><polygon points="13,16 19,16 13,52 7,52"/><polygon points="45,16 51,16 57,52 51,52"/><rect x="4" y="52" width="14" height="4" rx="1.5"/><rect x="46" y="52" width="14" height="4" rx="1.5"/><rect x="11" y="9" width="42" height="7" rx="2"/><rect x="26" y="16" width="12" height="6" rx="1.5"/></svg>`,
-      },
+      title: 'Deploy, orchestrate & monitor Docker across all your servers',
       tagline:
-        'Deploy, orchestrate, and monitor Docker services across all your servers. Production-grade ops — without Kubernetes.',
+        '<span class="lp-kicker">Production-grade ops — <em>without Kubernetes</em>.</span> BridgePort is a lightweight, open-source control plane you host yourself: encrypted secrets, health checks, deployment plans with automatic rollback, and real-time monitoring for every server you own.',
+      image: { html: terminalHtml },
       actions: [
         { text: 'Get started', link: '/getting-started/', icon: 'right-arrow', variant: 'primary' },
         {
-          text: 'View on GitHub',
-          link: 'https://github.com/bridgeinpt/bridgeport',
-          icon: 'external',
-          variant: 'minimal',
+          text: stars ? `Star on GitHub · ${stars} ★` : 'View on GitHub',
+          link: GITHUB,
+          icon: 'github',
+          variant: 'secondary',
         },
       ],
     },
   }}
 >
-  <CardGrid stagger>
-    <LinkCard
-      title="Servers & services"
-      href="/guides/services/"
-      description="Add servers over SSH or the Docker socket, discover running containers, and deploy from a central image catalog."
-    />
-    <LinkCard
-      title="Config & secrets"
-      href="/guides/secrets/"
-      description="AES-256-GCM encrypted secrets, reusable config fragments, and templated files synced to your servers."
-    />
-    <LinkCard
-      title="Monitoring & health"
-      href="/guides/monitoring/"
-      description="Server, service, and database metrics plus container, URL, TCP, and TLS health checks with bounce protection."
-    />
-    <LinkCard
-      title="Orchestration"
-      href="/guides/deployment-plans/"
-      description="Multi-service deployment plans with dependency ordering and auto-rollback, plus CI/CD webhooks."
-    />
-    <LinkCard
-      title="Automate it"
-      href="/reference/api/"
-      description="Drive everything from the REST API, the Go SDK, the CLI, or the Terraform provider."
-    />
-    <LinkCard
-      title="Run it in production"
-      href="/operations/upgrades/"
-      description="Backups, upgrades, security hardening, and real-world topologies."
-    />
-  </CardGrid>
+  <div class="lp">
+    <!-- Manifest strip: the operational facts, stamped like a cargo manifest. -->
+    <section class="lp-strip" aria-label="Key facts">
+      <div class="lp-strip-item"><span class="lp-strip-k">Install</span><span class="lp-strip-v">One container, SQLite inside</span></div>
+      <div class="lp-strip-item"><span class="lp-strip-k">Secrets</span><span class="lp-strip-v">AES-256-GCM at rest</span></div>
+      <div class="lp-strip-item"><span class="lp-strip-k">Connect</span><span class="lp-strip-v">SSH or Docker socket</span></div>
+      <div class="lp-strip-item"><span class="lp-strip-k">License</span><span class="lp-strip-v">Apache-2.0, open source</span></div>
+    </section>
+
+    <!-- Capabilities -->
+    <section class="lp-section" aria-labelledby="lp-features-h">
+      <p class="lp-eyebrow">Capabilities</p>
+      <h2 id="lp-features-h" class="lp-h2">Everything between <code>git push</code> and production</h2>
+      <div class="lp-grid">
+        <a class="lp-card lp-card-wide" href="/use-cases/deploy-docker-multiple-servers/">
+          <span class="lp-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><path d="M6 6.5h.01M6 17.5h.01M10 6.5h4M10 17.5h4"/></svg>
+          </span>
+          <h3>Deploy to every server</h3>
+          <p>Define a service once — image, env, health checks — and roll it out to any number of servers over SSH or the Docker socket. Existing containers are discovered and adopted in place.</p>
+          <span class="lp-more">See the workflow</span>
+        </a>
+        <a class="lp-card" href="/use-cases/docker-secrets-management/">
+          <span class="lp-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><path d="M12 14v3"/></svg>
+          </span>
+          <h3>Config &amp; secrets</h3>
+          <p>AES-256-GCM encrypted secrets and templated config files, synced atomically to your servers.</p>
+          <span class="lp-more">Out of .env files</span>
+        </a>
+        <a class="lp-card" href="/use-cases/docker-monitoring/">
+          <span class="lp-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.5-7 5 14 2.5-7h4"/></svg>
+          </span>
+          <h3>Monitoring &amp; health</h3>
+          <p>Server, container, and database metrics plus four kinds of health checks — no Prometheus stack to run.</p>
+          <span class="lp-more">Watch everything</span>
+        </a>
+        <a class="lp-card" href="/use-cases/ci-cd-deployments/">
+          <span class="lp-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8.2 7.1 15.8 11M8.2 16.9 15.8 13"/></svg>
+          </span>
+          <h3>CI/CD &amp; deployment plans</h3>
+          <p>CI pushes an image, a signed webhook triggers a health-gated rollout — with automatic rollback.</p>
+          <span class="lp-more">Ship on git push</span>
+        </a>
+        <a class="lp-card" href="/guides/notifications/">
+          <span class="lp-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M13.7 20a2 2 0 0 1-3.4 0"/></svg>
+          </span>
+          <h3>Notifications &amp; topology</h3>
+          <p>Alerts where your team lives, plus a live diagram of servers, services, databases, and dependencies.</p>
+          <span class="lp-more">See the whole picture</span>
+        </a>
+        <a class="lp-card lp-card-full" href="/reference/api/">
+          <span class="lp-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M12.5 15H17"/></svg>
+          </span>
+          <h3>Automate everything</h3>
+          <p>Every screen in the UI is a stable REST API underneath — with a Go SDK, a CLI, a Terraform provider, and an MCP server for AI agents.</p>
+          <span class="lp-more">Explore the API</span>
+        </a>
+      </div>
+      <p class="lp-compare-links">
+        <a href="/use-cases/">Browse all use cases</a>
+      </p>
+    </section>
+
+    <!-- How it works -->
+    <section class="lp-section" aria-labelledby="lp-steps-h">
+      <p class="lp-eyebrow">Up and running</p>
+      <h2 id="lp-steps-h" class="lp-h2">From zero to deployed in three steps</h2>
+      <ol class="lp-steps">
+        <li class="lp-step">
+          <span class="lp-step-num" aria-hidden="true">01</span>
+          <h3>Run the container</h3>
+          <p>One <code>docker run</code> — SQLite is embedded, so there's no external database to stand up.</p>
+          <div class="lp-snippet">
+            <pre><code>docker run -d --name bridgeport \
+  -p 3000:3000 -v bridgeport-data:/data \
+  -e MASTER_KEY=$(openssl rand -base64 32) \
+  -e JWT_SECRET=$(openssl rand -base64 32) \
+  -e ADMIN_EMAIL=admin@example.com \
+  -e ADMIN_PASSWORD=changeme123 \
+  ghcr.io/bridgeinpt/bridgeport:latest</code></pre>
+            <button class="lp-copy" type="button" data-copied="Copied!" aria-label="Copy install command">Copy</button>
+          </div>
+        </li>
+        <li class="lp-step">
+          <span class="lp-step-num" aria-hidden="true">02</span>
+          <h3>Connect your servers</h3>
+          <p>Point BridgePort at your machines over SSH or the Docker socket. It discovers running containers and brings them under management — nothing to reinstall.</p>
+          <a class="lp-step-link" href="/guides/servers/">Adding servers</a>
+        </li>
+        <li class="lp-step">
+          <span class="lp-step-num" aria-hidden="true">03</span>
+          <h3>Deploy &amp; monitor</h3>
+          <p>Ship services from the image catalog, wire up health checks and alerts, and let deployment plans handle ordering and rollback.</p>
+          <a class="lp-step-link" href="/getting-started/">Getting started guide</a>
+        </li>
+      </ol>
+    </section>
+
+    <!-- Positioning -->
+    <section class="lp-section" aria-labelledby="lp-fit-h">
+      <p class="lp-eyebrow">Where it fits</p>
+      <h2 id="lp-fit-h" class="lp-h2">More than Compose. Less than Kubernetes.</h2>
+      <div class="lp-compare">
+        <div class="lp-tier">
+          <h3>SSH + docker compose</h3>
+          <p>Great for one box. Past a couple of servers you're hand-rolling deploys, scattering <code>.env</code> files, and tailing logs over SSH — no audit trail, no rollback, no overview.</p>
+        </div>
+        <div class="lp-tier lp-tier-hero">
+          <span class="lp-tier-badge">The sweet spot</span>
+          <h3>BridgePort</h3>
+          <p>One self-hosted control plane for the whole fleet: central deploys, encrypted secrets, health checks, and plans that roll back on failure. Still plain Docker underneath — no lock-in, leave anytime.</p>
+        </div>
+        <div class="lp-tier">
+          <h3>Kubernetes</h3>
+          <p>The right call for elastic, cluster-scale platforms with a team to run them. For a fleet of long-lived servers, it's a lot of machinery you don't need.</p>
+        </div>
+      </div>
+      <p class="lp-compare-links">
+        Full comparisons: <a href="/compare/kubernetes/">Kubernetes</a> ·{' '}
+        <a href="/compare/docker-compose/">Docker Compose</a> ·{' '}
+        <a href="/compare/portainer/">Portainer</a> ·{' '}
+        <a href="/compare/coolify/">Coolify</a> ·{' '}
+        <a href="/compare/dokploy/">Dokploy</a> ·{' '}
+        <a href="/compare/caprover/">CapRover</a> — or read the <a href="/faq/">FAQ</a>
+      </p>
+    </section>
+
+    <!-- Final CTA -->
+    <section class="lp-cta" aria-labelledby="lp-cta-h">
+      <svg class="lp-cta-mark" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="currentColor"><rect x="30.5" y="9" width="3" height="20" rx="1.5"/><rect x="20" y="27" width="24" height="2.6" rx="1.3"/><rect x="20" y="38.4" width="24" height="2.6" rx="1.3"/><rect x="21" y="29.6" width="2" height="8.8"/><rect x="25" y="29.6" width="2" height="8.8"/><rect x="29" y="29.6" width="2" height="8.8"/><rect x="33" y="29.6" width="2" height="8.8"/><rect x="37" y="29.6" width="2" height="8.8"/><rect x="41" y="29.6" width="2" height="8.8"/><polygon points="13,16 19,16 13,52 7,52"/><polygon points="45,16 51,16 57,52 51,52"/><rect x="4" y="52" width="14" height="4" rx="1.5"/><rect x="46" y="52" width="14" height="4" rx="1.5"/><rect x="11" y="9" width="42" height="7" rx="2"/><rect x="26" y="16" width="12" height="6" rx="1.5"/></svg>
+      <h2 id="lp-cta-h" class="lp-h2">Run your fleet like a port authority</h2>
+      <p>Install one container, connect your servers, and ship with confidence — your infrastructure, your data, your rules.</p>
+      <div class="lp-cta-actions">
+        <a class="lp-btn lp-btn-primary" href="/getting-started/">Get started<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+        <a class="lp-btn lp-btn-ghost" href="/concepts/">Read the concepts</a>
+      </div>
+      <p class="lp-cta-sub">Self-hosted · single container · Apache-2.0</p>
+    </section>
+  </div>
 </StarlightPage>
+
+<script>
+  // Copy-to-clipboard for the install snippet.
+  for (const btn of document.querySelectorAll<HTMLButtonElement>('.lp-copy')) {
+    btn.addEventListener('click', async () => {
+      const code = btn.closest('.lp-snippet')?.querySelector('code')?.textContent ?? '';
+      try {
+        await navigator.clipboard.writeText(code);
+        const label = btn.textContent;
+        btn.textContent = btn.dataset.copied ?? 'Copied!';
+        btn.classList.add('is-copied');
+        setTimeout(() => {
+          btn.textContent = label;
+          btn.classList.remove('is-copied');
+        }, 1600);
+      } catch {
+        /* clipboard unavailable (http, old browser) — leave the button as-is */
+      }
+    });
+  }
+</script>
+
+<style is:global>
+  /* ============================================================
+     Landing page — scoped to the splash page via [data-has-hero].
+     Dark is the default theme; light overrides follow each block.
+     ============================================================ */
+
+  [data-has-hero] {
+    --lp-border: color-mix(in srgb, var(--sl-color-gray-5) 72%, transparent);
+    --lp-card: color-mix(in srgb, var(--sl-color-black) 55%, var(--sl-color-bg));
+    --lp-grid-line: rgba(148, 163, 184, 0.07);
+    --lp-glow: rgba(2, 132, 199, 0.16);
+    --lp-brand: #e04f4f; /* burgundy lifted for dark-bg legibility */
+    --lp-ok: #4ade80;
+    --lp-term-bg: #0b1220;
+    --lp-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+    --lp-display: 'IBM Plex Sans', var(--sl-font);
+  }
+  :root[data-theme='light'] [data-has-hero],
+  [data-theme='light'] [data-has-hero] {
+    --lp-grid-line: rgba(2, 6, 23, 0.055);
+    --lp-glow: rgba(2, 132, 199, 0.1);
+    --lp-brand: #cc0000;
+    --lp-ok: #15803d;
+    --lp-card: var(--sl-color-black);
+  }
+
+  /* Widen the splash content column — this is a landing page, not an article. */
+  [data-has-hero] {
+    --sl-content-width: 74rem;
+  }
+
+  /* Blueprint-grid atmosphere behind the hero, fading out down the page. */
+  [data-has-hero] .main-frame {
+    position: relative;
+  }
+  [data-has-hero] .main-frame::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 52rem;
+    pointer-events: none;
+    background-image:
+      radial-gradient(52rem 30rem at 72% 4rem, var(--lp-glow), transparent 68%),
+      linear-gradient(to right, var(--lp-grid-line) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--lp-grid-line) 1px, transparent 1px);
+    background-size:
+      100% 100%,
+      42px 42px,
+      42px 42px;
+    mask-image: linear-gradient(to bottom, black 55%, transparent);
+    -webkit-mask-image: linear-gradient(to bottom, black 55%, transparent);
+  }
+
+  /* ---------- Hero ---------- */
+  [data-has-hero] .hero {
+    padding-block: 2.5rem 1.5rem;
+    grid-template-columns: minmax(0, 10fr) minmax(0, 9fr);
+    gap: 3rem;
+  }
+  @media (max-width: 72rem) {
+    [data-has-hero] .hero {
+      grid-template-columns: 1fr;
+      padding-block: 1.5rem 0.5rem;
+    }
+    /* Copy first, terminal after — Starlight's hero markup puts the image first. */
+    [data-has-hero] .hero > .hero-html {
+      order: 2;
+    }
+  }
+  [data-has-hero] .hero > .sl-flex.stack {
+    align-items: flex-start;
+    text-align: left;
+    gap: 1.75rem;
+  }
+  [data-has-hero] .hero .copy {
+    align-items: flex-start;
+    gap: 1.25rem;
+  }
+  [data-has-hero] .hero h1 {
+    font-family: var(--lp-display);
+    font-weight: 650;
+    font-size: clamp(2.1rem, 4.6vw, 3.4rem);
+    line-height: 1.08;
+    letter-spacing: -0.022em;
+    max-width: 21ch;
+    animation: lp-rise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+  /* Manifest eyebrow above the headline (decorative; facts repeat in the strip below). */
+  [data-has-hero] .hero h1::before {
+    content: 'SELF-HOSTED /// OPEN SOURCE /// APACHE-2.0';
+    display: block;
+    font-family: var(--lp-mono);
+    font-size: 0.72rem;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    color: var(--sl-color-accent-high);
+    margin-bottom: 1.1rem;
+  }
+  [data-has-hero] .hero .tagline {
+    font-size: clamp(1rem, 1.4vw, 1.125rem);
+    line-height: 1.65;
+    color: var(--sl-color-gray-2);
+    max-width: 52ch;
+    animation: lp-rise 0.7s 0.08s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+  [data-has-hero] .hero .tagline .lp-kicker {
+    display: block;
+    font-family: var(--lp-display);
+    font-weight: 600;
+    color: var(--sl-color-white);
+    margin-bottom: 0.45rem;
+  }
+  [data-has-hero] .hero .tagline .lp-kicker em {
+    font-style: normal;
+    color: var(--lp-brand);
+  }
+  [data-has-hero] .hero .actions {
+    animation: lp-rise 0.7s 0.16s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+
+  /* ---------- Hero terminal ---------- */
+  [data-has-hero] .hero-html {
+    align-items: center;
+    justify-content: center;
+    animation: lp-rise 0.8s 0.2s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+  .lp-term {
+    width: 100%;
+    max-width: 34rem;
+    border: 1px solid var(--lp-border);
+    border-radius: 0.9rem;
+    background: var(--lp-term-bg);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.04) inset,
+      0 24px 60px -24px rgba(2, 8, 23, 0.7);
+    overflow: hidden;
+  }
+  :root[data-theme='light'] .lp-term {
+    box-shadow: 0 24px 60px -28px rgba(2, 8, 23, 0.35);
+  }
+  .lp-term-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.65rem 0.9rem;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  }
+  .lp-dot {
+    width: 0.62rem;
+    height: 0.62rem;
+    border-radius: 50%;
+    background: rgba(148, 163, 184, 0.28);
+  }
+  .lp-term-bar .lp-dot:first-child {
+    background: #cc0000;
+  }
+  .lp-term-title {
+    margin-left: 0.4rem;
+    font-family: var(--lp-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    color: #64748b;
+  }
+  .lp-term-body {
+    padding: 1rem 1.1rem 1.15rem;
+    font-family: var(--lp-mono);
+    font-size: 0.78rem;
+    line-height: 1.5;
+  }
+  .lp-term-body .tl {
+    display: flex;
+    align-items: baseline;
+    margin: 0 0 0.45rem;
+    color: #94a3b8;
+    white-space: nowrap;
+    overflow: hidden;
+    animation: lp-line 0.45s ease-out both;
+  }
+  .tl-1 { animation-delay: 0.5s; }
+  .tl-2 { animation-delay: 1s; }
+  .tl-3 { animation-delay: 1.5s; }
+  .tl-4 { animation-delay: 2s; }
+  .tl-5 { animation-delay: 2.5s; }
+  .tl-6 { animation-delay: 3.1s; }
+  /* Let the middle segments shrink and ellipsize on narrow screens instead of
+     clipping the trailing "ok" status. */
+  .lp-term-body .tl > span {
+    min-width: 0;
+  }
+  .lp-term-body :is(.t-what, .t-done, .t-dim) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .lp-term-body .t-dim { color: #64748b; }
+  .lp-term-body .t-bright { color: #e2e8f0; font-weight: 500; }
+  .lp-term-body .t-arrow { color: #38bdf8; margin-right: 0.6em; }
+  .lp-term-body .t-verb { color: #e2e8f0; width: 4.5em; flex-shrink: 0; }
+  .lp-term-body .t-what { color: #94a3b8; }
+  .lp-term-body .t-fill {
+    flex: 1;
+    min-width: 1.5em;
+    margin: 0 0.6em;
+    border-bottom: 1px dotted rgba(100, 116, 139, 0.45);
+    transform: translateY(-0.28em);
+  }
+  .lp-term-body .t-ok { color: #4ade80; }
+  .lp-term-body .t-check { color: #4ade80; margin-right: 0.6em; }
+  .lp-term-body .t-done { color: #e2e8f0; }
+  .tl-6 { margin-top: 0.65rem; }
+  .t-cursor {
+    display: inline-block;
+    width: 0.55em;
+    height: 1.05em;
+    margin-left: 0.35em;
+    background: #38bdf8;
+    transform: translateY(0.18em);
+    animation: lp-blink 1.1s steps(1) 3.6s infinite;
+    opacity: 0;
+  }
+
+  @keyframes lp-rise {
+    from { opacity: 0; transform: translateY(14px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes lp-line {
+    from { opacity: 0; transform: translateX(6px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+  @keyframes lp-blink {
+    0%, 49% { opacity: 1; }
+    50%, 100% { opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    [data-has-hero] .hero h1,
+    [data-has-hero] .hero .tagline,
+    [data-has-hero] .hero .actions,
+    [data-has-hero] .hero-html,
+    .lp-term-body .tl {
+      animation: none;
+    }
+    .t-cursor { animation: none; opacity: 1; }
+  }
+
+  /* ============ Sections below the hero ============ */
+  .lp {
+    display: flex;
+    flex-direction: column;
+    gap: 5.5rem;
+    padding-block: 3.5rem 2rem;
+  }
+  .lp-section > * + * {
+    margin-top: 0;
+  }
+  .lp-eyebrow {
+    font-family: var(--lp-mono);
+    font-size: 0.72rem;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--sl-color-accent-high);
+    margin: 0 0 0.6rem;
+  }
+  .lp-eyebrow::before {
+    content: '//';
+    color: var(--lp-brand);
+    margin-right: 0.6em;
+  }
+  .lp .lp-h2 {
+    font-family: var(--lp-display);
+    font-weight: 650;
+    font-size: clamp(1.6rem, 3vw, 2.2rem);
+    line-height: 1.15;
+    letter-spacing: -0.018em;
+    color: var(--sl-color-white);
+    margin: 0 0 2rem;
+    max-width: 30ch;
+  }
+  .lp .lp-h2 code {
+    font-family: var(--lp-mono);
+    font-size: 0.85em;
+    background: color-mix(in srgb, var(--sl-color-accent-low) 55%, transparent);
+    border-radius: 0.35em;
+    padding: 0.08em 0.3em;
+  }
+
+  /* ---------- Manifest strip ---------- */
+  .lp-strip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    border-block: 1px solid var(--lp-border);
+  }
+  .lp-strip-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    padding: 1.1rem 1.25rem;
+    border-inline-start: 1px solid var(--lp-border);
+  }
+  .lp-strip-item:first-child {
+    border-inline-start: none;
+  }
+  .lp-strip-k {
+    font-family: var(--lp-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--sl-color-gray-3);
+  }
+  .lp-strip-v {
+    font-family: var(--lp-display);
+    font-weight: 600;
+    font-size: 0.92rem;
+    color: var(--sl-color-white);
+  }
+  @media (max-width: 50rem) {
+    .lp-strip { grid-template-columns: 1fr 1fr; }
+    .lp-strip-item:nth-child(3) { border-inline-start: none; }
+    .lp-strip-item:nth-child(n + 3) { border-block-start: 1px solid var(--lp-border); }
+  }
+
+  /* ---------- Feature bento ---------- */
+  .lp-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+  }
+  .lp-card {
+    grid-column: span 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    padding: 1.5rem 1.5rem 1.35rem;
+    border: 1px solid var(--lp-border);
+    border-radius: 1rem;
+    background: var(--lp-card);
+    text-decoration: none;
+    color: inherit;
+    transition:
+      border-color 0.2s ease,
+      transform 0.2s ease,
+      box-shadow 0.2s ease;
+  }
+  .lp-card-wide {
+    grid-column: span 2;
+  }
+  .lp-card-full {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-rows: auto auto auto;
+    column-gap: 1.25rem;
+    align-items: start;
+  }
+  .lp-card-full .lp-icon {
+    grid-row: 1 / -1;
+    margin-top: 0.2rem;
+  }
+  .lp-card-full p {
+    max-width: 68ch;
+  }
+  .lp-card:hover {
+    border-color: color-mix(in srgb, var(--sl-color-accent) 55%, var(--lp-border));
+    transform: translateY(-3px);
+    box-shadow: 0 18px 40px -24px rgba(2, 8, 23, 0.55);
+  }
+  .lp-card h3 {
+    font-family: var(--lp-display);
+    font-weight: 600;
+    font-size: 1.08rem;
+    letter-spacing: -0.01em;
+    color: var(--sl-color-white);
+    margin: 0;
+  }
+  .lp-card p {
+    margin: 0;
+    font-size: 0.92rem;
+    line-height: 1.6;
+    color: var(--sl-color-gray-2);
+  }
+  .lp-icon {
+    display: inline-flex;
+    width: 2.4rem;
+    height: 2.4rem;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.65rem;
+    border: 1px solid var(--lp-border);
+    background: color-mix(in srgb, var(--sl-color-accent-low) 35%, transparent);
+    color: var(--sl-color-accent-high);
+    margin-bottom: 0.35rem;
+  }
+  .lp-icon svg {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+  .lp-more {
+    margin-top: auto;
+    padding-top: 0.5rem;
+    font-family: var(--lp-mono);
+    font-size: 0.74rem;
+    letter-spacing: 0.06em;
+    color: var(--sl-color-accent-high);
+  }
+  .lp-more::after {
+    content: ' →';
+    transition: transform 0.2s ease;
+    display: inline-block;
+  }
+  .lp-card:hover .lp-more::after {
+    transform: translateX(3px);
+  }
+  @media (max-width: 60rem) {
+    .lp-grid { grid-template-columns: 1fr 1fr; }
+    .lp-card-wide { grid-column: span 2; }
+  }
+  @media (max-width: 40rem) {
+    .lp-grid { grid-template-columns: 1fr; }
+    .lp-card-wide { grid-column: span 1; }
+    .lp-card-full {
+      display: flex;
+      flex-direction: column;
+    }
+  }
+
+  /* ---------- Steps ---------- */
+  .lp-steps {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2rem;
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    counter-reset: step;
+  }
+  .lp-step {
+    position: relative;
+    padding-top: 1.1rem;
+    border-top: 1px solid var(--lp-border);
+  }
+  .lp-step-num {
+    position: absolute;
+    top: -0.72rem;
+    left: 0;
+    font-family: var(--lp-mono);
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    color: var(--lp-brand);
+    background: var(--sl-color-bg);
+    padding-right: 0.8rem;
+  }
+  .lp-step h3 {
+    font-family: var(--lp-display);
+    font-weight: 600;
+    font-size: 1.05rem;
+    color: var(--sl-color-white);
+    margin: 0 0 0.5rem;
+  }
+  .lp-step p {
+    margin: 0;
+    font-size: 0.92rem;
+    line-height: 1.6;
+    color: var(--sl-color-gray-2);
+  }
+  .lp-step p code {
+    font-family: var(--lp-mono);
+    font-size: 0.85em;
+  }
+  .lp-step-link {
+    display: inline-block;
+    margin-top: 0.8rem;
+    font-family: var(--lp-mono);
+    font-size: 0.78rem;
+    color: var(--sl-color-accent-high);
+    text-decoration: none;
+  }
+  .lp-step-link::after {
+    content: ' →';
+  }
+  .lp-step-link:hover {
+    text-decoration: underline;
+  }
+  @media (max-width: 60rem) {
+    .lp-steps { grid-template-columns: 1fr; gap: 2.5rem; }
+  }
+
+  .lp-snippet {
+    position: relative;
+    margin-top: 1rem;
+    border: 1px solid var(--lp-border);
+    border-radius: 0.75rem;
+    background: var(--lp-term-bg);
+    overflow: hidden;
+  }
+  .lp-snippet pre {
+    margin: 0;
+    padding: 1rem 4.5rem 1rem 1.1rem; /* right padding clears the Copy button */
+    overflow-x: auto;
+    font-family: var(--lp-mono);
+    font-size: 0.74rem;
+    line-height: 1.55;
+    color: #cbd5e1;
+    background: transparent;
+  }
+  .lp-copy {
+    position: absolute;
+    top: 0.55rem;
+    right: 0.55rem;
+    font-family: var(--lp-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    padding: 0.3rem 0.6rem;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 0.45rem;
+    background: rgba(15, 23, 42, 0.85);
+    color: #94a3b8;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+  .lp-copy:hover {
+    color: #e2e8f0;
+    border-color: rgba(148, 163, 184, 0.5);
+  }
+  .lp-copy.is-copied {
+    color: #4ade80;
+    border-color: rgba(74, 222, 128, 0.4);
+  }
+
+  /* ---------- Positioning tiers ---------- */
+  .lp-compare {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    align-items: stretch;
+  }
+  .lp-tier {
+    padding: 1.5rem;
+    border: 1px dashed var(--lp-border);
+    border-radius: 1rem;
+  }
+  .lp-tier h3 {
+    font-family: var(--lp-mono);
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--sl-color-gray-2);
+    margin: 0 0 0.6rem;
+  }
+  .lp-tier p {
+    margin: 0;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: var(--sl-color-gray-3);
+  }
+  .lp-tier p code {
+    font-family: var(--lp-mono);
+    font-size: 0.85em;
+  }
+  .lp-tier-hero {
+    border-style: solid;
+    border-color: color-mix(in srgb, var(--sl-color-accent) 55%, var(--lp-border));
+    background:
+      radial-gradient(20rem 12rem at 50% -4rem, var(--lp-glow), transparent 70%),
+      var(--lp-card);
+  }
+  .lp-tier-hero h3 {
+    color: var(--sl-color-white);
+    font-family: var(--lp-display);
+    font-size: 1.05rem;
+  }
+  .lp-tier-hero p {
+    color: var(--sl-color-gray-2);
+  }
+  .lp-tier-badge {
+    display: inline-block;
+    font-family: var(--lp-mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--sl-color-accent-high);
+    border: 1px solid color-mix(in srgb, var(--sl-color-accent) 45%, transparent);
+    border-radius: 999px;
+    padding: 0.22rem 0.65rem;
+    margin-bottom: 0.9rem;
+  }
+  @media (max-width: 60rem) {
+    .lp-compare { grid-template-columns: 1fr; }
+    .lp-tier-hero { order: -1; }
+  }
+  .lp-compare-links {
+    margin: 1.4rem 0 0;
+    font-family: var(--lp-mono);
+    font-size: 0.78rem;
+    color: var(--sl-color-gray-3);
+  }
+  .lp-compare-links a {
+    color: var(--sl-color-accent-high);
+    text-decoration: none;
+  }
+  .lp-compare-links a:hover {
+    text-decoration: underline;
+  }
+
+  /* ---------- Final CTA ---------- */
+  .lp-cta {
+    position: relative;
+    text-align: center;
+    padding: 4rem 1.5rem 4.25rem;
+    border: 1px solid var(--lp-border);
+    border-radius: 1.25rem;
+    background:
+      radial-gradient(36rem 18rem at 50% -6rem, var(--lp-glow), transparent 70%),
+      var(--lp-card);
+    overflow: hidden;
+  }
+  .lp-cta-mark {
+    position: absolute;
+    right: -1.5rem;
+    bottom: -2.25rem;
+    width: 13rem;
+    height: 13rem;
+    color: var(--lp-brand);
+    opacity: 0.06;
+    pointer-events: none;
+  }
+  @media (max-width: 50rem) {
+    .lp-cta-mark {
+      width: 8rem;
+      height: 8rem;
+      right: -1.25rem;
+      bottom: -1.5rem;
+      opacity: 0.05;
+    }
+  }
+  .lp-cta .lp-h2 {
+    margin: 0 auto 0.9rem;
+  }
+  .lp-cta p {
+    max-width: 46ch;
+    margin: 0 auto;
+    color: var(--sl-color-gray-2);
+    line-height: 1.65;
+  }
+  .lp-cta-actions {
+    display: flex;
+    justify-content: center;
+    gap: 0.9rem;
+    flex-wrap: wrap;
+    margin-top: 1.9rem;
+  }
+  .lp-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--lp-display);
+    font-weight: 600;
+    font-size: 0.95rem;
+    padding: 0.7rem 1.35rem;
+    border-radius: 999px;
+    text-decoration: none;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  }
+  .lp-btn svg {
+    width: 1rem;
+    height: 1rem;
+  }
+  .lp-btn-primary {
+    background: var(--sl-color-accent);
+    color: #fff;
+    box-shadow: 0 10px 24px -12px color-mix(in srgb, var(--sl-color-accent) 70%, transparent);
+  }
+  .lp-btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 14px 28px -12px color-mix(in srgb, var(--sl-color-accent) 80%, transparent);
+  }
+  .lp-btn-ghost {
+    border: 1px solid var(--lp-border);
+    color: var(--sl-color-white);
+  }
+  .lp-btn-ghost:hover {
+    background: color-mix(in srgb, var(--sl-color-gray-6) 60%, transparent);
+  }
+  .lp-cta-sub {
+    margin-top: 1.4rem !important;
+    font-family: var(--lp-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--sl-color-gray-3);
+  }
+</style>

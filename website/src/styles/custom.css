@@ -1,8 +1,19 @@
-/* Inter — matches the BridgePort app UI for brand cohesion. */
+/* ============================================================
+   BridgePort site theme
+   - Inter body (matches the app UI)
+   - IBM Plex Sans for headings + the wordmark (docs/BRANDING.md)
+   - IBM Plex Mono for code and technical labels
+   ============================================================ */
 @import '@fontsource-variable/inter';
+@import '@fontsource/ibm-plex-sans/600.css';
+@import '@fontsource/ibm-plex-sans/700.css';
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
 
 :root {
   --sl-font: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --sl-font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  --bp-display: 'IBM Plex Sans', var(--sl-font);
 }
 
 /* Accent = the app's interactive "primary" sky (#0284c7), used for links and the active
@@ -20,12 +31,20 @@
   --sl-color-accent-high: #075985; /* sky-800 — readable accent text on light */
 }
 
+/* ---------- Header chrome ---------- */
+
 /* Keep the top-bar chrome neutral. Starlight tints the site title and social icons with
    the accent color (--sl-color-text-accent), which makes them look "selected". The accent
    belongs on links and the active nav item, not on always-present chrome — so force these
    to the regular high-contrast / muted text colors (theme-aware). */
 .site-title {
   color: var(--sl-color-white);
+  /* Match the product wordmark: IBM Plex Sans, semibold, uppercase, tracked. */
+  font-family: var(--bp-display);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: var(--sl-text-lg);
 }
 
 .social-icons a {
@@ -34,4 +53,141 @@
 
 .social-icons a:hover {
   color: var(--sl-color-white);
+}
+
+/* Keep the header fully opaque. (A translucent glass-blur variant let scrolled
+   content ghost through the bar wherever backdrop-filter doesn't render.) */
+.header {
+  background-color: var(--sl-color-bg-nav);
+}
+
+/* ---------- Typography ---------- */
+
+/* Headings in the display face, slightly tightened — ties every page to the wordmark. */
+.sl-markdown-content :is(h1, h2, h3, h4, h5),
+.content-panel h1,
+main h1 {
+  font-family: var(--bp-display);
+  letter-spacing: -0.015em;
+}
+
+/* Give running text a touch more air than Starlight's default. */
+.sl-markdown-content {
+  line-height: 1.72;
+}
+
+/* ---------- Sidebar ---------- */
+
+/* Softer, pill-shaped nav items with a clear hover and current-page state. */
+.sidebar-content a {
+  border-radius: 0.45rem;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.sidebar-content a:hover {
+  background-color: color-mix(in srgb, var(--sl-color-gray-6) 70%, transparent);
+  color: var(--sl-color-white);
+}
+
+.sidebar-content a[aria-current='page'],
+.sidebar-content a[aria-current='page']:hover {
+  background-color: color-mix(in srgb, var(--sl-color-accent-low) 65%, transparent);
+  color: var(--sl-color-accent-high);
+  font-weight: 600;
+}
+
+.sidebar-content summary {
+  border-radius: 0.45rem;
+}
+
+/* Category labels: small-caps manifest style. */
+.sidebar-content .top-level > li > details > summary .group-label > span,
+.sidebar-content .top-level > li > a > span {
+  font-family: var(--bp-display);
+}
+
+/* ---------- Content elements ---------- */
+
+/* Readable link styling in prose: underline sits lower, brightens on hover. */
+.sl-markdown-content a:not(:where(.not-content *)) {
+  text-underline-offset: 0.2em;
+  text-decoration-thickness: 1px;
+  transition: color 0.12s ease;
+}
+
+/* Rounded code blocks with a hairline border (Expressive Code frames). */
+.expressive-code .frame {
+  border-radius: 0.6rem;
+  box-shadow: 0 8px 24px -16px rgba(2, 8, 23, 0.5);
+}
+
+/* Inline code chips. */
+.sl-markdown-content code:not(:where(.expressive-code *, pre *)) {
+  border-radius: 0.35em;
+  background: color-mix(in srgb, var(--sl-color-gray-6) 80%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sl-color-gray-5) 55%, transparent);
+  padding: 0.1em 0.35em;
+  font-size: 0.92em;
+}
+
+/* Tables: hairline borders, tinted header row, row hover. */
+.sl-markdown-content table {
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.6rem;
+  overflow: hidden;
+  display: inline-block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.sl-markdown-content th {
+  background: color-mix(in srgb, var(--sl-color-gray-6) 75%, transparent);
+  font-family: var(--bp-display);
+  font-weight: 600;
+  border-bottom: 1px solid var(--sl-color-gray-5);
+}
+
+.sl-markdown-content :is(th, td) {
+  border: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--sl-color-gray-5) 55%, transparent);
+}
+
+.sl-markdown-content tr:last-child :is(th, td) {
+  border-bottom: none;
+}
+
+.sl-markdown-content tbody tr:hover {
+  background: color-mix(in srgb, var(--sl-color-gray-6) 45%, transparent);
+}
+
+/* Asides: rounder, with a slightly stronger accent spine. */
+.sl-markdown-content .starlight-aside {
+  border-radius: 0.6rem;
+  border-inline-start-width: 3px;
+}
+
+/* Link cards (used across docs index pages): lift on hover. */
+.sl-link-card {
+  border-radius: 0.85rem;
+  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.sl-link-card:hover {
+  border-color: color-mix(in srgb, var(--sl-color-accent) 55%, var(--sl-color-gray-5));
+  transform: translateY(-2px);
+  box-shadow: 0 14px 32px -20px rgba(2, 8, 23, 0.55);
+}
+
+/* Right-rail "on this page": clearer current-section marker. */
+starlight-toc a[aria-current='true'] {
+  font-weight: 600;
+}
+
+/* Smooth in-page anchor scrolling (heading links, TOC). */
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
 }

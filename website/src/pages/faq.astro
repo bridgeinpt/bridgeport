@@ -1,0 +1,241 @@
+---
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+
+/**
+ * /faq/ — the questions people search before adopting a self-hosted deployment
+ * tool, answered from the docs. Emits FAQPage JSON-LD for rich results; every
+ * answer links onward into the relevant guide.
+ */
+
+const SITE = 'https://bridgeport.bridgein.com';
+
+interface Faq {
+  q: string;
+  /** Plain-text answer used for JSON-LD. */
+  a: string;
+  /** Optional deep link shown under the answer. */
+  link?: { href: string; text: string };
+}
+
+interface FaqGroup {
+  title: string;
+  id: string;
+  items: Faq[];
+}
+
+const groups: FaqGroup[] = [
+  {
+    title: 'The basics',
+    id: 'basics',
+    items: [
+      {
+        q: 'What is BridgePort?',
+        a: 'BridgePort is a lightweight, self-hosted, open-source tool to deploy, orchestrate, and monitor Docker services across all your servers. It runs as a single container and manages your fleet over SSH or the Docker socket — production-grade operations without running Kubernetes.',
+        link: { href: '/concepts/', text: 'Core concepts' },
+      },
+      {
+        q: 'Is BridgePort free and open source?',
+        a: 'Yes. BridgePort is licensed under Apache-2.0 with a single edition — there is no paid tier, and features like RBAC, audit logging, monitoring, and the Terraform provider are all included.',
+      },
+      {
+        q: 'Do I need Kubernetes to use BridgePort?',
+        a: 'No — not needing Kubernetes is the point. BridgePort manages plain Docker servers directly. If you later need cluster-level autoscaling and scheduling, that is when Kubernetes becomes the right tool.',
+        link: { href: '/compare/kubernetes/', text: 'BridgePort vs Kubernetes' },
+      },
+      {
+        q: 'What do I need to run it?',
+        a: 'Any host that runs Docker. BridgePort ships as one container with an embedded SQLite database, so there is no external database or message queue to operate.',
+        link: { href: '/installation/', text: 'Installation guide' },
+      },
+    ],
+  },
+  {
+    title: 'Managing servers & services',
+    id: 'servers',
+    items: [
+      {
+        q: 'How does BridgePort connect to my servers?',
+        a: 'Over SSH (keys are stored encrypted per environment) or directly through the Docker socket. An optional lightweight Go agent can be deployed per server for richer metrics collection, but it is not required.',
+        link: { href: '/guides/servers/', text: 'Adding servers' },
+      },
+      {
+        q: 'Can BridgePort manage containers that are already running?',
+        a: 'Yes. Container discovery scans a server and imports running Docker containers as services, so you can adopt existing infrastructure without stopping or rebuilding anything.',
+        link: { href: '/guides/services/', text: 'Services guide' },
+      },
+      {
+        q: 'Does BridgePort work with Docker Compose?',
+        a: 'Yes. A service can carry a Docker Compose template; BridgePort renders it per deployment, syncs it to each server, and runs docker compose up as part of the deploy.',
+        link: { href: '/compare/docker-compose/', text: 'BridgePort vs Docker Compose' },
+      },
+      {
+        q: 'What happens if a deployment fails?',
+        a: 'Deployment plans roll out services in dependency order with health gates between steps. If a step fails its health check, the plan stops and automatically rolls back to the previous version.',
+        link: { href: '/guides/deployment-plans/', text: 'Deployment plans' },
+      },
+    ],
+  },
+  {
+    title: 'Security & data',
+    id: 'security',
+    items: [
+      {
+        q: 'Where is my data stored?',
+        a: 'On your own infrastructure. BridgePort is fully self-hosted: its SQLite database lives in a volume you control, and nothing about your servers or deployments is sent to a third party.',
+      },
+      {
+        q: 'How are secrets protected?',
+        a: 'Secrets are encrypted at rest with AES-256-GCM using a master key you provide, and revealing decrypted values is restricted to admins. Usage tracking shows exactly which config files reference each secret.',
+        link: { href: '/guides/secrets/', text: 'Secrets & variables' },
+      },
+      {
+        q: 'Does BridgePort support teams and access control?',
+        a: 'Yes — users with roles, per-environment scoping, service accounts for automation with scoped API tokens, and an audit log of sensitive operations.',
+        link: { href: '/guides/users/', text: 'Users & roles' },
+      },
+    ],
+  },
+  {
+    title: 'Automation & operations',
+    id: 'automation',
+    items: [
+      {
+        q: 'Can I automate BridgePort from CI/CD?',
+        a: 'Yes. Webhooks trigger deployments when CI pushes a new image, and everything in the UI is available through the REST API, the CLI, the Go SDK, the Terraform provider, and an MCP server for AI agents.',
+        link: { href: '/guides/webhooks/', text: 'Webhooks guide' },
+      },
+      {
+        q: 'How do upgrades work?',
+        a: 'Pull the new image and restart the container. Database migrations are detected and applied automatically on startup — no manual migration steps.',
+        link: { href: '/operations/upgrades/', text: 'Upgrade guide' },
+      },
+      {
+        q: 'How does BridgePort compare to Portainer or Coolify?',
+        a: 'Portainer is a general-purpose GUI for container platforms including Swarm and Kubernetes; Coolify is a self-hosted PaaS built around git-push deploys. BridgePort is a deployment-and-operations control plane for image-based services on Docker fleets. Each comparison page covers when the other tool is the better fit.',
+        link: { href: '/compare/', text: 'All comparisons' },
+      },
+    ],
+  },
+];
+
+const description =
+  'Frequently asked questions about BridgePort — the self-hosted, open-source tool for deploying, orchestrating, and monitoring Docker services across your servers.';
+
+const jsonLd = JSON.stringify({
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  url: `${SITE}/faq/`,
+  mainEntity: groups.flatMap((g) =>
+    g.items.map((f) => ({
+      '@type': 'Question',
+      name: f.q,
+      acceptedAnswer: { '@type': 'Answer', text: f.a },
+    })),
+  ),
+});
+---
+
+<StarlightPage
+  frontmatter={{
+    title: 'Frequently Asked Questions',
+    description,
+    template: 'splash',
+    tableOfContents: false,
+    editUrl: false,
+    head: [{ tag: 'script', attrs: { type: 'application/ld+json' }, content: jsonLd }],
+  }}
+>
+  <div class="faq">
+    <p class="faq-intro">
+      Quick answers about what BridgePort is, how it connects to your servers, and how it keeps
+      your deployments and secrets safe. For anything deeper, every answer links into the docs.
+    </p>
+    {
+      groups.map((group) => (
+        <section class="faq-group" aria-labelledby={`faq-${group.id}`}>
+          <h2 id={`faq-${group.id}`}>{group.title}</h2>
+          {group.items.map((f) => (
+            <details class="faq-item">
+              <summary>{f.q}</summary>
+              <p>{f.a}</p>
+              {f.link && (
+                <p class="faq-link">
+                  <a href={f.link.href}>{f.link.text} →</a>
+                </p>
+              )}
+            </details>
+          ))}
+        </section>
+      ))
+    }
+    <aside class="faq-cta">
+      <p>
+        Didn't find your answer? Ask on{' '}
+        <a href="https://github.com/bridgeinpt/bridgeport/issues">GitHub</a> — or just{' '}
+        <a href="/getting-started/">install it</a> and see; it takes about a minute.
+      </p>
+    </aside>
+  </div>
+</StarlightPage>
+
+<style is:global>
+  .faq {
+    max-width: 46rem;
+    margin-inline: auto;
+  }
+  .faq-intro {
+    font-size: 1.02rem;
+    line-height: 1.72;
+    color: var(--sl-color-gray-2);
+  }
+  .faq-group h2 {
+    font-family: 'IBM Plex Sans', var(--sl-font);
+    font-weight: 650;
+    letter-spacing: -0.015em;
+    font-size: 1.3rem;
+    color: var(--sl-color-white);
+    margin: 2.5rem 0 1rem;
+  }
+  .faq-item {
+    border: 1px solid color-mix(in srgb, var(--sl-color-gray-5) 72%, transparent);
+    border-radius: 0.65rem;
+    padding: 0.85rem 1.1rem;
+    margin-top: 0.6rem;
+  }
+  .faq-item summary {
+    cursor: pointer;
+    font-family: 'IBM Plex Sans', var(--sl-font);
+    font-weight: 600;
+    font-size: 0.97rem;
+    color: var(--sl-color-white);
+  }
+  .faq-item p {
+    margin: 0.7rem 0 0.15rem;
+    font-size: 0.92rem;
+    line-height: 1.65;
+    color: var(--sl-color-gray-2);
+  }
+  .faq-item .faq-link {
+    margin-top: 0.5rem;
+  }
+  .faq-item .faq-link a {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 0.78rem;
+    color: var(--sl-color-accent-high);
+    text-decoration: none;
+  }
+  .faq-item .faq-link a:hover {
+    text-decoration: underline;
+  }
+  .faq-cta {
+    margin-top: 2.75rem;
+    padding: 1.2rem 1.4rem;
+    border: 1px dashed color-mix(in srgb, var(--sl-color-gray-5) 72%, transparent);
+    border-radius: 0.85rem;
+    font-size: 0.92rem;
+    color: var(--sl-color-gray-2);
+  }
+  .faq-cta p {
+    margin: 0;
+  }
+</style>

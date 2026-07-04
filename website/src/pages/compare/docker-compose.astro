@@ -1,0 +1,92 @@
+---
+import ComparePage from '../../components/ComparePage.astro';
+---
+
+<ComparePage
+  competitor="Docker Compose"
+  title="BridgePort vs Docker Compose"
+  description="Docker Compose is perfect for one host. BridgePort adds the fleet layer: central deploys, encrypted secrets, health checks, monitoring, and rollback across all your servers."
+  framing="Fleet control plane vs single-host tooling"
+  intro={[
+    'This one is less a rivalry than a stack: Docker Compose is a great way to define what runs on a host, and BridgePort keeps using it — services can carry Compose templates that BridgePort renders and ships to each server. The comparison that matters is operating one host by hand versus operating a fleet through a control plane.',
+    'Compose alone scales beautifully until the second server. Then deploys become SSH sessions, secrets become scattered .env files, and "is everything healthy?" becomes a terminal habit. BridgePort centralizes exactly those parts and leaves Docker underneath untouched.',
+  ]}
+  rows={[
+    {
+      label: 'Scope',
+      bp: { mark: 'yes', text: 'Every server in every environment, from one place' },
+      other: { mark: 'partial', text: 'One host at a time, driven from that host (or docker contexts by hand)' },
+    },
+    {
+      label: 'Compose files',
+      bp: { mark: 'yes', text: 'Supported — services carry Compose templates, rendered and synced per server' },
+      other: { mark: 'yes', text: 'The native format' },
+    },
+    {
+      label: 'Deploys',
+      bp: { mark: 'yes', text: 'Central, repeatable, audited; multi-service plans with ordering and auto-rollback' },
+      other: { mark: 'partial', text: 'docker compose up per host — ordering and rollback are on you' },
+    },
+    {
+      label: 'Secrets',
+      bp: { mark: 'yes', text: 'AES-256-GCM encrypted at rest, referenced from config, usage-tracked' },
+      other: { mark: 'no', text: 'Plaintext .env files on each host' },
+    },
+    {
+      label: 'Config management',
+      bp: { mark: 'yes', text: 'Templated config files with reusable fragments, synced to servers' },
+      other: { mark: 'no', text: 'Copy files around yourself' },
+    },
+    {
+      label: 'Monitoring & health',
+      bp: { mark: 'yes', text: 'Metrics, container/URL/TCP/TLS health checks, notifications' },
+      other: { mark: 'partial', text: 'healthcheck: exists per container; no metrics, alerting, or history' },
+    },
+    {
+      label: 'Web UI & visibility',
+      bp: { mark: 'yes', text: 'Dashboard, topology diagram, logs, audit trail' },
+      other: { mark: 'no', text: 'CLI only' },
+    },
+    {
+      label: 'Team access',
+      bp: { mark: 'yes', text: 'Users, roles, service accounts, scoped API tokens, audit log' },
+      other: { mark: 'no', text: 'Everyone with SSH is root-equivalent on that host' },
+    },
+    {
+      label: 'Automation',
+      bp: { mark: 'yes', text: 'REST API, CLI, Go SDK, Terraform provider, CI/CD webhooks' },
+      other: { mark: 'partial', text: 'Scriptable, but you build the automation yourself' },
+    },
+    {
+      label: 'Footprint',
+      bp: { mark: 'yes', text: 'One extra container total (not per host)' },
+      other: { mark: 'yes', text: 'None beyond Docker itself' },
+    },
+  ]}
+  chooseBp={[
+    'You run services on two or more servers (or will soon).',
+    'More than one person deploys, and you want an audit trail instead of shared SSH keys.',
+    'Secrets currently live in .env files and that quietly bothers you.',
+    'You want health checks, metrics, and alerts without assembling a monitoring stack.',
+  ]}
+  chooseOther={[
+    'Everything you run fits on one server and you are the only operator.',
+    'It is local development or a homelab where a UI and audit trail add nothing.',
+    'You want absolutely minimal moving parts and SSH-and-edit is a feature, not a bug.',
+  ]}
+  reviewed="July 2026"
+  faqs={[
+    {
+      q: 'Does BridgePort replace Docker Compose?',
+      a: 'No — it builds on it. Services in BridgePort can carry a Docker Compose template; BridgePort renders it per deployment, ships it to each server, and runs docker compose up for you, adding ordering, health gates, and rollback on top.',
+    },
+    {
+      q: 'Can BridgePort import what my compose files already run?',
+      a: 'Yes. Container discovery imports the containers already running on a server as services, so you can adopt a compose-managed host without stopping anything.',
+    },
+    {
+      q: 'What does BridgePort add on a single server?',
+      a: 'Encrypted secrets, health checks with alerting, metrics history, config templating, an audit log, and a UI. On exactly one host with one operator that may be more than you need — Compose alone is a fine answer there.',
+    },
+  ]}
+/>

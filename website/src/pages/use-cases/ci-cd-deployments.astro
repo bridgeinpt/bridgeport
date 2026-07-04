@@ -1,0 +1,92 @@
+---
+import UseCasePage from '../../components/UseCasePage.astro';
+---
+
+<UseCasePage
+  title="Automate Docker Deployments from CI/CD"
+  description="Ship on every git push: CI builds the image, an HMAC-signed webhook triggers BridgePort, and health-gated deployment plans roll out — with automatic rollback if checks fail."
+  framing="git push → CI builds → BridgePort ships"
+  intro={[
+    'The healthiest CI/CD split keeps builds where they belong — in CI, reproducible and versioned — and hands everything after the registry push to something that understands your servers. Doing that handoff with an SSH key in a CI secret and a bash script means your pipeline has root on production and no idea whether the deploy actually worked.',
+    'With BridgePort the handoff is a signed webhook. CI builds and pushes the image, then calls one endpoint; BridgePort pulls, deploys to the right servers, gates each step on health checks, rolls back automatically on failure, and reports the result — to your team and back to your tooling.',
+  ]}
+  steps={[
+    {
+      title: 'CI builds and pushes',
+      text: 'GitHub Actions, GitLab CI, or any pipeline builds the image and pushes it to your registry — BridgePort works with the registries you already use.',
+    },
+    {
+      title: 'One webhook call',
+      text: 'The pipeline calls an incoming webhook, authenticated by HMAC signature (GitHub-style X-Hub-Signature-256 supported). Deploy a single service, or every service running that image.',
+    },
+    {
+      title: 'Health-gated rollout',
+      text: 'The deploy runs with the service’s strategy, or through a deployment plan that orders dependencies and checks health between steps.',
+    },
+    {
+      title: 'Rollback and report',
+      text: 'A failed health gate rolls the plan back automatically. Outgoing webhooks and notifications report success or failure to Slack, PagerDuty, or your own systems.',
+    },
+  ]}
+  features={[
+    {
+      title: 'HMAC-signed webhooks',
+      text: 'Incoming deploy triggers are authenticated by signature — no SSH keys or admin credentials in CI secrets.',
+      href: '/guides/webhooks/',
+      linkText: 'Webhooks guide',
+    },
+    {
+      title: 'Deploy-all-for-image',
+      text: 'One webhook can update every service running an image across the fleet — staging and production stay in step.',
+      href: '/guides/webhooks/',
+      linkText: 'Incoming webhooks',
+    },
+    {
+      title: 'Plans with auto-rollback',
+      text: 'Dependency-ordered, health-gated multi-service releases that undo themselves when a check fails.',
+      href: '/guides/deployment-plans/',
+      linkText: 'Deployment plans',
+    },
+    {
+      title: 'Service accounts',
+      text: 'Machine identities with scoped, role-capped API tokens — automation credentials that survive team turnover.',
+      href: '/guides/users/',
+      linkText: 'Service accounts',
+    },
+    {
+      title: 'Terraform provider',
+      text: 'Manage servers, services, secrets, and config as code; runtime operations stay imperative and auditable.',
+      href: '/guides/terraform/',
+      linkText: 'Terraform provider',
+    },
+    {
+      title: 'Full API, SDK & CLI',
+      text: 'Everything the UI does is a stable REST API — with a Go SDK, a CLI, and an MCP server for AI agents.',
+      href: '/reference/api/',
+      linkText: 'API reference',
+    },
+  ]}
+  faqs={[
+    {
+      q: 'Does BridgePort build my images?',
+      a: 'No — deliberately. CI owns the build so it stays reproducible and versioned; BridgePort owns everything after the registry push: pulling, deploying, health-checking, and rolling back.',
+    },
+    {
+      q: 'How does CI authenticate to BridgePort?',
+      a: 'Incoming webhooks are verified by HMAC signature (X-Webhook-Signature, or GitHub-compatible X-Hub-Signature-256). For richer automation, service accounts issue scoped API tokens with a role cap.',
+    },
+    {
+      q: 'Are there ready-made CI examples?',
+      a: 'Yes — the webhooks guide includes copy-paste examples for GitHub Actions, GitLab CI/CD, and a generic curl script.',
+    },
+    {
+      q: 'Can I manage BridgePort itself as code?',
+      a: 'Yes. The official Terraform provider manages configuration — servers, services, secrets, config files, registries — while deploys and restarts remain imperative operations through the UI, API, CLI, or webhooks.',
+    },
+  ]}
+  related={[
+    { href: '/guides/webhooks/', text: 'Webhooks guide' },
+    { href: '/guides/terraform/', text: 'Terraform provider' },
+    { href: '/use-cases/deploy-docker-multiple-servers/', text: 'Multi-server deployments' },
+  ]}
+/>
