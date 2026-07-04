@@ -1,0 +1,97 @@
+---
+import ComparePage from '../../components/ComparePage.astro';
+---
+
+<ComparePage
+  competitor="Kubernetes"
+  title="BridgePort vs Kubernetes"
+  description="Kubernetes alternative for small fleets: BridgePort gives you deployments, rollbacks, secrets, and monitoring for Docker servers — without running a cluster. An honest comparison."
+  framing="Fleet control plane vs cluster orchestrator"
+  intro={[
+    'Kubernetes is the industry standard for orchestrating containers at cluster scale — and for a lot of teams it is the right answer. But it answers a different question than BridgePort does. Kubernetes abstracts your servers into a pool and schedules workloads onto it; BridgePort manages the servers you already have, as they are, running plain Docker.',
+    'If your infrastructure is a fixed fleet of long-lived VMs or bare-metal machines running containerized services, most of what you want from Kubernetes — controlled rollouts, rollback, secrets, health checking, visibility — is available without operating a cluster. That is the gap BridgePort fills.',
+  ]}
+  rows={[
+    {
+      label: 'What it is',
+      bp: { mark: 'yes', text: 'Self-hosted control plane for Docker services on your servers' },
+      other: { mark: 'yes', text: 'Container orchestrator that schedules workloads across a cluster' },
+    },
+    {
+      label: 'Install & footprint',
+      bp: { mark: 'yes', text: 'One container with embedded SQLite; nothing on servers except optional metrics agent' },
+      other: { mark: 'partial', text: 'Control plane + node components on every machine, or a managed cloud service' },
+    },
+    {
+      label: 'Adopting existing containers',
+      bp: { mark: 'yes', text: 'Discovers running Docker containers and manages them in place' },
+      other: { mark: 'no', text: 'Workloads must be rewritten as manifests and migrated into the cluster' },
+    },
+    {
+      label: 'Autoscaling & rescheduling',
+      bp: { mark: 'no', text: 'Not a scheduler — services run where you put them' },
+      other: { mark: 'yes', text: 'Core strength: horizontal autoscaling, bin-packing, self-healing pods' },
+    },
+    {
+      label: 'Controlled rollouts',
+      bp: { mark: 'yes', text: 'Deployment plans with dependency ordering, health gates, automatic rollback' },
+      other: { mark: 'yes', text: 'Rolling updates and rollbacks via Deployments; richer strategies need extra tooling (Argo, Flagger)' },
+    },
+    {
+      label: 'Secrets',
+      bp: { mark: 'yes', text: 'AES-256-GCM encrypted at rest, usage-tracked, built in' },
+      other: { mark: 'partial', text: 'Secrets are base64 in etcd by default; encryption at rest and rotation need configuration or external managers' },
+    },
+    {
+      label: 'Monitoring & health checks',
+      bp: { mark: 'yes', text: 'Server/service/database metrics, container + URL + TCP + TLS checks, alerts — built in' },
+      other: { mark: 'partial', text: 'Probes built in; metrics and alerting mean running a Prometheus/Grafana stack' },
+    },
+    {
+      label: 'Infrastructure as code',
+      bp: { mark: 'yes', text: 'Terraform provider, REST API, Go SDK, CLI, MCP server' },
+      other: { mark: 'yes', text: 'Vast ecosystem: Helm, kustomize, operators, GitOps tooling' },
+    },
+    {
+      label: 'Operational burden',
+      bp: { mark: 'yes', text: 'One process to upgrade; migrations apply automatically' },
+      other: { mark: 'no', text: 'Cluster upgrades, etcd care, CNI/CSI choices, version skew — typically a platform team' },
+    },
+    {
+      label: 'License & cost',
+      bp: { mark: 'yes', text: 'Apache-2.0, free, self-hosted' },
+      other: { mark: 'yes', text: 'Apache-2.0, free — but managed control planes and platform engineering time cost real money' },
+    },
+  ]}
+  tableNote="Kubernetes capabilities describe vanilla Kubernetes; many gaps are solvable with additional ecosystem components — which is exactly the operational surface BridgePort avoids."
+  chooseBp={[
+    'Your infrastructure is a fixed fleet of VMs or bare-metal servers running long-lived services.',
+    'You want rollouts, rollback, secrets, and monitoring without hiring for or becoming the platform team.',
+    'You have running Docker hosts today and want to adopt them without a migration.',
+    'Your scaling story is "add a server occasionally", not "scale pods elastically by the minute".',
+  ]}
+  chooseOther={[
+    'You need elastic autoscaling, bin-packing, or self-healing scheduling across a pool of machines.',
+    'You run many microservices with sophisticated traffic management (service mesh, canary analysis).',
+    'You are building a multi-tenant internal platform and have people to operate it.',
+    'Your organization already standardized on Kubernetes and the expertise is paid for.',
+  ]}
+  faqs={[
+    {
+      q: 'Is BridgePort a Kubernetes alternative?',
+      a: 'For a fixed fleet of Docker servers, yes — BridgePort covers controlled deployments, rollback, secrets, health checks, and monitoring without running a cluster. It is not a replacement where you genuinely need cluster-level scheduling and autoscaling.',
+    },
+    {
+      q: 'Can BridgePort and Kubernetes coexist?',
+      a: 'Yes. Teams commonly run stateful or edge workloads on plain Docker hosts managed by BridgePort while keeping elastic workloads on a cluster. BridgePort only needs SSH or Docker socket access to the hosts it manages.',
+    },
+    {
+      q: 'Do I have to rewrite my services to use BridgePort?',
+      a: 'No. BridgePort discovers containers already running on your servers and brings them under management, and services can keep using Docker Compose templates.',
+    },
+    {
+      q: 'What does BridgePort deliberately not do?',
+      a: 'It does not schedule workloads, autoscale pods, or abstract your servers into a pool. Services run where you deploy them — that predictability is the point.',
+    },
+  ]}
+/>

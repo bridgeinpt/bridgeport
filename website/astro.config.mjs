@@ -114,7 +114,17 @@ export default defineConfig({
           // The generated OpenAPI + changelog + roadmap pages aren't markdown, so the
           // validator has no heading data for them and can't verify links pointing into
           // those sections.
-          exclude: ['/reference/api/', '/reference/api/**', '/changelog/', '/changelog/**', '/roadmap/'],
+          // (/compare/** and /faq/ are custom .astro pages, same as /roadmap/.)
+          exclude: [
+            '/reference/api/',
+            '/reference/api/**',
+            '/changelog/',
+            '/changelog/**',
+            '/roadmap/',
+            '/compare/',
+            '/compare/**',
+            '/faq/',
+          ],
           // localhost URLs are intentional examples for a self-hosted product.
           errorOnLocalLinks: false,
         }),

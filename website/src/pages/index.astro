@@ -203,6 +203,12 @@ const terminalHtml = `
           <p>The right call for elastic, cluster-scale platforms with a team to run them. For a fleet of long-lived servers, it's a lot of machinery you don't need.</p>
         </div>
       </div>
+      <p class="lp-compare-links">
+        Full comparisons: <a href="/compare/kubernetes/">Kubernetes</a> ·{' '}
+        <a href="/compare/docker-compose/">Docker Compose</a> ·{' '}
+        <a href="/compare/portainer/">Portainer</a> ·{' '}
+        <a href="/compare/coolify/">Coolify</a> — or read the <a href="/faq/">FAQ</a>
+      </p>
     </section>
 
     <!-- Final CTA -->
@@ -828,6 +834,19 @@ const terminalHtml = `
   @media (max-width: 60rem) {
     .lp-compare { grid-template-columns: 1fr; }
     .lp-tier-hero { order: -1; }
+  }
+  .lp-compare-links {
+    margin: 1.4rem 0 0;
+    font-family: var(--lp-mono);
+    font-size: 0.78rem;
+    color: var(--sl-color-gray-3);
+  }
+  .lp-compare-links a {
+    color: var(--sl-color-accent-high);
+    text-decoration: none;
+  }
+  .lp-compare-links a:hover {
+    text-decoration: underline;
   }
 
   /* ---------- Final CTA ---------- */

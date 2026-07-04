@@ -1,0 +1,184 @@
+---
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+
+/**
+ * /compare/ — hub for the honest-comparison pages. Each comparison genuinely
+ * argues for the other tool where it wins; this page sets that expectation.
+ */
+
+const SITE = 'https://bridgeport.bridgein.com';
+
+const comparisons = [
+  {
+    href: '/compare/kubernetes/',
+    name: 'Kubernetes',
+    kind: 'Cluster orchestrator',
+    blurb:
+      'Scheduling and autoscaling for elastic workloads — versus a control plane for the servers you already have. The most common either/or.',
+  },
+  {
+    href: '/compare/docker-compose/',
+    name: 'Docker Compose',
+    kind: 'Single-host tooling',
+    blurb:
+      'Compose stays — BridgePort renders and ships your Compose templates. The real comparison is operating a fleet by SSH versus through a control plane.',
+  },
+  {
+    href: '/compare/portainer/',
+    name: 'Portainer',
+    kind: 'Container platform GUI',
+    blurb:
+      'Broad point-and-click management of Docker, Swarm, and Kubernetes — versus a narrower, deployment-centric workflow for Docker fleets.',
+  },
+  {
+    href: '/compare/coolify/',
+    name: 'Coolify',
+    kind: 'Self-hosted PaaS',
+    blurb:
+      'Git-push-to-deploy with builds, proxy, and TLS handled — versus image-based fleet operations that adopt the infrastructure you already run.',
+  },
+];
+
+const description =
+  'How BridgePort compares to Kubernetes, Docker Compose, Portainer, and Coolify — honest, feature-by-feature comparisons for self-hosted Docker deployment and monitoring.';
+
+const jsonLd = JSON.stringify({
+  '@context': 'https://schema.org',
+  '@type': 'CollectionPage',
+  name: 'BridgePort comparisons',
+  url: `${SITE}/compare/`,
+  description,
+  hasPart: comparisons.map((c) => ({
+    '@type': 'WebPage',
+    name: `BridgePort vs ${c.name}`,
+    url: `${SITE}${c.href}`,
+  })),
+});
+---
+
+<StarlightPage
+  frontmatter={{
+    title: 'BridgePort vs the alternatives',
+    description,
+    template: 'splash',
+    tableOfContents: false,
+    editUrl: false,
+    head: [{ tag: 'script', attrs: { type: 'application/ld+json' }, content: jsonLd }],
+  }}
+>
+  <div class="cmphub">
+    <p class="cmphub-intro">
+      Picking infrastructure tooling is mostly about fit, so these comparisons are written to be
+      genuinely useful: every page includes the cases where the other tool is the better choice. In
+      one line, BridgePort's position: <strong>a self-hosted control plane for deploying,
+      orchestrating, and monitoring Docker services on the servers you already run</strong> — more
+      than Compose, less than Kubernetes.
+    </p>
+    <div class="cmphub-grid">
+      {
+        comparisons.map((c) => (
+          <a class="cmphub-card" href={c.href}>
+            <span class="cmphub-kind">{c.kind}</span>
+            <h2>
+              BridgePort <span class="cmphub-vs">vs</span> {c.name}
+            </h2>
+            <p>{c.blurb}</p>
+            <span class="cmphub-more">Read the comparison</span>
+          </a>
+        ))
+      }
+    </div>
+    <p class="cmphub-foot">
+      Have a question these don't answer? Try the <a href="/faq/">FAQ</a> or the{' '}
+      <a href="/concepts/">core concepts</a> overview.
+    </p>
+  </div>
+</StarlightPage>
+
+<style is:global>
+  .cmphub {
+    max-width: 56rem;
+    margin-inline: auto;
+  }
+  .cmphub-intro {
+    font-size: 1.02rem;
+    line-height: 1.72;
+    color: var(--sl-color-gray-2);
+    max-width: 68ch;
+  }
+  .cmphub-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-top: 2.25rem;
+  }
+  @media (max-width: 48rem) {
+    .cmphub-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+  .cmphub-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    padding: 1.4rem 1.5rem 1.25rem;
+    border: 1px solid color-mix(in srgb, var(--sl-color-gray-5) 72%, transparent);
+    border-radius: 1rem;
+    background: color-mix(in srgb, var(--sl-color-black) 55%, var(--sl-color-bg));
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .cmphub-card:hover {
+    border-color: color-mix(in srgb, var(--sl-color-accent) 55%, var(--sl-color-gray-5));
+    transform: translateY(-3px);
+    box-shadow: 0 18px 40px -24px rgba(2, 8, 23, 0.55);
+  }
+  .cmphub-kind {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--sl-color-accent-high);
+  }
+  .cmphub-card h2 {
+    font-family: 'IBM Plex Sans', var(--sl-font);
+    font-weight: 650;
+    font-size: 1.2rem;
+    letter-spacing: -0.015em;
+    color: var(--sl-color-white);
+    margin: 0;
+  }
+  .cmphub-vs {
+    color: var(--sl-color-gray-4);
+    font-weight: 400;
+    font-style: italic;
+    padding-inline: 0.1em;
+  }
+  .cmphub-card p {
+    margin: 0;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: var(--sl-color-gray-2);
+  }
+  .cmphub-more {
+    margin-top: auto;
+    padding-top: 0.6rem;
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 0.74rem;
+    color: var(--sl-color-accent-high);
+  }
+  .cmphub-more::after {
+    content: ' →';
+    display: inline-block;
+    transition: transform 0.2s ease;
+  }
+  .cmphub-card:hover .cmphub-more::after {
+    transform: translateX(3px);
+  }
+  .cmphub-foot {
+    margin-top: 2.5rem;
+    font-size: 0.9rem;
+    color: var(--sl-color-gray-3);
+  }
+</style>
