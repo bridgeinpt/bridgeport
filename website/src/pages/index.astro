@@ -15,6 +15,26 @@ import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
 const SITE = 'https://bridgeport.bridgein.com';
 const GITHUB = 'https://github.com/bridgeinpt/bridgeport';
 
+// GitHub star count, fetched at build time (same degrade-gracefully pattern as the
+// roadmap page): a failed fetch just means the button shows no count.
+let stars: string | null = null;
+try {
+  const res = await fetch('https://api.github.com/repos/bridgeinpt/bridgeport', {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      ...(process.env.GH_API_TOKEN ? { Authorization: `Bearer ${process.env.GH_API_TOKEN}` } : {}),
+    },
+  });
+  if (res.ok) {
+    const count = (await res.json()).stargazers_count;
+    if (typeof count === 'number' && count > 0) {
+      stars = count >= 1000 ? `${(count / 1000).toFixed(1).replace(/\.0$/, '')}k` : String(count);
+    }
+  }
+} catch {
+  /* offline build — no star count */
+}
+
 const description =
   'BridgePort is a lightweight, open-source, self-hosted tool to deploy, orchestrate, and monitor Docker services across all your servers — encrypted secrets, health checks, deployment plans with auto-rollback, and real-time monitoring. Production-grade ops without Kubernetes.';
 
@@ -79,7 +99,12 @@ const terminalHtml = `
       image: { html: terminalHtml },
       actions: [
         { text: 'Get started', link: '/getting-started/', icon: 'right-arrow', variant: 'primary' },
-        { text: 'View on GitHub', link: GITHUB, icon: 'github', variant: 'secondary' },
+        {
+          text: stars ? `Star on GitHub · ${stars} ★` : 'View on GitHub',
+          link: GITHUB,
+          icon: 'github',
+          variant: 'secondary',
+        },
       ],
     },
   }}
@@ -98,44 +123,44 @@ const terminalHtml = `
       <p class="lp-eyebrow">Capabilities</p>
       <h2 id="lp-features-h" class="lp-h2">Everything between <code>git push</code> and production</h2>
       <div class="lp-grid">
-        <a class="lp-card lp-card-wide" href="/guides/services/">
+        <a class="lp-card lp-card-wide" href="/use-cases/deploy-docker-multiple-servers/">
           <span class="lp-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><path d="M6 6.5h.01M6 17.5h.01M10 6.5h4M10 17.5h4"/></svg>
           </span>
-          <h3>Servers &amp; services</h3>
-          <p>Add servers over SSH or the Docker socket, auto-discover what's already running, and deploy services from a central image catalog — the same template rolled out to any number of servers.</p>
-          <span class="lp-more">Manage your fleet</span>
+          <h3>Deploy to every server</h3>
+          <p>Define a service once — image, env, health checks — and roll it out to any number of servers over SSH or the Docker socket. Existing containers are discovered and adopted in place.</p>
+          <span class="lp-more">See the workflow</span>
         </a>
-        <a class="lp-card" href="/guides/secrets/">
+        <a class="lp-card" href="/use-cases/docker-secrets-management/">
           <span class="lp-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><path d="M12 14v3"/></svg>
           </span>
           <h3>Config &amp; secrets</h3>
-          <p>AES-256-GCM encrypted secrets, reusable config fragments, and templated files synced to your servers.</p>
-          <span class="lp-more">Keep secrets safe</span>
+          <p>AES-256-GCM encrypted secrets and templated config files, synced atomically to your servers.</p>
+          <span class="lp-more">Out of .env files</span>
         </a>
-        <a class="lp-card" href="/guides/monitoring/">
+        <a class="lp-card" href="/use-cases/docker-monitoring/">
           <span class="lp-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2.5-7 5 14 2.5-7h4"/></svg>
           </span>
           <h3>Monitoring &amp; health</h3>
-          <p>Server, service, and database metrics plus container, URL, TCP, and TLS health checks with bounce protection.</p>
+          <p>Server, container, and database metrics plus four kinds of health checks — no Prometheus stack to run.</p>
           <span class="lp-more">Watch everything</span>
         </a>
-        <a class="lp-card" href="/guides/deployment-plans/">
+        <a class="lp-card" href="/use-cases/ci-cd-deployments/">
           <span class="lp-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8.2 7.1 15.8 11M8.2 16.9 15.8 13"/></svg>
           </span>
-          <h3>Deployment plans</h3>
-          <p>Multi-service rollouts with dependency ordering, health gates, and automatic rollback — triggered by hand or CI/CD webhooks.</p>
-          <span class="lp-more">Orchestrate rollouts</span>
+          <h3>CI/CD &amp; deployment plans</h3>
+          <p>CI pushes an image, a signed webhook triggers a health-gated rollout — with automatic rollback.</p>
+          <span class="lp-more">Ship on git push</span>
         </a>
         <a class="lp-card" href="/guides/notifications/">
           <span class="lp-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 8h18s-3-1-3-8"/><path d="M13.7 20a2 2 0 0 1-3.4 0"/></svg>
           </span>
           <h3>Notifications &amp; topology</h3>
-          <p>Alerts where your team lives, plus a live topology diagram of servers, services, databases, and the things between them.</p>
+          <p>Alerts where your team lives, plus a live diagram of servers, services, databases, and dependencies.</p>
           <span class="lp-more">See the whole picture</span>
         </a>
         <a class="lp-card lp-card-full" href="/reference/api/">
@@ -143,15 +168,12 @@ const terminalHtml = `
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M12.5 15H17"/></svg>
           </span>
           <h3>Automate everything</h3>
-          <p>Every screen in the UI is a stable REST API underneath. Drive it from the Go SDK, the CLI, the Terraform provider, or let your AI agent use the MCP server — with service accounts and scoped tokens built for automation.</p>
+          <p>Every screen in the UI is a stable REST API underneath — with a Go SDK, a CLI, a Terraform provider, and an MCP server for AI agents.</p>
           <span class="lp-more">Explore the API</span>
         </a>
       </div>
       <p class="lp-compare-links">
-        Popular use cases: <a href="/use-cases/deploy-docker-multiple-servers/">multi-server deploys</a> ·{' '}
-        <a href="/use-cases/docker-monitoring/">self-hosted monitoring</a> ·{' '}
-        <a href="/use-cases/docker-secrets-management/">secrets &amp; config</a> ·{' '}
-        <a href="/use-cases/ci-cd-deployments/">CI/CD rollouts</a>
+        <a href="/use-cases/">Browse all use cases</a>
       </p>
     </section>
 

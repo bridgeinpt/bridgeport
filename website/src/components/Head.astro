@@ -1,0 +1,23 @@
+---
+import Default from '@astrojs/starlight/components/Head.astro';
+import { getOgPages } from '../og-pages';
+
+/**
+ * Head override: per-page Open Graph images. Routes with a generated card
+ * (docs + marketing pages, see src/og-pages.ts) point og:image at
+ * /og/<route>.png; everything else (changelog, OpenAPI reference, 404) falls
+ * back to the static social-preview.png. The global head config deliberately
+ * carries no og:image so these are the only image tags emitted.
+ */
+
+const SITE = 'https://bridgeport.bridgein.com';
+
+const routeKey = Astro.url.pathname.replace(/^\/+|\/+$/g, '') || 'index';
+const ogPages = await getOgPages();
+const image = routeKey in ogPages ? `${SITE}/og/${routeKey}.png` : `${SITE}/social-preview.png`;
+---
+
+<Default><slot /></Default>
+<meta property="og:image" content={image} />
+<meta property="og:image:alt" content="BridgePort" />
+<meta name="twitter:image" content={image} />

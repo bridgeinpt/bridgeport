@@ -55,11 +55,10 @@
   color: var(--sl-color-white);
 }
 
-/* Subtle glass blur so content scrolling under the header reads as depth. */
+/* Keep the header fully opaque. (A translucent glass-blur variant let scrolled
+   content ghost through the bar wherever backdrop-filter doesn't render.) */
 .header {
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  background-color: color-mix(in srgb, var(--sl-color-bg-nav) 88%, transparent);
+  background-color: var(--sl-color-bg-nav);
 }
 
 /* ---------- Typography ---------- */

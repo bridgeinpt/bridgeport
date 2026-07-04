@@ -42,10 +42,23 @@ interface Props {
   chooseOther: string[];
   /** FAQ entries (plain-text answers; also emitted as FAQPage JSON-LD). */
   faqs: { q: string; a: string }[];
+  /** Human-readable review date shown under the table, e.g. "July 2026". */
+  reviewed: string;
 }
 
-const { competitor, title, description, framing, intro, rows, tableNote, chooseBp, chooseOther, faqs } =
-  Astro.props;
+const {
+  competitor,
+  title,
+  description,
+  framing,
+  intro,
+  rows,
+  tableNote,
+  chooseBp,
+  chooseOther,
+  faqs,
+  reviewed,
+} = Astro.props;
 
 const SITE = 'https://bridgeport.bridgein.com';
 const pagePath = Astro.url.pathname.endsWith('/') ? Astro.url.pathname : `${Astro.url.pathname}/`;
@@ -118,7 +131,10 @@ const markGlyph = { yes: '✓', no: '—', partial: '◐' } as const;
         ))
       }
     </div>
-    {tableNote && <p class="cmp-note">{tableNote}</p>}
+    <p class="cmp-note">
+      {tableNote && <>{tableNote}{' '}</>}
+      <span class="cmp-reviewed">Comparison last reviewed {reviewed}.</span>
+    </p>
 
     <div class="cmp-choose">
       <div class="cmp-choice cmp-choice-bp">
@@ -305,6 +321,11 @@ const markGlyph = { yes: '✓', no: '—', partial: '◐' } as const;
     font-size: 0.8rem;
     color: var(--sl-color-gray-3);
     margin-top: 0.75rem;
+  }
+  .cmp-reviewed {
+    font-family: var(--cmp-mono);
+    font-size: 0.72rem;
+    color: var(--sl-color-gray-4);
   }
 
   /* ---------- Choose cards ---------- */

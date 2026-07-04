@@ -51,7 +51,7 @@ flowchart LR
     E --> DB[(Database)]
     P --> DB
 
-    CF[Config file template<br/>with ${KEY} placeholders] --> Sync[Sync to server]
+    CF["Config file template<br/>with ${KEY} placeholders"] --> Sync[Sync to server]
     DB --> Sync
     Sync --> Server[Server file<br/>resolved values]
 ```
