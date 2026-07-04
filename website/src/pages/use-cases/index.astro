@@ -1,0 +1,174 @@
+---
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+
+/**
+ * /use-cases/ — hub for the solution-oriented landing pages. Same card grid
+ * pattern as /compare/.
+ */
+
+const SITE = 'https://bridgeport.bridgein.com';
+
+const useCases = [
+  {
+    href: '/use-cases/deploy-docker-multiple-servers/',
+    kind: 'Deployment',
+    name: 'Deploy Docker to multiple servers',
+    blurb:
+      'Define a service once, deploy it to any number of servers — with health-gated rollouts, rollback, and an audit trail instead of SSH loops.',
+  },
+  {
+    href: '/use-cases/docker-monitoring/',
+    kind: 'Monitoring',
+    name: 'Self-hosted Docker monitoring',
+    blurb:
+      'Server, container, and database metrics plus four kinds of health checks and alerting — without shipping data to a SaaS or running a Prometheus stack.',
+  },
+  {
+    href: '/use-cases/docker-secrets-management/',
+    kind: 'Security',
+    name: 'Docker secrets & config management',
+    blurb:
+      'AES-256-GCM encrypted secrets, reusable config fragments, usage tracking, and atomic sync — the end of scattered .env files.',
+  },
+  {
+    href: '/use-cases/ci-cd-deployments/',
+    kind: 'Automation',
+    name: 'CI/CD Docker deployments',
+    blurb:
+      'CI builds the image, a signed webhook triggers the rollout, health gates decide, rollback is automatic. No SSH keys in pipeline secrets.',
+  },
+];
+
+const description =
+  'What teams use BridgePort for: multi-server Docker deployments, self-hosted monitoring, encrypted secrets and config management, and CI/CD-triggered rollouts.';
+
+const jsonLd = JSON.stringify({
+  '@context': 'https://schema.org',
+  '@type': 'CollectionPage',
+  name: 'BridgePort use cases',
+  url: `${SITE}/use-cases/`,
+  description,
+  hasPart: useCases.map((u) => ({
+    '@type': 'WebPage',
+    name: u.name,
+    url: `${SITE}${u.href}`,
+  })),
+});
+---
+
+<StarlightPage
+  frontmatter={{
+    title: 'What teams use BridgePort for',
+    description,
+    template: 'splash',
+    tableOfContents: false,
+    editUrl: false,
+    head: [{ tag: 'script', attrs: { type: 'application/ld+json' }, content: jsonLd }],
+  }}
+>
+  <div class="uchub">
+    <p class="uchub-intro">
+      BridgePort is one tool with one model — services deployed to servers — but teams reach for it
+      to solve a few distinct problems. Each page below walks one job end to end: how it works,
+      what you get, and where it connects to the docs.
+    </p>
+    <div class="uchub-grid">
+      {
+        useCases.map((u) => (
+          <a class="uchub-card" href={u.href}>
+            <span class="uchub-kind">{u.kind}</span>
+            <h2>{u.name}</h2>
+            <p>{u.blurb}</p>
+            <span class="uchub-more">See how it works</span>
+          </a>
+        ))
+      }
+    </div>
+    <p class="uchub-foot">
+      Evaluating options? See how BridgePort <a href="/compare/">compares to the alternatives</a>,
+      or start with the <a href="/concepts/">core concepts</a>.
+    </p>
+  </div>
+</StarlightPage>
+
+<style is:global>
+  .uchub {
+    max-width: 56rem;
+    margin-inline: auto;
+  }
+  .uchub-intro {
+    font-size: 1.02rem;
+    line-height: 1.72;
+    color: var(--sl-color-gray-2);
+    max-width: 68ch;
+  }
+  .uchub-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-top: 2.25rem;
+  }
+  @media (max-width: 48rem) {
+    .uchub-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+  .uchub-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    padding: 1.4rem 1.5rem 1.25rem;
+    border: 1px solid color-mix(in srgb, var(--sl-color-gray-5) 72%, transparent);
+    border-radius: 1rem;
+    background: color-mix(in srgb, var(--sl-color-black) 55%, var(--sl-color-bg));
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  }
+  .uchub-card:hover {
+    border-color: color-mix(in srgb, var(--sl-color-accent) 55%, var(--sl-color-gray-5));
+    transform: translateY(-3px);
+    box-shadow: 0 18px 40px -24px rgba(2, 8, 23, 0.55);
+  }
+  .uchub-kind {
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 0.68rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--sl-color-accent-high);
+  }
+  .uchub-card h2 {
+    font-family: 'IBM Plex Sans', var(--sl-font);
+    font-weight: 650;
+    font-size: 1.2rem;
+    letter-spacing: -0.015em;
+    color: var(--sl-color-white);
+    margin: 0;
+  }
+  .uchub-card p {
+    margin: 0;
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: var(--sl-color-gray-2);
+  }
+  .uchub-more {
+    margin-top: auto;
+    padding-top: 0.6rem;
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 0.74rem;
+    color: var(--sl-color-accent-high);
+  }
+  .uchub-more::after {
+    content: ' →';
+    display: inline-block;
+    transition: transform 0.2s ease;
+  }
+  .uchub-card:hover .uchub-more::after {
+    transform: translateX(3px);
+  }
+  .uchub-foot {
+    margin-top: 2.5rem;
+    font-size: 0.9rem;
+    color: var(--sl-color-gray-3);
+  }
+</style>

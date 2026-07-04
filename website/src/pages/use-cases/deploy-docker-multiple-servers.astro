@@ -1,0 +1,92 @@
+---
+import UseCasePage from '../../components/UseCasePage.astro';
+---
+
+<UseCasePage
+  title="Deploy Docker Containers to Multiple Servers"
+  description="Deploy Docker containers to multiple servers from one self-hosted control plane — central image catalog, per-server deployments, health-gated rollouts, and automatic rollback."
+  framing="One control plane, every server"
+  intro={[
+    'Past the second server, hand-run deploys stop scaling: an SSH session per host, a pull-and-restart script that half the team has a slightly different copy of, and no record of what went where. The tooling gap is real — most deployment tools assume either one host or a full cluster.',
+    'BridgePort treats a set of plain Docker servers as a fleet. A service is defined once — image, tag, env, health checks, optional Compose template — and deployed to any number of servers as tracked deployments. Rollouts happen from one place, with health gates, rollback, and an audit trail.',
+  ]}
+  steps={[
+    {
+      title: 'Connect your servers',
+      text: 'Add each server over SSH (keys stored encrypted) or the Docker socket. Container discovery imports whatever is already running, so existing hosts come under management without downtime.',
+    },
+    {
+      title: 'Define services once',
+      text: 'A service template holds the image and tag filter, base env, health checks, and an optional Docker Compose template. The image catalog tracks available tags across your registries.',
+    },
+    {
+      title: 'Deploy to any number of servers',
+      text: 'Each deployment pins the template to a server with its own container name and env overrides. Roll out sequentially or in parallel, straight from the UI, CLI, or API.',
+    },
+    {
+      title: 'Coordinate multi-service rollouts',
+      text: 'Deployment plans order services by dependency, gate each step on health checks, and automatically roll back on failure — one click or one webhook for the whole release.',
+    },
+  ]}
+  features={[
+    {
+      title: 'Central image catalog',
+      text: 'Every service is backed by a container image entity with tag filters and digest tracking, so "what version is where" is a query, not archaeology.',
+      href: '/guides/container-images/',
+      linkText: 'Container images',
+    },
+    {
+      title: 'One template, many servers',
+      text: 'Service templates with per-server deployments keep config DRY while allowing per-host overrides where they belong.',
+      href: '/guides/services/',
+      linkText: 'Services guide',
+    },
+    {
+      title: 'Health-gated plans with rollback',
+      text: 'Dependency-ordered multi-service rollouts that stop and roll back automatically when a health check fails.',
+      href: '/guides/deployment-plans/',
+      linkText: 'Deployment plans',
+    },
+    {
+      title: 'CI/CD triggers',
+      text: 'HMAC-signed incoming webhooks deploy a service — or every service running an image — the moment CI pushes a new tag.',
+      href: '/guides/webhooks/',
+      linkText: 'Webhooks',
+    },
+    {
+      title: 'Docker Compose compatible',
+      text: 'Services can carry Compose templates that BridgePort renders per deployment and ships to each server.',
+      href: '/compare/docker-compose/',
+      linkText: 'vs Docker Compose',
+    },
+    {
+      title: 'Audit trail',
+      text: 'Every deploy records who, what, and where — sensitive operations are audit-logged across the board.',
+      href: '/guides/users/',
+      linkText: 'Users & roles',
+    },
+  ]}
+  faqs={[
+    {
+      q: 'Do I need to install anything on my servers?',
+      a: 'No. Servers are managed over SSH or the Docker socket. An optional lightweight Go agent adds real-time metrics push, and BridgePort can deploy it for you when you want it.',
+    },
+    {
+      q: 'How do I deploy the same service to many servers at once?',
+      a: 'Define the service once and add a deployment per server. The rollout strategy — sequential or parallel — is set on the service, and deployment plans coordinate multiple services across the fleet.',
+    },
+    {
+      q: 'What happens when a deployment fails halfway?',
+      a: 'Within a deployment plan, a failed health gate stops the rollout and automatically rolls back to the previous version. Outside plans, per-service health checks and status make the failure visible immediately.',
+    },
+    {
+      q: 'Do I need Kubernetes for multi-server Docker deployments?',
+      a: 'No. Kubernetes solves scheduling and autoscaling across a cluster. If your servers are long-lived and you decide what runs where, a control plane over plain Docker hosts covers deployment, rollback, and monitoring with far less machinery.',
+    },
+  ]}
+  related={[
+    { href: '/guides/servers/', text: 'Adding servers' },
+    { href: '/guides/deployment-plans/', text: 'Deployment plans' },
+    { href: '/compare/kubernetes/', text: 'BridgePort vs Kubernetes' },
+  ]}
+/>

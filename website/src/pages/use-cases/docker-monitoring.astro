@@ -1,0 +1,92 @@
+---
+import UseCasePage from '../../components/UseCasePage.astro';
+---
+
+<UseCasePage
+  title="Self-Hosted Docker Monitoring"
+  description="Monitor Docker containers, servers, and databases from one self-hosted tool — metrics history, container/URL/TCP/TLS health checks, and alerting. No SaaS, no Prometheus stack to assemble."
+  framing="Metrics, health, alerts — on your infrastructure"
+  intro={[
+    'Monitoring self-hosted infrastructure usually means one of two contortions: shipping your metrics to a SaaS you adopted specifically to avoid depending on, or assembling and operating a Prometheus–Grafana–Alertmanager stack that quickly becomes its own service to babysit.',
+    'BridgePort ships monitoring as part of the control plane. The same tool that deploys your services watches them: server metrics, container stats, database metrics, four kinds of health checks, and notifications — with history stored in your own database and nothing leaving your infrastructure.',
+  ]}
+  steps={[
+    {
+      title: 'Connect servers',
+      text: 'SSH mode needs nothing installed and collects server metrics on a polling cycle (default: every 5 minutes).',
+    },
+    {
+      title: 'Enable the agent where you want more',
+      text: 'Flip a server to agent mode and BridgePort auto-deploys its lightweight Go agent over SSH — real-time metrics push, container stats, and process snapshots, typically live within 30 seconds.',
+    },
+    {
+      title: 'Add health checks',
+      text: 'Container, URL, TCP, and TLS-certificate checks with bounce protection so a single blip does not page anyone. Results feed service status and history.',
+    },
+    {
+      title: 'Route alerts',
+      text: 'Notification types cover deploys, health transitions, and system events; outgoing webhooks (with HMAC signatures and retries) forward events to Slack, PagerDuty, or anything with a URL.',
+    },
+  ]}
+  features={[
+    {
+      title: 'Server metrics',
+      text: 'CPU, memory, disk, and load per server — over SSH with zero install, or in real time via the agent.',
+      href: '/guides/monitoring-servers/',
+      linkText: 'Server monitoring',
+    },
+    {
+      title: 'Container & service metrics',
+      text: 'Docker stats per service deployment, tied to the service model rather than anonymous container IDs.',
+      href: '/guides/monitoring-services/',
+      linkText: 'Service monitoring',
+    },
+    {
+      title: 'Database monitoring',
+      text: 'Plugin-driven collectors gather size, activity, and performance metrics from your databases on their own interval.',
+      href: '/guides/monitoring-databases/',
+      linkText: 'Database monitoring',
+    },
+    {
+      title: 'Four kinds of health checks',
+      text: 'Container state, URL/HTTP, TCP port, and TLS certificate expiry — with bounce protection against flapping.',
+      href: '/guides/health-checks/',
+      linkText: 'Health checks',
+    },
+    {
+      title: 'Notifications & webhooks',
+      text: 'Built-in notification channels plus signed outgoing webhooks with retry behavior for external systems.',
+      href: '/guides/notifications/',
+      linkText: 'Notifications',
+    },
+    {
+      title: 'Your data, your retention',
+      text: 'History lives in BridgePort’s embedded database on your infrastructure, with retention-based cleanup you configure.',
+      href: '/reference/system-settings/',
+      linkText: 'System settings',
+    },
+  ]}
+  faqs={[
+    {
+      q: 'Do I need to run Prometheus or Grafana?',
+      a: 'No. Metrics collection, storage, charts, and alerting are built into BridgePort. If you already run a metrics stack, BridgePort complements it with deployment-aware health checks and event webhooks.',
+    },
+    {
+      q: 'Is an agent required for monitoring?',
+      a: 'No — SSH mode collects server metrics with nothing installed. The optional Go agent upgrades a server to real-time push metrics, container stats, and process snapshots, and BridgePort deploys it automatically.',
+    },
+    {
+      q: 'Can BridgePort alert my team in Slack or PagerDuty?',
+      a: 'Yes. Notification events can be forwarded through outgoing webhooks — signed, filtered by type and environment, and retried on failure — to any system that accepts an HTTP request.',
+    },
+    {
+      q: 'Does any monitoring data leave my infrastructure?',
+      a: 'No. BridgePort is fully self-hosted; metrics and health history are stored in its embedded SQLite database on your own server, with configurable retention.',
+    },
+  ]}
+  related={[
+    { href: '/guides/monitoring/', text: 'Monitoring quick start' },
+    { href: '/reference/agent/', text: 'Agent reference' },
+    { href: '/use-cases/deploy-docker-multiple-servers/', text: 'Multi-server deployments' },
+  ]}
+/>

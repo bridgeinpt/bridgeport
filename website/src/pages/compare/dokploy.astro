@@ -1,0 +1,96 @@
+---
+import ComparePage from '../../components/ComparePage.astro';
+---
+
+<ComparePage
+  competitor="Dokploy"
+  title="BridgePort vs Dokploy"
+  description="Dokploy alternative for ops-centric teams: Dokploy is a self-hosted PaaS with git builds and Traefik; BridgePort is a fleet control plane for image-based Docker services. An honest comparison."
+  framing="Fleet control plane vs self-hosted PaaS"
+  intro={[
+    'Dokploy is a self-hosted platform-as-a-service in the same family as Coolify: connect a git repository, and it builds your app, wires routing and TLS through its built-in Traefik proxy, and runs it — with one-click databases, backups, and app templates included. For multi-server setups it builds on Docker Swarm.',
+    'BridgePort is not a PaaS. It assumes CI builds your images and picks up from there: a control plane that deploys cataloged images as services across plain Docker servers, syncs encrypted secrets and templated config files, orchestrates multi-service rollout plans with automatic rollback, and monitors servers, services, and databases. It also adopts infrastructure that already exists rather than expecting to have created it.',
+  ]}
+  rows={[
+    {
+      label: 'Philosophy',
+      bp: { mark: 'yes', text: 'Ops control plane for image-based services on your fleet' },
+      other: { mark: 'yes', text: 'Self-hosted PaaS: git push → build → run behind its proxy' },
+    },
+    {
+      label: 'Builds from source',
+      bp: { mark: 'no', text: 'Bring images from any registry — CI owns the build' },
+      other: { mark: 'yes', text: 'Builds from git (Dockerfile, Nixpacks, buildpacks) with app templates' },
+    },
+    {
+      label: 'Multi-server model',
+      bp: { mark: 'yes', text: 'Plain Docker hosts over SSH or socket — no cluster layer' },
+      other: { mark: 'partial', text: 'Multi-node setups lean on Docker Swarm and remote server support' },
+    },
+    {
+      label: 'Adopting existing servers',
+      bp: { mark: 'yes', text: 'Discovers and manages containers already running on your hosts' },
+      other: { mark: 'partial', text: 'Manages what it deploys; pre-existing workloads stay outside its model' },
+    },
+    {
+      label: 'Reverse proxy & TLS',
+      bp: { mark: 'no', text: 'Bring your own (Caddy, Traefik, nginx) — managed as services like everything else' },
+      other: { mark: 'yes', text: 'Built-in Traefik with automatic HTTPS' },
+    },
+    {
+      label: 'Multi-service orchestration',
+      bp: { mark: 'yes', text: 'Deployment plans: dependency ordering, health gates, automatic rollback' },
+      other: { mark: 'partial', text: 'Per-app deploys and compose stacks; cross-app ordering is not the model' },
+    },
+    {
+      label: 'Secrets & config',
+      bp: { mark: 'yes', text: 'AES-256-GCM secrets + templated config files and fragments synced to servers' },
+      other: { mark: 'partial', text: 'Per-app and shared environment variables' },
+    },
+    {
+      label: 'Monitoring',
+      bp: { mark: 'yes', text: 'Server/service/database metrics, URL/TCP/TLS checks, alert notifications' },
+      other: { mark: 'partial', text: 'Container/server monitoring and notifications, PaaS-scoped' },
+    },
+    {
+      label: 'Infrastructure as code',
+      bp: { mark: 'yes', text: 'Terraform provider, REST API, Go SDK, CLI, MCP server' },
+      other: { mark: 'partial', text: 'REST API and CLI' },
+    },
+    {
+      label: 'License & cost',
+      bp: { mark: 'yes', text: 'Apache-2.0, one edition, all features' },
+      other: { mark: 'yes', text: 'Open source and free to self-host, with an optional paid cloud' },
+    },
+  ]}
+  tableNote="Dokploy is a fast-moving project — verify specifics against its current documentation for your version."
+  chooseBp={[
+    'CI already builds and pushes images, and you want deployment + operations from there.',
+    'You operate an existing fleet — proxies, databases, and containers you set up yourself.',
+    'You need coordinated multi-service rollouts with health gates and rollback.',
+    'You want to avoid a Swarm layer and keep servers as plain Docker hosts.',
+  ]}
+  chooseOther={[
+    'You want git-push-to-deploy with builds, routing, and TLS handled for you.',
+    'You like one-click databases, backups, and a template marketplace.',
+    'A Vercel/Heroku-style app workflow on your own hardware is the goal.',
+  ]}
+  faqs={[
+    {
+      q: 'Is BridgePort a Dokploy alternative?',
+      a: 'They overlap on "run containers on my own servers" but optimize different workflows. Dokploy is a PaaS: it builds apps from git and runs them behind its built-in proxy. BridgePort is an operations control plane for image-based services across a fleet — deployment plans, encrypted secrets, config sync, and monitoring for infrastructure you already run.',
+    },
+    {
+      q: 'Does BridgePort use Docker Swarm for multiple servers?',
+      a: 'No. BridgePort manages each server as a plain Docker host over SSH or the Docker socket — there is no cluster or Swarm layer, which keeps servers independent and easy to reason about.',
+    },
+    {
+      q: 'Does BridgePort build my app from a git repository like Dokploy?',
+      a: 'No, by design. Your CI builds and pushes the image; an HMAC-signed webhook then triggers BridgePort to roll it out, optionally through a deployment plan with automatic rollback.',
+    },
+    {
+      q: 'Can I use both?',
+      a: 'Yes — some teams host small apps on a PaaS while running core infrastructure through BridgePort. Since BridgePort only needs SSH or socket access, it can also monitor servers a PaaS manages.',
+    },
+  ]}
+/>
