@@ -31,6 +31,11 @@ const DOCS_GLOB = {
     '!TESTING_STRATEGY.md',
     // Owned by the generated OpenAPI reference at the same route (/reference/api/).
     '!reference/api.md',
+    // Draft contracts for unshipped features — repo-only until implemented.
+    // The implementing PR removes the exclusion and adds sidebar + docs/README.md
+    // entries: #325/#318 for metrics-vocabulary, #330 for audit-event-schema.
+    '!reference/metrics-vocabulary.md',
+    '!reference/audit-event-schema.md',
   ],
 };
 
