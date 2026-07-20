@@ -80,7 +80,7 @@ jobs:
             scenarios: 'services-list,container-images-list,monitoring-overview,agents-status,health-status,metrics-summary,server-metrics-history,service-metrics-history,database-metrics-history,secrets-list,databases-list,database-monitoring-summary,config-files-list,dependency-graph,backup-summary'
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       # pnpm via npm (version pinned to package.json's packageManager):
