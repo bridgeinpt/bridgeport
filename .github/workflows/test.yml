@@ -30,7 +30,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       # pnpm via npm (version pinned to package.json's packageManager):
@@ -50,7 +50,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       # pnpm via npm (version pinned to package.json's packageManager):
@@ -65,7 +65,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.25'
       - run: cd bridgeport-agent && go test ./... -short -count=1
@@ -80,7 +80,7 @@ jobs:
     needs: unit-backend
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       # pnpm via npm (version pinned to package.json's packageManager):
@@ -100,7 +100,7 @@ jobs:
     needs: unit-frontend
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       # pnpm via npm (version pinned to package.json's packageManager):
@@ -120,7 +120,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       # pnpm via npm (version pinned to package.json's packageManager):
@@ -137,13 +137,13 @@ jobs:
     if: github.event_name == 'schedule'
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       # pnpm via npm (version pinned to package.json's packageManager):
       # pnpm/action-setup isn't on this repo's GitHub Actions allowlist.
       - run: npm install -g pnpm@11.7.0
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.25'
       - run: pnpm install --frozen-lockfile
@@ -165,7 +165,7 @@ jobs:
     needs: [unit-backend, unit-frontend]
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       # pnpm via npm (version pinned to package.json's packageManager):
@@ -186,7 +186,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       # pnpm via npm (version pinned to package.json's packageManager):
@@ -209,7 +209,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       # pnpm via npm (version pinned to package.json's packageManager):
